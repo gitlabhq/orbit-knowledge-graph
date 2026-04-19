@@ -432,12 +432,28 @@ fn matches_workspace_patterns(patterns: &[String], relative_path: &str) -> Resul
 }
 
 fn workspace_path_is_excluded(
-    exclude_patterns: &[String],
+    exclude_entries: &[String],
     workspace_root: &Path,
     manifest_path: &Path,
 ) -> Result<bool> {
     let relative_path = relative_workspace_path(workspace_root, manifest_path);
-    matches_workspace_patterns(exclude_patterns, &relative_path)
+    Ok(path_has_prefix(&relative_path, exclude_entries))
+}
+
+// Cargo's `workspace.exclude` is a list of directory prefixes, not glob patterns.
+// `exclude = ["vendor"]` must exclude both `vendor` and `vendor/sub`.
+fn path_has_prefix(relative_path: &str, exclude_entries: &[String]) -> bool {
+    let normalized = relative_path.trim_end_matches('/');
+    exclude_entries.iter().any(|entry| {
+        let entry = entry.trim_end_matches('/');
+        if entry.is_empty() {
+            return false;
+        }
+        normalized == entry
+            || normalized
+                .strip_prefix(entry)
+                .is_some_and(|rest| rest.starts_with('/'))
+    })
 }
 
 fn workspace_dependencies_map(
@@ -467,7 +483,7 @@ fn workspace_members_for_root(
     };
 
     let include_matchers = compile_glob_matchers(patterns)?;
-    let exclude_matchers = compile_glob_matchers(workspace.exclude.as_deref().unwrap_or_default())?;
+    let exclude_entries = workspace.exclude.as_deref().unwrap_or_default();
     let mut members = Vec::new();
 
     for manifest_path in &manifest_cache.manifest_paths {
@@ -475,9 +491,7 @@ fn workspace_members_for_root(
         if include_matchers
             .iter()
             .any(|matcher| matcher.is_match(&relative_path))
-            && !exclude_matchers
-                .iter()
-                .any(|matcher| matcher.is_match(&relative_path))
+            && !path_has_prefix(&relative_path, exclude_entries)
         {
             members.push(manifest_path.clone());
         }
@@ -759,6 +773,12 @@ fn resolve_dependency_candidate(
     };
     let Some(target_manifest_path) = manifest_cache.dependency_manifest_path(&dependency_dir)?
     else {
+        tracing::debug!(
+            rejected_path = %dependency_dir.display(),
+            source_manifest = %parsed.manifest_path.display(),
+            dependency = manifest_name,
+            "dropping path dependency resolving outside the indexed repository",
+        );
         return Ok(None);
     };
     let target_manifest = manifest_cache.load(&target_manifest_path)?;
@@ -869,10 +889,17 @@ fn package_id_for(manifest_path: &Path, package_name: &str, version: &str) -> St
 }
 
 fn parse_target_platform(target: &str) -> Option<String> {
-    target
-        .parse::<Platform>()
-        .ok()
-        .map(|platform| platform.to_string())
+    match target.parse::<Platform>() {
+        Ok(platform) => {
+            let roundtrip = platform.to_string();
+            if roundtrip == target {
+                Some(roundtrip)
+            } else {
+                Some(target.to_string())
+            }
+        }
+        Err(_) => Some(target.to_string()),
+    }
 }
 
 fn cfg_flag(name: &str) -> CfgAtom {
@@ -886,6 +913,8 @@ fn cfg_key_value(key: &str, value: &str) -> CfgAtom {
     }
 }
 
+// Pins cfg atoms to linux/x86_64 to match the server indexing environment.
+// Trades local-platform accuracy for reproducibility across indexer runs.
 fn server_rustc_cfg() -> Vec<CfgAtom> {
     vec![
         cfg_flag("unix"),
@@ -1344,6 +1373,9 @@ fn synthetic_metadata_from_packages(
                 .iter()
                 .filter_map(|dependency| {
                     package_ids.get(&dependency.target_manifest_path)?;
+                    if dependency.optional && !is_dep_feature_activated(package, dependency) {
+                        return None;
+                    }
                     Some(serde_json::json!({
                         "name": dependency.target_package_name,
                         "source": serde_json::Value::Null,
@@ -1416,6 +1448,9 @@ fn synthetic_metadata_from_packages(
                 else {
                     continue;
                 };
+                if dependency.optional && !is_dep_feature_activated(package, dependency) {
+                    continue;
+                }
                 dependency_ids.push(target_package_id.clone());
                 deps.entry((dependency.code_name.clone(), target_package_id.clone()))
                     .or_default()
@@ -1482,4 +1517,40 @@ fn synthetic_metadata_from_packages(
 fn rename_field(dependency: &ResolvedDependencyCandidate) -> Option<String> {
     Some(dependency.manifest_name.clone())
         .filter(|rename| rename != &dependency.target_package_name)
+}
+
+// An optional dependency is considered activated only when it is named by a
+// feature that is transitively reachable from `default`. We do not track the
+// full feature resolution that Cargo performs; the conservative rule keeps
+// rust-analyzer from pulling in optional crates that the user has disabled.
+fn is_dep_feature_activated(
+    package: &LocalWorkspacePackage,
+    dependency: &ResolvedDependencyCandidate,
+) -> bool {
+    let default = match package.features.get("default") {
+        Some(values) => values,
+        None => return false,
+    };
+    let mut visited = HashSet::new();
+    let mut queue = default.iter().cloned().collect::<VecDeque<_>>();
+    while let Some(entry) = queue.pop_front() {
+        if !visited.insert(entry.clone()) {
+            continue;
+        }
+        if entry == format!("dep:{}", dependency.manifest_name) || entry == dependency.manifest_name
+        {
+            return true;
+        }
+        if let Some((feature, _)) = entry.split_once('/')
+            && feature == dependency.manifest_name
+        {
+            return true;
+        }
+        if let Some(sub) = package.features.get(&entry) {
+            for value in sub {
+                queue.push_back(value.clone());
+            }
+        }
+    }
+    false
 }

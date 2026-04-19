@@ -113,6 +113,11 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
             return;
         };
 
+        let effective_value = match &pat {
+            ast::Pat::IdentPat(_) | ast::Pat::WildcardPat(_) => value,
+            _ => SsaValue::Opaque,
+        };
+
         for ident_pat in pat.syntax().descendants().filter_map(ast::IdentPat::cast) {
             let Some(local) = self.sema.to_def(&ident_pat) else {
                 continue;
@@ -120,7 +125,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
             let key = self.local_key(local);
             self.invalidate_local_fields(local);
             self.ssa
-                .write_variable(key, self.current_block, value.clone());
+                .write_variable(key, self.current_block, effective_value.clone());
         }
     }
 
@@ -131,20 +136,27 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         rhs: Option<&ast::Expr>,
         index: &mut LocalFlowIndex,
     ) {
-        let ast::Expr::PathExpr(path_expr) = lhs else {
-            return;
-        };
-        let Some(path) = path_expr.path() else {
-            return;
-        };
-        let Some(PathResolution::Local(local)) = self.sema.resolve_path(&path) else {
-            return;
-        };
-        let key = self.local_key(local);
-        self.invalidate_local_fields(local);
-        self.ssa.write_variable(key, self.current_block, value);
-        if let Some(rhs) = rhs {
-            self.capture_assigned_local_fields(local, rhs, index);
+        match lhs {
+            ast::Expr::PathExpr(path_expr) => {
+                let Some(path) = path_expr.path() else {
+                    return;
+                };
+                let Some(PathResolution::Local(local)) = self.sema.resolve_path(&path) else {
+                    return;
+                };
+                let key = self.local_key(local);
+                self.invalidate_local_fields(local);
+                self.ssa.write_variable(key, self.current_block, value);
+                if let Some(rhs) = rhs {
+                    self.capture_assigned_local_fields(local, rhs, index);
+                }
+            }
+            ast::Expr::FieldExpr(field_expr) => {
+                if let Some(slot) = self.field_slot_for_expr(field_expr) {
+                    self.ssa.write_variable(slot, self.current_block, value);
+                }
+            }
+            _ => {}
         }
     }
 
@@ -352,10 +364,39 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         }
     }
 
-    fn write_destructured_pattern_bindings(&mut self, pat: &ast::Pat, initializer: &ast::Expr) {
-        let ast::Pat::RecordPat(record_pat) = pat else {
-            return;
-        };
+    fn write_destructured_pattern_bindings(
+        &mut self,
+        pat: &ast::Pat,
+        initializer: &ast::Expr,
+        index: &mut LocalFlowIndex,
+    ) {
+        match pat {
+            ast::Pat::RecordPat(record_pat) => {
+                self.write_destructured_record_bindings(record_pat, initializer);
+            }
+            ast::Pat::TuplePat(tuple_pat) => {
+                if let ast::Expr::TupleExpr(tuple_expr) = initializer {
+                    self.write_positional_bindings(tuple_pat.fields(), tuple_expr.fields(), index);
+                }
+            }
+            ast::Pat::TupleStructPat(tuple_struct_pat) => {
+                if let ast::Expr::TupleExpr(tuple_expr) = initializer {
+                    self.write_positional_bindings(
+                        tuple_struct_pat.fields(),
+                        tuple_expr.fields(),
+                        index,
+                    );
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn write_destructured_record_bindings(
+        &mut self,
+        record_pat: &ast::RecordPat,
+        initializer: &ast::Expr,
+    ) {
         let Some(source_local) = self.expr_local(initializer) else {
             return;
         };
@@ -396,6 +437,17 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         }
     }
 
+    fn write_positional_bindings<P, E>(&mut self, pats: P, exprs: E, index: &mut LocalFlowIndex)
+    where
+        P: IntoIterator<Item = ast::Pat>,
+        E: IntoIterator<Item = ast::Expr>,
+    {
+        for (sub_pat, sub_expr) in pats.into_iter().zip(exprs) {
+            let value = self.walk_expr_value(&sub_expr, index);
+            self.write_pattern_bindings(Some(sub_pat), value);
+        }
+    }
+
     fn walk_block_value(
         &mut self,
         block: &ast::BlockExpr,
@@ -426,7 +478,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
                             self.capture_assigned_local_fields(local, initializer, index);
                         }
                     } else if let Some(initializer) = initializer.as_ref() {
-                        self.write_destructured_pattern_bindings(&pat, initializer);
+                        self.write_destructured_pattern_bindings(&pat, initializer, index);
                     }
                 }
             }
@@ -508,7 +560,6 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
         let body_block = self.ssa.add_block();
         self.ssa.add_predecessor(body_block, header);
-        self.ssa.seal_block(body_block);
         self.current_block = body_block;
 
         if let Some(pat) = binding_pat {
@@ -520,6 +571,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
 
         self.ssa.add_predecessor(header, self.current_block);
         self.ssa.seal_block(header);
+        self.ssa.seal_block(body_block);
 
         let exit = self.ssa.add_block();
         self.ssa.add_predecessor(exit, header);

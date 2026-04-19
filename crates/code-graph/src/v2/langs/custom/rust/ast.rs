@@ -59,6 +59,13 @@ struct RustStructureExtractor {
     crate_root_parts: Vec<String>,
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
+    trait_impl_scopes: Vec<TraitImplScope>,
+}
+
+struct TraitImplScope {
+    trait_name: String,
+    start: usize,
+    end: usize,
 }
 
 impl RustStructureExtractor {
@@ -69,6 +76,7 @@ impl RustStructureExtractor {
             crate_root_parts,
             definitions: Vec::new(),
             imports: Vec::new(),
+            trait_impl_scopes: Vec::new(),
         }
     }
 
@@ -80,7 +88,57 @@ impl RustStructureExtractor {
     ) -> (Vec<CanonicalDefinition>, Vec<CanonicalImport>) {
         let module_parts = self.file_module_parts.clone();
         self.collect_items(source_file.items(), &module_parts, true, sema, workspace);
+        self.disambiguate_trait_impl_collisions();
         (self.definitions, self.imports)
+    }
+
+    fn disambiguate_trait_impl_collisions(&mut self) {
+        if self.trait_impl_scopes.is_empty() {
+            return;
+        }
+        let mut fqn_groups: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, def) in self.definitions.iter().enumerate() {
+            fqn_groups.entry(def.fqn.to_string()).or_default().push(idx);
+        }
+        for indices in fqn_groups.values() {
+            if indices.len() < 2 {
+                continue;
+            }
+            let traits: Vec<Option<String>> = indices
+                .iter()
+                .map(|&idx| self.trait_for_definition(idx).map(str::to_string))
+                .collect();
+            if !traits.iter().all(|t| t.is_some()) {
+                continue;
+            }
+            for (&idx, trait_name) in indices.iter().zip(traits.iter()) {
+                let Some(trait_name) = trait_name else {
+                    continue;
+                };
+                let def = &mut self.definitions[idx];
+                let parts: Vec<String> = def
+                    .fqn
+                    .as_str()
+                    .split(def.fqn.separator())
+                    .map(str::to_string)
+                    .collect();
+                if parts.len() < 2 {
+                    continue;
+                }
+                let (last, container) = parts.split_last().expect("non-empty");
+                let mut new_parts: Vec<String> = container.to_vec();
+                new_parts.push(format!("<{}>", trait_name));
+                new_parts.push(last.clone());
+                def.fqn = canonical_fqn_parts(&new_parts);
+            }
+        }
+    }
+
+    fn trait_for_definition(&self, def_idx: usize) -> Option<&str> {
+        self.trait_impl_scopes
+            .iter()
+            .find(|scope| def_idx >= scope.start && def_idx < scope.end)
+            .map(|scope| scope.trait_name.as_str())
     }
 
     fn collect_items<I>(
@@ -109,6 +167,10 @@ impl RustStructureExtractor {
         if stacker::remaining_stack().unwrap_or(usize::MAX)
             < crate::legacy::parser::MINIMUM_STACK_REMAINING
         {
+            return;
+        }
+
+        if !item_is_active(sema, &item) {
             return;
         }
 
@@ -196,30 +258,31 @@ impl RustStructureExtractor {
             sema,
             workspace,
         );
-        let Some(name) = module.name().map(|name| name.text().to_string()) else {
-            return;
-        };
-
-        self.push_definition(
-            "Module",
-            DefKind::Module,
-            name.clone(),
-            &module_parts,
-            top_level,
-            module.syntax().text_range(),
-        );
-
-        if module.semicolon_token().is_some() {
-            self.push_import(
-                "ModDeclaration",
+        let module_name = module.name().map(|name| name.text().to_string());
+        if let Some(name) = module_name.as_ref() {
+            self.push_definition(
+                "Module",
+                DefKind::Module,
                 name.clone(),
-                Some(name),
-                None,
-                parent_module_parts,
+                &module_parts,
+                top_level,
                 module.syntax().text_range(),
-                false,
             );
-            return;
+
+            if module.semicolon_token().is_some() {
+                self.push_import(
+                    "ModDeclaration",
+                    name.clone(),
+                    Some(name.clone()),
+                    None,
+                    parent_module_parts,
+                    module.syntax().text_range(),
+                    false,
+                );
+                return;
+            }
+        } else {
+            tracing::debug!("rust module missing name; continuing to walk children");
         }
 
         if let Some(item_list) = module.item_list() {
@@ -229,6 +292,7 @@ impl RustStructureExtractor {
 
     fn collect_struct(&mut self, strukt: ast::Struct, module_parts: &[String], top_level: bool) {
         let Some(name) = strukt.name().map(|name| name.text().to_string()) else {
+            tracing::debug!("rust struct missing name; skipping definition");
             return;
         };
         let struct_parts = child_parts(module_parts, &name);
@@ -248,6 +312,7 @@ impl RustStructureExtractor {
 
     fn collect_union(&mut self, union_item: ast::Union, module_parts: &[String], top_level: bool) {
         let Some(name) = union_item.name().map(|name| name.text().to_string()) else {
+            tracing::debug!("rust union missing name; skipping definition");
             return;
         };
         let union_parts = child_parts(module_parts, &name);
@@ -280,6 +345,7 @@ impl RustStructureExtractor {
 
     fn collect_enum(&mut self, enum_item: ast::Enum, module_parts: &[String], top_level: bool) {
         let Some(name) = enum_item.name().map(|name| name.text().to_string()) else {
+            tracing::debug!("rust enum missing name; skipping definition");
             return;
         };
         let enum_parts = child_parts(module_parts, &name);
@@ -321,18 +387,24 @@ impl RustStructureExtractor {
         sema: Option<&Semantics<'_, RootDatabase>>,
         workspace: Option<&WorkspaceIndex>,
     ) {
-        let Some(name) = trait_item.name().map(|name| name.text().to_string()) else {
-            return;
+        let trait_parts = match trait_item.name().map(|name| name.text().to_string()) {
+            Some(name) => {
+                let trait_parts = child_parts(module_parts, &name);
+                self.push_definition(
+                    "Trait",
+                    DefKind::Interface,
+                    name,
+                    &trait_parts,
+                    top_level,
+                    trait_item.syntax().text_range(),
+                );
+                trait_parts
+            }
+            None => {
+                tracing::debug!("rust trait missing name; continuing to walk assoc items");
+                module_parts.to_vec()
+            }
         };
-        let trait_parts = child_parts(module_parts, &name);
-        self.push_definition(
-            "Trait",
-            DefKind::Interface,
-            name,
-            &trait_parts,
-            top_level,
-            trait_item.syntax().text_range(),
-        );
 
         if let Some(items) = trait_item.assoc_item_list() {
             self.collect_assoc_items(items.assoc_items(), &trait_parts, sema, workspace);
@@ -358,7 +430,27 @@ impl RustStructureExtractor {
         let Some(items) = impl_item.assoc_item_list() else {
             return;
         };
+        let trait_name = impl_item
+            .trait_()
+            .and_then(|trait_ty| match trait_ty {
+                ast::Type::PathType(path_type) => path_type.path(),
+                _ => None,
+            })
+            .and_then(|path| path.segment())
+            .and_then(|segment| segment.name_ref())
+            .map(|name_ref| name_ref.text().to_string());
+        let start = self.definitions.len();
         self.collect_assoc_items(items.assoc_items(), &container_parts, sema, workspace);
+        if let Some(trait_name) = trait_name {
+            let end = self.definitions.len();
+            if end > start {
+                self.trait_impl_scopes.push(TraitImplScope {
+                    trait_name,
+                    start,
+                    end,
+                });
+            }
+        }
     }
 
     fn collect_assoc_items<I>(
@@ -374,6 +466,12 @@ impl RustStructureExtractor {
             match item {
                 ast::AssocItem::Fn(function) => {
                     let Some(name) = function.name().map(|name| name.text().to_string()) else {
+                        self.collect_nested_items_in_function(
+                            &function,
+                            container_parts,
+                            sema,
+                            workspace,
+                        );
                         continue;
                     };
                     let definition_type = if function
@@ -437,18 +535,24 @@ impl RustStructureExtractor {
         sema: Option<&Semantics<'_, RootDatabase>>,
         workspace: Option<&WorkspaceIndex>,
     ) {
-        let Some(name) = function.name().map(|name| name.text().to_string()) else {
-            return;
+        let function_parts = match function.name().map(|name| name.text().to_string()) {
+            Some(name) => {
+                let function_parts = child_parts(module_parts, &name);
+                self.push_definition(
+                    "Function",
+                    DefKind::Function,
+                    name,
+                    &function_parts,
+                    top_level,
+                    function.syntax().text_range(),
+                );
+                function_parts
+            }
+            None => {
+                tracing::debug!("rust function missing name; continuing to walk nested items");
+                module_parts.to_vec()
+            }
         };
-        let function_parts = child_parts(module_parts, &name);
-        self.push_definition(
-            "Function",
-            DefKind::Function,
-            name,
-            &function_parts,
-            top_level,
-            function.syntax().text_range(),
-        );
         self.collect_nested_items_in_function(&function, &function_parts, sema, workspace);
     }
 
@@ -535,6 +639,7 @@ impl RustStructureExtractor {
         N: AstNode + HasName,
     {
         let Some(name) = node.name().map(|name| name.text().to_string()) else {
+            tracing::debug!(definition_type, "rust named item missing name; skipping");
             return;
         };
         let fqn_parts = child_parts(module_parts, &name);
@@ -552,10 +657,7 @@ impl RustStructureExtractor {
         let Some(use_tree) = use_item.use_tree() else {
             return;
         };
-        let visibility = if matches!(
-            use_item.visibility().map(|visibility| visibility.kind()),
-            Some(VisibilityKind::Pub)
-        ) {
+        let visibility = if use_item.visibility().is_some() {
             ImportVisibility::Public
         } else {
             ImportVisibility::Private
@@ -758,6 +860,10 @@ pub(super) fn fallback_file_module_parts(relative_path: &str) -> Vec<String> {
         })
         .unwrap_or_default();
 
+    if let Some(src_idx) = parts.iter().rposition(|component| component == "src") {
+        parts.drain(..=src_idx);
+    }
+
     let file_stem = path
         .file_stem()
         .and_then(|stem| stem.to_str())
@@ -819,14 +925,15 @@ fn normalize_type_path(
         "self" => module_parts.to_vec(),
         "super" => {
             let mut base = module_parts.to_vec();
+            let min_len = crate_root_parts.len().min(base.len());
             let mut idx = 0;
             while raw_parts.get(idx).is_some_and(|part| part == "super") {
-                if base.len() > crate_root_parts.len() {
+                if base.len() > min_len {
                     base.pop();
+                    idx += 1;
                 } else {
-                    break;
+                    idx += 1;
                 }
-                idx += 1;
             }
             base.extend(raw_parts[idx..].iter().cloned());
             return base;
@@ -869,4 +976,23 @@ fn canonical_fqn_parts(parts: &[String]) -> Fqn {
 
 fn scope_fqn(parts: &[String]) -> Option<Fqn> {
     (!parts.is_empty()).then(|| canonical_fqn_parts(parts))
+}
+
+fn item_is_active(sema: Option<&Semantics<'_, RootDatabase>>, item: &ast::Item) -> bool {
+    let Some(sema) = sema else {
+        return true;
+    };
+    match item {
+        ast::Item::Module(module) => sema.to_module_def(module).is_some(),
+        ast::Item::Struct(strukt) => sema.to_struct_def(strukt).is_some(),
+        ast::Item::Enum(enum_item) => sema.to_enum_def(enum_item).is_some(),
+        ast::Item::Union(union_item) => sema.to_union_def(union_item).is_some(),
+        ast::Item::Trait(trait_item) => sema.to_trait_def(trait_item).is_some(),
+        ast::Item::Fn(function) => sema.to_fn_def(function).is_some(),
+        ast::Item::Const(constant) => sema.to_const_def(constant).is_some(),
+        ast::Item::Static(static_item) => sema.to_static_def(static_item).is_some(),
+        ast::Item::TypeAlias(type_alias) => sema.to_type_alias_def(type_alias).is_some(),
+        ast::Item::Impl(impl_item) => sema.to_impl_def(impl_item).is_some(),
+        _ => true,
+    }
 }

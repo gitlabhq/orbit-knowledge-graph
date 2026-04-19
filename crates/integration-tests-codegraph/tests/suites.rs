@@ -206,6 +206,20 @@ yaml_test!(
     rust_field_sensitive_local_flow,
     "rust/field_sensitive_local_flow.yaml"
 );
+yaml_test!(rust_local_flow_fixes, "rust/local_flow_fixes.yaml");
+yaml_test!(
+    rust_edge_collection_fixes,
+    "rust/edge_collection_fixes.yaml"
+);
+yaml_test!(rust_ast_structural_fixes, "rust/ast_structural_fixes.yaml");
+yaml_test!(
+    rust_manifest_resolution_fixes,
+    "rust/manifest_resolution_fixes.yaml"
+);
+yaml_test!(
+    rust_workspace_setup_fixes,
+    "rust/workspace_setup_fixes.yaml"
+);
 
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");

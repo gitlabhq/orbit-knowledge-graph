@@ -30,7 +30,7 @@ use ra_ap_syntax::{
     AstNode, Edition, SyntaxKind, SyntaxNode, SyntaxNodePtr, TextRange,
     ast::{
         self, BinaryOp, ElseBranch, HasArgList, HasLoopBody, HasModuleItem, HasName, HasVisibility,
-        StructKind, VisibilityKind,
+        StructKind,
     },
 };
 use rayon::prelude::*;
@@ -112,20 +112,26 @@ impl LanguagePipeline for RustPipeline {
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
-        let workspaces = WorkspaceCatalog::load(root_path, config.worker_threads).ok();
+        let workspaces = match WorkspaceCatalog::load(root_path, config.worker_threads) {
+            Ok(catalog) => Some(catalog),
+            Err(err) => {
+                tracing::warn!(
+                    error = %err,
+                    "rust v2 workspace load failed; falling back to standalone parsing"
+                );
+                None
+            }
+        };
         let parsed = parse_rust_files(files, root_path, workspaces.as_ref())?;
         let mut graph = build_graph(root_path, &parsed);
 
         for file in &parsed {
             for edge in &file.edge_candidates {
-                let Some(source_node) = graph
-                    .enclosing_definition_for_range(
-                        &edge.source_relative_path,
-                        edge.source_start,
-                        edge.source_end,
-                    )
-                    .or_else(|| graph.file_node_for_path(&edge.source_relative_path))
-                else {
+                let Some(source_node) = graph.enclosing_definition_for_range(
+                    &edge.source_relative_path,
+                    edge.source_start,
+                    edge.source_end,
+                ) else {
                     continue;
                 };
                 let Some(target_node) = graph.definition_for_range(
@@ -336,7 +342,7 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
             .and_then(|ext| ext.to_str())
             .unwrap_or("rs");
 
-        let _ = graph.add_file(
+        graph.add_file(
             &file.relative_path,
             extension,
             Language::Rust,
@@ -357,9 +363,12 @@ struct ResolvedEdgeCollector<'a> {
     local_flow: LocalFlowIndex,
     seen_edges: HashSet<ResolvedEdgeCandidate>,
     seen_expanded_nodes: HashSet<SyntaxNodePtr>,
-    seen_expanded_sites: HashSet<(u32, u32, SyntaxKind)>,
+    seen_expanded_sites: HashSet<(u32, u32, u32, SyntaxKind)>,
     edges: Vec<ResolvedEdgeCandidate>,
+    macro_depth: u32,
 }
+
+const MAX_MACRO_EXPANSION_DEPTH: u32 = 8;
 
 impl<'a> ResolvedEdgeCollector<'a> {
     fn collect(mut self, source_file: &ast::SourceFile) -> Self {
@@ -411,9 +420,30 @@ impl<'a> ResolvedEdgeCollector<'a> {
             return;
         }
 
+        if let Some(record_expr) = ast::RecordExpr::cast(node.clone()) {
+            self.collect_record_expr(record_expr, source_range);
+            return;
+        }
+
         if let Some(macro_call) = ast::MacroCall::cast(node) {
             self.collect_macro_call(macro_call, source_range);
         }
+    }
+
+    fn collect_record_expr(
+        &mut self,
+        record_expr: ast::RecordExpr,
+        source_range: Option<TextRange>,
+    ) {
+        let target = record_expr.path().and_then(|path| {
+            self.sema.resolve_path(&path).and_then(|resolution| {
+                path_resolution_to_definition_site(self.db, self.paths_by_file_id, resolution)
+            })
+        });
+        self.push_target(
+            source_range.unwrap_or_else(|| record_expr.syntax().text_range()),
+            target,
+        );
     }
 
     fn collect_method_call(
@@ -451,7 +481,9 @@ impl<'a> ResolvedEdgeCollector<'a> {
             .local_flow
             .targets_for_call(call_expr.syntax().text_range());
 
-        if let Some(flow_targets) = local_flow_targets {
+        if let Some(flow_targets) = local_flow_targets
+            && !flow_targets.is_empty()
+        {
             targets.extend(flow_targets.iter().cloned());
         } else if let Some(target) = self
             .sema
@@ -506,7 +538,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
     }
 
     fn collect_bin_expr(&mut self, bin_expr: ast::BinExpr, source_range: Option<TextRange>) {
-        if matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. })) {
+        if matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { op: None })) {
             return;
         }
 
@@ -554,8 +586,13 @@ impl<'a> ResolvedEdgeCollector<'a> {
             target,
         );
 
+        if self.macro_depth >= MAX_MACRO_EXPANSION_DEPTH {
+            return;
+        }
         let expanded = self.sema.expand_macro_call(&macro_call);
         if let Some(expanded) = expanded {
+            let macro_call_start = u32::from(macro_call.syntax().text_range().start());
+            self.macro_depth += 1;
             for node in expanded.value.descendants() {
                 if !is_edge_relevant_node(&node) {
                     continue;
@@ -569,6 +606,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
                     continue;
                 };
                 let site_key = (
+                    macro_call_start,
                     u32::from(original_range.start()),
                     u32::from(original_range.end()),
                     node.kind(),
@@ -578,6 +616,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
                 }
                 self.collect_node(node, Some(original_range));
             }
+            self.macro_depth -= 1;
         }
     }
 
@@ -614,10 +653,11 @@ fn is_edge_relevant_node(node: &SyntaxNode) -> bool {
         || ast::PrefixExpr::can_cast(kind)
         || ast::IndexExpr::can_cast(kind)
         || ast::BinExpr::cast(node.clone()).is_some_and(|bin_expr| {
-            !matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. }))
+            !matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { op: None }))
         })
         || ast::TryExpr::can_cast(kind)
         || ast::AwaitExpr::can_cast(kind)
+        || ast::RecordExpr::can_cast(kind)
         || ast::MacroCall::can_cast(kind)
 }
 
@@ -639,6 +679,7 @@ fn collect_resolved_edge_candidates(
         seen_expanded_nodes: HashSet::new(),
         seen_expanded_sites: HashSet::new(),
         edges: Vec::new(),
+        macro_depth: 0,
     }
     .collect(source_file);
     EdgeCollectionResult {
@@ -738,6 +779,11 @@ fn callable_to_definition_site(
         CallableKind::TupleEnumVariant(variant) => {
             hir_def_to_definition_site(db, paths_by_file_id, variant)
         }
+        // Closures, raw fn pointers, and `impl Fn*` receivers do not map to a
+        // stable definition site: ra_ap_hir 0.0.328 does not expose the
+        // body-source-map lookup needed to recover the closure's AST node, and
+        // resolving `FnImpl<Ty>` to the `Ty::call*` method requires the
+        // callsite receiver type which is not carried in `CallableKind`.
         CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_) => None,
     }
 }

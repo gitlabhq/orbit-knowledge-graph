@@ -26,11 +26,7 @@ impl WorkspaceIndex {
         embedded_sysroot: &EmbeddedSysroot,
     ) -> Result<Self> {
         let workspace = build_project_workspace(manifest_path, manifest_cache, embedded_sysroot)?;
-        let worker_threads = if worker_threads == 0 {
-            num_cpus::get()
-        } else {
-            worker_threads
-        };
+        let worker_threads = resolve_worker_threads(worker_threads);
         let load_config = LoadCargoConfig {
             load_out_dirs_from_check: false,
             with_proc_macro_server: ProcMacroServerChoice::None,
@@ -158,7 +154,7 @@ impl WorkspaceCatalog {
             return Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no Rust manifests found")));
         }
 
-        let include_crate_name_in_fqn = crate_names.len() > 1;
+        let include_crate_name_in_fqn = workspaces.len() > 1 || crate_names.len() > 1;
         if include_crate_name_in_fqn {
             for workspace in &mut workspaces {
                 workspace.include_crate_name_in_fqn = true;
@@ -201,12 +197,23 @@ pub(super) fn relative_path(root_path: &str, file_path: &str) -> String {
     relative_path_if_under_root(root_path, file_path).unwrap_or_else(|| file_path.to_string())
 }
 
+/// Returns `file_path` made relative to `root_path`.
+///
+/// Callers should pass a pre-canonicalized `root_path` (see
+/// `canonical_root_path`) so this function does not need to re-resolve
+/// symlinks such as the macOS `/var` -> `/private/var` redirection on
+/// every invocation. `file_path` is still normalized here because vfs
+/// paths from rust-analyzer can contain unresolved components.
 pub(super) fn relative_path_if_under_root(root_path: &str, file_path: &str) -> Option<String> {
     let root = Path::new(root_path);
-    let normalized_root = normalize_existing_path(root).unwrap_or_else(|| root.to_path_buf());
     let file = Path::new(file_path);
     let normalized_file = normalize_existing_path(file).unwrap_or_else(|| file.to_path_buf());
 
+    if let Ok(path) = normalized_file.strip_prefix(root) {
+        return Some(path.to_string_lossy().to_string());
+    }
+
+    let normalized_root = normalize_existing_path(root).unwrap_or_else(|| root.to_path_buf());
     normalized_file
         .strip_prefix(&normalized_root)
         .ok()
@@ -270,7 +277,7 @@ pub(super) fn standalone_workspace(relative_path: &str, source: String) -> Works
         },
         Vec::new(),
         false,
-        Arc::new(AbsPathBuf::assert_utf8(std::env::current_dir().unwrap())),
+        Arc::new(standalone_crate_root()),
         Arc::new(CrateWorkspaceData {
             target: Err("standalone file has no target layout".into()),
             toolchain: None,
@@ -296,4 +303,24 @@ pub(super) fn standalone_workspace(relative_path: &str, source: String) -> Works
 
 pub(super) fn discover_manifest_paths_for_root(root_path: &str) -> Vec<PathBuf> {
     discover_manifest_paths(root_path)
+}
+
+fn standalone_crate_root() -> AbsPathBuf {
+    let cwd = std::env::current_dir().unwrap_or_else(|_| PathBuf::from("/"));
+    match Utf8PathBuf::from_path_buf(cwd) {
+        Ok(utf8) => AbsPathBuf::assert(utf8),
+        Err(_) => AbsPathBuf::assert(Utf8PathBuf::from("/")),
+    }
+}
+
+fn resolve_worker_threads(configured: usize) -> usize {
+    if configured > 0 {
+        return configured;
+    }
+    let cap = if rayon::current_num_threads() > 1 {
+        2
+    } else {
+        4
+    };
+    num_cpus::get().min(cap).max(1)
 }

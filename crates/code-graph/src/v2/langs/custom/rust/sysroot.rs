@@ -1,11 +1,19 @@
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::sync::OnceLock;
 
 use rust_embed::RustEmbed;
 use tempfile::TempDir;
 
 use super::*;
 
+/// Embedded Rust toolchain version.
+///
+/// The sysroot is pinned intentionally so that indexing results stay
+/// reproducible across machines and releases. Standard-library APIs
+/// introduced after this version will not resolve via rust-analyzer
+/// until this constant (and the checked-in assets under
+/// `assets/rust-sysroot-<version>/`) are bumped in lockstep.
 pub(super) const EMBEDDED_RUST_SYSROOT_VERSION: &str = "1.95.0";
 
 const EMBEDDED_RUST_PROJECT_JSON: &str = "rust-project.json";
@@ -20,6 +28,7 @@ pub(super) struct EmbeddedSysroot {
     root_path: PathBuf,
     root: AbsPathBuf,
     project_json: ProjectJson,
+    cached_sysroot: OnceLock<Sysroot>,
 }
 
 impl EmbeddedSysroot {
@@ -30,6 +39,10 @@ impl EmbeddedSysroot {
         let root_path = canonical_path(tempdir.path());
         let root = utf8_abs_path(tempdir.path())?;
         let project_json = load_project_json(&root)?;
+        tracing::debug!(
+            version = EMBEDDED_RUST_SYSROOT_VERSION,
+            "materialized embedded Rust sysroot"
+        );
 
         Ok(Self {
             _tempdir: tempdir,
@@ -37,10 +50,20 @@ impl EmbeddedSysroot {
             root_path,
             root,
             project_json,
+            cached_sysroot: OnceLock::new(),
         })
     }
 
     pub(super) fn project_workspace_sysroot(&self) -> Result<Sysroot> {
+        if let Some(sysroot) = self.cached_sysroot.get() {
+            return Ok(sysroot.clone());
+        }
+        let sysroot = self.load_sysroot()?;
+        let stored = self.cached_sysroot.get_or_init(|| sysroot.clone());
+        Ok(stored.clone())
+    }
+
+    fn load_sysroot(&self) -> Result<Sysroot> {
         let mut sysroot = Sysroot::new(None, Some(self.root.clone()));
         let config = RustSourceWorkspaceConfig::Json(self.project_json.clone());
         if let Some(workspace) = sysroot.load_workspace(&config, false, &|_| ()) {
