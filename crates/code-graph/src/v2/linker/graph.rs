@@ -255,6 +255,14 @@ impl CodeGraph {
         self.indexes.drop_construction_indexes();
     }
 
+    /// Build extends edges and ancestor chains. Must be called after all
+    /// files are added and before resolution.
+    ///
+    /// NOTE: `link_extends` resolves super types via `by_name` index which
+    /// can return multiple nodes for the same name. When files are added via
+    /// `par_iter`, insertion order is non-deterministic, so the `by_name`
+    /// iteration order varies across runs. This causes flaky resolution when
+    /// two classes share a name (e.g. `kotlin_v1_same_class_name`).
     pub fn finalize(&mut self, tracer: &crate::v2::trace::Tracer) {
         self.link_extends(tracer);
         self.build_ancestor_table(tracer);
