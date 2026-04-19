@@ -2,6 +2,7 @@
 name = "orbit"
 version.workspace = true
 edition = "2024"
+build = "build.rs"
 
 [[bin]]
 name = "orbit"
@@ -33,4 +34,3 @@ strum = { workspace = true }
 
 [dev-dependencies]
 tempfile = { workspace = true }
-

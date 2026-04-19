@@ -1,0 +1,60 @@
+name: "Rust: trait ambiguity resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_trait_ambiguity_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub trait Primary {
+          fn run(&self);
+      }
+
+      pub trait Secondary {
+          fn run(&self);
+      }
+
+      pub trait Base {
+          fn ping(&self) {}
+      }
+
+      pub trait Derived: Base {}
+
+      pub struct Service;
+
+      impl Primary for Service {
+          fn run(&self) {}
+      }
+
+      impl Base for Service {}
+      impl Derived for Service {}
+
+      pub fn call_run(service: Service) {
+          service.run();
+      }
+
+      pub fn call_ping(service: Service) {
+          service.ping();
+      }
+
+tests:
+  - name: "method fallback does not jump to an unrelated visible trait item"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_run' AND callee.name = 'run'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Service::run' } }
+
+  - name: "supertrait default methods resolve to the defining trait item"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_ping' AND callee.name = 'ping'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Base::ping', type: 'Method' } }

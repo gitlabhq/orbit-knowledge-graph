@@ -185,6 +185,27 @@ yaml_test!(rust_precision_resolution, "rust/precision_resolution.yaml");
 yaml_test!(rust_local_items, "rust/local_items.yaml");
 yaml_test!(rust_local_flow_ssa, "rust/local_flow_ssa.yaml");
 yaml_test!(rust_mod_rs_resolution, "rust/mod_rs_resolution.yaml");
+yaml_test!(
+    rust_macro_expansion_resolution,
+    "rust/macro_expansion_resolution.yaml"
+);
+yaml_test!(rust_cfg_gated_resolution, "rust/cfg_gated_resolution.yaml");
+yaml_test!(
+    rust_semantic_impl_alias_resolution,
+    "rust/semantic_impl_alias_resolution.yaml"
+);
+yaml_test!(
+    rust_operator_and_control_flow_resolution,
+    "rust/operator_and_control_flow_resolution.yaml"
+);
+yaml_test!(
+    rust_trait_ambiguity_resolution,
+    "rust/trait_ambiguity_resolution.yaml"
+);
+yaml_test!(
+    rust_field_sensitive_local_flow,
+    "rust/field_sensitive_local_flow.yaml"
+);
 
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");

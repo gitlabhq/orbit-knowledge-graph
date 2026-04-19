@@ -64,13 +64,13 @@ tests:
       - { row_count: 1 }
       - { row: { src: "src/api.rs", tgt: "src/util.rs" } }
 
-  - name: "execute -> Worker::new resolves across files"
+  - name: "execute -> Worker::new resolves across files and macro expansion"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'execute' AND callee.name = 'new'
       RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
       - { row: { src: "src/api.rs", tgt: "src/worker.rs", type: "AssociatedFunction" } }
 
   - name: "execute -> Worker::run resolves with inferred receiver type"
