@@ -261,6 +261,7 @@ impl CodeGraph {
     }
 
     fn build_ancestor_table(&mut self) {
+        let tracer = crate::v2::trace::thread_tracer();
         let extends_only = EdgeFiltered(
             &self.graph,
             |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
@@ -287,9 +288,18 @@ impl CodeGraph {
                 chain.push(ancestor);
             }
             if !chain.is_empty() {
+                let fqn = self.def_fqn(idx).to_string();
+                let ancestor_fqns: Vec<String> =
+                    chain.iter().map(|&a| self.def_fqn(a).to_string()).collect();
+                tracer.event(crate::v2::trace::TraceEvent::AncestorChainBuilt {
+                    fqn,
+                    ancestors: ancestor_fqns,
+                });
                 self.indexes.ancestors.insert(idx, chain);
             }
         }
+
+        tracer.dump("finalize (extends + ancestors)");
     }
 
     fn ensure_directory_chain(&mut self, file_path: &str) -> Option<NodeIndex> {
@@ -564,6 +574,7 @@ impl CodeGraph {
     // ── Internal ────────────────────────────────────────────
 
     fn link_extends(&mut self) {
+        let tracer = crate::v2::trace::thread_tracer();
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
@@ -571,9 +582,24 @@ impl CodeGraph {
                 && let Some(meta) = &self.defs[id.0 as usize].metadata
                 && !meta.super_types.is_empty()
             {
+                let child_fqn = self.strings.get(self.defs[id.0 as usize].fqn).to_string();
                 for &super_id in &meta.super_types {
                     let super_name = self.strings.get(super_id);
                     let targets = self.resolve_type_to_nodes(super_name);
+                    let resolved_fqns: Vec<String> = targets
+                        .iter()
+                        .filter(|&&t| t != idx)
+                        .filter_map(|&t| {
+                            self.graph[t]
+                                .def_id()
+                                .map(|d| self.strings.get(self.defs[d.0 as usize].fqn).to_string())
+                        })
+                        .collect();
+                    tracer.event(crate::v2::trace::TraceEvent::ExtendsLinked {
+                        child_fqn: child_fqn.clone(),
+                        super_type: super_name.to_string(),
+                        resolved_to: resolved_fqns,
+                    });
                     for &target in &targets {
                         if target != idx {
                             edges.push((idx, target));

@@ -47,6 +47,7 @@ pub enum TraceEvent {
     ScopePush {
         name: String,
         kind: String,
+        label: String,
         fqn: String,
         block_id: usize,
     },
@@ -105,6 +106,48 @@ pub enum TraceEvent {
     },
     /// Loop exited.
     LoopExit { exit_block: usize },
+
+    // ── DSL engine — Phase 1 ───────────────────────────────
+    /// A definition was discovered during Phase 1 parsing.
+    DefDiscovered {
+        name: String,
+        fqn: String,
+        kind: String,
+        label: String,
+        is_top_level: bool,
+    },
+
+    // ── DSL engine — ref/chain matching ─────────────────────
+    /// A reference rule was evaluated for a CST node.
+    RefEvaluated {
+        node_kind: String,
+        matched: bool,
+        name: Option<String>,
+        has_chain: bool,
+    },
+    /// A chain step was matched against ChainConfig during build_expression_chain.
+    ChainStepMatched {
+        node_kind: String,
+        category: String,
+        text: String,
+    },
+    /// Instance attr rewrite attempted (Pass 2).
+    InstanceAttrRewrite {
+        original_key: String,
+        compound_key: String,
+        found_values: Vec<String>,
+        chain_trimmed: bool,
+    },
+
+    // ── Graph construction ──────────────────────────────────
+    /// An extends edge was linked during finalize.
+    ExtendsLinked {
+        child_fqn: String,
+        super_type: String,
+        resolved_to: Vec<String>,
+    },
+    /// Ancestor chain was built during finalize.
+    AncestorChainBuilt { fqn: String, ancestors: Vec<String> },
 
     // ── Resolver ────────────────────────────────────────────
     /// Resolver started processing a reference.
@@ -226,12 +269,13 @@ impl fmt::Display for TraceEvent {
             TraceEvent::ScopePush {
                 name,
                 kind,
+                label,
                 fqn,
                 block_id,
             } => {
                 write!(
                     f,
-                    "scope.push           {kind} {name} ({fqn})  [B{block_id}]"
+                    "scope.push           {label} {name} ({fqn}) kind={kind}  [B{block_id}]"
                 )
             }
             TraceEvent::ScopePop { name } => {
@@ -338,6 +382,89 @@ impl fmt::Display for TraceEvent {
             }
             TraceEvent::LoopExit { exit_block } => {
                 write!(f, "loop.exit            [B{exit_block}]")
+            }
+
+            // Phase 1
+            TraceEvent::DefDiscovered {
+                name,
+                fqn,
+                kind,
+                label,
+                is_top_level,
+            } => {
+                let top = if *is_top_level { " (top)" } else { "" };
+                write!(
+                    f,
+                    "def.discovered       {label} {name} ({fqn}) kind={kind}{top}"
+                )
+            }
+
+            // Ref/chain matching
+            TraceEvent::RefEvaluated {
+                node_kind,
+                matched,
+                name,
+                has_chain,
+            } => {
+                if *matched {
+                    let chain_str = if *has_chain { " +chain" } else { "" };
+                    write!(
+                        f,
+                        "ref.eval             {node_kind} -> {}{}",
+                        name.as_deref().unwrap_or("?"),
+                        chain_str
+                    )
+                } else {
+                    write!(f, "ref.eval             {node_kind} -> (no match)")
+                }
+            }
+            TraceEvent::ChainStepMatched {
+                node_kind,
+                category,
+                text,
+            } => {
+                write!(f, "chain.match          {node_kind} -> {category}({text})")
+            }
+            TraceEvent::InstanceAttrRewrite {
+                original_key,
+                compound_key,
+                found_values,
+                chain_trimmed,
+            } => {
+                let vals = if found_values.is_empty() {
+                    "∅".to_string()
+                } else {
+                    found_values.join(", ")
+                };
+                let trim = if *chain_trimmed { " (trimmed)" } else { "" };
+                write!(
+                    f,
+                    "attr.rewrite         {original_key} -> {compound_key} = [{vals}]{trim}"
+                )
+            }
+
+            // Graph construction
+            TraceEvent::ExtendsLinked {
+                child_fqn,
+                super_type,
+                resolved_to,
+            } => {
+                if resolved_to.is_empty() {
+                    write!(f, "extends.link         {child_fqn} -> {super_type} = ∅")
+                } else {
+                    write!(
+                        f,
+                        "extends.link         {child_fqn} -> {super_type} = [{}]",
+                        resolved_to.join(", ")
+                    )
+                }
+            }
+            TraceEvent::AncestorChainBuilt { fqn, ancestors } => {
+                write!(
+                    f,
+                    "ancestors.built      {fqn} -> [{}]",
+                    ancestors.join(" -> ")
+                )
             }
 
             // Resolver
@@ -567,6 +694,7 @@ impl Tracer {
                     | TraceEvent::ImplicitSubScope { .. }
                     | TraceEvent::ReachingDefResolved { .. }
                     | TraceEvent::ResolveResult { .. }
+                    | TraceEvent::InstanceAttrRewrite { .. }
             );
             if is_resolve && !in_resolver {
                 eprintln!("  │");

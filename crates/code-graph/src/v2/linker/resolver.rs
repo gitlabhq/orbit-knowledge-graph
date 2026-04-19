@@ -169,6 +169,31 @@ impl<'a> ResolveCtx<'a> {
             self.rules.fqn_separator,
             &mut self.scratch,
         );
+        if let Some(iid) = self.graph.graph[import_node].import_id() {
+            let gimp = &self.graph.imports[iid.0 as usize];
+            let path = self.graph.str(gimp.path);
+            let name = gimp.name.map(|n| self.graph.str(n)).unwrap_or("");
+            let fqn = if path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{path}{}{name}", self.rules.fqn_separator)
+            };
+            let result_fqns: Vec<String> = result
+                .iter()
+                .filter_map(|&n| {
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
+                })
+                .collect();
+            self.tracer.event(TraceEvent::ImportResolve {
+                import_fqn: fqn,
+                found: !result.is_empty(),
+                result_fqns,
+            });
+        }
         self.import_cache.insert(import_node, result.clone());
         result
     }
@@ -393,29 +418,91 @@ fn resolve_from_reaching(
                         let name = ctx.graph.str(gdef.name);
                         let fqn = ctx.graph.str(gdef.fqn);
                         if ref_name == name {
-                            // Constructor call: ref matches class name
+                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                result: format!("constructor -> {fqn}"),
+                            });
                             result.push(node);
                         } else if !ctx.lookup_nested_cached(fqn, ref_name, &mut result) {
-                            // Instance call: try call_method fallback
                             if let Some(call_method) = ctx.rules.hooks.call_method {
+                                let before = result.len();
                                 ctx.lookup_nested_cached(fqn, call_method, &mut result);
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: if result.len() > before {
+                                        format!("call_method({call_method}) found")
+                                    } else {
+                                        format!("{fqn}.{ref_name} not found, call_method({call_method}) not found")
+                                    },
+                                });
+                            } else {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("{fqn}.{ref_name} not found"),
+                                });
                             }
+                        } else {
+                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                result: format!("nested {fqn}.{ref_name} found"),
+                            });
                         }
                     } else {
+                        let fqn = ctx.graph.str(gdef.fqn);
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                            result: format!("direct -> {fqn}"),
+                        });
                         result.push(node);
                     }
                 }
             }
             ParseValue::ImportRef(i) => {
                 if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
-                    result.extend(ctx.resolve_import_cached(import_node));
+                    let resolved = ctx.resolve_import_cached(import_node);
+                    let fqns: Vec<String> = resolved
+                        .iter()
+                        .filter_map(|&n| {
+                            ctx.graph.graph[n].def_id().map(|d| {
+                                ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string()
+                            })
+                        })
+                        .collect();
+                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                        value: format!("ImportRef({i})"),
+                        result: if fqns.is_empty() {
+                            "import not resolved".to_string()
+                        } else {
+                            format!("import -> [{}]", fqns.join(", "))
+                        },
+                    });
+                    result.extend(resolved);
                 }
             }
             ParseValue::Type(type_fqn) => {
-                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result)
-                    && let Some(call_method) = ctx.rules.hooks.call_method
-                {
-                    ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
+                let before = result.len();
+                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result) {
+                    if let Some(call_method) = ctx.rules.hooks.call_method {
+                        ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({type_fqn})"),
+                            result: if result.len() > before {
+                                format!("call_method({call_method}) found")
+                            } else {
+                                format!("{type_fqn}.{ref_name} not found, call_method({call_method}) not found")
+                            },
+                        });
+                    } else {
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({type_fqn})"),
+                            result: format!("{type_fqn}.{ref_name} not found"),
+                        });
+                    }
+                } else {
+                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                        value: format!("Type({type_fqn})"),
+                        result: format!("nested {type_fqn}.{ref_name} found"),
+                    });
                 }
             }
             ParseValue::Opaque => {}
@@ -557,6 +644,10 @@ fn resolve_base_type_fqns(
             for value in reaching {
                 match value {
                     ParseValue::Type(fqn) => {
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({fqn})"),
+                            result: format!("base type -> {fqn}"),
+                        });
                         types.push(fqn.clone());
                     }
                     ParseValue::LocalDef(i) => {
@@ -564,14 +655,33 @@ fn resolve_base_type_fqns(
                             && let Some(did) = ctx.graph.graph[node].def_id()
                         {
                             let gdef = &ctx.graph.defs[did.0 as usize];
+                            let fqn = ctx.graph.str(gdef.fqn);
                             if gdef.kind.is_type_container() {
-                                types.push(ctx.graph.str(gdef.fqn).to_string());
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (container) -> {fqn}"),
+                                });
+                                types.push(fqn.to_string());
                             } else if let Some(meta) = &gdef.metadata
                                 && let Some(rt) = meta.return_type
                             {
-                                types.push(ctx.graph.str(rt).to_string());
+                                let rt_str = ctx.graph.str(rt);
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (return_type) -> {rt_str}"),
+                                });
+                                types.push(rt_str.to_string());
                             } else if let Some(rt) = ctx.inferred_returns.get(&node) {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (inferred) -> {rt}"),
+                                });
                                 types.push(rt.clone());
+                            } else {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: "no type info".to_string(),
+                                });
                             }
                         }
                     }
@@ -581,13 +691,36 @@ fn resolve_base_type_fqns(
                             for def_idx in resolved {
                                 if let Some(did) = ctx.graph.graph[def_idx].def_id() {
                                     let gdef = &ctx.graph.defs[did.0 as usize];
+                                    let fqn = ctx.graph.str(gdef.fqn);
                                     if gdef.kind.is_type_container() {
-                                        types.push(ctx.graph.str(gdef.fqn).to_string());
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (container) -> {fqn}"),
+                                        });
+                                        types.push(fqn.to_string());
                                     } else if let Some(meta) = &gdef.metadata
                                         && let Some(rt) = meta.return_type
                                     {
-                                        types.push(ctx.graph.str(rt).to_string());
+                                        let rt_str = ctx.graph.str(rt);
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (return_type) -> {rt_str}"),
+                                        });
+                                        types.push(rt_str.to_string());
                                     } else if let Some(rt) = ctx.inferred_returns.get(&def_idx) {
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (inferred) -> {rt}"),
+                                        });
                                         types.push(rt.clone());
                                     }
                                 }
