@@ -5,7 +5,7 @@ use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
-use treesitter_visit::extract::{child_of_kind, default_name, field, no_extract, text};
+use treesitter_visit::extract::{child_of_kind, constant, default_name, field, no_extract, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -109,9 +109,14 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(kotlin_super_types)),
-            scopes(&["object_declaration", "companion_object"], "Object")
+            scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
+            // Companion objects: named (companion object Foo {}) uses type_identifier,
+            // anonymous (companion object {}) defaults to "Companion".
+            scope("companion_object", "Object")
+                .def_kind(DefKind::Class)
+                .name_from_or(child_of_kind("type_identifier"), "Companion"),
             // Extension function: has receiver type before the dot
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
@@ -151,6 +156,24 @@ impl DslLanguage for KotlinDsl {
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
             // Bare type references: declarations, type casts, is checks
             reference("type_identifier").name_from(text()),
+            // Operator desugaring: binary operators map to named methods.
+            // The left operand is the receiver, the method name is derived from the operator.
+            reference("additive_expression")
+                .name_from(constant("plus"))
+                .when(has_child_text("+"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("additive_expression")
+                .name_from(constant("minus"))
+                .when(has_child_text("-"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("multiplicative_expression")
+                .name_from(constant("times"))
+                .when(has_child_text("*"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("multiplicative_expression")
+                .name_from(constant("div"))
+                .when(has_child_text("/"))
+                .receiver_via(child_of_kind("simple_identifier")),
         ]
     }
 

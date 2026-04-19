@@ -42,6 +42,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
+    pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
@@ -73,6 +74,13 @@ impl ScopeRule {
 
     pub fn name_from(mut self, extract: Extract) -> Self {
         self.name = extract;
+        self
+    }
+
+    /// Try extract first, fall back to a constant default name.
+    pub fn name_from_or(mut self, extract: Extract, default: &'static str) -> Self {
+        self.name = extract;
+        self.default_name = Some(default);
         self
     }
 
@@ -118,6 +126,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -131,6 +140,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -149,6 +159,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -575,6 +586,18 @@ impl BindingRule {
             && cc.ident_kinds.contains(&vk_ref)
         {
             return Some(value_node.text().to_string());
+        }
+
+        // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name
+        // as the alias target. The object's type propagates via SSA alias chasing.
+        if let Some(cc) = &spec.chain_config {
+            for &(fa_kind, obj_field, _member_field) in cc.field_access {
+                if vk_ref == fa_kind {
+                    if let Some(obj) = value_node.field(obj_field) {
+                        return Some(obj.text().to_string());
+                    }
+                }
+            }
         }
 
         None

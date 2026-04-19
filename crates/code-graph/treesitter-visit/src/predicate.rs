@@ -87,6 +87,11 @@ pub fn has_descendant(kind: &'static str) -> Pred {
     check_at(Axis::Descendant, Match::Kind(kind))
 }
 
+/// Check if any direct child has exactly the given text (e.g. operator symbols).
+pub fn has_child_text(text: &'static str) -> Pred {
+    exists(extract::child_of_text(text))
+}
+
 pub fn field_kind(field: &'static str, kinds: &'static [&'static str]) -> Pred {
     check_at(Axis::Field(field), Match::AnyKind(kinds))
 }

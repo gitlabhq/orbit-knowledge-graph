@@ -66,7 +66,7 @@ pub trait LanguagePipeline {
         files: &[FileInput],
         root_path: &str,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        Self::process_files_traced(files, root_path, false)
+        Self::process_files_traced(files, root_path, crate::v2::trace::is_thread_trace())
     }
 
     fn process_files_traced(

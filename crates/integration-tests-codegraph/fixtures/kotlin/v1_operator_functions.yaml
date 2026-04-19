@@ -5,7 +5,7 @@ tests:
   # ── K10: test_kotlin_reference_to_operator_functions ──
 
   - name: "AnimalList.Companion.of -> AnimalList.plus (operator)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'
@@ -15,7 +15,7 @@ tests:
       - { row_count: 1 }
 
   - name: "AnimalList.Companion.of -> AnimalList.display"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.operator.AnimalList.Companion.of'

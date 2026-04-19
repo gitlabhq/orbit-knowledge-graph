@@ -40,12 +40,16 @@ pub enum Step {
 /// How to produce a string from the final node.
 #[derive(Clone)]
 pub enum Emit {
+    /// The node's full text.
     Text,
+    /// Nothing — used for navigation-only extracts (via `navigate()`).
     None,
     /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
     /// Collect text of all children matching this criterion.
     Children(Match<'static>),
+    /// A fixed constant string, ignoring the node.
+    Const(&'static str),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -83,12 +87,21 @@ pub fn child_of_kind(kind: &'static str) -> Extract {
     Extract::from_step(Step::Nav(Axis::Child, Match::Kind(kind)))
 }
 
+pub fn child_of_text(text: &'static str) -> Extract {
+    Extract::from_step(Step::Nav(Axis::Child, Match::Text(text)))
+}
+
 pub fn descendant(kind: &'static str) -> Extract {
     Extract::from_step(Step::Nav(Axis::Descendant, Match::Kind(kind)))
 }
 
 pub fn text() -> Extract {
     Extract::terminal(Emit::Text)
+}
+
+/// Always returns a fixed string, regardless of the node.
+pub fn constant(s: &'static str) -> Extract {
+    Extract::terminal(Emit::Const(s))
 }
 
 pub fn no_extract() -> Extract {
@@ -303,6 +316,7 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             // Single-value fallback: return first match
             emit_all(mode, node).into_iter().next()
         }
+        Emit::Const(s) => Some(s.to_string()),
     }
 }
 

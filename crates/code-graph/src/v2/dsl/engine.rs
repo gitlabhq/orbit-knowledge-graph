@@ -202,7 +202,10 @@ impl LanguageSpec {
             .map(|&i| &self.scopes[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
-        let name = rule.extract().apply(node)?;
+        let name = rule
+            .extract()
+            .apply(node)
+            .or_else(|| rule.default_name.map(|s| s.to_string()))?;
         Some(ScopeMatch {
             name,
             label: rule.resolve_label(node),
