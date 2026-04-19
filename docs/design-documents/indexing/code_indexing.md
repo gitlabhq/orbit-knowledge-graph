@@ -193,13 +193,15 @@ After acquiring the lock, the service downloads the full repository archive from
 
 ##### Parser architecture
 
-The code parser supports seven languages using three parser backends:
+The code parser supports seven languages using four parser backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
 - **TypeScript and JavaScript** use the SWC parser. Minified files are skipped.
-- **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
+- **Python, Kotlin, Java, and C#** use tree-sitter grammars.
+- **Rust** uses a rust-analyzer-backed custom v2 pipeline with a synthetic repo-local Cargo workspace model. The loader keeps analysis inside the checked-out tree, disables proc macros and build-script execution, and uses parser-time SSA only for local callable flow (aliases, rebindings, and branch joins) on top of rust-analyzer semantic resolution.
 
 Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only.
+Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, Java, and Rust emit call/reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 
