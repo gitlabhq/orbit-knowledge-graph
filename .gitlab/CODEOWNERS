@@ -1,9 +1,6 @@
 # Default: core team reviews everything
 * @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
 
-# GitLab configuration and CI
-/.gitlab/ @michaelangeloio @bohdanpk @dgruzd
-
 # Auth and security
 /crates/gkg-server/src/auth/ @michaelangeloio @bohdanpk @dgruzd
 /crates/gkg-server/src/redaction/ @michaelangeloio @bohdanpk @dgruzd
@@ -12,7 +9,7 @@
 /docs/design-documents/security.md @michaelangeloio @bohdanpk @dgruzd
 
 # Query engine
-/crates/query-engine/ @michaelusa @bohdanpk
+/crates/query-engine/ @michaelusa @michaelangeloio
 
 # Proto / API surface
 /crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon
