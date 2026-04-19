@@ -1,0 +1,27 @@
+# Siphon deployment layout for e2e.
+# Consumed by `scripts/sync-cdc-tables.sh` -> siphon `schema generate-values --layout`.
+#
+# E2E has a single GitLab Postgres (main DB only) and a single ClickHouse target,
+# so one producer + one consumer is sufficient. Add ci/sec producers only if e2e
+# starts deploying GitLab with sharded databases.
+#
+# Identifiers MUST match `application_identifier` values in `values/siphon.yaml.gotmpl`.
+
+producers:
+  main:
+    - e2e_siphon_1
+
+consumers:
+  - e2e_siphon_consumer_1
+
+# Reconciler runs scheduled refresh jobs that backfill derived ClickHouse views
+# (e.g. work_items, which JOINs siphon_issues with siphon_namespaces). Without
+# it, rows that were inserted before their JOIN dependencies appear stay
+# permanently missing from the materialized view.
+reconcilers:
+  - e2e_siphon_reconciler_1
+
+# `inline` keeps refresh packages on the same NATS consumer as CDC events.
+# Staging uses `separate` to give refresh its own consumer position; for e2e the
+# extra consumer adds noise without buying anything.
+refresh_mode: inline
