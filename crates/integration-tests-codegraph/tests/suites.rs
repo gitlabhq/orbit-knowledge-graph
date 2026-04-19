@@ -114,5 +114,8 @@ yaml_test!(
 );
 yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
 
+// Go
+yaml_test!(go_struct_embedding, "go/struct_embedding.yaml");
+
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");

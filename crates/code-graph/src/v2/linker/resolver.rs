@@ -187,8 +187,12 @@ impl<'a> ResolveCtx<'a> {
         // This handles Go methods (`func (s *Service) Run()`) and
         // Kotlin extension functions (`fun String.toTitleCase()`).
         if result.is_empty() {
-            self.graph
-                .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
+            self.graph.lookup_by_receiver_type(
+                scope_fqn,
+                member_name,
+                self.rules.fqn_separator,
+                &mut result,
+            );
         }
 
         let found = !result.is_empty();

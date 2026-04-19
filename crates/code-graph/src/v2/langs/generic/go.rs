@@ -1,5 +1,7 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, child_of_kind, field, metadata, text};
+use crate::v2::dsl::extractors::{
+    Extract, ExtractList, child_of_kind, field, field_chain, metadata, text,
+};
 use crate::v2::dsl::predicates::*;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
@@ -45,7 +47,8 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
-                .when(field_kind("type", &["struct_type"])),
+                .when(field_kind("type", &["struct_type"]))
+                .metadata(metadata().super_types(ExtractList::Fn(go_embedded_types))),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
@@ -54,9 +57,13 @@ impl DslLanguage for GoDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
+            // Method call: svc.Log("hello") — name from selector_expression's field
             reference("call_expression")
-                .name_from(field("function"))
-                .receiver("function"),
+                .name_from(field_chain(&["function", "field"]))
+                .when(field_kind("function", &["selector_expression"]))
+                .receiver_chain(&["function", "operand"]),
+            // Simple call: Log("hello") — name from function field directly
+            reference("call_expression").name_from(field("function")),
             // Bare type references: declarations, type assertions.
             // Skip inside composite_literal (already tracked via chain_config.constructor).
             reference("type_identifier")
@@ -120,6 +127,21 @@ impl DslLanguage for GoDsl {
             constructor: &[("composite_literal", "type")],
         })
     }
+}
+
+/// Extract embedded (promoted) types from a Go struct's field_declaration_list.
+/// Embedded fields have a `type` but no `name`, e.g. `type Foo struct { Bar }`.
+fn go_embedded_types(node: &N<'_>) -> Vec<String> {
+    let Some(struct_type) = node.field("type") else {
+        return vec![];
+    };
+    let Some(fdl) = struct_type.child_of_kind("field_declaration_list") else {
+        return vec![];
+    };
+    fdl.children_matching(Kind("field_declaration"))
+        .filter(|fd| fd.field("name").is_none())
+        .filter_map(|fd| fd.field("type").map(|t| t.text().to_string()))
+        .collect()
 }
 
 fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
