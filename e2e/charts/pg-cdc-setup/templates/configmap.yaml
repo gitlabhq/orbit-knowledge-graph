@@ -28,6 +28,16 @@ data:
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_replicator;
     ALTER DEFAULT PRIVILEGES IN SCHEMA public GRANT SELECT ON TABLES TO siphon_snapshot;
 
+    -- GitLab partitions live in gitlab_partitions_dynamic (date partitions for
+    -- p_* tables, hash partitions for merge_request_diff_files_99208b8fac).
+    -- Without USAGE here, siphon's CheckTableExists (information_schema.tables)
+    -- can't see partitions even though pg_inherits discovers them, causing the
+    -- producer to restart every partition-monitoring cycle.
+    CREATE SCHEMA IF NOT EXISTS gitlab_partitions_dynamic;
+    GRANT USAGE ON SCHEMA gitlab_partitions_dynamic TO siphon, siphon_replicator, siphon_snapshot;
+    GRANT SELECT ON ALL TABLES IN SCHEMA gitlab_partitions_dynamic TO siphon, siphon_replicator, siphon_snapshot;
+    ALTER DEFAULT PRIVILEGES IN SCHEMA gitlab_partitions_dynamic GRANT SELECT ON TABLES TO siphon, siphon_replicator, siphon_snapshot;
+
     DROP PUBLICATION IF EXISTS e2e_siphon_publication;
     CREATE PUBLICATION e2e_siphon_publication;
     ALTER PUBLICATION e2e_siphon_publication OWNER TO siphon;
