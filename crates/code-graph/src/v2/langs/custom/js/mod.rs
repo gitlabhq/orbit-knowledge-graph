@@ -27,7 +27,8 @@ pub use types::{
     CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
     JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsImport, JsImportKind,
     JsImportedBinding, JsImportedCall, JsImportedMemberBinding, JsInvocationKind,
-    JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode, OwnedImportEntry,
+    JsInvocationSupport, JsMemberKind, JsModuleInfo, JsPendingLocalCall, JsResolutionMode,
+    OwnedImportEntry,
 };
 
 const MODULE_FQN_PREFIX: &str = "__js_module__";

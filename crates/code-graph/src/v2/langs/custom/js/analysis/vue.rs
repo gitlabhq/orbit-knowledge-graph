@@ -6,7 +6,7 @@ use oxc::ast::ast::{
 use oxc::semantic::AstNodes;
 use std::collections::HashMap;
 
-use super::super::types::{JsDef, JsDefKind};
+use super::super::types::{JsDef, JsDefKind, JsInvocationSupport};
 
 fn vue_component_object<'a>(
     declaration: &'a ExportDefaultDeclarationKind<'a>,
@@ -219,6 +219,7 @@ pub(super) fn extract_vue_options_api(
             range: span_to_range(obj.span),
             is_exported: true,
             type_annotation: None,
+            invocation_support: Some(JsInvocationSupport::class()),
         });
 
         let lifecycle_hooks = [
@@ -270,6 +271,7 @@ pub(super) fn extract_vue_options_api(
                         range: span_to_range(mp.span),
                         is_exported: false,
                         type_annotation: None,
+                        invocation_support: Some(JsInvocationSupport::function()),
                     });
                 }
             }
@@ -296,6 +298,7 @@ pub(super) fn extract_vue_options_api(
                         range: span_to_range(mp.span),
                         is_exported: false,
                         type_annotation: None,
+                        invocation_support: None,
                     });
                 }
             }
@@ -322,6 +325,7 @@ pub(super) fn extract_vue_options_api(
                         range: span_to_range(wp.span),
                         is_exported: false,
                         type_annotation: None,
+                        invocation_support: Some(JsInvocationSupport::function()),
                     });
                 }
             }
@@ -338,6 +342,7 @@ pub(super) fn extract_vue_options_api(
                     range: span_to_range(p.span),
                     is_exported: false,
                     type_annotation: None,
+                    invocation_support: Some(JsInvocationSupport::function()),
                 });
             }
             // lifecycle hooks -- extract as LifecycleHook
@@ -352,6 +357,7 @@ pub(super) fn extract_vue_options_api(
                     range: span_to_range(p.span),
                     is_exported: false,
                     type_annotation: None,
+                    invocation_support: Some(JsInvocationSupport::function()),
                 });
             }
         }

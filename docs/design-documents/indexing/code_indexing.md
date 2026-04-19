@@ -195,7 +195,7 @@ After acquiring the lock, the service downloads the full repository archive from
 The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses four parser and analysis backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
-- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
+- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
 - **Vue and Svelte** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline. File-backed imports such as GraphQL, JSON, SVG, and common web assets resolve to the underlying file node even though the graph does not currently extract internal definitions from those asset formats.
 - **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
@@ -208,7 +208,7 @@ For each file, the parser extracts three categories of information:
 - **Imported symbols** with their import path, identifier, optional alias, and scope.
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
 
-For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions.
+For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions. A second OXC-driven pass records invocation sites, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
 
 ##### Streaming indexing pipeline
 

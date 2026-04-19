@@ -66,6 +66,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
 
     let mut all_defs = Vec::new();
     let mut all_imports = Vec::new();
+    let mut all_local_calls = Vec::new();
     let mut all_calls = Vec::new();
     let mut all_classes = Vec::new();
     let mut directive = None;
@@ -84,6 +85,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         module_info.merge(analysis.module_info);
         all_defs.extend(analysis.defs);
         all_imports.extend(analysis.imports);
+        all_local_calls.extend(analysis.local_calls);
         all_calls.extend(analysis.calls);
         all_classes.extend(analysis.classes);
     }
@@ -92,6 +94,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         relative_path: relative_path.clone(),
         defs: all_defs,
         imports: all_imports,
+        local_calls: all_local_calls,
         calls: all_calls,
         classes: all_classes,
         directive,
@@ -150,6 +153,7 @@ fn file_backed_module(
             relative_path: relative_path.to_string(),
             defs: Vec::new(),
             imports: Vec::new(),
+            local_calls: Vec::new(),
             calls: Vec::new(),
             classes: Vec::new(),
             directive: None,

@@ -156,6 +156,67 @@ fixtures:
         return items.map(transform);
       }
 
+  - path: ssa/branch.ts
+    content: |
+      class JsonParser {
+        parse(input: string): string[] {
+          return [input];
+        }
+      }
+
+      class CsvParser {
+        parse(input: string): string[] {
+          return input.split(",");
+        }
+      }
+
+      export function pickParser(flag: boolean): string[] {
+        let parser;
+        if (flag) {
+          parser = new JsonParser();
+        } else {
+          parser = new CsvParser();
+        }
+        return parser.parse("a,b");
+      }
+
+  - path: ssa/alias.ts
+    content: |
+      class Parser {
+        parse(input: string): string[] {
+          return [input];
+        }
+      }
+
+      export function aliasRun(): string[] {
+        const parser = new Parser();
+        const alias = parser;
+        return alias.parse("ok");
+      }
+
+  - path: ssa/loop.ts
+    content: |
+      class Parser {
+        parse(input: string): string[] {
+          return [input];
+        }
+      }
+
+      class SpecialParser {
+        parse(input: string): string[] {
+          return input.split(",");
+        }
+      }
+
+      export function loopRun(flag: boolean): string[] {
+        let parser = new Parser();
+        while (flag) {
+          parser = new SpecialParser();
+          flag = false;
+        }
+        return parser.parse("a,b");
+      }
+
   - path: namespace_chain/barrel.ts
     content: |
       export { default as Suggestions } from "./suggestions";
@@ -403,6 +464,42 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
+
+  - name: SSA branch merges preserve multiple candidate receiver types
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ssa/branch.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "pickParser", callee: "JsonParser" } }
+      - { row: { caller: "pickParser", callee: "CsvParser" } }
+      - { row: { caller: "pickParser", callee: "JsonParser::parse" } }
+      - { row: { caller: "pickParser", callee: "CsvParser::parse" } }
+
+  - name: SSA alias propagation preserves receiver type through local rebinding
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ssa/alias.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "aliasRun", callee: "Parser" } }
+      - { row: { caller: "aliasRun", callee: "Parser::parse" } }
+
+  - name: SSA loop exit preserves initial and loop-carried receiver types
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'ssa/loop.ts'
+        AND callee.name = 'parse'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "loopRun", callee: "Parser::parse" } }
+      - { row: { caller: "loopRun", callee: "SpecialParser::parse" } }
 
   - name: Namespace reexport member chains resolve to underlying static method
     query: |

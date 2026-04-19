@@ -69,6 +69,10 @@ fixtures:
           load() {
             return this.normalize();
           },
+          relayNormalize() {
+            const self = this;
+            return self.normalize();
+          },
           normalize() {
             return logError('normalize');
           },
@@ -123,6 +127,18 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "load", callee: "normalize" } }
+
+  - name: Vue this-alias preserves local method resolution
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND caller.name = 'relayNormalize'
+        AND callee.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "relayNormalize", callee: "normalize" } }
 
   - name: Vue imported helper call resolves from method to helper definition
     query: |

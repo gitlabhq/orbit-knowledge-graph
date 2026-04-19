@@ -1,4 +1,5 @@
 use crate::utils::Range;
+use crate::v2::types::{ExpressionStep, ssa::ParseValue};
 use std::collections::HashMap;
 
 use super::frameworks::JsDirective;
@@ -163,6 +164,7 @@ pub struct JsFileAnalysis {
     pub relative_path: String,
     pub defs: Vec<JsDef>,
     pub imports: Vec<JsImport>,
+    pub local_calls: Vec<JsPendingLocalCall>,
     pub calls: Vec<JsCallEdge>,
     pub classes: Vec<JsClassInfo>,
     pub directive: Option<JsDirective>,
@@ -177,6 +179,16 @@ pub struct JsDef {
     pub range: Range,
     pub is_exported: bool,
     pub type_annotation: Option<String>,
+    pub invocation_support: Option<JsInvocationSupport>,
+}
+
+#[derive(Debug, Clone)]
+pub struct JsPendingLocalCall {
+    pub name: String,
+    pub chain: Option<Vec<ExpressionStep>>,
+    pub reaching: Vec<ParseValue>,
+    pub enclosing_def: Option<u32>,
+    pub invocation_kind: JsInvocationKind,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

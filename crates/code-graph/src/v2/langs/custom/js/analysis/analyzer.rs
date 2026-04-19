@@ -14,8 +14,9 @@ use super::super::types::{
     JsImport, JsImportKind, JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode,
     OwnedImportEntry,
 };
-use super::calls::{build_class_hierarchy, build_variable_type_map, extract_call_edges};
+use super::calls::build_class_hierarchy;
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
+use super::ssa::extract_ssa_calls;
 use super::vue::extract_vue_options_api;
 
 pub(super) type NodeId = oxc::semantic::NodeId;
@@ -61,6 +62,10 @@ pub(super) struct Ctx<'a> {
 }
 
 impl<'a> Ctx<'a> {
+    pub(super) fn scope_symbol(&self, node_id: NodeId) -> Option<SymbolId> {
+        self.scope_defs.get(&node_id).copied()
+    }
+
     fn scoped_variable_owner_parts(&self, decl_node_id: NodeId) -> Vec<String> {
         let mut owners = Vec::new();
 
@@ -141,28 +146,6 @@ impl<'a> Ctx<'a> {
         }
         parts.reverse();
         parts.join("::")
-    }
-
-    pub(super) fn find_enclosing_def(
-        &self,
-        scope_id: oxc::syntax::scope::ScopeId,
-    ) -> Option<(String, Range)> {
-        let mut fqn_parts = Vec::new();
-        let mut def_range = None;
-        for ancestor in self.scoping.scope_ancestors(scope_id) {
-            if self.scoping.scope_flags(ancestor).contains(ScopeFlags::Top) {
-                break;
-            }
-            if let Some(&owner) = self.scope_defs.get(&self.scoping.get_node_id(ancestor)) {
-                if def_range.is_none() {
-                    def_range = Some(self.lt.span_to_range(self.scoping.symbol_span(owner)));
-                }
-                fqn_parts.push(self.scoping.symbol_name(owner).to_string());
-            }
-        }
-        let range = def_range?;
-        fqn_parts.reverse();
-        Some((fqn_parts.join("::"), range))
     }
 }
 
@@ -324,11 +307,6 @@ fn build_invocation_support_maps(
             continue;
         }
 
-        let scope_id = ctx.scoping.symbol_scope_id(symbol_id);
-        if !ctx.scoping.scope_flags(scope_id).contains(ScopeFlags::Top) {
-            continue;
-        }
-
         let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
         let Some(invocation_support) =
             invocation_support_for_symbol(flags, ctx.nodes, decl_node_id)
@@ -375,6 +353,7 @@ fn extract_definitions(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsD
             range,
             is_exported,
             type_annotation,
+            invocation_support: None,
         });
     }
     defs
@@ -430,6 +409,7 @@ fn extract_class_members(
                 range,
                 is_exported: false,
                 type_annotation: None,
+                invocation_support: Some(JsInvocationSupport::function()),
             });
 
             members.push(JsClassMember {
@@ -453,6 +433,31 @@ fn extract_class_members(
     }
 
     (method_defs, classes)
+}
+
+fn annotate_invocation_support(
+    defs: &mut [JsDef],
+    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
+    invocation_support_by_range: &HashMap<(usize, usize), JsInvocationSupport>,
+) {
+    for def in defs {
+        let fallback = match def.kind {
+            JsDefKind::Class => Some(JsInvocationSupport::class()),
+            JsDefKind::Function
+            | JsDefKind::Method { .. }
+            | JsDefKind::LifecycleHook { .. }
+            | JsDefKind::Watcher { .. }
+            | JsDefKind::Getter { .. }
+            | JsDefKind::Setter { .. } => Some(JsInvocationSupport::function()),
+            _ => None,
+        };
+
+        def.invocation_support = invocation_support_by_range
+            .get(&def.range.byte_offset)
+            .copied()
+            .or_else(|| invocation_support_by_name.get(&def.name).copied())
+            .or(fallback);
+    }
 }
 
 fn extract_imports(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsImport> {
@@ -946,12 +951,18 @@ impl JsAnalyzer {
             &mut class_hierarchy,
         );
 
-        let imports = extract_imports(&ctx, &parsed);
-        let variable_type_map = build_variable_type_map(nodes);
-        let calls = extract_call_edges(&ctx, &defs, &imports, &class_hierarchy, &variable_type_map);
-        let directive = super::super::frameworks::detect_directive(&parsed.program.directives);
         let (invocation_support_by_name, invocation_support_by_range) =
             build_invocation_support_maps(&ctx);
+        annotate_invocation_support(
+            &mut defs,
+            &invocation_support_by_name,
+            &invocation_support_by_range,
+        );
+
+        let imports = extract_imports(&ctx, &parsed);
+        let (local_calls, calls) =
+            extract_ssa_calls(&ctx, &parsed.program, &defs, &imports, &class_hierarchy);
+        let directive = super::super::frameworks::detect_directive(&parsed.program.directives);
 
         let cjs_exports = extract_cjs_exports(
             nodes,
@@ -1017,6 +1028,7 @@ impl JsAnalyzer {
             relative_path: relative_path.to_string(),
             defs,
             imports,
+            local_calls,
             calls,
             classes,
             directive,

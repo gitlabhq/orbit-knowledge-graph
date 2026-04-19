@@ -1,21 +1,26 @@
 use std::collections::HashMap;
 use std::path::Path;
+use std::sync::OnceLock;
 
-use crate::v2::linker::{CodeGraph, GraphEdge};
-use crate::v2::types::{DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship};
+use crate::v2::linker::rules::{ChainMode, ReceiverMode, ResolveStage};
+use crate::v2::linker::{CodeGraph, FileResolver, GraphEdge, ResolutionRules, ResolveSettings};
+use crate::v2::types::{
+    DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
+};
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use crate::legacy::linker::analysis::types::ConsolidatedRelationship;
 
 use super::{
-    JsCallEdge, JsCallSite, JsCallTarget, JsCrossFileResolver, JsExportName, JsFileAnalysis,
-    JsModuleIndex, JsModuleInfo, JsResolutionMode, is_bun_project, phase1::AnalyzedJsFile,
+    JsCallEdge, JsCallTarget, JsCrossFileResolver, JsExportName, JsFileAnalysis, JsModuleIndex,
+    JsModuleInfo, JsPhase1FileInfo, JsResolutionMode, is_bun_project, phase1::AnalyzedJsFile,
 };
 
 pub fn attach_resolution_edges(
     graph: &mut CodeGraph,
     analyzed_files: &[AnalyzedJsFile],
+    file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
     root_path: &str,
 ) {
@@ -23,7 +28,12 @@ pub fn attach_resolution_edges(
     let mut seen = FxHashSet::default();
 
     for analyzed in analyzed_files {
-        add_local_call_edges(graph, &lookup, analyzed, &mut seen);
+        add_local_call_edges(
+            graph,
+            analyzed,
+            file_infos.get(&analyzed.relative_path),
+            &mut seen,
+        );
     }
 
     if analyzed_files.is_empty() {
@@ -88,23 +98,157 @@ pub fn attach_resolution_edges(
 
 fn add_local_call_edges(
     graph: &mut CodeGraph,
-    lookup: &GraphLookup,
     analyzed: &AnalyzedJsFile,
+    file_info: Option<&JsPhase1FileInfo>,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
 ) {
-    for call in &analyzed.analysis.calls {
-        let Some((source_node, source_node_kind, source_def_kind)) =
-            local_call_source(graph, lookup, &analyzed.analysis, call)
-        else {
-            continue;
-        };
-        let Some(target_node) = local_call_target(lookup, &analyzed.analysis, call) else {
-            continue;
-        };
+    let Some(file_info) = file_info else {
+        return;
+    };
 
-        add_edge(
-            graph,
-            seen,
+    let rules = js_local_rules();
+    let settings = js_local_settings();
+    let mut resolver = FileResolver::new(
+        graph,
+        file_info.file_node,
+        &file_info.local_def_nodes,
+        &file_info.import_nodes,
+        rules,
+        settings,
+    );
+
+    let mut resolved = Vec::new();
+    let mut filtered = Vec::new();
+    let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
+    for call in &analyzed.analysis.local_calls {
+        resolved.clear();
+        resolver.resolve(
+            &call.name,
+            call.chain.as_deref(),
+            &call.reaching,
+            call.enclosing_def,
+            &mut resolved,
+        );
+
+        for (source_node, target_node, edge) in &resolved {
+            if !local_target_supports_invocation(
+                graph,
+                &analyzed.analysis,
+                *target_node,
+                call.invocation_kind,
+            ) {
+                continue;
+            }
+            let semantic_key = (
+                source_node.index(),
+                graph.def_fqn(*target_node).to_string(),
+                EdgeKind::Calls,
+            );
+            if semantic_seen.insert(semantic_key) {
+                filtered.push((*source_node, *target_node, edge.clone()));
+            }
+        }
+
+        append_direct_class_invocations(graph, file_info, call, &mut filtered, &mut semantic_seen);
+    }
+    drop(resolver);
+    for (source_node, target_node, edge) in filtered {
+        add_edge(graph, seen, source_node, target_node, edge);
+    }
+}
+
+fn js_local_rules() -> &'static ResolutionRules {
+    static RULES: OnceLock<ResolutionRules> = OnceLock::new();
+    RULES.get_or_init(|| {
+        ResolutionRules::custom(
+            "js_local_ssa",
+            vec![ResolveStage::SSA],
+            vec![],
+            ChainMode::ValueFlow,
+            ReceiverMode::None,
+            "::",
+            &["this"],
+            Some("super"),
+        )
+        .with_settings(js_local_settings().clone())
+    })
+}
+
+fn js_local_settings() -> &'static ResolveSettings {
+    static SETTINGS: OnceLock<ResolveSettings> = OnceLock::new();
+    SETTINGS.get_or_init(|| ResolveSettings {
+        chain_fallback: false,
+        compound_key_recovery: false,
+        implicit_scope_on_base: false,
+        ..ResolveSettings::default()
+    })
+}
+
+fn local_target_supports_invocation(
+    graph: &CodeGraph,
+    analysis: &JsFileAnalysis,
+    target_node: NodeIndex,
+    invocation_kind: super::JsInvocationKind,
+) -> bool {
+    let graph_def = graph.def(target_node);
+    let target_fqn = graph.def_fqn(target_node);
+    let support = analysis
+        .defs
+        .iter()
+        .find(|def| def.fqn == target_fqn || def.range.byte_offset == graph_def.range.byte_offset)
+        .and_then(|def| def.invocation_support)
+        .or_else(|| match graph_def.kind {
+            DefKind::Class => Some(super::JsInvocationSupport::class()),
+            DefKind::Function | DefKind::Method | DefKind::Constructor => {
+                Some(super::JsInvocationSupport::function())
+            }
+            _ => None,
+        });
+
+    support.is_some_and(|support| support.supports(invocation_kind))
+}
+
+fn append_direct_class_invocations(
+    graph: &CodeGraph,
+    file_info: &JsPhase1FileInfo,
+    call: &super::JsPendingLocalCall,
+    edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    semantic_seen: &mut FxHashSet<(usize, String, EdgeKind)>,
+) {
+    if call.chain.is_some()
+        || !matches!(
+            call.invocation_kind,
+            super::JsInvocationKind::Construct | super::JsInvocationKind::Jsx
+        )
+    {
+        return;
+    }
+
+    let (source_node, source_node_kind, source_def_kind) = call
+        .enclosing_def
+        .and_then(|idx| file_info.local_def_nodes.get(idx as usize).copied())
+        .map(|node| (node, NodeKind::Definition, Some(graph.def(node).kind)))
+        .unwrap_or((file_info.file_node, NodeKind::File, None));
+
+    for value in &call.reaching {
+        let ParseValue::LocalDef(idx) = value else {
+            continue;
+        };
+        let Some(&target_node) = file_info.local_def_nodes.get(*idx as usize) else {
+            continue;
+        };
+        if graph.def(target_node).kind != DefKind::Class {
+            continue;
+        }
+        let semantic_key = (
+            source_node.index(),
+            graph.def_fqn(target_node).to_string(),
+            EdgeKind::Calls,
+        );
+        if !semantic_seen.insert(semantic_key) {
+            continue;
+        }
+        edges.push((
             source_node,
             target_node,
             GraphEdge {
@@ -113,82 +257,10 @@ fn add_local_call_edges(
                     source_node: source_node_kind,
                     target_node: NodeKind::Definition,
                     source_def_kind,
-                    target_def_kind: Some(graph.def(target_node).kind),
+                    target_def_kind: Some(DefKind::Class),
                 },
             },
-        );
-    }
-}
-
-fn local_call_source(
-    graph: &CodeGraph,
-    lookup: &GraphLookup,
-    analysis: &JsFileAnalysis,
-    call: &JsCallEdge,
-) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
-    match &call.caller {
-        JsCallSite::Definition { fqn, range } => {
-            let node = lookup
-                .def_by_file_and_fqn
-                .get(&(analysis.relative_path.clone(), fqn.clone()))
-                .copied()
-                .or_else(|| {
-                    lookup
-                        .def_by_file_and_range
-                        .get(&(analysis.relative_path.clone(), range.byte_offset))
-                        .copied()
-                })?;
-            Some((node, NodeKind::Definition, Some(graph.def(node).kind)))
-        }
-        JsCallSite::ModuleLevel => {
-            let node = lookup.file_by_path.get(&analysis.relative_path).copied()?;
-            Some((node, NodeKind::File, None))
-        }
-    }
-}
-
-fn local_call_target(
-    lookup: &GraphLookup,
-    analysis: &JsFileAnalysis,
-    call: &JsCallEdge,
-) -> Option<NodeIndex> {
-    match &call.callee {
-        JsCallTarget::Direct { fqn, range } => lookup
-            .def_by_file_and_fqn
-            .get(&(analysis.relative_path.clone(), fqn.clone()))
-            .copied()
-            .or_else(|| {
-                lookup
-                    .def_by_file_and_range
-                    .get(&(analysis.relative_path.clone(), range.byte_offset))
-                    .copied()
-            }),
-        JsCallTarget::ThisMethod {
-            resolved_fqn,
-            resolved_range,
-            ..
-        }
-        | JsCallTarget::SuperMethod {
-            resolved_fqn,
-            resolved_range,
-            ..
-        } => resolved_fqn
-            .as_ref()
-            .and_then(|fqn| {
-                lookup
-                    .def_by_file_and_fqn
-                    .get(&(analysis.relative_path.clone(), fqn.clone()))
-                    .copied()
-            })
-            .or_else(|| {
-                resolved_range.and_then(|range| {
-                    lookup
-                        .def_by_file_and_range
-                        .get(&(analysis.relative_path.clone(), range.byte_offset))
-                        .copied()
-                })
-            }),
-        JsCallTarget::ImportedCall { .. } => None,
+        ));
     }
 }
 

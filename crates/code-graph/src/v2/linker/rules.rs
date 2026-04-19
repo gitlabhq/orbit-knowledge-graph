@@ -195,6 +195,37 @@ impl ResolutionRules {
         self
     }
 
+    /// Build a `ResolutionRules` without a DSL language spec, used by
+    /// pipelines (e.g. the JS custom pipeline) that drive resolution
+    /// entirely through hooks instead of scope/reference rules.
+    #[allow(clippy::too_many_arguments)]
+    pub fn custom(
+        name: &'static str,
+        bare_stages: Vec<ResolveStage>,
+        import_strategies: Vec<ImportStrategy>,
+        chain_mode: ChainMode,
+        receiver: ReceiverMode,
+        fqn_separator: &'static str,
+        self_names: &'static [&'static str],
+        super_name: Option<&'static str>,
+    ) -> Self {
+        Self {
+            name,
+            scopes: Vec::new(),
+            bare_stages,
+            import_strategies,
+            chain_mode,
+            receiver,
+            fqn_separator,
+            self_names,
+            super_name,
+            implicit_sub_scopes: &[],
+            hooks: ResolverHooks::default(),
+            language_spec: None,
+            settings: super::ResolveSettings::default(),
+        }
+    }
+
     /// Override the default resolve settings.
     pub fn with_settings(mut self, settings: super::ResolveSettings) -> Self {
         self.settings = settings;

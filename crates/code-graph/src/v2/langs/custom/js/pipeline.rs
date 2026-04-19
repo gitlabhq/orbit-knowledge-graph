@@ -1,9 +1,10 @@
 use crate::v2::linker::CodeGraph;
 use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
+use rustc_hash::FxHashMap;
 
-use super::JsModuleGraphBuilder;
 use super::phase1::analyze_files;
 use super::resolver::attach_resolution_edges;
+use super::{JsModuleGraphBuilder, JsPhase1FileInfo};
 
 pub struct JsPipeline;
 
@@ -24,12 +25,20 @@ impl LanguagePipeline for JsPipeline {
         }
 
         let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
+        let mut file_infos: FxHashMap<String, JsPhase1FileInfo> = FxHashMap::default();
         for file in &analyzed_files {
-            builder.add_file(file.phase1.clone());
+            let info = builder.add_file(file.phase1.clone());
+            file_infos.insert(file.relative_path.clone(), info);
         }
 
         let (mut graph, modules) = builder.into_parts();
-        attach_resolution_edges(&mut graph, &analyzed_files, &modules, root_path);
+        attach_resolution_edges(
+            &mut graph,
+            &analyzed_files,
+            &file_infos,
+            &modules,
+            root_path,
+        );
         graph.finalize();
 
         if errors.is_empty() {
