@@ -16,7 +16,7 @@ use crate::source::Doc;
 
 #[derive(Clone)]
 pub enum Pred {
-    Exists(Extract),
+    Exists(Box<Extract>),
     And(Box<Pred>, Box<Pred>),
     Or(Box<Pred>, Box<Pred>),
     Not(Box<Pred>),
@@ -52,7 +52,7 @@ impl std::ops::Not for Pred {
 // Each is just Exists(some Extract pipeline).
 
 fn exists(e: Extract) -> Pred {
-    Pred::Exists(e)
+    Pred::Exists(Box::new(e))
 }
 
 fn check(m: Match<'static>) -> Pred {
