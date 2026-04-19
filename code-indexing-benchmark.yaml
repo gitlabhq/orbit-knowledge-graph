@@ -101,6 +101,27 @@ repos:
     commit_sha: 7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1
     groups: [python]
 
+  # Rust
+  - name: orbit-knowledge-graph
+    source: gitlab
+    project: gitlab-org/orbit/knowledge-graph
+    version: 6f216119ed0c33a4ba00bcef67c447f30f416bf3
+    groups: [rust]
+
+  - name: cargo
+    source: github
+    project: rust-lang/cargo
+    version: 0.95.0-662-g7ecf0285e
+    commit_sha: 7ecf0285ebb408d596e4a8ac76a0980d8edb7005
+    groups: [rust]
+
+  - name: rust-analyzer
+    source: github
+    project: rust-lang/rust-analyzer
+    version: nightly
+    commit_sha: 251df518d73abb5c5d573c4d5d266a3edae9ca5a
+    groups: [rust]
+
 scenarios:
   hyperfine:
     - id: index
