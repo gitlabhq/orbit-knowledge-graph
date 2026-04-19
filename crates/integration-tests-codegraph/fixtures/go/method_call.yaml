@@ -1,0 +1,23 @@
+name: "Go: method call resolution"
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      type Service struct{}
+
+      func (s *Service) Run() {}
+
+      func main() {
+          var svc Service
+          svc.Run()
+      }
+
+tests:
+  - name: svc.Run() resolves to Service's Run method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.edge_kind = 'Calls' AND callee.name = 'Run'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Run" } }
