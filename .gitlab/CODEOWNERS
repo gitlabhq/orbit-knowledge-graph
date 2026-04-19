@@ -11,11 +11,5 @@
 # Query engine
 /crates/query-engine/ @michaelusa
 
-# Indexer
-/crates/indexer/ @jgdoyon
-
-# Ontology
-/config/ontology/ @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
-
 # Proto / API surface
 /crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon
