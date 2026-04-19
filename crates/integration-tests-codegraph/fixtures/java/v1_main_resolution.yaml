@@ -175,7 +175,7 @@ tests:
       - { row: { kind: Calls } }
 
   - name: "Main.main -> Executor.execute (method reference)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -279,7 +279,7 @@ tests:
       - { row: { kind: Calls } }
 
   - name: "Main.main -> EnumClass.enumMethod2 (enum var method)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'

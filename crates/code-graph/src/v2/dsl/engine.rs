@@ -1089,9 +1089,15 @@ impl LanguageSpec {
                             type_ann
                         };
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
-                    } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
-                        // RHS callee name → Alias for SSA copy propagation
-                        super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
+                    } else if let Some(rhs) = rule.extract_rhs_value(node, self) {
+                        match rhs {
+                            super::types::RhsValue::Alias(name) => {
+                                super::ssa::SsaValue::Alias(state.arena.alloc_str(&name))
+                            }
+                            super::types::RhsValue::Type(name) => {
+                                super::ssa::SsaValue::Type(state.arena.alloc_str(&name))
+                            }
+                        }
                     } else {
                         super::ssa::SsaValue::Opaque
                     };

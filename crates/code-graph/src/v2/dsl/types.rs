@@ -571,9 +571,10 @@ impl BindingRule {
         None
     }
 
-    /// Extract the RHS callee name from a binding's value field.
-    /// Unwraps call expressions: `Database()` → "Database".
-    pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
+    /// Extract the RHS value from a binding's value field.
+    /// Returns `Alias` for call expressions and bare identifiers (SSA copy propagation),
+    /// `Type` for field access objects (the object IS the type, resolved later).
+    pub fn extract_rhs_value(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<RhsValue> {
         let value_node = if let Some(extract) = &self.value_extract {
             extract.navigate(node)?
         } else {
@@ -583,26 +584,24 @@ impl BindingRule {
         let vk_ref = vk.as_ref();
 
         // Call expression → extract callee name via reference rules.
-        // Use matches() not just kind() to respect conditions (e.g.
-        // Python has two `call` rules — one for method calls, one for plain calls).
         if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
-            return ref_rule.extract().apply(&value_node);
+            return ref_rule.extract().apply(&value_node).map(RhsValue::Alias);
         }
 
         // Bare identifier
         if let Some(cc) = &spec.chain_config
             && cc.ident_kinds.contains(&vk_ref)
         {
-            return Some(value_node.text().to_string());
+            return Some(RhsValue::Alias(value_node.text().to_string()));
         }
 
-        // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name
-        // as the alias target. The object's type propagates via SSA alias chasing.
+        // Field access (e.g. EnumClass.ENUM_VALUE_2) → the object name is a type,
+        // not an alias. The resolver will FQN-resolve bare type names via imports.
         if let Some(cc) = &spec.chain_config {
             for fa in &cc.field_access {
                 if vk_ref == fa.kind {
                     if let Some(obj) = fa.object.navigate(&value_node) {
-                        return Some(obj.text().to_string());
+                        return Some(RhsValue::Type(obj.text().to_string()));
                     }
                 }
             }
@@ -610,6 +609,14 @@ impl BindingRule {
 
         None
     }
+}
+
+/// Result of extracting a binding's RHS value.
+pub enum RhsValue {
+    /// Callee name or bare identifier — SSA copy propagation via alias chasing.
+    Alias(String),
+    /// Field access object name — the object is a type, resolved by the resolver.
+    Type(String),
 }
 
 // ── Branch rules ────────────────────────────────────────────────

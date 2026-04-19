@@ -82,6 +82,14 @@ impl DslLanguage for JavaDsl {
             scope("enum_constant", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
+            scope("field_declaration", "Field")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .name_from(field("declarator").field("name"))
+                .metadata(
+                    metadata()
+                        .type_annotation(field("type").inner("type_arguments", "type_identifier")),
+                ),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
@@ -197,11 +205,13 @@ impl DslLanguage for JavaDsl {
         vec![
             java_type(
                 binding("local_variable_declaration", BindingKind::Assignment)
-                    .name_from(&["declarator", "name"]),
+                    .name_from(&["declarator", "name"])
+                    .value_from_extract(field("declarator").field("value")),
             ),
             java_type(
                 binding("field_declaration", BindingKind::Assignment)
                     .name_from(&["declarator", "name"])
+                    .value_from_extract(field("declarator").field("value"))
                     .instance_attrs(&["this."]),
             ),
             java_type(
