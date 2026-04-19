@@ -79,12 +79,19 @@ define_languages! {
         separator: ".",
         names: ["python"],
     },
-    TypeScript => {
-        support_lang: TypeScript,
-        extensions: ["ts", "js"],
+    JavaScript => {
+        support_lang: JavaScript,
+        extensions: ["js"],
         exclude: ["min.js"],
         separator: "::",
-        names: ["typescript", "javascript"],
+        names: ["javascript", "js"],
+    },
+    TypeScript => {
+        support_lang: TypeScript,
+        extensions: ["ts"],
+        exclude: [],
+        separator: "::",
+        names: ["typescript", "ts"],
     },
     Kotlin => {
         support_lang: Kotlin,
@@ -121,4 +128,27 @@ define_languages! {
         separator: "::",
         names: ["rust"],
     },
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn javascript_support_lang_is_distinct_from_typescript() {
+        assert_eq!(
+            Language::JavaScript.to_support_lang(),
+            Some(SupportLang::JavaScript)
+        );
+        assert_eq!(
+            Language::TypeScript.to_support_lang(),
+            Some(SupportLang::TypeScript)
+        );
+    }
+
+    #[test]
+    fn javascript_and_typescript_extensions_are_split() {
+        assert_eq!(Language::JavaScript.file_extensions(), &["js"]);
+        assert_eq!(Language::TypeScript.file_extensions(), &["ts"]);
+    }
 }
