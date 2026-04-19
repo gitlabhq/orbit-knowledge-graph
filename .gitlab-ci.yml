@@ -955,10 +955,7 @@ e2e:
       allow_failure: true
   before_script:
     - !reference [.sccache-template, before_script]
-    - apt-get update -qq && apt-get install -y -qq openssl python3
-    - curl -sLO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" && chmod +x kubectl && mv kubectl /usr/local/bin/
-    - curl -sL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar xz && mv linux-amd64/helm /usr/local/bin/ && rm -rf linux-amd64
-    - curl -sL "https://github.com/helmfile/helmfile/releases/download/v${HELMFILE_VERSION}/helmfile_${HELMFILE_VERSION}_linux_amd64.tar.gz" | tar xz -C /usr/local/bin
+    - bash e2e/scripts/install-ci-tools.sh
     - kubectl config use-context "$KCTX"
   script:
     - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
@@ -980,6 +977,8 @@ e2e:
     - bash e2e/scripts/setup.sh
     - bash e2e/scripts/test.sh
   after_script:
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
     - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
   artifacts:
     when: always
