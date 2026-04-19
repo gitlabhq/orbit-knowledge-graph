@@ -82,6 +82,11 @@ yaml_test!(
 yaml_test!(python_call_resolution, "python_resolution.yaml");
 yaml_test!(python_type_flow, "python/type_flow.yaml");
 yaml_test!(
+    python_decorator_references,
+    "python/decorator_references.yaml"
+);
+yaml_test!(python_relative_imports, "python/relative_imports.yaml");
+yaml_test!(
     python_v1_interfile_resolution,
     "python/v1_interfile_resolution.yaml"
 );
@@ -96,6 +101,10 @@ yaml_test!(
     "java/generic_type_stripping.yaml"
 );
 yaml_test!(java_cross_file_type_flow, "java/cross_file_type_flow.yaml");
+yaml_test!(
+    java_annotation_references,
+    "java/annotation_references.yaml"
+);
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
@@ -103,6 +112,15 @@ yaml_test!(
     kotlin_intrafile_resolution,
     "kotlin/intrafile_resolution.yaml"
 );
+yaml_test!(
+    kotlin_annotation_references,
+    "kotlin/annotation_references.yaml"
+);
+yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
+
+// Go
+yaml_test!(go_method_call, "go/method_call.yaml");
+yaml_test!(go_struct_embedding, "go/struct_embedding.yaml");
 
 // Java v1 parity
 yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");

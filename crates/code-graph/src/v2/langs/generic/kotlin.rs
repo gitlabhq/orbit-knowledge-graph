@@ -1,11 +1,12 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{
-    Extract, ExtractList, child_of_kind, default_extract, field, metadata, no_extract,
-};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
+use treesitter_visit::extract::Extract;
+use treesitter_visit::extract::{child_of_kind, default_name, field, no_extract, text};
+use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -85,10 +86,15 @@ impl DslLanguage for KotlinDsl {
             scope_fn("class_declaration", classify_kotlin_class)
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(ExtractList::Fn(kotlin_super_types))),
+                .metadata(metadata().super_types(kotlin_super_types)),
             scopes(&["object_declaration", "companion_object"], "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
+            // Extension function: has receiver type before the dot
+            scope("function_declaration", "ExtensionFunction")
+                .def_kind(DefKind::Function)
+                .when(has_child(&["."]))
+                .metadata(metadata().receiver_type(child_of_kind("user_type"))),
             scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)
@@ -107,7 +113,23 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn refs() -> Vec<ReferenceRule> {
-        vec![reference("call_expression").receiver("navigation_expression")]
+        vec![
+            // Simple call: create() — name from direct simple_identifier child
+            reference("call_expression")
+                .name_from(child_of_kind("simple_identifier"))
+                .when(!has_child(&["navigation_expression"])),
+            // Chain call: Foo.create() — name from navigation_suffix's identifier.
+            // Receiver: navigation_expression → first named child (the object).
+            reference("call_expression")
+                .name_from(
+                    child_of_kind("navigation_expression")
+                        .then(child_of_kind("navigation_suffix").then(default_name())),
+                )
+                .when(has_child(&["navigation_expression"]))
+                .receiver_via(child_of_kind("navigation_expression").first_named()),
+            // Bare type references: declarations, type casts, is checks
+            reference("type_identifier").name_from(text()),
+        ]
     }
 
     fn chain_config() -> Option<ChainConfig> {
@@ -115,8 +137,9 @@ impl DslLanguage for KotlinDsl {
             ident_kinds: &["simple_identifier"],
             this_kinds: &["this_expression"],
             super_kinds: &["super_expression"],
-            field_access: &[("navigation_expression", "expression", "navigation_suffix")],
+            field_access: &[],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 
@@ -142,7 +165,7 @@ impl DslLanguage for KotlinDsl {
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("package_header", default_extract()))
+        Some(("package_header", default_name()))
     }
 
     fn bindings() -> Vec<BindingRule> {
@@ -245,6 +268,7 @@ impl HasRules for KotlinRules {
             &["this", "self"],
             Some("super"),
         )
+        .with_implicit_sub_scopes(&["Companion"])
         .with_hooks(ResolverHooks {
             call_method: Some("invoke"),
         })

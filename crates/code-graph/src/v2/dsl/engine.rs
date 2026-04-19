@@ -97,12 +97,31 @@ impl LanguageSpec {
 
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && node_kind_ref == pkg_kind
-            && let Some(name) = pkg_extract.extract_name(node)
+            && let Some(name) = pkg_extract.apply(node)
         {
             scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
+        let module_prefix: Option<String> = if top_level_depth > 0 {
+            Some(
+                scope_stack[..top_level_depth]
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep),
+            )
+        } else {
+            None
+        };
+        if let Some(m) = self.evaluate_scope(node, node_kind_ref, |bare, _origin| {
+            if let Some(fqn) = import_map.get(&bare) {
+                return fqn.clone();
+            }
+            if let Some(prefix) = &module_prefix {
+                return format!("{prefix}{sep}{bare}");
+            }
+            bare
+        }) {
             let is_top_level = scope_stack.len() <= top_level_depth;
 
             if m.creates_scope {
@@ -139,7 +158,8 @@ impl LanguageSpec {
             let import_count_before = imports.len();
             let handled = self.hooks.on_import.is_some_and(|f| f(node, imports));
             if !handled {
-                self.evaluate_imports(node, node_kind_ref, imports);
+                let ms = scope_stack.first().map(|s| s.as_ref());
+                self.evaluate_imports(node, node_kind_ref, imports, ms, sep);
             }
             for imp in &imports[import_count_before..] {
                 if !imp.wildcard && !imp.path.is_empty() {
@@ -172,8 +192,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
+        resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
     ) -> Option<ScopeMatch> {
         let indices = self.scope_dispatch.get(node_kind)?;
         let rule = indices
@@ -182,14 +201,14 @@ impl LanguageSpec {
             .map(|&i| &self.scopes[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
-        let name = rule.extract_name(node)?;
+        let name = rule.extract().apply(node)?;
         Some(ScopeMatch {
             name,
             label: rule.resolve_label(node),
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node, import_map, sep),
+            metadata: rule.extract_metadata(node, &resolve),
         })
     }
 
@@ -198,6 +217,7 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         import_map: &rustc_hash::FxHashMap<String, String>,
+        module_prefix: Option<&str>,
         sep: &str,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let indices = self.ref_dispatch.get(node_kind)?;
@@ -205,7 +225,7 @@ impl LanguageSpec {
             .iter()
             .map(|&i| &self.refs[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
-        let name = rule.extract_name(node)?;
+        let name = rule.extract().apply(node)?;
 
         // Build expression chain if the rule declares an object field
         // and the spec has a ChainConfig
@@ -214,9 +234,16 @@ impl LanguageSpec {
             .as_ref()
             .zip(self.chain_config.as_ref())
             .and_then(|(extract, cc)| {
-                let receiver_node = extract.resolve(node)?;
+                let receiver_node = extract.navigate(node)?;
                 let mut chain = Vec::new();
-                self.build_expression_chain(&receiver_node, &mut chain, cc, import_map, sep);
+                self.build_expression_chain(
+                    &receiver_node,
+                    &mut chain,
+                    cc,
+                    import_map,
+                    module_prefix,
+                    sep,
+                );
                 chain.push(ExpressionStep::Call(name.clone()));
                 if chain.len() > 1 { Some(chain) } else { None }
             });
@@ -234,6 +261,7 @@ impl LanguageSpec {
         chain: &mut Vec<ExpressionStep>,
         cc: &super::types::ChainConfig,
         import_map: &rustc_hash::FxHashMap<String, String>,
+        module_prefix: Option<&str>,
         sep: &str,
     ) {
         let kind = node.kind();
@@ -257,13 +285,41 @@ impl LanguageSpec {
             return;
         }
 
-        // Constructor (new Foo())
+        // Constructor (new Foo() or new Outer.Inner())
         for &(ctor_kind, type_field) in cc.constructor {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
-                    let bare = type_node.text().to_string();
-                    let resolved = super::extractors::resolve_type_via_map(&bare, import_map, sep);
-                    chain.push(ExpressionStep::New(resolved));
+                    let tk = type_node.kind();
+                    // Qualified type (e.g. scoped_type_identifier): the type node
+                    // has multiple named children representing segments. Extract
+                    // them as Ident (first, resolved via imports) + Field (rest).
+                    if cc.qualified_type_kinds.contains(&tk.as_ref()) {
+                        let mut segments = type_node.children().filter(|c| c.is_named());
+                        if let Some(first) = segments.next() {
+                            let name = first.text().to_string();
+                            let resolved = if let Some(fqn) = import_map.get(&name) {
+                                fqn.clone()
+                            } else if let Some(prefix) = module_prefix {
+                                format!("{prefix}{sep}{name}")
+                            } else {
+                                name
+                            };
+                            chain.push(ExpressionStep::New(resolved));
+                            for seg in segments {
+                                chain.push(ExpressionStep::Field(seg.text().to_string()));
+                            }
+                        }
+                    } else {
+                        let bare = type_node.text().to_string();
+                        let resolved = if let Some(fqn) = import_map.get(&bare) {
+                            fqn.clone()
+                        } else if let Some(prefix) = module_prefix {
+                            format!("{prefix}{sep}{bare}")
+                        } else {
+                            bare
+                        };
+                        chain.push(ExpressionStep::New(resolved));
+                    }
                 }
                 return;
             }
@@ -272,11 +328,37 @@ impl LanguageSpec {
         // Field access (obj.field)
         for &(fa_kind, obj_field, member_field) in cc.field_access {
             if kind_ref == fa_kind {
-                if let Some(obj) = node.field(obj_field) {
-                    self.build_expression_chain(&obj, chain, cc, import_map, sep);
+                // Named field lookup. Falls back to child-of-kind for grammars
+                // without named fields (e.g. Kotlin navigation_expression).
+                let obj = node.field(obj_field);
+                let member = node
+                    .field(member_field)
+                    .or_else(|| node.child_of_kind(member_field));
+
+                if let Some(obj) = obj {
+                    self.build_expression_chain(&obj, chain, cc, import_map, module_prefix, sep);
+                } else if let Some(ref member_node) = member {
+                    // No named field for the object — use the first named child
+                    // that isn't the member node.
+                    let mr = member_node.range();
+                    if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
+                        self.build_expression_chain(
+                            &obj,
+                            chain,
+                            cc,
+                            import_map,
+                            module_prefix,
+                            sep,
+                        );
+                    }
                 }
-                if let Some(field) = node.field(member_field) {
-                    chain.push(ExpressionStep::Field(field.text().to_string()));
+                if let Some(field) = member {
+                    // Use default_name to extract the identifier from wrapper
+                    // nodes like navigation_suffix (skip the "." punctuation).
+                    let name = treesitter_visit::extract::default_name()
+                        .apply(&field)
+                        .unwrap_or_else(|| field.text().to_string());
+                    chain.push(ExpressionStep::Field(name));
                 }
                 return;
             }
@@ -286,11 +368,11 @@ impl LanguageSpec {
         if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
             let rule = &self.refs[rule_idx];
             if let Some(extract) = &rule.receiver_extract
-                && let Some(recv) = extract.resolve(node)
+                && let Some(recv) = extract.navigate(node)
             {
-                self.build_expression_chain(&recv, chain, cc, import_map, sep);
+                self.build_expression_chain(&recv, chain, cc, import_map, module_prefix, sep);
             }
-            if let Some(name) = rule.extract_name(node) {
+            if let Some(name) = rule.extract().apply(node) {
                 chain.push(ExpressionStep::Call(name));
             }
             return;
@@ -308,6 +390,8 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         imports: &mut Vec<CanonicalImport>,
+        module_scope: Option<&str>,
+        sep: &str,
     ) {
         let Some(indices) = self.import_dispatch.get(node_kind) else {
             return;
@@ -324,7 +408,14 @@ impl LanguageSpec {
         let label = rule.resolve_label(node);
 
         if let Some(child_kinds) = rule.multi_child_kinds {
-            let base_path = rule.extract_name(node).unwrap_or_default();
+            let raw_path = rule.extract().apply(node).unwrap_or_default();
+            let base_path = if let Some(resolve) = self.hooks.resolve_import_path
+                && let Some(ms) = module_scope
+            {
+                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
+            } else {
+                raw_path
+            };
             let alias_kind = rule.alias_child_kind;
 
             for child in node.children() {
@@ -374,7 +465,14 @@ impl LanguageSpec {
                     });
                 }
             }
-        } else if let Some(full_path) = rule.extract_name(node) {
+        } else if let Some(raw_path) = rule.extract().apply(node) {
+            let full_path = if let Some(resolve) = self.hooks.resolve_import_path
+                && let Some(ms) = module_scope
+            {
+                resolve(&raw_path, ms, sep).unwrap_or(raw_path)
+            } else {
+                raw_path
+            };
             // Check for wildcard child (e.g. `asterisk` in `import com.example.*`).
             let has_wildcard_child = rule
                 .wildcard_child_kind
@@ -614,13 +712,34 @@ impl LanguageSpec {
         // Package node
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && nk == pkg_kind
-            && let Some(name) = pkg_extract.extract_name(node)
+            && let Some(name) = pkg_extract.apply(node)
         {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
+        // Module-level scope prefix for FQN resolution (package/module, not class/method)
+        let module_prefix: Option<String> = if state.top_level_depth > 0 {
+            Some(
+                state.scope_stack[..state.top_level_depth]
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep),
+            )
+        } else {
+            None
+        };
+
         // Scope matching → push def + optional SSA self/super writes
-        if let Some(m) = self.evaluate_scope(node, nk, &state.import_map, sep) {
+        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+            if let Some(fqn) = state.import_map.get(&bare) {
+                return fqn.clone();
+            }
+            if let Some(prefix) = &module_prefix {
+                return format!("{prefix}{sep}{bare}");
+            }
+            bare
+        }) {
             let is_top_level = state.scope_stack.len() <= state.top_level_depth;
             let def_index = state.defs.len() as u32;
 
@@ -706,6 +825,32 @@ impl LanguageSpec {
             // Track enclosing def for references
             if m.creates_scope {
                 state.enclosing_def_stack.push(def_index);
+
+                // Adopt sibling references: when decorators/annotations are
+                // CST siblings of the scope node, emit refs attributed to
+                // this def rather than the parent scope.
+                if !self.hooks.adopt_sibling_refs.is_empty()
+                    && let Some(parent) = node.parent()
+                {
+                    for sibling in parent.children() {
+                        let sk = sibling.kind();
+                        if sibling.range() != node.range()
+                            && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
+                            && let Some(name) =
+                                treesitter_visit::extract::default_name().apply(&sibling)
+                        {
+                            let ssa_key = state.arena.alloc_str(&name);
+                            state.pending_refs.push(PendingRef {
+                                name,
+                                chain: None,
+                                ssa_key,
+                                block: state.current_block,
+                                enclosing_def: Some(def_index),
+                                is_return: false,
+                            });
+                        }
+                    }
+                }
             }
         }
 
@@ -749,7 +894,8 @@ impl LanguageSpec {
                 .on_import
                 .is_some_and(|f| f(node, &mut state.imports));
             if !handled {
-                self.evaluate_imports(node, nk, &mut state.imports);
+                let ms = state.scope_stack.first().map(|s| s.as_ref());
+                self.evaluate_imports(node, nk, &mut state.imports, ms, sep);
             }
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
@@ -777,8 +923,15 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → Type(bare_name), matching walker behavior
-                        super::ssa::SsaValue::Type(state.arena.alloc_str(&type_ann))
+                        // Type annotation → resolve to FQN
+                        let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
+                            fqn.clone()
+                        } else if let Some(prefix) = &module_prefix {
+                            format!("{prefix}{sep}{type_ann}")
+                        } else {
+                            type_ann
+                        };
+                        super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         // RHS callee name → Alias for SSA copy propagation
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
@@ -848,7 +1001,7 @@ impl LanguageSpec {
 
             // Reference handling → SSA read → PendingRef
             if let Some((name, _range, expression)) =
-                self.evaluate_reference(node, nk, &state.import_map, sep)
+                self.evaluate_reference(node, nk, &state.import_map, module_prefix.as_deref(), sep)
             {
                 // For chains, read SSA for the base identifier (not the terminal).
                 // For bare refs, read SSA for the name itself.
@@ -1093,9 +1246,9 @@ fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> O
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::v2::dsl::extractors::field;
-    use crate::v2::dsl::predicates::*;
     use crate::v2::dsl::types::*;
+    use treesitter_visit::extract::field;
+    use treesitter_visit::predicate::*;
 
     fn parse_with(spec: &LanguageSpec, code: &str) -> ParsedDefs {
         spec.parse_defs_only(code.as_bytes(), "test.py", Language::Python)

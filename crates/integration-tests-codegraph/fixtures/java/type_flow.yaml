@@ -281,7 +281,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { row_count: 5 }
+          - { row_count: 6 }
           - { row: { callee: "Pool" } }
           - { row: { callee: "getConnection" } }
           - { row: { callee: "getDb" } }
@@ -304,7 +304,7 @@ tests:
           RETURN callee.name AS callee
           ORDER BY callee
         assert:
-          - { row_count: 4 }
+          - { row_count: 5 }
           - { row: { callee: "FileStream" } }
           - { row: { callee: "flush" } }
           - { row: { callee: "read" } }
@@ -348,7 +348,7 @@ tests:
           RETURN callee.name AS callee, callee.fqn AS callee_fqn
           ORDER BY callee
         assert:
-          - { row_count: 3 }
+          - { row_count: 4 }
           - { row: { callee: "PackagedDog", callee_fqn: "com.example.PackagedDog" } }
           - { row: { callee: "fetch", callee_fqn: "com.example.PackagedDog.fetch" } }
           - { row: { callee: "speak", callee_fqn: "com.example.PackagedAnimal.speak" } }

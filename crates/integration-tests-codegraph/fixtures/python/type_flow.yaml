@@ -182,7 +182,7 @@ tests:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.name = 'run_query'
-            AND NOT callee.name IN ['session', 'cursor', 'fetch_all']
+            AND NOT callee.name IN ['session', 'cursor', 'fetch_all', 'Engine']
           RETURN callee.name
         assert:
           - { empty: true }

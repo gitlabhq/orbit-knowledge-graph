@@ -1,8 +1,10 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{Extract, child_of_kind, field, metadata};
-use crate::v2::dsl::predicates::*;
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use treesitter_visit::extract::Extract;
+use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
+use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -32,13 +34,21 @@ impl DslLanguage for GoDsl {
                 .metadata(metadata().return_type(field("result"))),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
-                .metadata(metadata().return_type(field("result"))),
+                .metadata(
+                    metadata().return_type(field("result")).receiver_type(
+                        field("receiver").then(
+                            child_of_kind("parameter_declaration")
+                                .then(field("type").inner("pointer_type", "type_identifier")),
+                        ),
+                    ),
+                ),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
-                .when(field_kind("type", &["struct_type"])),
+                .when(field_kind("type", &["struct_type"]))
+                .metadata(metadata().super_types(go_embedded_types)),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),
@@ -47,9 +57,18 @@ impl DslLanguage for GoDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
+            // Method call: svc.Log("hello") — name from selector_expression's field
             reference("call_expression")
-                .name_from(field("function"))
-                .receiver("function"),
+                .name_from(field_chain(&["function", "field"]))
+                .when(field_kind("function", &["selector_expression"]))
+                .receiver_chain(&["function", "operand"]),
+            // Simple call: Log("hello") — name from function field directly
+            reference("call_expression").name_from(field("function")),
+            // Bare type references: declarations, type assertions.
+            // Skip inside composite_literal (already tracked via chain_config.constructor).
+            reference("type_identifier")
+                .name_from(text())
+                .when(!parent_is("composite_literal")),
         ]
     }
 
@@ -64,7 +83,8 @@ impl DslLanguage for GoDsl {
                 .value_from("right"),
             binding("var_spec", BindingKind::Assignment)
                 .name_from(&["name"])
-                .value_from("value"),
+                .value_from("value")
+                .typed(vec![field("type")], &[]),
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
@@ -105,8 +125,32 @@ impl DslLanguage for GoDsl {
             super_kinds: &[],
             field_access: &[("selector_expression", "operand", "field")],
             constructor: &[("composite_literal", "type")],
+            qualified_type_kinds: &[],
         })
     }
+}
+
+/// Extract embedded (promoted) types from a Go struct's field_declaration_list.
+/// Embedded fields have a `type` but no `name`, e.g. `type Foo struct { Bar }`.
+fn go_embedded_types(node: &N<'_>) -> Vec<String> {
+    let Some(struct_type) = node.field("type") else {
+        return vec![];
+    };
+    let Some(fdl) = struct_type.child_of_kind("field_declaration_list") else {
+        return vec![];
+    };
+    fdl.children_matching(Kind("field_declaration"))
+        .filter(|fd| fd.field("name").is_none())
+        .filter_map(|fd| {
+            fd.field("type").map(|t| {
+                let s = t.text().to_string();
+                // Strip pointer prefix: `*Bar` → `Bar`
+                s.strip_prefix('*')
+                    .map(|stripped| stripped.to_string())
+                    .unwrap_or(s)
+            })
+        })
+        .collect()
 }
 
 fn go_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
@@ -184,7 +228,30 @@ impl HasRules for GoRules {
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::ValueFlow,
+            ChainMode::TypeFlow {
+                type_fields: &["type"],
+                skip_types: &[
+                    "int",
+                    "int8",
+                    "int16",
+                    "int32",
+                    "int64",
+                    "uint",
+                    "uint8",
+                    "uint16",
+                    "uint32",
+                    "uint64",
+                    "float32",
+                    "float64",
+                    "complex64",
+                    "complex128",
+                    "string",
+                    "bool",
+                    "byte",
+                    "rune",
+                    "error",
+                ],
+            },
             ReceiverMode::None,
             ".",
             &[],

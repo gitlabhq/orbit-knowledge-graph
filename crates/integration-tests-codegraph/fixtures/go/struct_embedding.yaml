@@ -1,0 +1,35 @@
+name: "Go: struct embedding (promoted methods)"
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      type Logger struct{}
+
+      func (l *Logger) Log(msg string) {}
+
+      type Service struct {
+          Logger
+          Name string
+      }
+
+      type Decoy struct{}
+
+      func (d *Decoy) Log(msg string) {}
+
+      func main() {
+          var svc Service
+          svc.Log("hello")
+      }
+
+tests:
+  # Struct embedding resolution needs the ancestors index, which is built
+  # in finalize() AFTER Phase 2 resolution. Needs Phase 3-style re-resolution.
+  - name: svc.Log() resolves via embedding
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Log" } }

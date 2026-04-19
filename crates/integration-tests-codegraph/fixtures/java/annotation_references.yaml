@@ -1,0 +1,52 @@
+name: "Java: annotation references"
+fixtures:
+  - path: com/example/MyAnnotation.java
+    content: |
+      package com.example;
+      public @interface MyAnnotation {}
+
+  - path: com/example/OtherAnnotation.java
+    content: |
+      package com.example;
+      public @interface OtherAnnotation {}
+
+  - path: com/example/Service.java
+    content: |
+      package com.example;
+
+      public class Service {
+          @MyAnnotation
+          public void annotatedMethod() {}
+
+          @OtherAnnotation
+          public void otherMethod() {}
+
+          public void plainMethod() {}
+      }
+
+tests:
+  - name: Annotation ref attributed to the annotated method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'annotatedMethod' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { row: { callee: "MyAnnotation" } }
+      - { not: true, row: { callee: "OtherAnnotation" } }
+
+  - name: Each method references its own annotation
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'otherMethod' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { row: { callee: "OtherAnnotation" } }
+      - { not: true, row: { callee: "MyAnnotation" } }
+
+  - name: Plain method has no annotation edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'plainMethod' AND e.edge_kind = 'Calls'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
