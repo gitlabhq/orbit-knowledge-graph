@@ -101,7 +101,17 @@ impl DslLanguage for JavaDsl {
             reference("method_invocation")
                 .name_from(field("name"))
                 .receiver("object"),
-            reference("object_creation_expression").name_from(field("type")),
+            // Simple constructor: new Foo() — extract type name directly
+            reference("object_creation_expression")
+                .name_from(field("type").inner("type_arguments", "type_identifier"))
+                .when(!has_descendant("scoped_type_identifier")),
+            // Qualified constructor: new Outer.Inner() — name is last segment,
+            // receiver is first segment. Chain becomes [Ident("Outer"), Call("Inner")]
+            // and the resolver looks up Inner as a nested member of Outer.
+            reference("object_creation_expression")
+                .name_from(field("type").nth(Child, Kind("type_identifier"), -1))
+                .when(has_descendant("scoped_type_identifier"))
+                .receiver_via(field("type").nth(Child, Kind("type_identifier"), 0)),
             // Bare type references: declarations, casts, instanceof, annotations.
             // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
@@ -170,7 +180,13 @@ impl DslLanguage for JavaDsl {
         ];
         let java_type = |rule: BindingRule| {
             rule.typed(
-                vec![field("type").inner("type_arguments", "type_identifier")],
+                vec![
+                    // Dotted types (Outer.Inner): navigate to type field, match scoped_type_identifier,
+                    // emit full text. The engine resolves first segment via imports, appends rest.
+                    Extract::one(Field("type"), Kind("scoped_type_identifier")),
+                    // Simple types (Foo): strip generics, extract type_identifier text
+                    field("type").inner("type_arguments", "type_identifier"),
+                ],
                 skip,
             )
         };

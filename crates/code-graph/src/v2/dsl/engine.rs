@@ -306,6 +306,38 @@ impl LanguageSpec {
             return;
         }
 
+        // Qualified type reference (e.g. Outer.Inner as receiver in new Outer.Inner()).
+        // Decompose into Ident(first) + Field(rest) with import resolution on first segment.
+        if cc.qualified_type_kinds.contains(&kind_ref) {
+            let mut segments = node.children().filter(|c| c.is_named());
+            if let Some(first) = segments.next() {
+                let name = first.text().to_string();
+                let resolved = if let Some(fqn) = import_map.get(&name) {
+                    fqn.clone()
+                } else if let Some(prefix) = module_prefix {
+                    format!("{prefix}{sep}{name}")
+                } else {
+                    name.clone()
+                };
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "Ident(qualified)".to_string(),
+                    text: resolved.clone(),
+                });
+                chain.push(ExpressionStep::Ident(resolved));
+                for seg in segments {
+                    let seg_text = seg.text().to_string();
+                    tracer.event(TraceEvent::ChainStepMatched {
+                        node_kind: kind_ref.to_string(),
+                        category: "Field(qualified)".to_string(),
+                        text: seg_text.clone(),
+                    });
+                    chain.push(ExpressionStep::Field(seg_text));
+                }
+            }
+            return;
+        }
+
         // Constructor (new Foo() or new Outer.Inner())
         for &(ctor_kind, type_field) in cc.constructor {
             if kind_ref == ctor_kind {
@@ -1044,9 +1076,18 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → resolve to FQN
+                        // Type annotation → resolve to FQN.
+                        // For dotted types (Outer.Inner), resolve the first segment
+                        // via imports and append the remaining segments — this is
+                        // standard qualified name resolution (first segment = imported
+                        // symbol, rest = nested member access).
                         let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
                             fqn.clone()
+                        } else if type_ann.contains(sep)
+                            && let Some((first, rest)) = type_ann.split_once(sep)
+                            && let Some(fqn) = state.import_map.get(first)
+                        {
+                            format!("{fqn}{sep}{rest}")
                         } else if let Some(prefix) = &module_prefix {
                             format!("{prefix}{sep}{type_ann}")
                         } else {

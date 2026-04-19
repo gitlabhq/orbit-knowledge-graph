@@ -226,7 +226,7 @@ tests:
       - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.outerMethod, kind: Calls } }
 
   - name: "Main.main -> Outer.Inner (nested class constructor)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -234,10 +234,10 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
     assert:
       - { row_count: 1 }
-      - { row: { kind: Calls } }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.Inner, kind: Calls } }
 
   - name: "Main.main -> Outer.Inner.innerMethod (nested class instance method)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -245,7 +245,7 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
     assert:
       - { row_count: 1 }
-      - { row: { kind: Calls } }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.Inner.innerMethod, kind: Calls } }
 
   - name: "Main.main -> Outer.Inner.innerStatic (nested class static method)"
     query: |
