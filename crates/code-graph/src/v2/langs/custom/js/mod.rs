@@ -1,5 +1,6 @@
 mod analysis;
 mod cross_file;
+mod evaluator;
 pub mod frameworks;
 mod phase1;
 mod pipeline;
@@ -11,7 +12,8 @@ mod workspace;
 use crate::v2::config::Language;
 use crate::v2::linker::CodeGraph;
 use crate::v2::types::{
-    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportMode, Range,
+    CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportMode, Position,
+    Range,
 };
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
@@ -26,12 +28,11 @@ pub use workspace::{WorkspacePackage, detect_workspaces, is_bun_project};
 pub use types::{
     CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
     JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsImport, JsImportKind,
-    JsImportedBinding, JsImportedCall, JsImportedMemberBinding, JsInvocationKind,
-    JsInvocationSupport, JsMemberKind, JsModuleInfo, JsPendingLocalCall, JsResolutionMode,
+    JsImportedBinding, JsImportedCall, JsInvocationKind, JsInvocationSupport, JsMemberKind,
+    JsModuleInfo, JsPendingLocalCall, JsResolutionMode, JsResolvedCallRelationship,
     OwnedImportEntry,
 };
 
-const MODULE_FQN_PREFIX: &str = "__js_module__";
 const MODULE_EXPORT_TYPE: &str = "ModuleExport";
 const PRIMARY_EXPORT_MEMBER: &str = "default";
 
@@ -68,9 +69,8 @@ pub enum JsModuleBindingTargetInput {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsModuleBindingInput {
     pub export_name: JsExportName,
+    pub binding: ExportedBinding,
     pub target: JsModuleBindingTargetInput,
-    pub range: Range,
-    pub is_type_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -96,7 +96,6 @@ pub struct JsPhase1FileInfo {
     pub file_node: NodeIndex,
     pub module_node: NodeIndex,
     pub local_def_nodes: Vec<NodeIndex>,
-    pub export_def_nodes: Vec<NodeIndex>,
     pub import_nodes: Vec<NodeIndex>,
 }
 
@@ -120,14 +119,13 @@ pub enum JsModuleBindingTarget {
 pub struct JsModuleBinding {
     pub export_name: JsExportName,
     pub export_node: NodeIndex,
+    pub binding: ExportedBinding,
     pub target: JsModuleBindingTarget,
-    pub is_type_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsModuleRecord {
     pub file_path: String,
-    pub module_fqn: String,
     pub file_node: NodeIndex,
     pub module_node: NodeIndex,
     pub bindings: FxHashMap<JsExportName, JsModuleBinding>,
@@ -137,17 +135,11 @@ pub struct JsModuleRecord {
 #[derive(Debug, Default)]
 pub struct JsModuleIndex {
     modules_by_path: FxHashMap<String, JsModuleRecord>,
-    paths_by_fqn: FxHashMap<String, String>,
 }
 
 impl JsModuleIndex {
     pub fn module_for_path(&self, file_path: &str) -> Option<&JsModuleRecord> {
         self.modules_by_path.get(file_path)
-    }
-
-    pub fn module_for_fqn(&self, module_fqn: &str) -> Option<&JsModuleRecord> {
-        let path = self.paths_by_fqn.get(module_fqn)?;
-        self.modules_by_path.get(path)
     }
 }
 
@@ -167,7 +159,7 @@ impl JsModuleGraphBuilder {
     pub fn add_file(&mut self, file: JsPhase1File) -> JsPhase1FileInfo {
         let relative_path = self.graph.relative_path(&file.path);
         let module_def = synthesize_module_definition(&relative_path);
-        let module_fqn = module_def.fqn.as_str().to_string();
+        let module_scope = module_def.fqn.as_str().to_string();
 
         let local_defs_by_fqn: FxHashMap<_, _> = file
             .definitions
@@ -177,7 +169,7 @@ impl JsModuleGraphBuilder {
         let export_defs: Vec<_> = file
             .bindings
             .iter()
-            .map(|binding| synthesize_export_definition(&module_fqn, binding, &local_defs_by_fqn))
+            .map(|binding| synthesize_export_definition(&module_scope, binding, &local_defs_by_fqn))
             .collect();
 
         let local_def_count = file.definitions.len();
@@ -239,21 +231,17 @@ impl JsModuleGraphBuilder {
                 let record = JsModuleBinding {
                     export_name: binding.export_name.clone(),
                     export_node,
+                    binding: binding.binding.clone(),
                     target,
-                    is_type_only: binding.is_type_only,
                 };
                 (binding.export_name.clone(), record)
             })
             .collect();
 
-        self.modules
-            .paths_by_fqn
-            .insert(module_fqn.clone(), relative_path.clone());
         self.modules.modules_by_path.insert(
             relative_path.clone(),
             JsModuleRecord {
                 file_path: relative_path,
-                module_fqn,
                 file_node,
                 module_node,
                 bindings,
@@ -265,7 +253,6 @@ impl JsModuleGraphBuilder {
             file_node,
             module_node,
             local_def_nodes,
-            export_def_nodes,
             import_nodes,
         }
     }
@@ -280,7 +267,7 @@ fn synthesize_module_definition(file_path: &str) -> CanonicalDefinition {
         definition_type: "Module",
         kind: DefKind::Module,
         name: file_path.to_string(),
-        fqn: Fqn::from_parts(&[MODULE_FQN_PREFIX, file_path], "::"),
+        fqn: Fqn::from_parts(&[file_path], "::"),
         range: Range::empty(),
         is_top_level: true,
         metadata: None,
@@ -307,7 +294,7 @@ fn synthesize_export_definition(
         kind,
         name: member_name.to_string(),
         fqn: Fqn::from_parts(&[module_fqn, member_name], "::"),
-        range: binding.range,
+        range: to_graph_range(binding.binding.range),
         is_top_level: false,
         metadata: Some(Box::new(DefinitionMetadata {
             is_exported: true,
@@ -316,9 +303,18 @@ fn synthesize_export_definition(
     }
 }
 
+fn to_graph_range(range: crate::utils::Range) -> Range {
+    Range::new(
+        Position::new(range.start.line, range.start.column),
+        Position::new(range.end.line, range.end.column),
+        range.byte_offset,
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::utils::{Position as SourcePosition, Range as SourceRange};
     use crate::v2::types::{Position, Range};
 
     fn local_def(name: &str, kind: DefKind) -> CanonicalDefinition {
@@ -350,19 +346,45 @@ mod tests {
             bindings: vec![
                 JsModuleBindingInput {
                     export_name: JsExportName::Named("normalize".to_string()),
+                    binding: ExportedBinding {
+                        local_fqn: "normalize".to_string(),
+                        range: SourceRange::new(
+                            SourcePosition::new(4, 0),
+                            SourcePosition::new(4, 20),
+                            (43, 63),
+                        ),
+                        definition_range: None,
+                        invocation_support: None,
+                        member_bindings: Default::default(),
+                        is_type: false,
+                        is_default: false,
+                        reexport_source: None,
+                        reexport_imported_name: None,
+                    },
                     target: JsModuleBindingTargetInput::LocalDefinition {
                         fqn: "normalize".to_string(),
                     },
-                    range: Range::new(Position::new(4, 0), Position::new(4, 20), (43, 63)),
-                    is_type_only: false,
                 },
                 JsModuleBindingInput {
                     export_name: JsExportName::Primary,
+                    binding: ExportedBinding {
+                        local_fqn: "normalize".to_string(),
+                        range: SourceRange::new(
+                            SourcePosition::new(5, 0),
+                            SourcePosition::new(5, 30),
+                            (64, 94),
+                        ),
+                        definition_range: None,
+                        invocation_support: None,
+                        member_bindings: Default::default(),
+                        is_type: false,
+                        is_default: true,
+                        reexport_source: None,
+                        reexport_imported_name: None,
+                    },
                     target: JsModuleBindingTargetInput::LocalDefinition {
                         fqn: "normalize".to_string(),
                     },
-                    range: Range::new(Position::new(5, 0), Position::new(5, 30), (64, 94)),
-                    is_type_only: false,
                 },
             ],
             star_reexports: Vec::new(),
@@ -372,26 +394,16 @@ mod tests {
         let (graph, modules) = builder.into_parts();
 
         assert_eq!(info.local_def_nodes.len(), 1);
-        assert_eq!(info.export_def_nodes.len(), 2);
 
         let module = modules
             .module_for_path("src/utils.ts")
             .expect("module record should exist");
         assert_eq!(module.module_node, info.module_node);
-        assert_eq!(module.module_fqn, "__js_module__::src/utils.ts");
-        assert_eq!(
-            modules
-                .module_for_fqn("__js_module__::src/utils.ts")
-                .expect("module lookup by fqn should work")
-                .module_node,
-            info.module_node
-        );
 
         let named = module
             .bindings
             .get(&JsExportName::Named("normalize".to_string()))
             .expect("named export should be tracked");
-        assert_eq!(named.export_node, info.export_def_nodes[0]);
         assert!(matches!(
             &named.target,
             JsModuleBindingTarget::LocalDefinition { fqn, node }
@@ -402,14 +414,21 @@ mod tests {
             .bindings
             .get(&JsExportName::Primary)
             .expect("primary export should be tracked");
-        assert_eq!(primary.export_node, info.export_def_nodes[1]);
 
         let mut hits = Vec::new();
-        assert!(graph.lookup_nested_with_hierarchy(&module.module_fqn, "normalize", &mut hits));
-        assert!(hits.contains(&info.export_def_nodes[0]));
+        assert!(graph.lookup_nested_from_node_with_hierarchy(
+            module.module_node,
+            "normalize",
+            &mut hits,
+        ));
+        assert!(hits.contains(&named.export_node));
         hits.clear();
-        assert!(graph.lookup_nested_with_hierarchy(&module.module_fqn, "default", &mut hits));
-        assert!(hits.contains(&info.export_def_nodes[1]));
+        assert!(graph.lookup_nested_from_node_with_hierarchy(
+            module.module_node,
+            "default",
+            &mut hits,
+        ));
+        assert!(hits.contains(&primary.export_node));
     }
 
     #[test]
@@ -424,11 +443,20 @@ mod tests {
             imports: Vec::new(),
             bindings: vec![JsModuleBindingInput {
                 export_name: JsExportName::Named("schema".to_string()),
+                binding: ExportedBinding {
+                    local_fqn: "schema".to_string(),
+                    range: SourceRange::empty(),
+                    definition_range: None,
+                    invocation_support: None,
+                    member_bindings: Default::default(),
+                    is_type: false,
+                    is_default: false,
+                    reexport_source: None,
+                    reexport_imported_name: None,
+                },
                 target: JsModuleBindingTargetInput::File {
                     path: "src/schema.graphql".to_string(),
                 },
-                range: Range::empty(),
-                is_type_only: false,
             }],
             star_reexports: vec![JsStarReexport {
                 specifier: "./shared".to_string(),

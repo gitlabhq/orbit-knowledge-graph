@@ -1,13 +1,13 @@
 use oxc::ast::AstKind;
-use oxc::semantic::AstNodes;
 use oxc::syntax::symbol::SymbolId;
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 
 use super::super::types::{
     ImportedName, JsImport, JsImportKind, JsImportedBinding, JsImportedCall, JsInvocationKind,
     JsResolutionMode,
 };
-use super::analyzer::Ctx;
+use super::analyzer::{Ctx, NodeId};
+use super::patterns::walk_binding_pattern_identifiers;
 
 fn imported_binding_from_import(import: &JsImport) -> Option<JsImportedBinding> {
     if import.is_type {
@@ -53,9 +53,16 @@ pub(super) fn binding_from_identifier_reference(
     ident: &oxc::ast::ast::IdentifierReference<'_>,
     import_bindings: &HashMap<SymbolId, JsImportedBinding>,
 ) -> Option<JsImportedBinding> {
-    let reference_id = ident.reference_id.get()?;
-    let symbol_id = ctx.scoping.get_reference(reference_id).symbol_id()?;
+    let symbol_id = symbol_from_identifier_reference(ctx, ident)?;
     import_bindings.get(&symbol_id).cloned()
+}
+
+fn symbol_from_identifier_reference(
+    ctx: &Ctx,
+    ident: &oxc::ast::ast::IdentifierReference<'_>,
+) -> Option<SymbolId> {
+    let reference_id = ident.reference_id.get()?;
+    ctx.scoping.get_reference(reference_id).symbol_id()
 }
 
 fn imported_binding_from_expression(
@@ -147,34 +154,26 @@ fn collect_aliases_from_binding_pattern(
     base_binding: &JsImportedBinding,
     aliases: &mut Vec<(SymbolId, JsImportedBinding)>,
 ) {
-    match pattern {
-        oxc::ast::ast::BindingPattern::BindingIdentifier(binding) => {
-            if let Some(symbol_id) = binding.symbol_id.get() {
-                aliases.push((symbol_id, base_binding.clone()));
-            }
-        }
-        oxc::ast::ast::BindingPattern::AssignmentPattern(assignment) => {
-            collect_aliases_from_binding_pattern(&assignment.left, base_binding, aliases);
-        }
-        oxc::ast::ast::BindingPattern::ObjectPattern(object) => {
-            if !matches!(base_binding.imported_name, ImportedName::Namespace) {
+    walk_binding_pattern_identifiers(
+        pattern,
+        None,
+        matches!(base_binding.imported_name, ImportedName::Namespace),
+        false,
+        &mut |binding, imported_name| {
+            let Some(symbol_id) = binding.symbol_id.get() else {
                 return;
-            }
-
-            for property in &object.properties {
-                let Some(member_name) = property.key.static_name() else {
-                    continue;
-                };
-                let member_binding = JsImportedBinding {
+            };
+            let binding = imported_name.map_or_else(
+                || base_binding.clone(),
+                |member_name| JsImportedBinding {
                     specifier: base_binding.specifier.clone(),
-                    imported_name: ImportedName::Named(member_name.to_string()),
+                    imported_name: ImportedName::Named(member_name),
                     resolution_mode: base_binding.resolution_mode,
-                };
-                collect_aliases_from_binding_pattern(&property.value, &member_binding, aliases);
-            }
-        }
-        oxc::ast::ast::BindingPattern::ArrayPattern(_) => {}
-    }
+                },
+            );
+            aliases.push((symbol_id, binding));
+        },
+    );
 }
 
 pub(super) fn build_import_binding_map(
@@ -197,46 +196,78 @@ pub(super) fn build_import_binding_map(
         })
         .collect();
 
-    let mut changed = true;
-    while changed {
-        changed = false;
+    let alias_declarators = alias_declarators(ctx);
+    let mut dependents = HashMap::<SymbolId, Vec<usize>>::new();
+    let mut ready = VecDeque::new();
+    let mut queued = vec![false; alias_declarators.len()];
 
-        for node in ctx.nodes.iter() {
-            let AstKind::VariableDeclarator(declarator) = node.kind() else {
-                continue;
-            };
-            let Some(init) = &declarator.init else {
-                continue;
-            };
-            let Some(mut base_binding) =
-                imported_binding_from_expression(ctx, init, &import_bindings)
-                    .or_else(|| imported_namespace_binding_from_require_call(init))
-            else {
-                continue;
-            };
-            if matches!(
-                (
-                    &declarator.id,
-                    base_binding.resolution_mode,
-                    &base_binding.imported_name
-                ),
-                (
-                    oxc::ast::ast::BindingPattern::BindingIdentifier(_),
-                    JsResolutionMode::Require,
-                    ImportedName::Namespace
-                )
-            ) {
-                base_binding.imported_name = ImportedName::Default;
+    for (idx, declarator) in alias_declarators.iter().enumerate() {
+        if let Some(symbol_id) = declarator.dependency {
+            dependents.entry(symbol_id).or_default().push(idx);
+        } else {
+            ready.push_back(idx);
+            queued[idx] = true;
+        }
+    }
+
+    let mut available_symbols: VecDeque<_> = import_bindings.keys().copied().collect();
+    while let Some(symbol_id) = available_symbols.pop_front() {
+        if let Some(indices) = dependents.remove(&symbol_id) {
+            for idx in indices {
+                if !queued[idx] {
+                    queued[idx] = true;
+                    ready.push_back(idx);
+                }
             }
+        }
+    }
 
-            let mut discovered = Vec::new();
-            collect_aliases_from_binding_pattern(&declarator.id, &base_binding, &mut discovered);
-            for (symbol_id, binding) in discovered {
-                if let std::collections::hash_map::Entry::Vacant(entry) =
-                    import_bindings.entry(symbol_id)
-                {
-                    entry.insert(binding);
-                    changed = true;
+    while let Some(idx) = ready.pop_front() {
+        let declarator = &alias_declarators[idx];
+        let AstKind::VariableDeclarator(variable_declarator) = ctx.nodes.kind(declarator.id) else {
+            continue;
+        };
+        let Some(init) = &variable_declarator.init else {
+            continue;
+        };
+        let Some(mut base_binding) = imported_binding_from_expression(ctx, init, &import_bindings)
+            .or_else(|| imported_namespace_binding_from_require_call(init))
+        else {
+            continue;
+        };
+        if matches!(
+            (
+                &variable_declarator.id,
+                base_binding.resolution_mode,
+                &base_binding.imported_name
+            ),
+            (
+                oxc::ast::ast::BindingPattern::BindingIdentifier(_),
+                JsResolutionMode::Require,
+                ImportedName::Namespace
+            )
+        ) {
+            base_binding.imported_name = ImportedName::Default;
+        }
+
+        let mut discovered = Vec::new();
+        collect_aliases_from_binding_pattern(
+            &variable_declarator.id,
+            &base_binding,
+            &mut discovered,
+        );
+        for (symbol_id, binding) in discovered {
+            if let std::collections::hash_map::Entry::Vacant(entry) =
+                import_bindings.entry(symbol_id)
+            {
+                entry.insert(binding);
+                if let Some(indices) = dependents.remove(&symbol_id) {
+                    for idx in indices {
+                        if !queued[idx] {
+                            queued[idx] = true;
+                            ready.push_back(idx);
+                        }
+                    }
                 }
             }
         }
@@ -245,19 +276,45 @@ pub(super) fn build_import_binding_map(
     import_bindings
 }
 
-pub(super) fn build_class_hierarchy(nodes: &AstNodes) -> HashMap<String, Option<String>> {
-    let mut hierarchy = HashMap::new();
-    for node in nodes.iter() {
-        if let AstKind::Class(class) = node.kind()
-            && let Some(id) = &class.id
-        {
-            let extends = class.super_class.as_ref().and_then(|expr| match expr {
-                oxc::ast::ast::Expression::Identifier(ident) => Some(ident.name.to_string()),
-                _ => None,
-            });
-            hierarchy.insert(id.name.to_string(), extends);
-        }
-    }
+struct AliasDeclarator {
+    id: NodeId,
+    dependency: Option<SymbolId>,
+}
 
-    hierarchy
+fn alias_declarators(ctx: &Ctx) -> Vec<AliasDeclarator> {
+    ctx.nodes
+        .iter()
+        .filter_map(|node| match node.kind() {
+            AstKind::VariableDeclarator(declarator) if declarator.init.is_some() => {
+                Some(AliasDeclarator {
+                    id: node.id(),
+                    dependency: declarator
+                        .init
+                        .as_ref()
+                        .and_then(|init| alias_dependency_symbol(ctx, init)),
+                })
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+fn alias_dependency_symbol(
+    ctx: &Ctx,
+    expression: &oxc::ast::ast::Expression<'_>,
+) -> Option<SymbolId> {
+    match expression.get_inner_expression() {
+        oxc::ast::ast::Expression::Identifier(identifier) => {
+            symbol_from_identifier_reference(ctx, identifier)
+        }
+        oxc::ast::ast::Expression::StaticMemberExpression(member) => {
+            let oxc::ast::ast::Expression::Identifier(identifier) =
+                member.object.get_inner_expression()
+            else {
+                return None;
+            };
+            symbol_from_identifier_reference(ctx, identifier)
+        }
+        _ => None,
+    }
 }

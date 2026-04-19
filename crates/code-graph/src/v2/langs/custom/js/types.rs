@@ -1,6 +1,7 @@
 use crate::utils::Range;
 use crate::v2::types::{ExpressionStep, ssa::ParseValue};
 use std::collections::HashMap;
+use std::collections::hash_map::Entry;
 
 use super::frameworks::JsDirective;
 
@@ -76,16 +77,33 @@ pub struct JsModuleInfo {
 
 impl JsModuleInfo {
     pub fn merge(&mut self, other: Self) {
-        self.exports.extend(other.exports);
+        merge_unique_map(&mut self.exports, other.exports, "export");
         self.imports.extend(other.imports);
         self.star_export_sources.extend(other.star_export_sources);
         self.cjs_exports.extend(other.cjs_exports);
         self.has_module_syntax |= other.has_module_syntax;
-        self.definition_fqns.extend(other.definition_fqns);
+        merge_unique_map(
+            &mut self.definition_fqns,
+            other.definition_fqns,
+            "definition_fqn",
+        );
     }
 }
 
-#[derive(Debug, Clone)]
+fn merge_unique_map<V>(into: &mut HashMap<String, V>, from: HashMap<String, V>, label: &str) {
+    for (key, value) in from {
+        match into.entry(key) {
+            Entry::Vacant(entry) => {
+                entry.insert(value);
+            }
+            Entry::Occupied(entry) => {
+                debug_assert!(false, "duplicate {label} merge for key {}", entry.key());
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportedBinding {
     pub local_fqn: String,
     pub range: Range,
@@ -127,21 +145,6 @@ pub struct JsImportedCall {
     pub binding: JsImportedBinding,
     pub member_path: Vec<String>,
     pub invocation_kind: JsInvocationKind,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct JsImportedMemberBinding {
-    pub binding: JsImportedBinding,
-    pub member_name: String,
-}
-
-impl JsImportedBinding {
-    pub fn member(&self, member_name: impl Into<String>) -> JsImportedMemberBinding {
-        JsImportedMemberBinding {
-            binding: self.clone(),
-            member_name: member_name.into(),
-        }
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -295,6 +298,14 @@ pub struct JsCallEdge {
     pub callee: JsCallTarget,
     pub call_range: Range,
     pub confidence: JsCallConfidence,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct JsResolvedCallRelationship {
+    pub source_path: String,
+    pub source_definition_range: Option<Range>,
+    pub target_path: String,
+    pub target_definition_range: Range,
 }
 
 #[derive(Debug, Clone)]

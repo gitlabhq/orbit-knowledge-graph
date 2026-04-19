@@ -23,6 +23,14 @@ yaml_test!(
     "javascript/commonjs_module_resolution.yaml"
 );
 yaml_test!(
+    javascript_repo_boundary_enforcement,
+    "javascript/repo_boundary_enforcement.yaml"
+);
+yaml_test!(
+    javascript_extension_routing,
+    "javascript/extension_routing.yaml"
+);
+yaml_test!(
     javascript_vue_monolith_patterns,
     "javascript/vue_monolith_patterns.yaml"
 );
@@ -45,6 +53,14 @@ yaml_test!(
 yaml_test!(
     vue_gitlab_monolith_aliases,
     "vue/gitlab_monolith_aliases.yaml"
+);
+yaml_test!(
+    vue_async_and_setup_patterns,
+    "vue/async_and_setup_patterns.yaml"
+);
+yaml_test!(
+    typescript_type_only_and_definitions,
+    "typescript/type_only_and_definitions.yaml"
 );
 
 // Python

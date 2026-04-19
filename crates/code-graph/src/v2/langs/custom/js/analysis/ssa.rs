@@ -114,29 +114,27 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
             .unwrap_or(JsCallSite::ModuleLevel)
     }
 
-    fn push_child_block(&mut self) -> BlockId {
-        let block = self.ssa.add_block();
-        self.ssa.add_predecessor(block, self.current_block);
-        self.ssa.seal_block(block);
+    fn with_child_block<R>(&mut self, visit: impl FnOnce(&mut Self) -> R) -> R {
         let parent = self.current_block;
-        self.current_block = block;
-        parent
-    }
-
-    fn pop_child_block(&mut self, parent: BlockId) {
+        self.current_block = self.ssa.add_sealed_successor(parent);
+        let result = visit(self);
         self.current_block = parent;
+        result
     }
 
-    fn push_def_if_any(&mut self, def_idx: Option<u32>) {
+    fn with_enclosing_def<R>(
+        &mut self,
+        def_idx: Option<u32>,
+        visit: impl FnOnce(&mut Self) -> R,
+    ) -> R {
         if let Some(def_idx) = def_idx {
             self.enclosing_defs.push(def_idx);
         }
-    }
-
-    fn pop_def_if_any(&mut self, def_idx: Option<u32>) {
+        let result = visit(self);
         if def_idx.is_some() {
             self.enclosing_defs.pop();
         }
+        result
     }
 
     fn lookup_scope_def(&self, node_id: oxc::semantic::NodeId) -> Option<u32> {
@@ -171,6 +169,22 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
         let name = self.alloc(&def.name);
         self.ssa
             .write_variable(name, self.current_block, SsaValue::LocalDef(def_idx));
+    }
+
+    fn visit_callable_scope<R>(
+        &mut self,
+        def_idx: Option<u32>,
+        params: &FormalParameters<'a>,
+        visit: impl FnOnce(&mut Self) -> R,
+    ) -> R {
+        self.maybe_write_named_def(def_idx);
+        self.with_child_block(|this| {
+            this.with_enclosing_def(def_idx, |this| {
+                this.seed_this_and_super(def_idx);
+                this.seed_parameters(params);
+                visit(this)
+            })
+        })
     }
 
     fn seed_this_and_super(&mut self, def_idx: Option<u32>) {
@@ -375,58 +389,29 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
         self.visit_expression(&it.test);
         let pre_block = self.current_block;
 
-        let then_block = self.ssa.add_block();
-        self.ssa.add_predecessor(then_block, pre_block);
-        self.ssa.seal_block(then_block);
-        self.current_block = then_block;
+        self.current_block = self.ssa.add_branch_block(pre_block);
         self.visit_statement(&it.consequent);
-        let then_exit = self.current_block;
-
-        let mut end_blocks = vec![then_exit];
-        let mut catch_all = false;
+        let mut branch_exits = vec![self.current_block];
+        let mut fallthrough = Some(pre_block);
 
         if let Some(alternate) = &it.alternate {
-            let else_block = self.ssa.add_block();
-            self.ssa.add_predecessor(else_block, pre_block);
-            self.ssa.seal_block(else_block);
-            self.current_block = else_block;
+            self.current_block = self.ssa.add_branch_block(pre_block);
             self.visit_statement(alternate);
-            end_blocks.push(self.current_block);
-            catch_all = true;
+            branch_exits.push(self.current_block);
+            fallthrough = None;
         }
 
-        let join = self.ssa.add_block();
-        for end in end_blocks {
-            self.ssa.add_predecessor(join, end);
-        }
-        if !catch_all {
-            self.ssa.add_predecessor(join, pre_block);
-        }
-        self.ssa.seal_block(join);
-        self.current_block = join;
+        self.current_block = self.ssa.add_branch_join(fallthrough, branch_exits);
     }
 
     fn walk_loop_statement_manual<F>(&mut self, body: F)
     where
         F: FnOnce(&mut Self),
     {
-        let pre_block = self.current_block;
-        let header = self.ssa.add_block();
-        self.ssa.add_predecessor(header, pre_block);
-        self.current_block = header;
-
-        let body_block = self.ssa.add_block();
-        self.ssa.add_predecessor(body_block, header);
-        self.ssa.seal_block(body_block);
+        let (header, body_block) = self.ssa.begin_loop(self.current_block);
         self.current_block = body_block;
         body(self);
-        self.ssa.add_predecessor(header, self.current_block);
-        self.ssa.seal_block(header);
-
-        let exit = self.ssa.add_block();
-        self.ssa.add_predecessor(exit, header);
-        self.ssa.seal_block(exit);
-        self.current_block = exit;
+        self.current_block = self.ssa.finish_loop(header, self.current_block);
     }
 }
 
@@ -434,29 +419,17 @@ impl<'a> Visit<'a> for JsSsaCallExtractor<'a, '_> {
     fn visit_function(&mut self, it: &Function<'a>, flags: oxc::syntax::scope::ScopeFlags) {
         let hinted_def = self.scope_def_hints.last().copied().flatten();
         let def_idx = self.lookup_scope_def(it.node_id()).or(hinted_def);
-        self.maybe_write_named_def(def_idx);
-
-        let parent = self.push_child_block();
-        self.push_def_if_any(def_idx);
-        self.seed_this_and_super(def_idx);
-        self.seed_parameters(&it.params);
-        walk::walk_function(self, it, flags);
-        self.pop_def_if_any(def_idx);
-        self.pop_child_block(parent);
+        self.visit_callable_scope(def_idx, &it.params, |this| {
+            walk::walk_function(this, it, flags);
+        });
     }
 
     fn visit_arrow_function_expression(&mut self, it: &ArrowFunctionExpression<'a>) {
         let hinted_def = self.scope_def_hints.last().copied().flatten();
         let def_idx = self.lookup_scope_def(it.node_id()).or(hinted_def);
-        self.maybe_write_named_def(def_idx);
-
-        let parent = self.push_child_block();
-        self.push_def_if_any(def_idx);
-        self.seed_this_and_super(def_idx);
-        self.seed_parameters(&it.params);
-        walk::walk_arrow_function_expression(self, it);
-        self.pop_def_if_any(def_idx);
-        self.pop_child_block(parent);
+        self.visit_callable_scope(def_idx, &it.params, |this| {
+            walk::walk_arrow_function_expression(this, it);
+        });
     }
 
     fn visit_class(&mut self, it: &Class<'a>) {
@@ -555,18 +528,11 @@ impl<'a> Visit<'a> for JsSsaCallExtractor<'a, '_> {
         let pre_block = self.current_block;
         self.visit_expression(&it.left);
 
-        let right_block = self.ssa.add_block();
-        self.ssa.add_predecessor(right_block, pre_block);
-        self.ssa.seal_block(right_block);
-        self.current_block = right_block;
+        self.current_block = self.ssa.add_branch_block(pre_block);
         self.visit_expression(&it.right);
-        let right_exit = self.current_block;
-
-        let join = self.ssa.add_block();
-        self.ssa.add_predecessor(join, pre_block);
-        self.ssa.add_predecessor(join, right_exit);
-        self.ssa.seal_block(join);
-        self.current_block = join;
+        self.current_block = self
+            .ssa
+            .add_branch_join(Some(pre_block), [self.current_block]);
     }
 
     fn visit_while_statement(&mut self, it: &WhileStatement<'a>) {

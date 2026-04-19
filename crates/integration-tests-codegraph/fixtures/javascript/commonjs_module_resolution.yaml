@@ -107,6 +107,19 @@ fixtures:
         return HTTP_STATUS_OK();
       }
 
+  - path: interop/util.js
+    content: |
+      exports.default = function defaultHelper(value) {
+        return value.trim();
+      };
+  - path: interop/main.js
+    content: |
+      const util = require('./util');
+
+      function run(value) {
+        return util.default(value);
+      }
+
 tests:
   - name: Destructured require targets named export proxy
     query: |
@@ -115,7 +128,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "__js_module__::named/util.js::helper" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "helper", target: "named/util.js::helper" } }
 
   - name: Destructured require call resolves to concrete definition
     query: |
@@ -135,7 +148,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "__js_module__::namespace/util.js" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "namespace/util.js" } }
 
   - name: Namespace require call resolves to concrete definition
     query: |
@@ -155,7 +168,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "__js_module__::alias/util.js::resolve" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "resolve", alias: "presolve", target: "alias/util.js::resolve" } }
 
   - name: Aliased destructured require call resolves to concrete definition
     query: |
@@ -175,7 +188,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "__js_module__::default/util.js::default" } }
+      - { row: { import_type: "CjsRequire", path: "./util", name: "default", target: "default/util.js::default" } }
 
   - name: Default module.exports require call resolves to the exported function
     query: |
@@ -217,8 +230,8 @@ tests:
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { name: "HTTP_STATUS_OK", alias: null, target: "__js_module__::no_false_call/util.js::HTTP_STATUS_OK" } }
-      - { row: { name: "trimValue", alias: null, target: "__js_module__::no_false_call/util.js::trimValue" } }
+      - { row: { name: "HTTP_STATUS_OK", alias: null, target: "no_false_call/util.js::HTTP_STATUS_OK" } }
+      - { row: { name: "trimValue", alias: null, target: "no_false_call/util.js::trimValue" } }
 
   - name: Imported CJS constants do not create false call edges
     query: |
@@ -241,3 +254,14 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "trimValue" } }
+
+  - name: Transpiled CJS default interop resolves namespace default member calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'interop/main.js'
+        AND callee.file_path = 'interop/util.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "defaultHelper" } }

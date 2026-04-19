@@ -81,14 +81,25 @@ define_languages! {
     },
     JavaScript => {
         support_lang: JavaScript,
-        extensions: ["js"],
+        extensions: [
+            "js",
+            "jsx",
+            "mjs",
+            "cjs",
+            "vue",
+            "svelte",
+            "astro",
+            "graphql",
+            "gql",
+            "json"
+        ],
         exclude: ["min.js"],
         separator: "::",
         names: ["javascript", "js"],
     },
     TypeScript => {
         support_lang: TypeScript,
-        extensions: ["ts"],
+        extensions: ["ts", "tsx", "mts", "cts"],
         exclude: [],
         separator: "::",
         names: ["typescript", "ts"],
@@ -148,7 +159,15 @@ mod tests {
 
     #[test]
     fn javascript_and_typescript_extensions_are_split() {
-        assert_eq!(Language::JavaScript.file_extensions(), &["js"]);
-        assert_eq!(Language::TypeScript.file_extensions(), &["ts"]);
+        assert_eq!(
+            Language::JavaScript.file_extensions(),
+            &[
+                "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "graphql", "gql", "json"
+            ]
+        );
+        assert_eq!(
+            Language::TypeScript.file_extensions(),
+            &["ts", "tsx", "mts", "cts"]
+        );
     }
 }

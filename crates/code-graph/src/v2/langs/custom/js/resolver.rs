@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::path::Path;
 use std::sync::OnceLock;
 
@@ -10,16 +9,16 @@ use crate::v2::types::{
 use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
-use crate::legacy::linker::analysis::types::ConsolidatedRelationship;
-
+use super::analysis::invocation::invocation_support_for_graph_def_kind;
 use super::{
     JsCallEdge, JsCallTarget, JsCrossFileResolver, JsExportName, JsFileAnalysis, JsModuleIndex,
-    JsModuleInfo, JsPhase1FileInfo, JsResolutionMode, is_bun_project, phase1::AnalyzedJsFile,
+    JsPhase1FileInfo, JsResolutionMode, JsResolvedCallRelationship, is_bun_project,
+    phase1::ResolvedJsFile,
 };
 
 pub fn attach_resolution_edges(
     graph: &mut CodeGraph,
-    analyzed_files: &[AnalyzedJsFile],
+    analyzed_files: &[ResolvedJsFile],
     file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
     root_path: &str,
@@ -47,15 +46,6 @@ pub fn attach_resolution_edges(
         .any(|name| root_dir.join(name).is_file());
     let is_bun = is_bun_project(root_dir, &discovered_paths);
 
-    let modules: HashMap<String, JsModuleInfo> = analyzed_files
-        .iter()
-        .map(|file| {
-            (
-                file.relative_path.clone(),
-                file.analysis.module_info.clone(),
-            )
-        })
-        .collect();
     let imported_calls: Vec<(String, Vec<JsCallEdge>)> = analyzed_files
         .iter()
         .filter_map(|file| {
@@ -70,12 +60,8 @@ pub fn attach_resolution_edges(
         })
         .collect();
 
-    if modules.is_empty() {
-        return;
-    }
-
     let mut resolver = JsCrossFileResolver::new(root_dir.to_path_buf(), is_bun, has_tsconfig);
-    resolver.apply_project_resolution_hints(is_bun, has_tsconfig, &modules);
+    resolver.apply_project_resolution_hints(is_bun, has_tsconfig);
 
     let import_nodes: Vec<_> = graph
         .imports_iter()
@@ -91,14 +77,14 @@ pub fn attach_resolution_edges(
             &mut seen,
         );
     }
-    for relationship in resolver.resolve_calls(&imported_calls, &modules) {
+    for relationship in resolver.resolve_calls(&imported_calls, modules_index) {
         add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
     }
 }
 
 fn add_local_call_edges(
     graph: &mut CodeGraph,
-    analyzed: &AnalyzedJsFile,
+    analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
 ) {
@@ -197,13 +183,7 @@ fn local_target_supports_invocation(
         .iter()
         .find(|def| def.fqn == target_fqn || def.range.byte_offset == graph_def.range.byte_offset)
         .and_then(|def| def.invocation_support)
-        .or_else(|| match graph_def.kind {
-            DefKind::Class => Some(super::JsInvocationSupport::class()),
-            DefKind::Function | DefKind::Method | DefKind::Constructor => {
-                Some(super::JsInvocationSupport::function())
-            }
-            _ => None,
-        });
+        .or_else(|| invocation_support_for_graph_def_kind(graph_def.kind));
 
     support.is_some_and(|support| support.supports(invocation_kind))
 }
@@ -317,7 +297,7 @@ fn import_target(
 
     match import.binding_kind {
         ImportBindingKind::Namespace => Some(module_target(graph, module.module_node)),
-        ImportBindingKind::Primary => primary_import_target(graph, module),
+        ImportBindingKind::Primary => primary_import_target(graph, module, import.mode),
         ImportBindingKind::Named => {
             let export_name = graph.str(import.name?).to_string();
             named_import_target(graph, modules, resolver, module, &export_name)
@@ -329,12 +309,16 @@ fn import_target(
 fn primary_import_target(
     graph: &CodeGraph,
     module: &super::JsModuleRecord,
+    import_mode: ImportMode,
 ) -> Option<(NodeIndex, NodeKind, Option<DefKind>)> {
     module
         .bindings
         .get(&JsExportName::Primary)
         .map(|binding| module_target(graph, binding.export_node))
-        .or_else(|| Some(module_target(graph, module.module_node)))
+        .or_else(|| {
+            (import_mode == ImportMode::Runtime && !module.bindings.is_empty())
+                .then(|| module_target(graph, module.module_node))
+        })
 }
 
 fn named_import_target(
@@ -347,7 +331,6 @@ fn named_import_target(
     let export_name = JsExportName::Named(export_name.to_string());
     let mut visited = FxHashSet::default();
     resolve_named_export_target(graph, modules, resolver, module, &export_name, &mut visited)
-        .or_else(|| Some(module_target(graph, module.module_node)))
 }
 
 fn resolve_named_export_target(
@@ -389,6 +372,7 @@ fn resolve_star_reexport_target(
         return Some(module_target(graph, binding.export_node));
     }
 
+    let mut resolved = None;
     for star_reexport in &module.star_reexports {
         let Some(target_path) = resolver.resolve_import_path(
             module_path,
@@ -408,11 +392,15 @@ fn resolve_star_reexport_target(
             export_name,
             visited,
         ) {
-            return Some(target);
+            match &resolved {
+                Some(existing) if *existing != target => return None,
+                Some(_) => {}
+                None => resolved = Some(target),
+            }
         }
     }
 
-    None
+    resolved
 }
 
 fn module_target(
@@ -429,54 +417,41 @@ fn module_target(
 fn add_call_relationship_edge(
     graph: &mut CodeGraph,
     lookup: &GraphLookup,
-    relationship: &ConsolidatedRelationship,
+    relationship: &JsResolvedCallRelationship,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
 ) {
-    let Some(target_path) = relationship
-        .target_path
-        .as_ref()
-        .map(|path| path.as_ref().clone())
-    else {
-        return;
-    };
-    let Some(target_range) = relationship.target_definition_range.as_ref() else {
-        return;
-    };
     let Some(target_node) = lookup
         .def_by_file_and_range
-        .get(&(target_path, target_range.byte_offset))
+        .get(&(
+            relationship.target_path.clone(),
+            relationship.target_definition_range.byte_offset,
+        ))
         .copied()
     else {
         return;
     };
 
-    let Some(source_path) = relationship
-        .source_path
-        .as_ref()
-        .map(|path| path.as_ref().clone())
-    else {
-        return;
-    };
-    let (source_node, source_node_kind, source_def_kind) =
-        if let Some(source_range) = relationship.source_definition_range.as_ref() {
-            let Some(source_node) = lookup
-                .def_by_file_and_range
-                .get(&(source_path, source_range.byte_offset))
-                .copied()
-            else {
-                return;
-            };
-            (
-                source_node,
-                NodeKind::Definition,
-                Some(graph.def(source_node).kind),
-            )
-        } else {
-            let Some(source_node) = lookup.file_by_path.get(&source_path).copied() else {
-                return;
-            };
-            (source_node, NodeKind::File, None)
+    let (source_node, source_node_kind, source_def_kind) = if let Some(source_range) =
+        relationship.source_definition_range
+    {
+        let Some(source_node) = lookup
+            .def_by_file_and_range
+            .get(&(relationship.source_path.clone(), source_range.byte_offset))
+            .copied()
+        else {
+            return;
         };
+        (
+            source_node,
+            NodeKind::Definition,
+            Some(graph.def(source_node).kind),
+        )
+    } else {
+        let Some(source_node) = lookup.file_by_path.get(&relationship.source_path).copied() else {
+            return;
+        };
+        (source_node, NodeKind::File, None)
+    };
 
     add_edge(
         graph,
@@ -508,7 +483,7 @@ fn add_edge(
     }
 }
 
-fn discovered_paths(root_dir: &Path, analyzed_files: &[AnalyzedJsFile]) -> Vec<String> {
+fn discovered_paths(root_dir: &Path, analyzed_files: &[ResolvedJsFile]) -> Vec<String> {
     let mut discovered: Vec<String> = analyzed_files
         .iter()
         .map(|file| file.relative_path.clone())
@@ -534,7 +509,6 @@ fn discovered_paths(root_dir: &Path, analyzed_files: &[AnalyzedJsFile]) -> Vec<S
 #[derive(Default)]
 struct GraphLookup {
     file_by_path: FxHashMap<String, NodeIndex>,
-    def_by_file_and_fqn: FxHashMap<(String, String), NodeIndex>,
     def_by_file_and_range: FxHashMap<(String, (usize, usize)), NodeIndex>,
 }
 
@@ -548,9 +522,6 @@ impl GraphLookup {
 
         for (node, file_path, definition) in graph.definitions() {
             let file_path = file_path.as_ref().to_string();
-            lookup
-                .def_by_file_and_fqn
-                .insert((file_path.clone(), graph.def_fqn(node).to_string()), node);
             lookup
                 .def_by_file_and_range
                 .insert((file_path, definition.range.byte_offset), node);

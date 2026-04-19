@@ -1,0 +1,78 @@
+name: "Vue async and script setup patterns"
+pipeline: js
+fixtures:
+  - path: components/helpers.ts
+    content: |
+      export function markReady(): string {
+        return 'ready';
+      }
+
+      export function normalizeValue(value: string): string {
+        return value.trim();
+      }
+
+  - path: components/async_panel.vue
+    content: |
+      <script lang="ts">
+      import { defineAsyncComponent } from 'vue';
+      import { markReady } from './helpers';
+
+      export default defineAsyncComponent({
+        name: 'AsyncPanel',
+        setup() {
+          return markReady();
+        },
+      });
+      </script>
+
+  - path: components/setup_panel.vue
+    content: |
+      <script setup lang="ts">
+      import { normalizeValue } from './helpers';
+
+      function runSetup(value: string): string {
+        return normalizeValue(value);
+      }
+      </script>
+
+tests:
+  - name: defineAsyncComponent options objects still synthesize Vue component definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'components/async_panel.vue'
+        AND d.fqn IN ['AsyncPanel', 'AsyncPanel::setup']
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "AsyncPanel", type: "Class" } }
+      - { row: { name: "setup", type: "Method" } }
+
+  - name: defineAsyncComponent setup methods resolve imported helper calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'AsyncPanel::setup'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "AsyncPanel::setup", callee: "markReady" } }
+
+  - name: script setup imports resolve to concrete helper definitions
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'components/setup_panel.vue'
+      RETURN i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "normalizeValue", target: "components/helpers.ts::normalizeValue" } }
+
+  - name: script setup function bodies resolve imported helper calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'runSetup'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runSetup", callee: "normalizeValue" } }

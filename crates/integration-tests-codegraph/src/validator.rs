@@ -1,7 +1,9 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
-use arrow_56::array::{Array, Int64Array, Int64Builder, StringArray, StringBuilder};
+use arrow_56::array::{
+    Array, BooleanArray, BooleanBuilder, Int64Array, Int64Builder, StringArray, StringBuilder,
+};
 use arrow_56::record_batch::RecordBatch;
 use lance_graph::{CypherQuery, GraphConfig};
 use tabled::{Table, builder::Builder};
@@ -148,6 +150,9 @@ fn format_cell(array: &dyn Array, row: usize) -> String {
     if array.is_null(row) {
         return "NULL".into();
     }
+    if let Some(arr) = array.as_any().downcast_ref::<BooleanArray>() {
+        return arr.value(row).to_string();
+    }
     if let Some(arr) = array.as_any().downcast_ref::<StringArray>() {
         return arr.value(row).to_string();
     }
@@ -216,6 +221,16 @@ fn apply_filter(batch: &RecordBatch, where_clause: &HashMap<String, String>) -> 
                 Arc::new(b.finish()) as Arc<dyn Array>
             } else if let Some(arr) = col.as_any().downcast_ref::<Int64Array>() {
                 let mut b = Int64Builder::new();
+                for &row in &matching {
+                    if arr.is_null(row) {
+                        b.append_null();
+                    } else {
+                        b.append_value(arr.value(row));
+                    }
+                }
+                Arc::new(b.finish()) as Arc<dyn Array>
+            } else if let Some(arr) = col.as_any().downcast_ref::<BooleanArray>() {
+                let mut b = BooleanBuilder::new();
                 for &row in &matching {
                     if arr.is_null(row) {
                         b.append_null();

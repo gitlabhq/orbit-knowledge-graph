@@ -127,7 +127,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "__js_module__::ee/app/assets/javascripts/sidebar/constants.js::dropdowni18nText" } }
+      - { row: { import_type: "NamedImport", target: "ee/app/assets/javascripts/sidebar/constants.js::dropdowni18nText" } }
 
   - name: Vue computed property resolves ee_else_ce helper call
     query: |
@@ -148,7 +148,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue::default" } }
+      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/repository/components/header_area/blob_overflow_menu.vue::default" } }
 
   - name: GraphQL import through ee_else_ce targets primary export proxy
     query: |
@@ -158,7 +158,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "__js_module__::ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
+      - { row: { import_type: "DefaultImport", target: "ee/app/assets/javascripts/repository/queries/project_info.query.graphql::default" } }
 
   - name: Asset alias import targets JS helper module
     query: |
@@ -168,7 +168,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/lib/utils/icons_path.js::default" } }
+      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/lib/utils/icons_path.js::default" } }
 
   - name: Vue monolith helper import from tilde alias resolves to concrete definition
     query: |

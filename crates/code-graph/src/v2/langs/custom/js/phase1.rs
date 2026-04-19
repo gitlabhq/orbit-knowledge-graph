@@ -1,9 +1,10 @@
 use std::path::Path;
 
+use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, Fqn, ImportBindingKind,
-    ImportMode, Position, Range,
+    ImportMode, Position as GraphPosition, Range as GraphRange,
 };
 use rayon::prelude::*;
 use rustc_hash::{FxHashMap, FxHashSet};
@@ -12,8 +13,8 @@ use crate::v2::pipeline::PipelineError;
 
 use super::{
     CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsDef, JsDefKind, JsExportName,
-    JsFileAnalysis, JsImport, JsImportKind, JsInvocationSupport, JsModuleBindingInput,
-    JsModuleBindingTargetInput, JsModuleInfo, JsPhase1File, JsStarReexport, extract_scripts,
+    JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput, JsModuleBindingTargetInput,
+    JsModuleInfo, JsPhase1File, JsStarReexport, extract_scripts,
 };
 
 #[derive(Debug, Clone)]
@@ -21,6 +22,12 @@ pub struct AnalyzedJsFile {
     pub relative_path: String,
     pub analysis: JsFileAnalysis,
     pub phase1: JsPhase1File,
+}
+
+#[derive(Debug, Clone)]
+pub struct ResolvedJsFile {
+    pub relative_path: String,
+    pub analysis: JsFileAnalysis,
 }
 
 pub fn analyze_files(
@@ -62,7 +69,11 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
     ) {
         return Ok(stub);
     }
-    let sources = source_variants(&relative_path, &extension, &source);
+    let sources =
+        source_variants(&relative_path, &extension, &source).map_err(|error| PipelineError {
+            file_path: relative_path.clone(),
+            error,
+        })?;
 
     let mut all_defs = Vec::new();
     let mut all_imports = Vec::new();
@@ -140,11 +151,20 @@ fn file_backed_module(
     )
     .then(|| JsModuleBindingInput {
         export_name: JsExportName::Primary,
+        binding: ExportedBinding {
+            local_fqn: "default".to_string(),
+            range: SourceRange::empty(),
+            definition_range: None,
+            invocation_support: None,
+            member_bindings: Default::default(),
+            is_type: false,
+            is_default: true,
+            reexport_source: None,
+            reexport_imported_name: None,
+        },
         target: JsModuleBindingTargetInput::File {
             path: relative_path.to_string(),
         },
-        range: Range::empty(),
-        is_type_only: false,
     })?;
 
     Some(AnalyzedJsFile {
@@ -172,23 +192,29 @@ fn file_backed_module(
     })
 }
 
-fn source_variants(relative_path: &str, extension: &str, source: &str) -> Vec<(String, String)> {
+fn source_variants(
+    relative_path: &str,
+    extension: &str,
+    source: &str,
+) -> Result<Vec<(String, String)>, String> {
     match extension {
-        "vue" | "svelte" | "astro" => extract_scripts(source, extension)
-            .into_iter()
-            .map(|block| {
-                let virtual_ext = if block.source_type.is_typescript() {
-                    "ts"
-                } else {
-                    "js"
-                };
-                (
-                    format!("{relative_path}.{virtual_ext}"),
-                    block.source_text.to_string(),
-                )
-            })
-            .collect(),
-        _ => vec![(relative_path.to_string(), source.to_string())],
+        "vue" | "svelte" | "astro" => extract_scripts(source, extension).map(|blocks| {
+            blocks
+                .into_iter()
+                .map(|block| {
+                    let virtual_ext = if block.source_type.is_typescript() {
+                        "ts"
+                    } else {
+                        "js"
+                    };
+                    (
+                        format!("{relative_path}.{virtual_ext}"),
+                        block.source_text.to_string(),
+                    )
+                })
+                .collect()
+        }),
+        _ => Ok(vec![(relative_path.to_string(), source.to_string())]),
     }
 }
 
@@ -336,17 +362,13 @@ fn canonical_import(import_entry: &JsImport) -> CanonicalImport {
 
 fn module_bindings(analysis: &JsFileAnalysis) -> Vec<JsModuleBindingInput> {
     let local_fqns: FxHashSet<_> = analysis.defs.iter().map(|def| def.fqn.as_str()).collect();
+    let local_definition_ranges = &analysis.module_info.definition_fqns;
     let mut bindings = Vec::new();
 
     let mut named_exports: Vec<_> = analysis.module_info.exports.iter().collect();
     named_exports.sort_by(|(left, _), (right, _)| left.cmp(right));
     for (export_name, binding) in named_exports {
-        bindings.push(module_binding(
-            export_name,
-            binding,
-            &local_fqns,
-            binding.invocation_support,
-        ));
+        bindings.push(module_binding(export_name, binding, &local_fqns));
     }
 
     let mut seen_exports: FxHashSet<_> = bindings
@@ -354,7 +376,7 @@ fn module_bindings(analysis: &JsFileAnalysis) -> Vec<JsModuleBindingInput> {
         .map(|binding| binding.export_name.clone())
         .collect();
     for export in &analysis.module_info.cjs_exports {
-        let Some(binding) = cjs_binding(export, &local_fqns) else {
+        let Some(binding) = cjs_binding(export, &local_fqns, local_definition_ranges) else {
             continue;
         };
         if seen_exports.insert(binding.export_name.clone()) {
@@ -369,11 +391,83 @@ fn module_binding(
     export_name: &str,
     binding: &ExportedBinding,
     local_fqns: &FxHashSet<&str>,
-    _invocation_support: Option<JsInvocationSupport>,
 ) -> JsModuleBindingInput {
     let export_name = export_name_to_variant(export_name);
-    let target = if let Some(specifier) = &binding.reexport_source {
-        JsModuleBindingTargetInput::Reexport {
+    let target = binding_target_input(binding, &export_name, local_fqns);
+    JsModuleBindingInput {
+        export_name,
+        binding: binding.clone(),
+        target,
+    }
+}
+
+fn cjs_binding(
+    export: &CjsExport,
+    local_fqns: &FxHashSet<&str>,
+    local_definition_ranges: &std::collections::HashMap<String, crate::utils::Range>,
+) -> Option<JsModuleBindingInput> {
+    match export {
+        CjsExport::Default {
+            local_fqn,
+            range,
+            invocation_support,
+        } => Some(JsModuleBindingInput {
+            export_name: JsExportName::Primary,
+            binding: ExportedBinding {
+                local_fqn: local_fqn.clone().unwrap_or_else(|| "default".to_string()),
+                range: *range,
+                definition_range: local_fqn
+                    .as_ref()
+                    .and_then(|fqn| local_definition_ranges.get(fqn).copied()),
+                invocation_support: *invocation_support,
+                member_bindings: Default::default(),
+                is_type: false,
+                is_default: true,
+                reexport_source: None,
+                reexport_imported_name: None,
+            },
+            target: local_fqn
+                .as_ref()
+                .filter(|fqn| local_fqns.contains(fqn.as_str()))
+                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
+                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
+        }),
+        CjsExport::Named {
+            name,
+            local_fqn,
+            range,
+            invocation_support,
+        } => Some(JsModuleBindingInput {
+            export_name: JsExportName::Named(name.clone()),
+            binding: ExportedBinding {
+                local_fqn: local_fqn.clone().unwrap_or_else(|| name.clone()),
+                range: *range,
+                definition_range: local_fqn
+                    .as_ref()
+                    .and_then(|fqn| local_definition_ranges.get(fqn).copied()),
+                invocation_support: *invocation_support,
+                member_bindings: Default::default(),
+                is_type: false,
+                is_default: false,
+                reexport_source: None,
+                reexport_imported_name: None,
+            },
+            target: local_fqn
+                .as_ref()
+                .filter(|fqn| local_fqns.contains(fqn.as_str()))
+                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
+                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
+        }),
+    }
+}
+
+fn binding_target_input(
+    binding: &ExportedBinding,
+    export_name: &JsExportName,
+    local_fqns: &FxHashSet<&str>,
+) -> JsModuleBindingTargetInput {
+    if let Some(specifier) = &binding.reexport_source {
+        return JsModuleBindingTargetInput::Reexport {
             specifier: specifier.clone(),
             export_name: binding
                 .reexport_imported_name
@@ -386,55 +480,16 @@ fn module_binding(
                         export_name.clone()
                     }
                 }),
-        }
-    } else if local_fqns.contains(binding.local_fqn.as_str()) {
-        JsModuleBindingTargetInput::LocalDefinition {
+        };
+    }
+
+    if local_fqns.contains(binding.local_fqn.as_str()) {
+        return JsModuleBindingTargetInput::LocalDefinition {
             fqn: binding.local_fqn.clone(),
-        }
-    } else {
-        JsModuleBindingTargetInput::Unresolved
-    };
-
-    JsModuleBindingInput {
-        export_name,
-        target,
-        range: to_range(binding.range),
-        is_type_only: binding.is_type,
+        };
     }
-}
 
-fn cjs_binding(export: &CjsExport, local_fqns: &FxHashSet<&str>) -> Option<JsModuleBindingInput> {
-    match export {
-        CjsExport::Default {
-            local_fqn,
-            range,
-            invocation_support: _,
-        } => Some(JsModuleBindingInput {
-            export_name: JsExportName::Primary,
-            target: local_fqn
-                .as_ref()
-                .filter(|fqn| local_fqns.contains(fqn.as_str()))
-                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
-                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
-            range: to_range(*range),
-            is_type_only: false,
-        }),
-        CjsExport::Named {
-            name,
-            local_fqn,
-            range,
-            invocation_support: _,
-        } => Some(JsModuleBindingInput {
-            export_name: JsExportName::Named(name.clone()),
-            target: local_fqn
-                .as_ref()
-                .filter(|fqn| local_fqns.contains(fqn.as_str()))
-                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
-                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
-            range: to_range(*range),
-            is_type_only: false,
-        }),
-    }
+    JsModuleBindingTargetInput::Unresolved
 }
 
 fn export_name_to_variant(name: &str) -> JsExportName {
@@ -452,10 +507,75 @@ fn imported_name_to_export_name(name: &ImportedName) -> JsExportName {
     }
 }
 
-fn to_range(range: crate::utils::Range) -> Range {
-    Range::new(
-        Position::new(range.start.line, range.start.column),
-        Position::new(range.end.line, range.end.column),
+fn to_range(range: crate::utils::Range) -> GraphRange {
+    GraphRange::new(
+        GraphPosition::new(range.start.line, range.start.column),
+        GraphPosition::new(range.end.line, range.end.column),
         range.byte_offset,
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn analyze_files_accepts_extended_typescript_extensions() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let root = temp.path();
+
+        for (path, content) in [
+            (
+                "tsx/component.tsx",
+                "export function renderPanel(): string { return 'panel'; }\n",
+            ),
+            (
+                "tsx/consumer.ts",
+                "import { renderPanel } from './component.tsx';\nexport function runPanel(): string { return renderPanel(); }\n",
+            ),
+            (
+                "mts/component.mts",
+                "export function formatMts(value: string): string { return value.trim(); }\n",
+            ),
+            (
+                "mts/consumer.ts",
+                "import { formatMts } from './component.mts';\nexport function runMts(value: string): string { return formatMts(value); }\n",
+            ),
+            (
+                "cts/component.cts",
+                "export function formatCts(value: string): string { return value.toLowerCase(); }\n",
+            ),
+            (
+                "cts/consumer.ts",
+                "import { formatCts } from './component.cts';\nexport function runCts(value: string): string { return formatCts(value); }\n",
+            ),
+        ] {
+            let file_path = root.join(path);
+            fs::create_dir_all(
+                file_path
+                    .parent()
+                    .expect("test fixture path should have a parent"),
+            )
+            .expect("create fixture directories");
+            fs::write(file_path, content).expect("write fixture");
+        }
+
+        let files = vec![
+            "tsx/component.tsx".to_string(),
+            "tsx/consumer.ts".to_string(),
+            "mts/component.mts".to_string(),
+            "mts/consumer.ts".to_string(),
+            "cts/component.cts".to_string(),
+            "cts/consumer.ts".to_string(),
+        ];
+
+        let (analyzed, errors) = analyze_files(&files, root.to_str().expect("utf8 root path"));
+
+        assert!(
+            errors.is_empty(),
+            "expected no phase1 errors, got: {errors:#?}"
+        );
+        assert_eq!(analyzed.len(), files.len());
+    }
 }

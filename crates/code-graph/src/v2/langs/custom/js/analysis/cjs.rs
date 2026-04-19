@@ -5,6 +5,8 @@ use oxc::span::Span;
 use std::collections::HashMap;
 
 use super::super::types::{CjsExport, JsImport, JsImportKind, JsInvocationSupport};
+use super::invocation::invocation_support_for_expression;
+use super::patterns::{for_each_static_object_property, walk_binding_pattern_identifiers};
 
 pub(super) fn extract_cjs_imports(
     nodes: &AstNodes,
@@ -48,33 +50,9 @@ fn collect_cjs_bindings(
     bindings: &mut Vec<(String, Option<String>)>,
     imported_name: Option<String>,
 ) {
-    use oxc::ast::ast::BindingPattern;
-
-    match pattern {
-        BindingPattern::BindingIdentifier(ident) => {
-            bindings.push((ident.name.to_string(), imported_name));
-        }
-        BindingPattern::AssignmentPattern(assign) => {
-            collect_cjs_bindings(&assign.left, bindings, imported_name);
-        }
-        BindingPattern::ObjectPattern(object) => {
-            for property in &object.properties {
-                let property_name = property.key.static_name().map(|name| name.into_owned());
-                collect_cjs_bindings(&property.value, bindings, property_name);
-            }
-            if let Some(rest) = &object.rest {
-                collect_cjs_bindings(&rest.argument, bindings, None);
-            }
-        }
-        BindingPattern::ArrayPattern(array) => {
-            for element in array.elements.iter().flatten() {
-                collect_cjs_bindings(element, bindings, None);
-            }
-            if let Some(rest) = &array.rest {
-                collect_cjs_bindings(&rest.argument, bindings, None);
-            }
-        }
-    }
+    walk_binding_pattern_identifiers(pattern, imported_name, true, true, &mut |binding, name| {
+        bindings.push((binding.name.to_string(), name));
+    });
 }
 
 pub(super) fn extract_cjs_exports(
@@ -159,31 +137,28 @@ fn collect_cjs_object_exports(
     span_to_range: impl Fn(Span) -> Range + Copy,
     exports: &mut Vec<CjsExport>,
 ) {
-    use oxc::ast::ast::ObjectPropertyKind;
-
-    for property in &object.properties {
-        let ObjectPropertyKind::ObjectProperty(property) = property else {
-            continue;
-        };
-        let Some(name) = property.key.static_name() else {
-            continue;
-        };
-
+    for_each_static_object_property(object, &mut |name, value, span| {
         exports.push(CjsExport::Named {
-            name: name.to_string(),
-            local_fqn: local_fqn_for_expression(&property.value),
-            range: span_to_range(property.span),
+            name,
+            local_fqn: local_fqn_for_expression(value),
+            range: span_to_range(span),
             invocation_support: invocation_support_for_assignment_rhs(
-                &property.value,
+                value,
                 invocation_support_by_name,
             ),
         });
-    }
+    });
 }
 
 fn local_fqn_for_expression(expr: &oxc::ast::ast::Expression<'_>) -> Option<String> {
     match expr.get_inner_expression() {
         oxc::ast::ast::Expression::Identifier(ident) => Some(ident.name.to_string()),
+        oxc::ast::ast::Expression::FunctionExpression(function) => {
+            function.id.as_ref().map(|id| id.name.to_string())
+        }
+        oxc::ast::ast::Expression::ClassExpression(class) => {
+            class.id.as_ref().map(|id| id.name.to_string())
+        }
         _ => None,
     }
 }
@@ -193,14 +168,9 @@ fn invocation_support_for_assignment_rhs(
     invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
 ) -> Option<JsInvocationSupport> {
     match expr.get_inner_expression() {
-        oxc::ast::ast::Expression::ArrowFunctionExpression(_) => {
-            Some(JsInvocationSupport::arrow_function())
-        }
-        oxc::ast::ast::Expression::FunctionExpression(_) => Some(JsInvocationSupport::function()),
-        oxc::ast::ast::Expression::ClassExpression(_) => Some(JsInvocationSupport::class()),
         oxc::ast::ast::Expression::Identifier(ident) => {
             invocation_support_by_name.get(ident.name.as_str()).copied()
         }
-        _ => None,
+        _ => invocation_support_for_expression(expr),
     }
 }

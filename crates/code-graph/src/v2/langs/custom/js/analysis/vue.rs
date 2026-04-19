@@ -8,6 +8,23 @@ use std::collections::HashMap;
 
 use super::super::types::{JsDef, JsDefKind, JsInvocationSupport};
 
+const VUE_LIFECYCLE_HOOKS: &[&str] = &[
+    "beforeCreate",
+    "created",
+    "beforeMount",
+    "mounted",
+    "beforeUpdate",
+    "updated",
+    "beforeDestroy",
+    "destroyed",
+    "beforeUnmount",
+    "unmounted",
+    "activated",
+    "deactivated",
+    "errorCaptured",
+    "serverPrefetch",
+];
+
 fn vue_component_object<'a>(
     declaration: &'a ExportDefaultDeclarationKind<'a>,
     allow_loose_detection: bool,
@@ -90,6 +107,10 @@ fn is_contract_value(expression: &Expression<'_>) -> bool {
     )
 }
 
+fn is_vue_lifecycle_hook(key: &str) -> bool {
+    VUE_LIFECYCLE_HOOKS.contains(&key)
+}
+
 fn is_executable_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool {
     match property.key.static_name().as_deref() {
         Some("methods" | "computed" | "watch") => {
@@ -99,11 +120,7 @@ fn is_executable_vue_option(property: &oxc::ast::ast::ObjectProperty<'_>) -> boo
             )
         }
         Some("data" | "setup" | "render") => is_function_like(&property.value),
-        Some(
-            "beforeCreate" | "created" | "beforeMount" | "mounted" | "beforeUpdate" | "updated"
-            | "beforeDestroy" | "destroyed" | "beforeUnmount" | "unmounted" | "activated"
-            | "deactivated" | "errorCaptured",
-        ) => is_function_like(&property.value),
+        Some(key) if is_vue_lifecycle_hook(key) => is_function_like(&property.value),
         _ => false,
     }
 }
@@ -128,26 +145,17 @@ fn is_known_vue_option_key(property: &oxc::ast::ast::ObjectProperty<'_>) -> bool
                 | "data"
                 | "setup"
                 | "render"
-                | "beforeCreate"
-                | "created"
-                | "beforeMount"
-                | "mounted"
-                | "beforeUpdate"
-                | "updated"
-                | "beforeDestroy"
-                | "destroyed"
-                | "beforeUnmount"
-                | "unmounted"
-                | "activated"
-                | "deactivated"
-                | "errorCaptured"
                 | "props"
                 | "emits"
                 | "inject"
                 | "provide"
                 | "components"
         )
-    )
+    ) || property
+        .key
+        .static_name()
+        .as_deref()
+        .is_some_and(is_vue_lifecycle_hook)
 }
 
 pub(super) fn extract_vue_options_api(
@@ -221,22 +229,6 @@ pub(super) fn extract_vue_options_api(
             type_annotation: None,
             invocation_support: Some(JsInvocationSupport::class()),
         });
-
-        let lifecycle_hooks = [
-            "beforeCreate",
-            "created",
-            "beforeMount",
-            "mounted",
-            "beforeUpdate",
-            "updated",
-            "beforeDestroy",
-            "destroyed",
-            "beforeUnmount",
-            "unmounted",
-            "activated",
-            "deactivated",
-            "errorCaptured",
-        ];
 
         for prop in &obj.properties {
             let ObjectPropertyKind::ObjectProperty(p) = prop else {
@@ -346,7 +338,7 @@ pub(super) fn extract_vue_options_api(
                 });
             }
             // lifecycle hooks -- extract as LifecycleHook
-            else if lifecycle_hooks.contains(&key) {
+            else if is_vue_lifecycle_hook(key) {
                 let fqn = format!("{component_name}::{key}");
                 defs.push(JsDef {
                     name: key.to_string(),

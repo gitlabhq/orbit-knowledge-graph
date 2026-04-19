@@ -168,6 +168,62 @@ impl<'a> SsaEngine<'a> {
         });
     }
 
+    /// Create a sealed successor block with a single predecessor.
+    pub fn add_sealed_successor(&mut self, predecessor: BlockId) -> BlockId {
+        let block = self.add_block();
+        self.add_predecessor(block, predecessor);
+        self.seal_block(block);
+        block
+    }
+
+    /// Create and seal a join block from the provided predecessors.
+    pub fn add_sealed_join<I>(&mut self, predecessors: I) -> BlockId
+    where
+        I: IntoIterator<Item = BlockId>,
+    {
+        let block = self.add_block();
+        for predecessor in predecessors {
+            self.add_predecessor(block, predecessor);
+        }
+        self.seal_block(block);
+        block
+    }
+
+    /// Create a sealed branch block from a shared predecessor.
+    pub fn add_branch_block(&mut self, predecessor: BlockId) -> BlockId {
+        self.add_sealed_successor(predecessor)
+    }
+
+    /// Create a join block for one or more branch exits, with an optional
+    /// fallthrough predecessor when one side of the branch is absent.
+    pub fn add_branch_join<I>(&mut self, fallthrough: Option<BlockId>, branch_exits: I) -> BlockId
+    where
+        I: IntoIterator<Item = BlockId>,
+    {
+        let mut predecessors = SmallVec::<[BlockId; 3]>::new();
+        predecessors.extend(branch_exits);
+        if let Some(fallthrough) = fallthrough {
+            predecessors.push(fallthrough);
+        }
+        self.add_sealed_join(predecessors)
+    }
+
+    /// Create a loop header/body pair from the current predecessor block.
+    pub fn begin_loop(&mut self, predecessor: BlockId) -> (BlockId, BlockId) {
+        let header = self.add_block();
+        self.add_predecessor(header, predecessor);
+        let body = self.add_sealed_successor(header);
+        (header, body)
+    }
+
+    /// Close a loop by wiring the body exit back into the header and creating
+    /// a sealed exit block.
+    pub fn finish_loop(&mut self, header: BlockId, body_exit: BlockId) -> BlockId {
+        self.add_predecessor(header, body_exit);
+        self.seal_block(header);
+        self.add_sealed_successor(header)
+    }
+
     /// Seal a block — all predecessors are now known.
     /// Resolves any incomplete phi nodes that were deferred.
     pub fn seal_block(&mut self, block: BlockId) {

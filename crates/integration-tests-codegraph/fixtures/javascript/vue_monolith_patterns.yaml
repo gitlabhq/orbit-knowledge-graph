@@ -196,14 +196,14 @@ tests:
   - name: Synthesizes module definitions for Vue SFC files
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn STARTS WITH '__js_module__::'
+      WHERE d.definition_type = 'Module'
         AND d.fqn ENDS WITH '.vue'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 3 }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue" } }
-      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
+      - { row: { fqn: "app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue" } }
+      - { row: { fqn: "app/assets/javascripts/gitlab_version_check/components/security_patch_upgrade_alert_modal.vue" } }
+      - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/oncall_schedules_wrapper.vue" } }
 
   - name: jh_else_ce Vue default import targets the primary export proxy
     query: |
@@ -213,7 +213,7 @@ tests:
       RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", name: "default", target: "__js_module__::app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue::default" } }
+      - { row: { import_type: "DefaultImport", name: "default", target: "app/assets/javascripts/gitlab_version_check/components/gitlab_version_check_badge.vue::default" } }
 
   - name: Barrel named import for Vue component targets the barrel proxy
     query: |
@@ -224,7 +224,7 @@ tests:
       RETURN i.import_type AS import_type, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "__js_module__::app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
+      - { row: { import_type: "NamedImport", name: "SecurityPatchUpgradeAlertModal", target: "app/assets/javascripts/gitlab_version_check/components/index.js::SecurityPatchUpgradeAlertModal" } }
 
   - name: Vue SFC imports preserve local monolith alias and relative targets
     query: |
@@ -233,11 +233,11 @@ tests:
       RETURN i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 5 }
-      - { row: { path: "~/tracking", name: "track", alias: null, target: "__js_module__::app/assets/javascripts/tracking.js::track" } }
-      - { row: { path: "../utils", name: "getHideAlertModalCookie", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js::getHideAlertModalCookie" } }
-      - { row: { path: "../utils", name: "setHideAlertModalCookie", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js::setHideAlertModalCookie" } }
-      - { row: { path: "../constants", name: "TRACKING_ACTIONS", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_ACTIONS" } }
-      - { row: { path: "../constants", name: "TRACKING_LABELS", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_LABELS" } }
+      - { row: { path: "~/tracking", name: "track", alias: null, target: "app/assets/javascripts/tracking.js::track" } }
+      - { row: { path: "../utils", name: "getHideAlertModalCookie", alias: null, target: "app/assets/javascripts/gitlab_version_check/utils.js::getHideAlertModalCookie" } }
+      - { row: { path: "../utils", name: "setHideAlertModalCookie", alias: null, target: "app/assets/javascripts/gitlab_version_check/utils.js::setHideAlertModalCookie" } }
+      - { row: { path: "../constants", name: "TRACKING_ACTIONS", alias: null, target: "app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_ACTIONS" } }
+      - { row: { path: "../constants", name: "TRACKING_LABELS", alias: null, target: "app/assets/javascripts/gitlab_version_check/constants.js::TRACKING_LABELS" } }
 
   - name: Vue SFC definitions are extracted for lifecycle and methods
     query: |
@@ -264,8 +264,8 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { import_type: "NamespaceImport", path: "../utils", name: null, alias: "versionUtils", target: "__js_module__::app/assets/javascripts/gitlab_version_check/utils.js" } }
-      - { row: { import_type: "NamedImport", path: "../constants", name: "STATUS_TYPES", alias: null, target: "__js_module__::app/assets/javascripts/gitlab_version_check/constants.js::STATUS_TYPES" } }
+      - { row: { import_type: "NamespaceImport", path: "../utils", name: null, alias: "versionUtils", target: "app/assets/javascripts/gitlab_version_check/utils.js" } }
+      - { row: { import_type: "NamedImport", path: "../constants", name: "STATUS_TYPES", alias: null, target: "app/assets/javascripts/gitlab_version_check/constants.js::STATUS_TYPES" } }
 
   - name: Vue badge definitions are extracted for component methods
     query: |
@@ -295,6 +295,29 @@ tests:
     assert:
       - { empty: true }
 
+  - name: Vue namespace member calls resolve to concrete helper definitions
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'GitlabVersionCheckBadge::badgeTitle'
+        AND callee.file_path = 'app/assets/javascripts/gitlab_version_check/utils.js'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "GitlabVersionCheckBadge::badgeTitle", callee: "buildKey" } }
+
+  - name: Vue method chains preserve imported helper and local method calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", callee: "SecurityPatchUpgradeAlertModal::dispatchTrackingEvent" } }
+      - { row: { caller: "SecurityPatchUpgradeAlertModal::trackRemindMeLaterClick", callee: "setHideAlertModalCookie" } }
+
   - name: Script lang ts Vue imports preserve namespace and ee alias targets
     query: |
       MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
@@ -302,8 +325,8 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { import_type: "NamespaceImport", path: "~/sentry", name: null, alias: "Sentry", target: "__js_module__::app/assets/javascripts/sentry.js" } }
-      - { row: { import_type: "NamedImport", path: "ee/oncall_schedules/utils", name: "buildSchedulePath", alias: null, target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/utils.js::buildSchedulePath" } }
+      - { row: { import_type: "NamespaceImport", path: "~/sentry", name: null, alias: "Sentry", target: "app/assets/javascripts/sentry.js" } }
+      - { row: { import_type: "NamedImport", path: "ee/oncall_schedules/utils", name: "buildSchedulePath", alias: null, target: "ee/app/assets/javascripts/oncall_schedules/utils.js::buildSchedulePath" } }
 
   - name: Script lang ts Vue definitions are extracted for wrapper methods
     query: |

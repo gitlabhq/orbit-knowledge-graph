@@ -262,19 +262,46 @@ fixtures:
       export function runToolkit(value: string): string {
         return toolkit.normalize(value);
       }
+  - path: unresolved/util.ts
+    content: |
+      export const ready = 'ready';
+  - path: unresolved/main.ts
+    content: |
+      import missingDefault, { missingNamed } from './util';
+
+      export function inspectImports() {
+        return [missingDefault, missingNamed];
+      }
+  - path: ambiguous/left.ts
+    content: |
+      export const shared = 'left';
+  - path: ambiguous/right.ts
+    content: |
+      export const shared = 'right';
+  - path: ambiguous/index.ts
+    content: |
+      export * from './left';
+      export * from './right';
+  - path: ambiguous/main.ts
+    content: |
+      import { shared } from './index';
+
+      export function inspectShared() {
+        return shared;
+      }
 
 tests:
   - name: Synthesizes per-file module definitions
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn STARTS WITH '__js_module__::'
+      WHERE d.definition_type = 'Module'
       RETURN d.fqn AS fqn
     assert:
-      - { row: { fqn: "__js_module__::named/util.ts" } }
-      - { row: { fqn: "__js_module__::default/util.ts" } }
-      - { row: { fqn: "__js_module__::namespace/util.ts" } }
-      - { row: { fqn: "__js_module__::explicit/index.ts" } }
-      - { row: { fqn: "__js_module__::star/index.ts" } }
+      - { row: { fqn: "named/util.ts" } }
+      - { row: { fqn: "default/util.ts" } }
+      - { row: { fqn: "namespace/util.ts" } }
+      - { row: { fqn: "explicit/index.ts" } }
+      - { row: { fqn: "star/index.ts" } }
 
   - name: Named import targets export proxy
     query: |
@@ -283,7 +310,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "__js_module__::named/util.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./util", name: "helper", target: "named/util.ts::helper" } }
 
   - name: Named import call resolves to concrete definition
     query: |
@@ -303,7 +330,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "__js_module__::default/util.ts::default" } }
+      - { row: { import_type: "DefaultImport", path: "./util", name: "default", target: "default/util.ts::default" } }
 
   - name: Default import call resolves to concrete definition
     query: |
@@ -323,7 +350,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamespaceImport", path: "./util", target: "__js_module__::namespace/util.ts" } }
+      - { row: { import_type: "NamespaceImport", path: "./util", target: "namespace/util.ts" } }
 
   - name: Namespace import call resolves to concrete definition
     query: |
@@ -343,7 +370,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "__js_module__::explicit/index.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "explicit/index.ts::helper" } }
 
   - name: Explicit reexport call resolves to source definition
     query: |
@@ -363,7 +390,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "__js_module__::star/util.ts::helper" } }
+      - { row: { import_type: "NamedImport", path: "./index", name: "helper", target: "star/util.ts::helper" } }
 
   - name: Star reexport call resolves to source definition
     query: |
@@ -383,7 +410,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "__js_module__::alias/constants.ts::formatPrecision" } }
+      - { row: { import_type: "NamedImport", path: "./constants", name: "formatPrecision", alias: "fmt", target: "alias/constants.ts::formatPrecision" } }
 
   - name: Aliased named import call resolves to local definition
     query: |
@@ -403,9 +430,9 @@ tests:
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 3 }
-      - { row: { name: "dateFormats", alias: null, target: "__js_module__::identity/constants.ts::dateFormats" } }
-      - { row: { name: "FLOW_METRICS", alias: "metrics", target: "__js_module__::identity/constants.ts::FLOW_METRICS" } }
-      - { row: { name: "formatPrecision", alias: null, target: "__js_module__::identity/constants.ts::formatPrecision" } }
+      - { row: { name: "dateFormats", alias: null, target: "identity/constants.ts::dateFormats" } }
+      - { row: { name: "FLOW_METRICS", alias: "metrics", target: "identity/constants.ts::FLOW_METRICS" } }
+      - { row: { name: "formatPrecision", alias: null, target: "identity/constants.ts::formatPrecision" } }
 
   - name: Imported function from mixed import statement still calls concrete definition
     query: |
@@ -522,3 +549,26 @@ tests:
       - { row_count: 2 }
       - { row: { caller: "runFormat", callee: "defaultFormat" } }
       - { row: { caller: "runToolkit", callee: "normalize" } }
+
+  - name: Missing default and named exports stay unresolved
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'unresolved/main.ts'
+        AND i.has_target = false
+      RETURN i.import_type AS import_type, i.name AS name, i.has_target AS has_target
+      ORDER BY import_type, name
+    assert:
+      - { row_count: 2 }
+      - { row: { import_type: "DefaultImport", name: "default", has_target: false } }
+      - { row: { import_type: "NamedImport", name: "missingNamed", has_target: false } }
+
+  - name: Ambiguous star reexports do not pick an arbitrary target
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'ambiguous/main.ts'
+        AND i.name = 'shared'
+        AND i.has_target = false
+      RETURN i.name AS name, i.has_target AS has_target
+    assert:
+      - { row_count: 1 }
+      - { row: { name: "shared", has_target: false } }

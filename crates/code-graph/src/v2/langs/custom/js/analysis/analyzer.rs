@@ -14,8 +14,9 @@ use super::super::types::{
     JsImport, JsImportKind, JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode,
     OwnedImportEntry,
 };
-use super::calls::build_class_hierarchy;
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
+use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
+use super::patterns::for_each_static_object_property;
 use super::ssa::extract_ssa_calls;
 use super::vue::extract_vue_options_api;
 
@@ -247,116 +248,10 @@ fn extract_type_annotation(nodes: &AstNodes, decl_node_id: NodeId, source: &str)
     }
 }
 
-fn invocation_support_for_expression(
-    expr: &oxc::ast::ast::Expression,
-) -> Option<JsInvocationSupport> {
-    match expr.get_inner_expression() {
-        oxc::ast::ast::Expression::ArrowFunctionExpression(_) => {
-            Some(JsInvocationSupport::arrow_function())
-        }
-        oxc::ast::ast::Expression::FunctionExpression(_) => Some(JsInvocationSupport::function()),
-        oxc::ast::ast::Expression::ClassExpression(_) => Some(JsInvocationSupport::class()),
-        _ => None,
-    }
-}
-
-fn invocation_support_for_symbol(
-    flags: SymbolFlags,
-    nodes: &AstNodes,
-    decl_node_id: NodeId,
-) -> Option<JsInvocationSupport> {
-    if flags.is_class() {
-        return Some(JsInvocationSupport::class());
-    }
-    if flags.is_function() {
-        if matches!(
-            nodes.parent_kind(decl_node_id),
-            AstKind::MethodDefinition(_)
-        ) {
-            return None;
-        }
-        return Some(JsInvocationSupport::function());
-    }
-    if !flags.is_variable()
-        || matches!(nodes.parent_kind(decl_node_id), AstKind::FormalParameter(_))
-    {
-        return None;
-    }
-
-    match nodes.kind(decl_node_id) {
-        AstKind::VariableDeclarator(decl) => decl
-            .init
-            .as_ref()
-            .and_then(invocation_support_for_expression),
-        _ => None,
-    }
-}
-
-fn build_invocation_support_maps(
-    ctx: &Ctx,
-) -> (
-    HashMap<String, JsInvocationSupport>,
-    HashMap<(usize, usize), JsInvocationSupport>,
-) {
-    let mut by_name = HashMap::new();
-    let mut by_range = HashMap::new();
-
-    for symbol_id in ctx.scoping.symbol_ids() {
-        let flags = ctx.scoping.symbol_flags(symbol_id);
-        if flags.is_import() {
-            continue;
-        }
-
-        let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
-        let Some(invocation_support) =
-            invocation_support_for_symbol(flags, ctx.nodes, decl_node_id)
-        else {
-            continue;
-        };
-
-        let name = ctx.scoping.symbol_name(symbol_id).to_string();
-        let range = ctx.lt.span_to_range(ctx.scoping.symbol_span(symbol_id));
-        by_name.insert(name, invocation_support);
-        by_range.insert(
-            (range.byte_offset.0, range.byte_offset.1),
-            invocation_support,
-        );
-    }
-
-    (by_name, by_range)
-}
-
-fn extract_definitions(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> Vec<JsDef> {
-    let exported_bindings = &parsed.module_record.exported_bindings;
-    let mut defs = Vec::new();
-    for symbol_id in ctx.scoping.symbol_ids() {
-        let flags = ctx.scoping.symbol_flags(symbol_id);
-        if flags.is_import() {
-            continue;
-        }
-
-        let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
-        let Some(kind) = classify_symbol_kind(flags, ctx.nodes, decl_node_id) else {
-            continue;
-        };
-
-        let name = ctx.scoping.symbol_name(symbol_id).to_string();
-        let fqn = ctx.build_fqn(symbol_id);
-        let range = ctx.lt.span_to_range(ctx.scoping.symbol_span(symbol_id));
-        let is_exported = exported_bindings.contains_key(name.as_str());
-        let type_annotation = extract_type_annotation(ctx.nodes, decl_node_id, ctx.source);
-
-        defs.push(JsDef {
-            name,
-            fqn,
-            kind,
-            range,
-            is_exported,
-            type_annotation,
-            invocation_support: None,
-        });
-    }
-    defs
+struct SymbolExtraction {
+    defs: Vec<JsDef>,
+    invocation_support_by_name: HashMap<String, JsInvocationSupport>,
+    invocation_support_by_range: HashMap<(usize, usize), JsInvocationSupport>,
 }
 
 fn extract_class_members(
@@ -435,28 +330,46 @@ fn extract_class_members(
     (method_defs, classes)
 }
 
-fn annotate_invocation_support(
-    defs: &mut [JsDef],
-    invocation_support_by_name: &HashMap<String, JsInvocationSupport>,
-    invocation_support_by_range: &HashMap<(usize, usize), JsInvocationSupport>,
-) {
-    for def in defs {
-        let fallback = match def.kind {
-            JsDefKind::Class => Some(JsInvocationSupport::class()),
-            JsDefKind::Function
-            | JsDefKind::Method { .. }
-            | JsDefKind::LifecycleHook { .. }
-            | JsDefKind::Watcher { .. }
-            | JsDefKind::Getter { .. }
-            | JsDefKind::Setter { .. } => Some(JsInvocationSupport::function()),
-            _ => None,
-        };
+fn collect_symbol_data(ctx: &Ctx, parsed: &oxc::parser::ParserReturn) -> SymbolExtraction {
+    let exported_bindings = &parsed.module_record.exported_bindings;
+    let mut defs = Vec::new();
+    let mut invocation_support_by_name = HashMap::new();
+    let mut invocation_support_by_range = HashMap::new();
 
-        def.invocation_support = invocation_support_by_range
-            .get(&def.range.byte_offset)
-            .copied()
-            .or_else(|| invocation_support_by_name.get(&def.name).copied())
-            .or(fallback);
+    for symbol_id in ctx.scoping.symbol_ids() {
+        let flags = ctx.scoping.symbol_flags(symbol_id);
+        if flags.is_import() {
+            continue;
+        }
+
+        let decl_node_id = ctx.scoping.symbol_declaration(symbol_id);
+        let name = ctx.scoping.symbol_name(symbol_id).to_string();
+        let range = ctx.lt.span_to_range(ctx.scoping.symbol_span(symbol_id));
+        let invocation_support = invocation_support_for_symbol(flags, ctx.nodes, decl_node_id);
+
+        if let Some(invocation_support) = invocation_support {
+            invocation_support_by_name.insert(name.clone(), invocation_support);
+            invocation_support_by_range.insert(range.byte_offset, invocation_support);
+        }
+
+        if let Some(kind) = classify_symbol_kind(flags, ctx.nodes, decl_node_id) {
+            defs.push(JsDef {
+                fqn: ctx.build_fqn(symbol_id),
+                is_exported: exported_bindings.contains_key(name.as_str()),
+                type_annotation: extract_type_annotation(ctx.nodes, decl_node_id, ctx.source),
+                invocation_support: invocation_support
+                    .or_else(|| invocation_support_for_js_def_kind(&kind)),
+                kind,
+                name: name.clone(),
+                range,
+            });
+        }
+    }
+
+    SymbolExtraction {
+        defs,
+        invocation_support_by_name,
+        invocation_support_by_range,
     }
 }
 
@@ -618,22 +531,14 @@ fn collect_object_member_bindings(
 ) -> Option<HashMap<String, ExportedBinding>> {
     let mut members = HashMap::new();
 
-    for property in &object.properties {
-        let oxc::ast::ast::ObjectPropertyKind::ObjectProperty(property) = property else {
-            continue;
+    for_each_static_object_property(object, &mut |member_name, value, _| {
+        let Some(binding) =
+            exported_binding_from_expression(value, definition_fqns, invocation_support_by_name)
+        else {
+            return;
         };
-        let Some(member_name) = property.key.static_name() else {
-            continue;
-        };
-        let Some(binding) = exported_binding_from_expression(
-            &property.value,
-            definition_fqns,
-            invocation_support_by_name,
-        ) else {
-            continue;
-        };
-        members.insert(member_name.to_string(), binding);
-    }
+        members.insert(member_name, binding);
+    });
 
     (!members.is_empty()).then_some(members)
 }
@@ -929,8 +834,6 @@ impl JsAnalyzer {
 
         let lt = LineTable::build(source);
         let scope_defs = build_scope_def_map(scoping, nodes);
-        let mut class_hierarchy = build_class_hierarchy(nodes);
-
         let ctx = Ctx {
             scoping,
             nodes,
@@ -939,9 +842,17 @@ impl JsAnalyzer {
             source,
         };
 
-        let mut defs = extract_definitions(&ctx, &parsed);
+        let SymbolExtraction {
+            mut defs,
+            invocation_support_by_name,
+            invocation_support_by_range,
+        } = collect_symbol_data(&ctx, &parsed);
         let (method_defs, classes) = extract_class_members(&ctx, &semantic);
         defs.extend(method_defs);
+        let mut class_hierarchy = classes
+            .iter()
+            .map(|class| (class.fqn.clone(), class.extends.clone()))
+            .collect();
 
         extract_vue_options_api(
             nodes,
@@ -949,14 +860,6 @@ impl JsAnalyzer {
             relative_path,
             &mut defs,
             &mut class_hierarchy,
-        );
-
-        let (invocation_support_by_name, invocation_support_by_range) =
-            build_invocation_support_maps(&ctx);
-        annotate_invocation_support(
-            &mut defs,
-            &invocation_support_by_name,
-            &invocation_support_by_range,
         );
 
         let imports = extract_imports(&ctx, &parsed);

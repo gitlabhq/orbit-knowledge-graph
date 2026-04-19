@@ -62,7 +62,47 @@ mod tests {
             Some(Language::JavaScript)
         );
         assert_eq!(
+            detect_language_from_extension("jsx"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("mjs"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("cjs"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("vue"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("graphql"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("gql"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("json"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
             detect_language_from_extension("ts"),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("tsx"),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("mts"),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language_from_extension("cts"),
             Some(Language::TypeScript)
         );
         assert_eq!(detect_language_from_extension("md"), None);
@@ -90,7 +130,31 @@ mod tests {
             Some(Language::JavaScript)
         );
         assert_eq!(
+            detect_language_from_path("src/index.jsx"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/index.cjs"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/component.vue"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/query.graphql"),
+            Some(Language::JavaScript)
+        );
+        assert_eq!(
             detect_language_from_path("src/index.ts"),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/index.tsx"),
+            Some(Language::TypeScript)
+        );
+        assert_eq!(
+            detect_language_from_path("src/index.mts"),
             Some(Language::TypeScript)
         );
         assert_eq!(

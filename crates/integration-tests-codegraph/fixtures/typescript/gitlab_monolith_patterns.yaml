@@ -90,6 +90,14 @@ fixtures:
         return [ProjectsApp(term), buildTab(term), normalizeSearch(term), ProjectComponents.normalizeSearch(term)];
       }
 
+      export function runProjectsNamespace(term: string): string[] {
+        return [
+          ProjectComponents.ProjectsApp(term),
+          ProjectComponents.buildTab(term),
+          ProjectComponents.normalizeSearch(term),
+        ];
+      }
+
       export function badProjectsCall(): string {
         return DEFAULT_TAB();
       }
@@ -169,7 +177,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "__js_module__::app/assets/javascripts/gitlab_version_check/index.js::default" } }
+      - { row: { import_type: "DefaultImport", path: "jh_else_ce/gitlab_version_check/index.js", name: "default", target: "app/assets/javascripts/gitlab_version_check/index.js::default" } }
 
   - name: default imported CE entry preserves aliased helper target
     query: |
@@ -178,7 +186,7 @@ tests:
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "__js_module__::app/assets/javascripts/lib/utils/common_utils.js::parseBoolean" } }
+      - { row: { path: "~/lib/utils/common_utils", name: "parseBoolean", target: "app/assets/javascripts/lib/utils/common_utils.js::parseBoolean" } }
 
   - name: aliased import from star barrel preserves identity
     query: |
@@ -187,8 +195,8 @@ tests:
       RETURN i.name AS name, i.alias AS alias, d.fqn AS target
     assert:
       - { row_count: 2 }
-      - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "__js_module__::app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::buildFlagName" } }
-      - { row: { name: "DEFAULT_SCOPE", alias: null, target: "__js_module__::app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::DEFAULT_SCOPE" } }
+      - { row: { name: "buildFlagName", alias: "normalizeFlag", target: "app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::buildFlagName" } }
+      - { row: { name: "DEFAULT_SCOPE", alias: null, target: "app/assets/javascripts/feature_flags/store/modules/feature_flag.ts::DEFAULT_SCOPE" } }
 
   - name: feature flag barrel import preserves underlying module targets
     query: |
@@ -197,10 +205,10 @@ tests:
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::fetchFlags" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::featureFlagModule" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/index.ts::legacyAdapter" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::fetchFlags" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::featureFlagModule" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/index.ts::legacyAdapter" } }
 
   - name: imported constants from alias barrels do not create false call edges
     query: |
@@ -219,7 +227,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
+      - { row: { import_type: "CjsRequire", path: "~/feature_flags/store/legacy_adapter", name: "default", target: "app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
 
   - name: CommonJS alias modules synthesize module and primary export definitions
     query: |
@@ -229,8 +237,8 @@ tests:
     assert:
       - { row_count: 4 }
       - { row: { fqn: "legacyAdapter" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
-      - { row: { fqn: "__js_module__::app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/legacy_adapter.js" } }
+      - { row: { fqn: "app/assets/javascripts/feature_flags/store/legacy_adapter.js::default" } }
 
   - name: explicit default reexports target the barrel proxy
     query: |
@@ -240,7 +248,7 @@ tests:
       RETURN i.import_type AS import_type, i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
+      - { row: { import_type: "NamedImport", path: "~/projects/your_work/components", name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
 
   - name: project barrel imports preserve explicit, star, and constant targets
     query: |
@@ -250,10 +258,10 @@ tests:
       RETURN i.name AS name, d.fqn AS target
     assert:
       - { row_count: 4 }
-      - { row: { name: "ProjectsApp", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
-      - { row: { name: "buildTab", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts::buildTab" } }
-      - { row: { name: "normalizeSearch", target: "__js_module__::app/assets/javascripts/projects/your_work/components/filters.ts::normalizeSearch" } }
-      - { row: { name: "DEFAULT_TAB", target: "__js_module__::app/assets/javascripts/projects/your_work/components/filters.ts::DEFAULT_TAB" } }
+      - { row: { name: "ProjectsApp", target: "app/assets/javascripts/projects/your_work/components/index.ts::ProjectsApp" } }
+      - { row: { name: "buildTab", target: "app/assets/javascripts/projects/your_work/components/index.ts::buildTab" } }
+      - { row: { name: "normalizeSearch", target: "app/assets/javascripts/projects/your_work/components/filters.ts::normalizeSearch" } }
+      - { row: { name: "DEFAULT_TAB", target: "app/assets/javascripts/projects/your_work/components/filters.ts::DEFAULT_TAB" } }
 
   - name: namespace imports over alias barrels target the synthesized barrel module
     query: |
@@ -263,7 +271,20 @@ tests:
       RETURN i.path AS path, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { path: "~/projects/your_work/components", target: "__js_module__::app/assets/javascripts/projects/your_work/components/index.ts" } }
+      - { row: { path: "~/projects/your_work/components", target: "app/assets/javascripts/projects/your_work/components/index.ts" } }
+
+  - name: namespace alias barrel calls resolve to concrete component definitions
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'runProjectsNamespace'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "runProjectsNamespace", callee: "buildTab" } }
+      - { row: { caller: "runProjectsNamespace", callee: "normalizeSearch" } }
+      - { row: { caller: "runProjectsNamespace", callee: "renderProjects" } }
 
   - name: imported constants from monolith barrels stay inert
     query: |
@@ -282,7 +303,7 @@ tests:
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "__js_module__::ee/app/assets/javascripts/security_inventory/utils.js::buildSeverityPath" } }
+      - { row: { path: "ee/security_inventory/utils", name: "buildSeverityPath", target: "ee/app/assets/javascripts/security_inventory/utils.js::buildSeverityPath" } }
 
   - name: direct ee Vue imports target synthesized default export proxies
     query: |
@@ -291,7 +312,7 @@ tests:
       RETURN i.path AS path, i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
+      - { row: { path: "ee/oncall_schedules/components/add_edit_schedule_form.vue", name: "default", target: "ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
 
   - name: Vue SFC extraction emits component and method definitions for monolith files
     query: |
@@ -302,8 +323,8 @@ tests:
       - { row_count: 5 }
       - { row: { fqn: "AddEditScheduleForm" } }
       - { row: { fqn: "AddEditScheduleForm::normalizeTimezone" } }
-      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue" } }
-      - { row: { fqn: "__js_module__::ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
+      - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue" } }
+      - { row: { fqn: "ee/app/assets/javascripts/oncall_schedules/components/add_edit_schedule_form.vue::default" } }
 
   - name: external Vue package imports remain unresolved inside monolith SFCs
     query: |
@@ -321,4 +342,4 @@ tests:
       RETURN i.name AS name, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { name: "AddEditScheduleForm", target: "__js_module__::ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }
+      - { row: { name: "AddEditScheduleForm", target: "ee/app/assets/javascripts/oncall_schedules/index.ts::AddEditScheduleForm" } }

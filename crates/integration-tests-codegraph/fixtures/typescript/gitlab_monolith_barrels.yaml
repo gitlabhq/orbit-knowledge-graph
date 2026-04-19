@@ -81,7 +81,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "__js_module__::ee/app/assets/javascripts/commit/constants.ts::verificationStatuses" } }
+      - { row: { import_type: "NamedImport", target: "ee/app/assets/javascripts/commit/constants.ts::verificationStatuses" } }
 
   - name: EE barrel star reexport import resolves to CE export proxy
     query: |
@@ -92,7 +92,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "NamedImport", target: "__js_module__::app/assets/javascripts/commit/constants.ts::VERIFIED_CONFIG" } }
+      - { row: { import_type: "NamedImport", target: "app/assets/javascripts/commit/constants.ts::VERIFIED_CONFIG" } }
 
   - name: Namespace import over EE barrel resolves to local EE function
     query: |

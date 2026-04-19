@@ -92,7 +92,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/components/child_badge.vue::default" } }
+      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/components/child_badge.vue::default" } }
 
   - name: Vue GraphQL default import targets primary export proxy
     query: |
@@ -102,7 +102,7 @@ tests:
       RETURN i.import_type AS import_type, d.fqn AS target
     assert:
       - { row_count: 1 }
-      - { row: { import_type: "DefaultImport", target: "__js_module__::app/assets/javascripts/graphql/get_items.query.graphql::default" } }
+      - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/graphql/get_items.query.graphql::default" } }
 
   - name: Vue mounted hook resolves this-method call to local method
     query: |
