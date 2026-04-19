@@ -6,6 +6,7 @@
 //!
 //! All variable names are `&'a str` backed by `FileArena` (bumpalo).
 
+use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
@@ -76,6 +77,19 @@ impl SsaValue<'_> {
             SsaValue::Alias(_) | SsaValue::Marker | SsaValue::Phi(_) => None,
         }
     }
+
+    /// Human-readable representation for trace output.
+    pub(crate) fn trace_display(&self) -> String {
+        match self {
+            SsaValue::LocalDef(i) => format!("LocalDef({i})"),
+            SsaValue::ImportRef(i) => format!("ImportRef({i})"),
+            SsaValue::Type(t) => format!("Type({t})"),
+            SsaValue::Alias(a) => format!("Alias({a})"),
+            SsaValue::Opaque => "Opaque".to_string(),
+            SsaValue::Marker => "Marker".to_string(),
+            SsaValue::Phi(id) => format!("φ{}", id.0),
+        }
+    }
 }
 
 // ── Phi node ────────────────────────────────────────────────────
@@ -112,6 +126,7 @@ pub(crate) struct SsaEngine<'a> {
     /// Incomplete phis for unsealed blocks: block → variable → phi_id
     incomplete_phis: FxHashMap<BlockId, FxHashMap<&'a str, PhiId>>,
     pub stats: SsaStats,
+    tracer: &'a Tracer,
 }
 
 impl<'a> SsaEngine<'a> {
@@ -122,7 +137,13 @@ impl<'a> SsaEngine<'a> {
             current_def: FxHashMap::with_capacity_and_hasher(64, Default::default()),
             incomplete_phis: FxHashMap::default(),
             stats: SsaStats::default(),
+            tracer: super::super::trace::leaked_noop_tracer(),
         }
+    }
+
+    pub fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
+        self.tracer = tracer;
+        self
     }
 
     /// Create a new basic block. Returns its ID.
@@ -133,12 +154,18 @@ impl<'a> SsaEngine<'a> {
             sealed: false,
         });
         self.stats.blocks_created += 1;
+        self.tracer
+            .event(TraceEvent::SsaBlockCreated { block_id: id.0 });
         id
     }
 
     /// Add a predecessor edge: `pred` flows into `block`.
     pub fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
         self.blocks[block.0].predecessors.push(pred);
+        self.tracer.event(TraceEvent::SsaAddPredecessor {
+            block_id: block.0,
+            pred_id: pred.0,
+        });
     }
 
     /// Seal a block — all predecessors are now known.
@@ -150,6 +177,8 @@ impl<'a> SsaEngine<'a> {
             }
         }
         self.blocks[block.0].sealed = true;
+        self.tracer
+            .event(TraceEvent::SsaBlockSealed { block_id: block.0 });
     }
 
     /// Seal any blocks that haven't been sealed yet.
@@ -175,6 +204,11 @@ impl<'a> SsaEngine<'a> {
         } else {
             value
         };
+        self.tracer.event(TraceEvent::SsaWrite {
+            variable: variable.to_string(),
+            block_id: block.0,
+            value: resolved.trace_display(),
+        });
         self.current_def
             .entry(variable)
             .or_default()
@@ -190,7 +224,13 @@ impl<'a> SsaEngine<'a> {
     ) -> ReachingDefs<'a> {
         self.stats.reads += 1;
         let value = self.read_variable_internal(variable, block);
-        self.resolve_value(&value)
+        let result = self.resolve_value(&value);
+        self.tracer.event(TraceEvent::SsaRead {
+            variable: variable.to_string(),
+            block_id: block.0,
+            values: result.values.iter().map(|v| v.trace_display()).collect(),
+        });
+        result
     }
 
     // ── Internal: Braun et al. algorithm ────────────────────────
@@ -301,6 +341,11 @@ impl<'a> SsaEngine<'a> {
             operands: SmallVec::new(),
             witnesses: [None, None],
         });
+        self.tracer.event(TraceEvent::SsaPhiCreated {
+            phi_id: id.0,
+            block_id: block.0,
+            variable: variable.to_string(),
+        });
         id
     }
 
@@ -351,6 +396,10 @@ impl<'a> SsaEngine<'a> {
 
         let replacement = same.unwrap_or(SsaValue::Opaque);
         self.stats.phis_trivial += 1;
+        self.tracer.event(TraceEvent::SsaPhiTrivial {
+            phi_id: phi_id.0,
+            replacement: replacement.trace_display(),
+        });
 
         let variable = self.phis[phi_id.0].variable;
         let block = self.phis[phi_id.0].block;
@@ -446,7 +495,7 @@ impl<'a> SsaEngine<'a> {
     }
 }
 
-impl Default for SsaEngine<'_> {
+impl<'a> Default for SsaEngine<'a> {
     fn default() -> Self {
         Self::new()
     }

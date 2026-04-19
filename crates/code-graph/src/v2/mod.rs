@@ -4,6 +4,7 @@ pub mod langs;
 pub mod linker;
 pub mod pipeline;
 pub mod registry;
+pub mod trace;
 pub mod types;
 
 pub use pipeline::{

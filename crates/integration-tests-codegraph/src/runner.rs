@@ -111,6 +111,10 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let root = tmp.path().to_string_lossy().to_string();
 
+    // Enable tracing if requested by the suite
+    let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
+    code_graph::v2::trace::set_thread_trace(trace_any);
+
     let datasets = match suite.pipeline.as_deref() {
         None | Some("generic") => {
             let pipeline = Pipeline::new(PipelineConfig::default());
@@ -145,6 +149,9 @@ pub async fn run_yaml_suite(yaml: &str) {
             output_to_datasets(output)
         }
     };
+
+    // Reset trace flag
+    code_graph::v2::trace::set_thread_trace(false);
 
     let config = make_graph_config().expect("Failed to build graph config");
 

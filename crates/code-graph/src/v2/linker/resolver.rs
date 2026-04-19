@@ -3,6 +3,7 @@
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
+use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
@@ -41,6 +42,11 @@ impl<'a> FileResolver<'a> {
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
         Self { ctx, deadline }
+    }
+
+    /// Dump resolver trace events to stderr. Call after all refs are resolved.
+    pub fn dump_trace(&self, header: &str) {
+        self.ctx.tracer.dump_grouped(header);
     }
 
     /// Register inferred return types from the current file's Phase 2 pass.
@@ -124,6 +130,7 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
+    tracer: Tracer,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -148,6 +155,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
+            tracer: crate::v2::trace::thread_tracer(),
         }
     }
 
@@ -191,6 +199,12 @@ impl<'a> ResolveCtx<'a> {
                 self.graph
                     .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
                 if !result.is_empty() {
+                    self.tracer.event(TraceEvent::ImplicitSubScope {
+                        scope_fqn: scope_fqn.to_string(),
+                        sub_scope: sub.to_string(),
+                        member_name: member_name.to_string(),
+                        found: true,
+                    });
                     break;
                 }
             }
@@ -206,9 +220,32 @@ impl<'a> ResolveCtx<'a> {
                 self.rules.fqn_separator,
                 &mut result,
             );
+            if !result.is_empty() {
+                self.tracer.event(TraceEvent::ReceiverTypeLookup {
+                    type_name: scope_fqn.to_string(),
+                    member_name: member_name.to_string(),
+                    found_count: result.len(),
+                });
+            }
         }
 
         let found = !result.is_empty();
+        let result_fqns: Vec<String> = result
+            .iter()
+            .filter_map(|&n| {
+                self.graph.graph[n].def_id().map(|d| {
+                    self.graph
+                        .str(self.graph.defs[d.0 as usize].fqn)
+                        .to_string()
+                })
+            })
+            .collect();
+        self.tracer.event(TraceEvent::NestedLookup {
+            scope_fqn: scope_fqn.to_string(),
+            member_name: member_name.to_string(),
+            found,
+            result_fqns,
+        });
         if found {
             out.extend_from_slice(&result);
         }
@@ -217,12 +254,55 @@ impl<'a> ResolveCtx<'a> {
     }
 }
 
+fn format_reaching(reaching: &[ParseValue]) -> Vec<String> {
+    reaching
+        .iter()
+        .map(|v| match v {
+            ParseValue::LocalDef(i) => format!("LocalDef({i})"),
+            ParseValue::ImportRef(i) => format!("ImportRef({i})"),
+            ParseValue::Type(t) => format!("Type({t})"),
+            ParseValue::Opaque => "Opaque".to_string(),
+        })
+        .collect()
+}
+
+fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
+    chain.map(|c| c.iter().map(|s| format!("{s:?}")).collect())
+}
+
 fn resolve_single(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
-    if r.chain.is_some() {
+    ctx.tracer.event(TraceEvent::ResolveStart {
+        name: r.name.to_string(),
+        chain: format_chain(r.chain),
+        reaching: format_reaching(r.reaching),
+        enclosing_def: r.enclosing_def.and_then(|i| {
+            ctx.def_nodes
+                .get(i as usize)
+                .and_then(|&n| ctx.graph.graph[n].def_id())
+                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+        }),
+    });
+
+    let result = if r.chain.is_some() {
         resolve_chain(ctx, r)
     } else {
         resolve_bare(ctx, r)
-    }
+    };
+
+    let target_fqns: Vec<String> = result
+        .iter()
+        .filter_map(|&n| {
+            ctx.graph.graph[n]
+                .def_id()
+                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+        })
+        .collect();
+    ctx.tracer.event(TraceEvent::ResolveResult {
+        name: r.name.to_string(),
+        targets: target_fqns,
+    });
+
+    result
 }
 
 fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
@@ -231,6 +311,7 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
     }
 
     for stage in &ctx.rules.bare_stages.clone() {
+        let stage_name = format!("{stage:?}");
         let result = match stage {
             ResolveStage::SSA => {
                 if r.reaching.is_empty() {
@@ -271,6 +352,20 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 }
             }
         };
+        let result_fqns: Vec<String> = result
+            .iter()
+            .filter_map(|&n| {
+                ctx.graph.graph[n]
+                    .def_id()
+                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+            })
+            .collect();
+        ctx.tracer.event(TraceEvent::ResolveBareStage {
+            stage: stage_name,
+            name: r.name.to_string(),
+            result_count: result.len(),
+            result_fqns,
+        });
         if !result.is_empty() {
             let mut seen = rustc_hash::FxHashSet::default();
             let mut result = result;
@@ -337,6 +432,11 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
 
     let mut current_types: Vec<String> = resolve_base_type_fqns(ctx, &chain[0], r.reaching);
 
+    ctx.tracer.event(TraceEvent::ResolveChainBase {
+        step: format!("{:?}", chain[0]),
+        types: current_types.clone(),
+    });
+
     if current_types.is_empty() {
         if ctx.settings.chain_fallback
             && let Some(last_name) = chain.last().and_then(|s| match s {
@@ -344,6 +444,9 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 _ => None,
             })
         {
+            ctx.tracer.event(TraceEvent::ResolveChainFallback {
+                name: last_name.to_string(),
+            });
             let fallback = RefData {
                 name: last_name,
                 chain: None,
@@ -408,6 +511,24 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 }
             }
         }
+
+        let found_fqns: Vec<String> = found_nodes
+            .iter()
+            .filter_map(|&n| {
+                ctx.graph.graph[n]
+                    .def_id()
+                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+            })
+            .collect();
+        ctx.tracer.event(TraceEvent::ResolveChainStep {
+            depth,
+            step: format!("{step:?}"),
+            member_name: member_name.to_string(),
+            scope_types: current_types.clone(),
+            found_count: found_nodes.len(),
+            found_fqns,
+            next_types: next_types.clone(),
+        });
 
         if is_last {
             let mut seen = rustc_hash::FxHashSet::default();

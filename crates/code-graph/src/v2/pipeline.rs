@@ -71,6 +71,8 @@ pub trait LanguagePipeline {
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
+    /// When true, emit detailed trace events for SSA, engine, and resolver.
+    pub trace: bool,
 }
 
 impl Default for PipelineConfig {
@@ -78,6 +80,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
+            trace: false,
         }
     }
 }
@@ -402,6 +405,7 @@ where
                     }
                 };
 
+                let tracer = crate::v2::trace::thread_tracer();
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
@@ -414,11 +418,11 @@ where
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut inferred_set = false;
 
-                let inferred_result = spec.parse_full_and_resolve(
+                let inferred_result = spec.parse_full_and_resolve_traced(
                     &source,
                     path,
                     language,
-                    |name, chain, reaching, enclosing_def, inferred| {
+                    &mut |name, chain, reaching, enclosing_def, inferred| {
                         if !inferred_set {
                             resolver.set_inferred_returns(inferred);
                             inferred_set = true;
@@ -435,7 +439,11 @@ where
                             ));
                         }
                     },
+                    &tracer,
                 );
+
+                tracer.dump_grouped(&format!("{path} [engine]"));
+                resolver.dump_trace(&format!("{path} [resolver]"));
 
                 let inferred = inferred_result.unwrap_or_default();
 

@@ -6,6 +6,7 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::config::Language;
+use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
 };
@@ -530,6 +531,28 @@ impl LanguageSpec {
             &[(u32, String)],                            // inferred return types
         ),
     {
+        let noop = crate::v2::trace::noop_tracer();
+        self.parse_full_and_resolve_traced(source, file_path, language, &mut on_ref, &noop)
+    }
+
+    /// Like `parse_full_and_resolve` but with an explicit tracer for debugging.
+    pub fn parse_full_and_resolve_traced<F>(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        on_ref: &mut F,
+        tracer: &Tracer,
+    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
+    where
+        F: FnMut(
+            &str,                                        // name
+            Option<&[crate::v2::types::ExpressionStep]>, // chain
+            &[crate::v2::types::ssa::ParseValue],        // reaching defs
+            Option<u32>,                                 // enclosing_def index
+            &[(u32, String)],                            // inferred return types
+        ),
+    {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
 
@@ -538,12 +561,15 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena);
+        let mut state = WalkFullState::new(&arena, tracer);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
         {
             state.scope_stack.push(Arc::from(module.as_str()));
+            tracer.event(TraceEvent::PackageMatched {
+                name: module.clone(),
+            });
         }
         state.top_level_depth = state.scope_stack.len();
 
@@ -597,6 +623,11 @@ impl LanguageSpec {
                 }
             });
             if let Some(rt) = inferred {
+                tracer.event(TraceEvent::ReturnTypeInferred {
+                    def_index: enclosing_idx,
+                    def_fqn: state.defs[enclosing_idx as usize].fqn.as_str().to_string(),
+                    return_type: rt.clone(),
+                });
                 state.defs[enclosing_idx as usize]
                     .metadata
                     .get_or_insert_with(Box::default)
@@ -771,6 +802,12 @@ impl LanguageSpec {
             let is_type_scope = m.def_kind.is_type_container();
 
             let def_name = m.name.clone();
+            state.tracer.event(TraceEvent::ScopePush {
+                name: def_name.clone(),
+                kind: format!("{:?}", m.def_kind),
+                fqn: fqn.as_str().to_string(),
+                block_id: state.current_block.0,
+            });
             state.defs.push(CanonicalDefinition {
                 definition_type: m.label,
                 kind: m.def_kind,
@@ -839,6 +876,10 @@ impl LanguageSpec {
                             && let Some(name) =
                                 treesitter_visit::extract::default_name().apply(&sibling)
                         {
+                            state.tracer.event(TraceEvent::SiblingRefAdopted {
+                                name: name.clone(),
+                                def_index,
+                            });
                             let ssa_key = state.arena.alloc_str(&name);
                             state.pending_refs.push(PendingRef {
                                 name,
@@ -900,8 +941,21 @@ impl LanguageSpec {
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
+                let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                state.tracer.event(TraceEvent::ImportRecorded {
+                    path: imp.path.clone(),
+                    name: imp.name.as_deref().unwrap_or("").to_string(),
+                    alias: imp.alias.clone(),
+                    wildcard: imp.wildcard,
+                    ssa_name: if !imp.wildcard && !imp.path.is_empty() && !effective_name.is_empty()
+                    {
+                        Some(effective_name.to_string())
+                    } else {
+                        None
+                    },
+                    block_id: state.current_block.0,
+                });
                 if !imp.wildcard && !imp.path.is_empty() {
-                    let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
                     if !effective_name.is_empty() {
                         state.import_map.insert(
                             effective_name.to_string(),
@@ -950,6 +1004,11 @@ impl LanguageSpec {
                     } else {
                         state.current_block
                     };
+                    state.tracer.event(TraceEvent::BindingWrite {
+                        name: name.clone(),
+                        value: val.trace_display(),
+                        block_id: target_block.0,
+                    });
                     state.ssa.write_variable(ssa_name, target_block, val);
                 }
             }
@@ -1028,6 +1087,16 @@ impl LanguageSpec {
                     state.arena.alloc_str(&name)
                 };
 
+                state.tracer.event(TraceEvent::RefQueued {
+                    name: name.clone(),
+                    chain: expression
+                        .as_ref()
+                        .map(|c| c.iter().map(|s| format!("{s:?}")).collect()),
+                    ssa_key: ssa_key.to_string(),
+                    block_id: state.current_block.0,
+                    enclosing_def: state.enclosing_def_stack.last().copied(),
+                    is_return: state.in_return,
+                });
                 state.pending_refs.push(PendingRef {
                     name,
                     chain: expression,
@@ -1050,6 +1119,11 @@ impl LanguageSpec {
         }
 
         if pushed_scope {
+            if let Some(name) = state.scope_stack.last() {
+                state.tracer.event(TraceEvent::ScopePop {
+                    name: name.to_string(),
+                });
+            }
             state.scope_stack.pop();
             state.enclosing_def_stack.pop();
             if let Some(saved) = state.saved_blocks.pop() {
@@ -1067,6 +1141,10 @@ impl LanguageSpec {
     ) {
         let rule = &self.branches[rule_idx];
         let pre_block = state.current_block;
+        state.tracer.event(TraceEvent::BranchEnter {
+            node_kind: node.kind().to_string(),
+            pre_block: pre_block.0,
+        });
 
         // Walk condition in pre-branch block
         if let Some(cond_field) = rule.condition_field
@@ -1094,6 +1172,9 @@ impl LanguageSpec {
                 state.ssa.add_predecessor(arm_block, pre_block);
                 state.ssa.seal_block(arm_block);
                 state.current_block = arm_block;
+                state.tracer.event(TraceEvent::BranchArm {
+                    block_id: arm_block.0,
+                });
 
                 // Walk arm contents
                 for arm_child in child.children() {
@@ -1122,6 +1203,10 @@ impl LanguageSpec {
             state.ssa.add_predecessor(join, pre_block);
         }
         state.ssa.seal_block(join);
+        state.tracer.event(TraceEvent::BranchJoin {
+            block_id: join.0,
+            arm_blocks: end_blocks.iter().map(|b| b.0).collect(),
+        });
         state.current_block = join;
     }
 
@@ -1152,6 +1237,11 @@ impl LanguageSpec {
         state.ssa.add_predecessor(body, header);
         state.ssa.seal_block(body);
         state.current_block = body;
+        state.tracer.event(TraceEvent::LoopEnter {
+            node_kind: node.kind().to_string(),
+            header_block: header.0,
+            body_block: body.0,
+        });
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
@@ -1171,6 +1261,9 @@ impl LanguageSpec {
         let exit = state.ssa.add_block();
         state.ssa.add_predecessor(exit, header);
         state.ssa.seal_block(exit);
+        state
+            .tracer
+            .event(TraceEvent::LoopExit { exit_block: exit.0 });
         state.current_block = exit;
     }
 }
@@ -1202,11 +1295,12 @@ struct WalkFullState<'a> {
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
     in_return: bool,
+    tracer: &'a Tracer,
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump) -> Self {
-        let mut ssa = super::ssa::SsaEngine::new();
+    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer) -> Self {
+        let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
         ssa.seal_block(entry);
 
@@ -1223,6 +1317,7 @@ impl<'a> WalkFullState<'a> {
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
             in_return: false,
+            tracer,
         }
     }
 }
