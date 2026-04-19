@@ -337,4 +337,31 @@ mod tests {
         let node = field("name").navigate(&func).unwrap();
         assert_eq!(node.text().as_ref(), "foo");
     }
+
+    #[test]
+    fn test_apply_with_computes_fqn() {
+        let code = "class Outer:\n    class Inner:\n        def method(self): pass";
+        let root = SupportLang::Python.ast_grep(code);
+        let method = root
+            .root()
+            .find(Axis::Descendant, Match::Kind("function_definition"))
+            .unwrap();
+
+        // Extract the method name, then compute FQN from ancestors
+        let fqn = field("name").apply_with(&method, |name, origin| {
+            let mut scope = Vec::new();
+            for ancestor in origin.parent_chain() {
+                if Match::AnyKind(&["class_definition", "function_definition"]).test(&ancestor) {
+                    if let Some(n) = ancestor.field("name") {
+                        scope.push(n.text().to_string());
+                    }
+                }
+            }
+            scope.reverse();
+            scope.push(name);
+            scope.join(".")
+        });
+
+        assert_eq!(fqn, Some("Outer.Inner.method".to_string()));
+    }
 }
