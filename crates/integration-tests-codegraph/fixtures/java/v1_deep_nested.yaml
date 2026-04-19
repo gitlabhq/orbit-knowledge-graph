@@ -1,0 +1,52 @@
+name: "Java v1 parity — deep nested class resolution"
+fixtures:
+  - path: com/example/helpers/Helpers.java
+    content: |
+      package com.example.helpers;
+      public class Helpers {
+          public static void doHelp() {}
+          abstract class InnerHelpers { public void innerDoHelp() {} }
+          class InnerInnerHelpers extends InnerHelpers {
+              public void innerInnerDoHelp() { super.innerDoHelp(); }
+          }
+      }
+  - path: com/example/edgecases/ResolveTypeFailingOnNestedChild.java
+    content: |
+      package com.example.edgecases;
+      public class ResolveTypeFailingOnNestedChild {
+          static class Child {
+              static abstract class GrandChild {
+                  void greet() { System.out.println("Hello"); }
+              }
+          }
+          class GrandChild extends Child.GrandChild {
+              public GrandChild() { super(); }
+              @Override
+              void greet() { super.greet(); }
+          }
+      }
+
+tests:
+  # ── J5: test_java_reference_to_deep_nested_class ──
+
+  - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.helpers.Helpers.InnerInnerHelpers.innerInnerDoHelp'
+        AND callee.fqn = 'com.example.helpers.Helpers.InnerHelpers.innerDoHelp'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── J6: test_java_reference_resolve_type_failing_on_nested_type ──
+
+  - name: "GrandChild.greet -> Child.GrandChild.greet (nested type regression)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.edgecases.ResolveTypeFailingOnNestedChild.GrandChild.greet'
+        AND callee.fqn = 'com.example.edgecases.ResolveTypeFailingOnNestedChild.Child.GrandChild.greet'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

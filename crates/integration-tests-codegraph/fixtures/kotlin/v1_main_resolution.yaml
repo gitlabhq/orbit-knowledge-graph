@@ -1,0 +1,45 @@
+name: "Kotlin v1 parity — Main function resolution"
+fixture_dir: "fixtures/code/kotlin/main/kotlin"
+
+tests:
+  # ── K1: test_kotlin_reference_resolution_main_function_calls ──
+
+  - name: "main -> Foo (constructor)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.foo.Foo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main -> Foo.foo (instance method)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.foo.Foo.foo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main -> Foo.Companion.companionFoo"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.foo.Foo.Companion.companionFoo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main -> Baz.baz (interface through inheritance)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.main'
+        AND callee.fqn = 'com.example.foo.Baz.baz'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

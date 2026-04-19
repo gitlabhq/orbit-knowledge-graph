@@ -1,0 +1,69 @@
+name: "Java v1 parity — imported symbol resolution"
+fixtures:
+  - path: com/example/app/Main.java
+    content: |
+      package com.example.app;
+      import java.util.ArrayList;
+      import java.util.List;
+      public class Main extends Application {
+          public void main() {
+              var list = new ArrayList<String>();
+              var list2 = List.of("a", "b", "c");
+          }
+      }
+  - path: com/example/app/Application.java
+    content: |
+      package com.example.app;
+      public class Application { public void run() {} }
+  - path: com/example/app/Traceable.java
+    content: |
+      package com.example.app;
+      import java.lang.annotation.*;
+      @Retention(RetentionPolicy.RUNTIME)
+      @Target({ElementType.METHOD, ElementType.TYPE})
+      public @interface Traceable {}
+
+tests:
+  # ── J2: test_java_reference_resolution_to_imported_symbol ──
+
+  - name: "Main.main -> ArrayList (imported symbol)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND sym.path = 'java.util'
+        AND sym.name = 'ArrayList'
+      RETURN caller.fqn AS caller, sym.name AS symbol
+    assert:
+      - { row_count: 1 }
+
+  - name: "Main.main -> List (imported symbol)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND sym.path = 'java.util'
+        AND sym.name = 'List'
+      RETURN caller.fqn AS caller, sym.name AS symbol
+    assert:
+      - { row_count: 1 }
+
+  - name: "Traceable -> Retention (annotation import)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Traceable'
+        AND sym.name = 'Retention'
+      RETURN caller.fqn AS caller, sym.name AS symbol
+    assert:
+      - { row_count: 1 }
+
+  - name: "Traceable -> Target (annotation import)"
+    skip: true
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Traceable'
+        AND sym.name = 'Target'
+      RETURN caller.fqn AS caller, sym.name AS symbol
+    assert:
+      - { row_count: 1 }
