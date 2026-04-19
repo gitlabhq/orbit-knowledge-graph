@@ -376,7 +376,7 @@ impl LanguageSpec {
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena);
+        let mut state = WalkCtx::new(&arena);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -387,7 +387,7 @@ impl LanguageSpec {
 
         self.walk_full(&root, &mut state, sep);
 
-        state.ssa.seal_remaining();
+        state.seal_remaining();
 
         // Infer return types from bare-call / bare-identifier returns.
         let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
@@ -494,7 +494,7 @@ impl LanguageSpec {
                                 compound.push_str(name);
                             }
                         }
-                        let key = state.arena.alloc_str(&compound);
+                        let key = state.alloc(&compound);
                         let r = state.ssa.read_variable_stateless(key, pending.block);
                         let compound_values: smallvec::SmallVec<
                             [crate::v2::types::ssa::ParseValue; 2],
@@ -537,7 +537,7 @@ impl LanguageSpec {
     fn walk_full<'a>(
         &self,
         node: &Node<StrDoc<SupportLang>>,
-        state: &mut WalkFullState<'a>,
+        state: &mut WalkCtx<'a>,
         sep: &'static str,
     ) {
         if stacker::remaining_stack().unwrap_or(usize::MAX)
@@ -575,7 +575,7 @@ impl LanguageSpec {
         let empty_actions = smallvec::SmallVec::<[super::types::ActionRef; 3]>::new();
         let actions = self.dispatch.get(nk).unwrap_or(&empty_actions);
 
-        // Scope matching → push def + optional SSA self/super writes
+        // Scope matching → push def + SSA writes via WalkCtx
         if let Some(m) = self.evaluate_scope(node, actions, |bare, _origin| {
             if let Some(fqn) = state.import_map.get(&bare) {
                 return fqn.clone();
@@ -591,13 +591,7 @@ impl LanguageSpec {
             if m.creates_scope {
                 state.scope_stack.push(Arc::from(m.name.as_str()));
                 pushed_scope = true;
-
-                // Create new SSA block for this scope (isolates bindings)
-                let new_block = state.ssa.add_block();
-                state.ssa.add_predecessor(new_block, state.current_block);
-                state.ssa.seal_block(new_block);
-                state.saved_blocks.push(state.current_block);
-                state.current_block = new_block;
+                state.enter_scope();
             }
 
             let fqn = if m.creates_scope {
@@ -626,54 +620,35 @@ impl LanguageSpec {
                 metadata: m.metadata,
             });
 
-            // Write def name to SSA in the parent block so sibling scopes can see it.
-            let parent_block = if pushed_scope {
-                *state.saved_blocks.last().unwrap_or(&state.current_block)
+            // Def name visible in parent block so siblings can see it
+            if pushed_scope {
+                state.bind_in_parent(&def_name, super::ssa::SsaValue::LocalDef(def_index));
             } else {
-                state.current_block
-            };
-            let ssa_name = state.arena.alloc_str(&def_name);
-            state.ssa.write_variable(
-                ssa_name,
-                parent_block,
-                super::ssa::SsaValue::LocalDef(def_index),
-            );
+                state.bind(&def_name, super::ssa::SsaValue::LocalDef(def_index));
+            }
 
-            // Write self/this/super SSA variables for type scopes
+            // self/this/super SSA variables for type scopes
             if is_type_scope {
                 let scope_fqn = {
                     let parts: Vec<&str> = state.scope_stack.iter().map(|s| s.as_ref()).collect();
-                    state.arena.alloc_str(&parts.join(sep))
+                    state.alloc(&parts.join(sep))
                 };
                 for &self_name in self.ssa_config.self_names {
-                    let name = state.arena.alloc_str(self_name);
-                    state.ssa.write_variable(
-                        name,
-                        state.current_block,
-                        super::ssa::SsaValue::Type(scope_fqn),
-                    );
+                    state.bind(self_name, super::ssa::SsaValue::Type(scope_fqn));
                 }
                 if let Some(super_name) = self.ssa_config.super_name
                     && let Some(meta) = &state.defs[def_index as usize].metadata
                     && let Some(super_type) = meta.super_types.first()
                 {
-                    let st = state.arena.alloc_str(super_type);
-                    let name = state.arena.alloc_str(super_name);
-                    state.ssa.write_variable(
-                        name,
-                        state.current_block,
-                        super::ssa::SsaValue::Type(st),
-                    );
+                    let st = state.alloc(super_type);
+                    state.bind(super_name, super::ssa::SsaValue::Type(st));
                 }
             }
 
-            // Track enclosing def for references
+            // Track enclosing def + adopt sibling refs
             if m.creates_scope {
                 state.enclosing_def_stack.push(def_index);
 
-                // Adopt sibling references: when decorators/annotations are
-                // CST siblings of the scope node, emit refs attributed to
-                // this def rather than the parent scope.
                 if !m.adopt_siblings.is_empty() {
                     if let Some(parent) = node.parent() {
                         for sibling in parent.children() {
@@ -682,15 +657,8 @@ impl LanguageSpec {
                                 if let Some(name) =
                                     treesitter_visit::extract::default_name().apply(&sibling)
                                 {
-                                    let ssa_key = state.arena.alloc_str(&name);
-                                    state.pending_refs.push(PendingRef {
-                                        name,
-                                        chain: None,
-                                        ssa_key,
-                                        block: state.current_block,
-                                        enclosing_def: Some(def_index),
-                                        is_return: false,
-                                    });
+                                    let ssa_key = state.alloc(&name);
+                                    state.record_ref(name, None, ssa_key, Some(def_index), false);
                                 }
                             }
                         }
@@ -715,9 +683,7 @@ impl LanguageSpec {
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
-                    if let Some(saved) = state.saved_blocks.pop() {
-                        state.current_block = saved;
-                    }
+                    state.exit_scope();
                 }
                 return;
             }
@@ -731,14 +697,12 @@ impl LanguageSpec {
                 if pushed_scope {
                     state.scope_stack.pop();
                     state.enclosing_def_stack.pop();
-                    if let Some(saved) = state.saved_blocks.pop() {
-                        state.current_block = saved;
-                    }
+                    state.exit_scope();
                 }
                 return;
             }
 
-            // Import handling → also write to SSA
+            // Import handling
             let import_count_before = state.imports.len();
             let handled = self
                 .hooks
@@ -749,27 +713,23 @@ impl LanguageSpec {
                 self.evaluate_imports(node, actions, &mut state.imports, ms, sep);
             }
             for idx in import_count_before..state.imports.len() {
-                let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                if !imp.wildcard && !imp.path.is_empty() {
-                    let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
-                    if !effective_name.is_empty() {
-                        state.import_map.insert(
-                            effective_name.to_string(),
-                            format!("{}{}{}", imp.path, sep, effective_name),
-                        );
-                        // Write import to SSA so alias chasing finds it
-                        let ssa_name = state.arena.alloc_str(effective_name);
-                        state.ssa.write_variable(
-                            ssa_name,
-                            state.current_block,
-                            super::ssa::SsaValue::ImportRef(import_idx),
-                        );
-                    }
+                let wildcard = state.imports[idx].wildcard;
+                let path_empty = state.imports[idx].path.is_empty();
+                let effective_name = state.imports[idx]
+                    .alias
+                    .as_deref()
+                    .or(state.imports[idx].name.as_deref())
+                    .unwrap_or("")
+                    .to_string();
+                if !wildcard && !path_empty && !effective_name.is_empty() {
+                    let fqn = format!("{}{}{}", state.imports[idx].path, sep, effective_name);
+                    state.import_map.insert(effective_name.clone(), fqn);
+                    state.bind(&effective_name, super::ssa::SsaValue::ImportRef(import_idx));
                 }
             }
 
-            // Binding handling → SSA write
+            // Binding handling
             if let Some(rule_idx) = actions.iter().find_map(|a| match a {
                 super::types::ActionRef::Binding(i) => Some(*i),
                 _ => None,
@@ -777,7 +737,6 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → resolve to FQN
                         let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
                             fqn.clone()
                         } else if let Some(prefix) = &module_prefix {
@@ -785,37 +744,29 @@ impl LanguageSpec {
                         } else {
                             type_ann
                         };
-                        super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
+                        super::ssa::SsaValue::Type(state.alloc(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
-                        // RHS callee name → Alias for SSA copy propagation
-                        super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
+                        super::ssa::SsaValue::Alias(state.alloc(&rhs_name))
                     } else {
                         super::ssa::SsaValue::Opaque
                     };
 
-                    let ssa_name = state.arena.alloc_str(&name);
                     let is_instance_attr = rule
                         .instance_attr_prefixes
                         .iter()
                         .any(|p| name.starts_with(p));
-                    let target_block = if is_instance_attr {
-                        // Write to parent class block so sibling methods can read it
-                        *state.saved_blocks.last().unwrap_or(&state.current_block)
+                    if is_instance_attr {
+                        state.bind_in_parent(&name, val);
                     } else {
-                        state.current_block
-                    };
-                    state.ssa.write_variable(ssa_name, target_block, val);
+                        state.bind(&name, val);
+                    }
                 }
             }
 
-            // Track return statement context + infer return type from bare identifiers
+            // Return statement context + inline return type inference
             if !self.return_kinds.is_empty() && self.return_kinds.contains(&nk) {
                 state.in_return = true;
 
-                // For `return x` where x is a bare identifier, read its SSA
-                // value. Only fires when the return expression's first named
-                // child is itself an identifier kind — chains like `return
-                // foo.bar()` are left to the resolver via PendingRef.is_return.
                 if let Some(enclosing_idx) = state.enclosing_def_stack.last().copied()
                     && state.defs[enclosing_idx as usize]
                         .metadata
@@ -829,10 +780,7 @@ impl LanguageSpec {
                         .is_some_and(|c| cc.ident_kinds.contains(&c.kind().as_ref()))
                     && let Some(ident) = find_first_ident(node, cc.ident_kinds)
                 {
-                    let ssa_key = state.arena.alloc_str(&ident);
-                    let reaching = state
-                        .ssa
-                        .read_variable_stateless(ssa_key, state.current_block);
+                    let reaching = state.read_reaching(&ident);
                     let inferred = reaching.values.iter().find_map(|v| {
                         let pv = v.to_parse_value()?;
                         match pv {
@@ -853,7 +801,7 @@ impl LanguageSpec {
                 }
             }
 
-            // Reference handling → SSA read → PendingRef
+            // Reference handling
             if let Some((name, _range, expression)) = self.evaluate_reference(
                 node,
                 actions,
@@ -861,39 +809,36 @@ impl LanguageSpec {
                 module_prefix.as_deref(),
                 sep,
             ) {
-                // For chains, read SSA for the base identifier (not the terminal).
-                // For bare refs, read SSA for the name itself.
                 let ssa_key = if let Some(chain) = &expression {
                     match chain.first() {
                         Some(ExpressionStep::Ident(base) | ExpressionStep::Call(base)) => {
-                            state.arena.alloc_str(base)
+                            state.alloc(base)
                         }
                         Some(ExpressionStep::This) => self
                             .ssa_config
                             .self_names
                             .first()
-                            .map(|&s| state.arena.alloc_str(s))
-                            .unwrap_or(state.arena.alloc_str(&name)),
+                            .map(|&s| state.alloc(s))
+                            .unwrap_or(state.alloc(&name)),
                         Some(ExpressionStep::Super) => self
                             .ssa_config
                             .super_name
-                            .map(|s| state.arena.alloc_str(s))
-                            .unwrap_or(state.arena.alloc_str(&name)),
-                        Some(ExpressionStep::New(type_name)) => state.arena.alloc_str(type_name),
-                        _ => state.arena.alloc_str(&name),
+                            .map(|s| state.alloc(s))
+                            .unwrap_or(state.alloc(&name)),
+                        Some(ExpressionStep::New(type_name)) => state.alloc(type_name),
+                        _ => state.alloc(&name),
                     }
                 } else {
-                    state.arena.alloc_str(&name)
+                    state.alloc(&name)
                 };
 
-                state.pending_refs.push(PendingRef {
+                state.record_ref(
                     name,
-                    chain: expression,
+                    expression,
                     ssa_key,
-                    block: state.current_block,
-                    enclosing_def: state.enclosing_def_stack.last().copied(),
-                    is_return: state.in_return,
-                });
+                    state.enclosing_def_stack.last().copied(),
+                    state.in_return,
+                );
             }
         }
 
@@ -910,9 +855,7 @@ impl LanguageSpec {
         if pushed_scope {
             state.scope_stack.pop();
             state.enclosing_def_stack.pop();
-            if let Some(saved) = state.saved_blocks.pop() {
-                state.current_block = saved;
-            }
+            state.exit_scope();
         }
     }
 
@@ -920,11 +863,10 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         rule_idx: usize,
-        state: &mut WalkFullState<'a>,
+        state: &mut WalkCtx<'a>,
         sep: &'static str,
     ) {
         let rule = &self.branches[rule_idx];
-        let pre_block = state.current_block;
 
         // Walk condition in pre-branch block
         if let Some(cond_field) = rule.condition_field
@@ -937,61 +879,43 @@ impl LanguageSpec {
             .catch_all_kind
             .is_some_and(|ck| node.has(Axis::Child, Match::Kind(ck)));
 
-        // Identify condition byte range to skip (already walked above)
         let cond_range = rule
             .condition_field
             .and_then(|f| node.field(f))
             .map(|n| (n.range().start, n.range().end));
 
-        let mut end_blocks = smallvec::SmallVec::<[super::ssa::BlockId; 4]>::new();
+        let mut branch = state.enter_branch();
 
         for child in node.children() {
             let ck = child.kind();
             if rule.branch_kinds.iter().any(|&k| k == ck.as_ref()) {
-                let arm_block = state.ssa.add_block();
-                state.ssa.add_predecessor(arm_block, pre_block);
-                state.ssa.seal_block(arm_block);
-                state.current_block = arm_block;
-
-                // Walk arm contents
+                state.enter_arm(&branch);
                 for arm_child in child.children() {
                     self.walk_full(&arm_child, state, sep);
                 }
-
-                end_blocks.push(state.current_block);
+                state.exit_arm(&mut branch);
             } else {
-                // Non-branch child: walk in pre-block (skip condition, already walked)
                 let cs = child.range().start;
                 let ce = child.range().end;
                 let is_condition = cond_range.is_some_and(|(s, e)| cs >= s && ce <= e);
                 if !is_condition {
-                    state.current_block = pre_block;
+                    state.in_pre_block(&branch);
                     self.walk_full(&child, state, sep);
                 }
             }
         }
 
-        // Join block
-        let join = state.ssa.add_block();
-        for &end in &end_blocks {
-            state.ssa.add_predecessor(join, end);
-        }
-        if !has_catch_all {
-            state.ssa.add_predecessor(join, pre_block);
-        }
-        state.ssa.seal_block(join);
-        state.current_block = join;
+        state.exit_branch(branch, has_catch_all);
     }
 
     fn walk_full_loop<'a>(
         &self,
         node: &Node<StrDoc<SupportLang>>,
         rule_idx: usize,
-        state: &mut WalkFullState<'a>,
+        state: &mut WalkCtx<'a>,
         sep: &'static str,
     ) {
         let rule = &self.loops[rule_idx];
-        let pre_block = state.current_block;
 
         // Walk iteration expression in pre-loop block
         if let Some(iter_field) = rule.iter_field
@@ -1000,69 +924,66 @@ impl LanguageSpec {
             self.walk_full(&iter_node, state, sep);
         }
 
-        // Header block (NOT sealed yet — back edge comes after body)
-        let header = state.ssa.add_block();
-        state.ssa.add_predecessor(header, pre_block);
-        state.current_block = header;
-
-        // Body block
-        let body = state.ssa.add_block();
-        state.ssa.add_predecessor(body, header);
-        state.ssa.seal_block(body);
-        state.current_block = body;
+        let loop_ctx = state.enter_loop();
 
         // Walk body contents
         if let Some(body_node) = node.field(rule.body_field) {
             self.walk_full(&body_node, state, sep);
         } else {
-            // No explicit body field — walk all children
             for child in node.children() {
                 self.walk_full(&child, state, sep);
             }
         }
 
-        // Back edge + seal header
-        state.ssa.add_predecessor(header, state.current_block);
-        state.ssa.seal_block(header);
-
-        // Exit block
-        let exit = state.ssa.add_block();
-        state.ssa.add_predecessor(exit, header);
-        state.ssa.seal_block(exit);
-        state.current_block = exit;
+        state.exit_loop(loop_ctx);
     }
 }
 
-// ── Walk state for parse_full ───────────────────────────────────
+// ── WalkCtx: high-level walk state with SSA abstraction ────────
 
 /// A reference whose SSA reaching defs haven't been resolved yet.
-/// Stored during the walk, resolved after seal_remaining().
+/// Stored during the walk, resolved after seal.
 struct PendingRef<'a> {
     name: String,
     chain: Option<Vec<ExpressionStep>>,
     ssa_key: &'a str,
     block: super::ssa::BlockId,
     enclosing_def: Option<u32>,
-    /// True if this ref is inside a return statement.
     is_return: bool,
 }
 
-struct WalkFullState<'a> {
+/// Saved state for an in-progress branch (if/match/switch).
+/// Returned by `enter_branch`, consumed by `exit_branch`.
+pub(crate) struct BranchCtx {
+    pre_block: super::ssa::BlockId,
+    end_blocks: smallvec::SmallVec<[super::ssa::BlockId; 4]>,
+}
+
+/// Saved state for an in-progress loop (for/while).
+/// Returned by `enter_loop`, consumed by `exit_loop`.
+pub(crate) struct LoopCtx {
+    header: super::ssa::BlockId,
+}
+
+struct WalkCtx<'a> {
+    // SSA internals — hidden behind methods below
     ssa: super::ssa::SsaEngine<'a>,
     arena: &'a bumpalo::Bump,
     current_block: super::ssa::BlockId,
+    saved_blocks: Vec<super::ssa::BlockId>,
+
+    // Walk state
     scope_stack: Vec<Arc<str>>,
     enclosing_def_stack: Vec<u32>,
     defs: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     pending_refs: Vec<PendingRef<'a>>,
-    saved_blocks: Vec<super::ssa::BlockId>,
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
     in_return: bool,
 }
 
-impl<'a> WalkFullState<'a> {
+impl<'a> WalkCtx<'a> {
     fn new(arena: &'a bumpalo::Bump) -> Self {
         let mut ssa = super::ssa::SsaEngine::new();
         let entry = ssa.add_block();
@@ -1072,16 +993,158 @@ impl<'a> WalkFullState<'a> {
             ssa,
             arena,
             current_block: entry,
+            saved_blocks: Vec::new(),
             scope_stack: Vec::new(),
             enclosing_def_stack: Vec::new(),
             defs: Vec::new(),
             imports: Vec::new(),
             pending_refs: Vec::new(),
-            saved_blocks: Vec::new(),
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
             in_return: false,
         }
+    }
+
+    // ── Scope lifecycle ─────────────────────────────────────
+
+    /// Create an isolated SSA block for a new scope (class/function).
+    fn enter_scope(&mut self) {
+        let new = self.ssa.add_block();
+        self.ssa.add_predecessor(new, self.current_block);
+        self.ssa.seal_block(new);
+        self.saved_blocks.push(self.current_block);
+        self.current_block = new;
+    }
+
+    /// Restore the parent scope's SSA block.
+    fn exit_scope(&mut self) {
+        if let Some(saved) = self.saved_blocks.pop() {
+            self.current_block = saved;
+        }
+    }
+
+    // ── Variable operations ─────────────────────────────────
+
+    /// Write a variable in the current block.
+    fn bind(&mut self, name: &str, value: super::ssa::SsaValue<'a>) {
+        let key = self.arena.alloc_str(name);
+        self.ssa.write_variable(key, self.current_block, value);
+    }
+
+    /// Write a variable in the parent scope's block.
+    /// Used for instance attrs (self.x) that should be visible to sibling methods.
+    fn bind_in_parent(&mut self, name: &str, value: super::ssa::SsaValue<'a>) {
+        let block = *self.saved_blocks.last().unwrap_or(&self.current_block);
+        let key = self.arena.alloc_str(name);
+        self.ssa.write_variable(key, block, value);
+    }
+
+    /// Read reaching definitions for a key at the current block.
+    /// Used for inline return-type inference during the walk.
+    fn read_reaching(&mut self, key: &str) -> super::ssa::ReachingDefs<'a> {
+        let k = self.arena.alloc_str(key);
+        self.ssa.read_variable_stateless(k, self.current_block)
+    }
+
+    // ── Reference recording ─────────────────────────────────
+
+    /// Allocate a string in the arena (outlives the current node).
+    fn alloc(&self, s: &str) -> &'a str {
+        self.arena.alloc_str(s)
+    }
+
+    /// Record a reference for post-walk resolution.
+    /// Snapshots the current block automatically.
+    fn record_ref(
+        &mut self,
+        name: String,
+        chain: Option<Vec<ExpressionStep>>,
+        ssa_key: &'a str,
+        enclosing_def: Option<u32>,
+        is_return: bool,
+    ) {
+        self.pending_refs.push(PendingRef {
+            name,
+            chain,
+            ssa_key,
+            block: self.current_block,
+            enclosing_def,
+            is_return,
+        });
+    }
+
+    // ── Branch CFG (if/match/switch) ────────────────────────
+
+    /// Start a branch. Returns a context to pass to arm/exit methods.
+    fn enter_branch(&self) -> BranchCtx {
+        BranchCtx {
+            pre_block: self.current_block,
+            end_blocks: smallvec::SmallVec::new(),
+        }
+    }
+
+    /// Enter one arm of a branch.
+    fn enter_arm(&mut self, branch: &BranchCtx) {
+        let arm = self.ssa.add_block();
+        self.ssa.add_predecessor(arm, branch.pre_block);
+        self.ssa.seal_block(arm);
+        self.current_block = arm;
+    }
+
+    /// Finish one arm. Records the current block as an arm endpoint.
+    fn exit_arm(&mut self, branch: &mut BranchCtx) {
+        branch.end_blocks.push(self.current_block);
+    }
+
+    /// Walk a non-arm child in the pre-branch block (e.g. condition already walked).
+    fn in_pre_block(&mut self, branch: &BranchCtx) {
+        self.current_block = branch.pre_block;
+    }
+
+    /// Close a branch: create the join block from all arm endpoints.
+    fn exit_branch(&mut self, branch: BranchCtx, has_catch_all: bool) {
+        let join = self.ssa.add_block();
+        for &end in &branch.end_blocks {
+            self.ssa.add_predecessor(join, end);
+        }
+        if !has_catch_all {
+            self.ssa.add_predecessor(join, branch.pre_block);
+        }
+        self.ssa.seal_block(join);
+        self.current_block = join;
+    }
+
+    // ── Loop CFG (for/while) ────────────────────────────────
+
+    /// Start a loop: create header (unsealed) + body block.
+    fn enter_loop(&mut self) -> LoopCtx {
+        let header = self.ssa.add_block();
+        self.ssa.add_predecessor(header, self.current_block);
+        self.current_block = header;
+
+        let body = self.ssa.add_block();
+        self.ssa.add_predecessor(body, header);
+        self.ssa.seal_block(body);
+        self.current_block = body;
+
+        LoopCtx { header }
+    }
+
+    /// Close a loop: add back edge, seal header, create exit block.
+    fn exit_loop(&mut self, ctx: LoopCtx) {
+        self.ssa.add_predecessor(ctx.header, self.current_block);
+        self.ssa.seal_block(ctx.header);
+
+        let exit = self.ssa.add_block();
+        self.ssa.add_predecessor(exit, ctx.header);
+        self.ssa.seal_block(exit);
+        self.current_block = exit;
+    }
+
+    // ── Finalization ────────────────────────────────────────
+
+    fn seal_remaining(&mut self) {
+        self.ssa.seal_remaining();
     }
 }
 
