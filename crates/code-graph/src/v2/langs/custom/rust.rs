@@ -27,7 +27,7 @@ use ra_ap_project_model::{
     WorkspaceBuildScripts,
 };
 use ra_ap_syntax::{
-    AstNode, Edition, SourceFile, SyntaxNode, SyntaxNodePtr, TextRange,
+    AstNode, Edition, SourceFile, SyntaxKind, SyntaxNode, SyntaxNodePtr, TextRange,
     ast::{
         self, BinaryOp, ElseBranch, HasArgList, HasLoopBody, HasModuleItem, HasName, HasVisibility,
         StructKind, VisibilityKind,
@@ -56,11 +56,12 @@ struct ParsedRustFile {
     edge_candidates: Vec<ResolvedEdgeCandidate>,
 }
 
+#[derive(Clone)]
 struct WorkspaceIndex {
     db: RootDatabase,
-    file_ids_by_relative_path: HashMap<String, FileId>,
-    paths_by_file_id: HashMap<FileId, String>,
-    crate_names_by_file_id: HashMap<FileId, String>,
+    file_ids_by_relative_path: Arc<HashMap<String, FileId>>,
+    paths_by_file_id: Arc<HashMap<FileId, String>>,
+    crate_names_by_file_id: Arc<HashMap<FileId, String>>,
     include_crate_name_in_fqn: bool,
 }
 
@@ -172,6 +173,10 @@ struct LocalFlowIndex {
     targets_by_call_range: HashMap<(u32, u32), Vec<DefinitionSite>>,
 }
 
+struct EdgeCollectionResult {
+    edge_candidates: Vec<ResolvedEdgeCandidate>,
+}
+
 impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
@@ -208,7 +213,6 @@ impl LanguagePipeline for RustPipeline {
                 }
             }
         }
-
         graph.finalize();
         Ok(PipelineOutput::Graph(Box::new(graph)))
     }
@@ -252,15 +256,22 @@ fn parse_rust_files_with_workspaces(
         }
 
         let workspace = &workspaces.workspaces[workspace_id];
-        let sema = Semantics::new(&workspace.db);
-        attach_db(&workspace.db, || {
-            for file in workspace_files {
-                match parse_workspace_file(file, root_path, workspace, &sema) {
-                    Ok(file) => parsed.push(file),
-                    Err(err) => errors.push(err),
-                }
+        let workspace_tasks = workspace_files
+            .iter()
+            .map(|_| workspace.clone())
+            .collect::<Vec<_>>();
+        let workspace_results = workspace_tasks
+            .into_par_iter()
+            .zip(workspace_files.par_iter())
+            .map(|(workspace, file)| parse_workspace_file(file, root_path, &workspace))
+            .collect::<Vec<_>>();
+
+        for result in workspace_results {
+            match result {
+                Ok(file) => parsed.push(file),
+                Err(err) => errors.push(err),
             }
-        });
+        }
     }
 
     let standalone_results = standalone
@@ -312,7 +323,6 @@ fn parse_workspace_file(
     file_path: &str,
     root_path: &str,
     workspace: &WorkspaceIndex,
-    sema: &Semantics<'_, RootDatabase>,
 ) -> Result<ParsedRustFile, PipelineError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let relative_path = relative_path(root_path, &abs_path);
@@ -321,29 +331,32 @@ fn parse_workspace_file(
         return parse_rust_file_standalone(file_path, root_path);
     };
 
-    let source_file = sema.parse_guess_edition(file_id);
-    let source = source_file.syntax().text().to_string();
-    let file_module_parts = file_module_parts_from_workspace(sema, workspace, file_id)
-        .unwrap_or_else(|| fallback_file_module_parts(&relative_path));
-    let crate_root_parts = workspace.crate_root_parts_for_file(file_id);
-    let edge_candidates = collect_resolved_edge_candidates(
-        &source_file,
-        sema,
-        &workspace.db,
-        &workspace.paths_by_file_id,
-        &relative_path,
-    );
-
-    Ok(build_parsed_rust_file(
-        relative_path,
-        source,
-        file_module_parts,
-        crate_root_parts,
-        edge_candidates,
-        source_file,
-        Some(sema),
-        Some(workspace),
-    ))
+    attach_db(&workspace.db, || {
+        let sema = Semantics::new(&workspace.db);
+        let source_file = sema.parse_guess_edition(file_id);
+        let source = source_file.syntax().text().to_string();
+        let file_module_parts = file_module_parts_from_workspace(&sema, workspace, file_id)
+            .unwrap_or_else(|| fallback_file_module_parts(&relative_path));
+        let crate_root_parts = workspace.crate_root_parts_for_file(file_id);
+        let edge_result = collect_resolved_edge_candidates(
+            &source_file,
+            &sema,
+            &workspace.db,
+            &workspace.paths_by_file_id,
+            &relative_path,
+        );
+        let parsed = build_parsed_rust_file(
+            relative_path.clone(),
+            source,
+            file_module_parts,
+            crate_root_parts,
+            edge_result.edge_candidates,
+            source_file,
+            Some(&sema),
+            Some(workspace),
+        );
+        Ok(parsed)
+    })
 }
 
 fn parse_rust_file_standalone(
@@ -358,11 +371,11 @@ fn parse_rust_file_standalone(
     })?;
     let file_module_parts = fallback_file_module_parts(&relative_path);
     let workspace = standalone_workspace(&relative_path, source.clone());
-    let (source_file, edge_candidates) =
+    let (source_file, edge_result) =
         if let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) {
             let sema = Semantics::new(&workspace.db);
             let source_file = sema.parse_guess_edition(file_id);
-            let edge_candidates = attach_db(&workspace.db, || {
+            let edge_result = attach_db(&workspace.db, || {
                 collect_resolved_edge_candidates(
                     &source_file,
                     &sema,
@@ -371,24 +384,27 @@ fn parse_rust_file_standalone(
                     &relative_path,
                 )
             });
-            (source_file, edge_candidates)
+            (source_file, edge_result)
         } else {
             (
                 SourceFile::parse(&source, Edition::CURRENT).tree(),
-                Vec::new(),
+                EdgeCollectionResult {
+                    edge_candidates: Vec::new(),
+                },
             )
         };
 
-    Ok(build_parsed_rust_file(
-        relative_path,
+    let parsed = build_parsed_rust_file(
+        relative_path.clone(),
         source,
         file_module_parts,
         Vec::new(),
-        edge_candidates,
+        edge_result.edge_candidates,
         source_file,
         None,
         None,
-    ))
+    );
+    Ok(parsed)
 }
 
 #[expect(
@@ -1322,9 +1338,9 @@ fn standalone_workspace(relative_path: &str, source: String) -> WorkspaceIndex {
 
     WorkspaceIndex {
         db,
-        file_ids_by_relative_path,
-        paths_by_file_id,
-        crate_names_by_file_id: HashMap::new(),
+        file_ids_by_relative_path: Arc::new(file_ids_by_relative_path),
+        paths_by_file_id: Arc::new(paths_by_file_id),
+        crate_names_by_file_id: Arc::new(HashMap::new()),
         include_crate_name_in_fqn: false,
     }
 }
@@ -2028,6 +2044,9 @@ fn build_local_flow_index(
         let Some(body) = function.body() else {
             continue;
         };
+        if !body_needs_local_flow_index(&body) {
+            continue;
+        }
         let arena = Bump::new();
         let mut state = LocalFlowState::new(sema, db, paths_by_file_id, &arena);
         let _ = state.walk_block_value(&body, &mut index);
@@ -2035,6 +2054,60 @@ fn build_local_flow_index(
 
     index.dedup();
     index
+}
+
+fn body_needs_local_flow_index(body: &ast::BlockExpr) -> bool {
+    let mut saw_call_candidate = false;
+    let mut saw_aliasing_shape = false;
+
+    for node in body.syntax().descendants() {
+        let kind = node.kind();
+
+        if !saw_call_candidate && let Some(call_expr) = ast::CallExpr::cast(node.clone()) {
+            saw_call_candidate = call_expr
+                .expr()
+                .is_some_and(|expr| expr_can_use_local_flow(&expr));
+        }
+
+        if !saw_aliasing_shape {
+            saw_aliasing_shape = let_stmt_with_initializer(&node)
+                || assignment_expr(&node)
+                || ast::FieldExpr::can_cast(kind)
+                || ast::RecordExpr::can_cast(kind)
+                || ast::TupleExpr::can_cast(kind)
+                || ast::RecordPat::can_cast(kind)
+                || ast::IfExpr::can_cast(kind)
+                || ast::MatchExpr::can_cast(kind)
+                || ast::WhileExpr::can_cast(kind)
+                || ast::LoopExpr::can_cast(kind)
+                || ast::ForExpr::can_cast(kind);
+        }
+
+        if saw_call_candidate && saw_aliasing_shape {
+            return true;
+        }
+    }
+
+    false
+}
+
+fn expr_can_use_local_flow(expr: &ast::Expr) -> bool {
+    match expr {
+        ast::Expr::PathExpr(_) | ast::Expr::FieldExpr(_) => true,
+        ast::Expr::ParenExpr(paren_expr) => paren_expr
+            .expr()
+            .is_some_and(|inner| expr_can_use_local_flow(&inner)),
+        _ => false,
+    }
+}
+
+fn let_stmt_with_initializer(node: &SyntaxNode) -> bool {
+    ast::LetStmt::cast(node.clone()).is_some_and(|let_stmt| let_stmt.initializer().is_some())
+}
+
+fn assignment_expr(node: &SyntaxNode) -> bool {
+    ast::BinExpr::cast(node.clone())
+        .is_some_and(|bin_expr| matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. })))
 }
 
 struct ResolvedEdgeCollector<'a> {
@@ -2045,34 +2118,16 @@ struct ResolvedEdgeCollector<'a> {
     local_flow: LocalFlowIndex,
     seen_edges: HashSet<ResolvedEdgeCandidate>,
     seen_expanded_nodes: HashSet<SyntaxNodePtr>,
+    seen_expanded_sites: HashSet<(u32, u32, SyntaxKind)>,
     edges: Vec<ResolvedEdgeCandidate>,
 }
 
 impl<'a> ResolvedEdgeCollector<'a> {
-    fn new(
-        source_file: &ast::SourceFile,
-        sema: &'a Semantics<'a, RootDatabase>,
-        db: &'a RootDatabase,
-        paths_by_file_id: &'a HashMap<FileId, String>,
-        relative_path: &'a str,
-    ) -> Self {
-        Self {
-            relative_path,
-            sema,
-            db,
-            paths_by_file_id,
-            local_flow: build_local_flow_index(source_file, sema, db, paths_by_file_id),
-            seen_edges: HashSet::new(),
-            seen_expanded_nodes: HashSet::new(),
-            edges: Vec::new(),
-        }
-    }
-
-    fn collect(mut self, source_file: &ast::SourceFile) -> Vec<ResolvedEdgeCandidate> {
+    fn collect(mut self, source_file: &ast::SourceFile) -> Self {
         for node in source_file.syntax().descendants() {
             self.collect_node(node, None);
         }
-        self.edges
+        self
     }
 
     fn original_range_for_node(&self, node: &SyntaxNode) -> Option<TextRange> {
@@ -2260,15 +2315,28 @@ impl<'a> ResolvedEdgeCollector<'a> {
             target,
         );
 
-        if let Some(expanded) = self.sema.expand_macro_call(&macro_call) {
+        let expanded = self.sema.expand_macro_call(&macro_call);
+        if let Some(expanded) = expanded {
             for node in expanded.value.descendants() {
+                if !is_edge_relevant_node(&node) {
+                    continue;
+                }
                 let node_ptr = SyntaxNodePtr::new(&node);
                 if !self.seen_expanded_nodes.insert(node_ptr) {
                     continue;
                 }
-                let Some(original_range) = self.original_range_for_node(&node) else {
+                let original_range = self.original_range_for_node(&node);
+                let Some(original_range) = original_range else {
                     continue;
                 };
+                let site_key = (
+                    u32::from(original_range.start()),
+                    u32::from(original_range.end()),
+                    node.kind(),
+                );
+                if !self.seen_expanded_sites.insert(site_key) {
+                    continue;
+                }
                 self.collect_node(node, Some(original_range));
             }
         }
@@ -2300,15 +2368,43 @@ impl<'a> ResolvedEdgeCollector<'a> {
     }
 }
 
+fn is_edge_relevant_node(node: &SyntaxNode) -> bool {
+    let kind = node.kind();
+    ast::MethodCallExpr::can_cast(kind)
+        || ast::CallExpr::can_cast(kind)
+        || ast::PrefixExpr::can_cast(kind)
+        || ast::IndexExpr::can_cast(kind)
+        || ast::BinExpr::cast(node.clone()).is_some_and(|bin_expr| {
+            !matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. }))
+        })
+        || ast::TryExpr::can_cast(kind)
+        || ast::AwaitExpr::can_cast(kind)
+        || ast::MacroCall::can_cast(kind)
+}
+
 fn collect_resolved_edge_candidates(
     source_file: &ast::SourceFile,
     sema: &Semantics<'_, RootDatabase>,
     db: &RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
     relative_path: &str,
-) -> Vec<ResolvedEdgeCandidate> {
-    ResolvedEdgeCollector::new(source_file, sema, db, paths_by_file_id, relative_path)
-        .collect(source_file)
+) -> EdgeCollectionResult {
+    let local_flow = build_local_flow_index(source_file, sema, db, paths_by_file_id);
+    let edge_candidates = ResolvedEdgeCollector {
+        relative_path,
+        sema,
+        db,
+        paths_by_file_id,
+        local_flow,
+        seen_edges: HashSet::new(),
+        seen_expanded_nodes: HashSet::new(),
+        seen_expanded_sites: HashSet::new(),
+        edges: Vec::new(),
+    }
+    .collect(source_file);
+    EdgeCollectionResult {
+        edge_candidates: edge_candidates.edges,
+    }
 }
 
 fn method_call_to_definition_fallback(
@@ -2619,9 +2715,9 @@ impl WorkspaceIndex {
 
         Ok(Self {
             db,
-            file_ids_by_relative_path,
-            paths_by_file_id,
-            crate_names_by_file_id,
+            file_ids_by_relative_path: Arc::new(file_ids_by_relative_path),
+            paths_by_file_id: Arc::new(paths_by_file_id),
+            crate_names_by_file_id: Arc::new(crate_names_by_file_id),
             include_crate_name_in_fqn: false,
         })
     }
