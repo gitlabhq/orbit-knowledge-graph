@@ -129,9 +129,9 @@ pub(super) async fn run_query_with_security(
 pub(super) fn allow_all() -> MockRedactionService {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1, 2, 3, 4, 5, 6]);
-    svc.allow("group", &[100, 101, 102, 200, 300]);
-    svc.allow("project", &[1000, 1001, 1002, 1003, 1004]);
-    svc.allow("merge_request", &[2000, 2001, 2002, 2003]);
+    svc.allow("group", &[100, 101, 102, 200, 300, 900]);
+    svc.allow("project", &[1000, 1001, 1002, 1003, 1004, 9000]);
+    svc.allow("merge_request", &[2000, 2001, 2002, 2003, 9100]);
     svc.allow("note", &[3000, 3001, 3002, 3003]);
     svc.allow("work_item", &[4000, 4001, 4002, 4003]);
     svc.allow("milestone", &[6000, 6001]);
