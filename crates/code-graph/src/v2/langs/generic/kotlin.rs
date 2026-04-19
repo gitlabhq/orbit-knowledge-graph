@@ -24,14 +24,26 @@ pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
+fn extract_user_type(node: &N<'_>) -> Option<String> {
+    // Look for user_type in direct children first, then in constructor_invocation
+    if let Some(ut) = node.children().find(|c| c.kind() == "user_type") {
+        return Some(ut.text().to_string());
+    }
+    if let Some(ci) = node
+        .children()
+        .find(|c| c.kind() == "constructor_invocation")
+    {
+        if let Some(ut) = ci.children().find(|c| c.kind() == "user_type") {
+            return Some(ut.text().to_string());
+        }
+    }
+    None
+}
+
 fn extract_delegation_specifier(spec: &N<'_>, result: &mut Vec<String>) {
     let sk = spec.kind();
     if sk == "delegation_specifier" || sk == "constructor_invocation" {
-        let text = spec
-            .children()
-            .find(|c| c.kind() == "user_type")
-            .map(|n| n.text().to_string())
-            .unwrap_or_else(|| spec.text().to_string());
+        let text = extract_user_type(spec).unwrap_or_else(|| spec.text().to_string());
         if !text.is_empty() && text != "," {
             result.push(text);
         }

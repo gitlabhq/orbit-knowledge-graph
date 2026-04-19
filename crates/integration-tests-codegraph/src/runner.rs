@@ -126,10 +126,26 @@ pub async fn run_yaml_suite(yaml: &str) {
     code_graph::v2::trace::set_thread_trace(trace_any);
     let _trace_guard = TraceGuard;
 
+    // Single-thread rayon when tracing so trace output isn't interleaved
+    let pool = if trace_any {
+        Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
+
     let datasets = match suite.pipeline.as_deref() {
         None | Some("generic") => {
             let pipeline = Pipeline::new(PipelineConfig::default());
-            let result = pipeline.run(tmp.path());
+            let result = if let Some(pool) = &pool {
+                pool.install(|| pipeline.run(tmp.path()))
+            } else {
+                pipeline.run(tmp.path())
+            };
             assert!(
                 result.errors.is_empty(),
                 "Pipeline errors: {:?}",
@@ -154,9 +170,16 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let output = dispatch_by_tag(tag, &files, &root)
-                .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
-                .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
+            let run = || {
+                dispatch_by_tag(tag, &files, &root)
+                    .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
+                    .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"))
+            };
+            let output = if let Some(pool) = &pool {
+                pool.install(run)
+            } else {
+                run()
+            };
             output_to_datasets(output)
         }
     };

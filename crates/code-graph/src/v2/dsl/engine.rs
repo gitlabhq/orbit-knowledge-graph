@@ -950,7 +950,20 @@ impl LanguageSpec {
                     && let Some(meta) = &state.defs[def_index as usize].metadata
                     && let Some(super_type) = meta.super_types.first()
                 {
-                    let st = state.arena.alloc_str(super_type);
+                    // Resolve super type through imports, same as type annotations
+                    let resolved = if let Some(fqn) = state.import_map.get(super_type.as_str()) {
+                        fqn.clone()
+                    } else if super_type.contains(sep)
+                        && let Some((first, rest)) = super_type.split_once(sep)
+                        && let Some(fqn) = state.import_map.get(first)
+                    {
+                        format!("{fqn}{sep}{rest}")
+                    } else if let Some(prefix) = &module_prefix {
+                        format!("{prefix}{sep}{super_type}")
+                    } else {
+                        super_type.clone()
+                    };
+                    let st = state.arena.alloc_str(&resolved);
                     let name = state.arena.alloc_str(super_name);
                     state.ssa.write_variable(
                         name,

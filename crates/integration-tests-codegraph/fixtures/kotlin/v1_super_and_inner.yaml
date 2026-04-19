@@ -5,7 +5,7 @@ tests:
   # ── K2: test_kotlin_inheritance_and_super_calls ──
 
   - name: "Foo.foo -> Bar.bar (super call)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.foo'
