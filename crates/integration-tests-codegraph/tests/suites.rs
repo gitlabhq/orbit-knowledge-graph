@@ -145,5 +145,45 @@ yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 // Ruby v1 parity (v2 pipeline — all skipped until Ruby resolution is implemented)
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 
+// Rust
+yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");
+yaml_test!(rust_interfile_resolution, "rust/interfile_resolution.yaml");
+yaml_test!(
+    rust_definitions_and_imports,
+    "rust/definitions_and_imports.yaml"
+);
+yaml_test!(
+    rust_trait_and_callable_resolution,
+    "rust/trait_and_callable_resolution.yaml"
+);
+yaml_test!(
+    rust_module_keywords_resolution,
+    "rust/module_keywords_resolution.yaml"
+);
+yaml_test!(
+    rust_workspace_multi_crate_resolution,
+    "rust/workspace_multi_crate_resolution.yaml"
+);
+yaml_test!(
+    rust_workspace_globs_and_inheritance,
+    "rust/workspace_globs_and_inheritance.yaml"
+);
+yaml_test!(
+    rust_workspace_members_outside_root,
+    "rust/workspace_members_outside_root.yaml"
+);
+yaml_test!(
+    rust_nested_manifests_resolution,
+    "rust/nested_manifests_resolution.yaml"
+);
+yaml_test!(
+    rust_reexports_and_self_resolution,
+    "rust/reexports_and_self_resolution.yaml"
+);
+yaml_test!(rust_structural_entities, "rust/structural_entities.yaml");
+yaml_test!(rust_precision_resolution, "rust/precision_resolution.yaml");
+yaml_test!(rust_local_items, "rust/local_items.yaml");
+yaml_test!(rust_mod_rs_resolution, "rust/mod_rs_resolution.yaml");
+
 // Examples (custom pipelines)
 yaml_test!(ruby_custom_pipeline, "examples/ruby_custom_pipeline.yaml");

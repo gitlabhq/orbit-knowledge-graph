@@ -7,6 +7,7 @@ use crate::v2::config::Language;
 use crate::v2::linker::NoRules;
 
 use crate::v2::langs::custom::ruby::RubyPipeline;
+use crate::v2::langs::custom::rust::RustPipeline;
 use crate::v2::langs::generic::csharp::CSharpDsl;
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
@@ -88,5 +89,7 @@ register_v2_pipelines! {
     CSharp  => [GenericPipeline<CSharpDsl, NoRules<CSharpDsl>>],
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
+    Rust    => [RustPipeline],
+    Tag("rust_ra") => [RustPipeline],
     Tag("ruby_prism") => [RubyPipeline],
 }

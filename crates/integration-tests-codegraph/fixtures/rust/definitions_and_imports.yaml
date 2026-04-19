@@ -1,0 +1,174 @@
+name: "Rust: definitions and imports"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_inventory_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/generated.rs
+    content: |
+      pub struct Generated;
+
+  - path: src/lib.rs
+    content: |
+      mod generated;
+
+      use crate::generated::Generated;
+      use crate::inner::{helper as inner_helper, self as inner_mod};
+      use crate::inner::nested::*;
+      pub use crate::inner::{Worker, make_worker};
+      extern crate core as rust_core;
+
+      pub const ROOT_CONST: usize = 1;
+      pub static ROOT_STATIC: &str = "hi";
+      pub type RootAlias = inner::Worker;
+
+      macro_rules! local_macro {
+          () => {
+              inner_helper();
+          };
+      }
+
+      pub mod inner {
+          pub struct Worker {
+              pub id: usize,
+          }
+
+          pub enum Status {
+              Ready,
+              Busy,
+          }
+
+          pub union Bits {
+              pub raw: u32,
+          }
+
+          pub trait Runner {
+              fn run(&self);
+              fn build() -> Self
+              where
+                  Self: Sized;
+          }
+
+          pub fn helper() {}
+
+          pub fn make_worker() -> Worker {
+              Worker { id: ROOT_CONST }
+          }
+
+          pub mod nested {
+              pub fn ping() {}
+          }
+      }
+
+      pub fn use_everything() {
+          inner_helper();
+          let _generated = Generated;
+          let _ = inner_mod::nested::ping as fn();
+          let _ = rust_core::mem::size_of::<usize>();
+          let _ = make_worker();
+          local_macro!();
+      }
+
+tests:
+  - name: "root inventory definitions are captured"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND (
+          d.name = 'ROOT_CONST'
+          OR d.name = 'ROOT_STATIC'
+          OR d.name = 'RootAlias'
+          OR d.name = 'local_macro'
+          OR d.name = 'inner'
+          OR d.name = 'use_everything'
+        )
+      RETURN d.name AS name
+    assert:
+      - { column_values: { field: name, values: ['ROOT_CONST', 'ROOT_STATIC', 'RootAlias', 'local_macro', 'inner', 'use_everything'] } }
+
+  - name: "worker struct has semantic FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs' AND d.name = 'Worker'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'inner::Worker', type: 'Struct' } }
+
+  - name: "record fields are retained"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs' AND d.name = 'id'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'inner::Worker::id', type: 'Field' } }
+
+  - name: "enum variants are retained"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs' AND d.name = 'Ready'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'inner::Status::Ready', type: 'Variant' } }
+
+  - name: "trait and union definitions are retained"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs' AND (d.name = 'Runner' OR d.name = 'Bits')
+      RETURN d.name AS name, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { name: 'Runner', type: 'Trait' } }
+      - { row: { name: 'Bits', type: 'Union' } }
+
+  - name: "mod declarations become imports"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ModDeclaration'
+      RETURN i.import_type AS type, i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { type: 'ModDeclaration', path: 'generated' } }
+
+  - name: "extern crate alias becomes import metadata"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
+      RETURN i.path AS path, i.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'core', alias: 'rust_core' } }
+
+  - name: "grouped imports preserve aliases and names"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs'
+        AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod' OR i.name = 'Worker')
+      RETURN i.import_type AS type, i.path AS path, i.name AS name
+    assert:
+      - { row_count: 3 }
+      - { row: { type: 'UseGroup', path: 'crate::inner::helper', name: 'helper' } }
+      - { row: { type: 'UseGroup', path: 'crate::inner', name: 'inner' } }
+      - { row: { type: 'PubUseGroup', path: 'crate::inner::Worker', name: 'Worker' } }
+
+  - name: "group import aliases are retained"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND (i.alias = 'inner_helper' OR i.alias = 'inner_mod')
+      RETURN i.alias AS alias
+    assert:
+      - { column_values: { field: alias, values: ['inner_helper', 'inner_mod'] } }
+
+  - name: "wildcard imports retain their source path"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'GlobUse'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'crate::inner::nested' } }
