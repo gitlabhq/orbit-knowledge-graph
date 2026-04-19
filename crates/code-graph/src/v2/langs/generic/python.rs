@@ -325,7 +325,12 @@ fn resolve_python_relative_import(raw_path: &str, module_scope: &str, sep: &str)
     }
     let base = &parts[..parts.len() - dots];
     if suffix.is_empty() {
-        Some(base.join(sep))
+        let joined = base.join(sep);
+        if joined.is_empty() {
+            None
+        } else {
+            Some(joined)
+        }
     } else {
         let suffix_clean = suffix.trim_start_matches('.');
         if base.is_empty() {

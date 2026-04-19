@@ -222,7 +222,7 @@ impl Extract {
     pub fn apply_with<D: Doc>(
         &self,
         node: &Node<'_, D>,
-        transform: impl FnOnce(String, &Node<'_, D>) -> String,
+        transform: impl Fn(String, &Node<'_, D>) -> String,
     ) -> Option<String> {
         let target = self.navigate(node)?;
         let raw = emit(&self.emit, &target)?;

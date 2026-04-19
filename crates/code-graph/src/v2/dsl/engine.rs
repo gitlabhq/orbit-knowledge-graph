@@ -833,7 +833,9 @@ impl LanguageSpec {
                     if let Some(parent) = node.parent() {
                         for sibling in parent.children() {
                             let sk = sibling.kind();
-                            if self.hooks.adopt_sibling_refs.contains(&sk.as_ref()) {
+                            if sibling.range() != node.range()
+                                && self.hooks.adopt_sibling_refs.contains(&sk.as_ref())
+                            {
                                 if let Some(name) =
                                     treesitter_visit::extract::default_name().apply(&sibling)
                                 {

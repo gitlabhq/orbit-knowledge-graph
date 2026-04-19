@@ -141,7 +141,15 @@ fn go_embedded_types(node: &N<'_>) -> Vec<String> {
     };
     fdl.children_matching(Kind("field_declaration"))
         .filter(|fd| fd.field("name").is_none())
-        .filter_map(|fd| fd.field("type").map(|t| t.text().to_string()))
+        .filter_map(|fd| {
+            fd.field("type").map(|t| {
+                let s = t.text().to_string();
+                // Strip pointer prefix: `*Bar` → `Bar`
+                s.strip_prefix('*')
+                    .map(|stripped| stripped.to_string())
+                    .unwrap_or(s)
+            })
+        })
         .collect()
 }
 
