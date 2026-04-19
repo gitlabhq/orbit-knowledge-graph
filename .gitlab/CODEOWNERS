@@ -2,11 +2,11 @@
 * @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
 
 # Auth and security
-/crates/gkg-server/src/auth/ @michaelusa
-/crates/gkg-server/src/redaction/ @michaelusa
-/crates/gkg-server/src/rate_limit.rs @michaelusa
-/crates/gkg-server/src/tls.rs @michaelusa
-/docs/design-documents/security.md @michaelusa
+/crates/gkg-server/src/auth/ @michaelangeloio @bohdanpk @dgruzd
+/crates/gkg-server/src/redaction/ @michaelangeloio @bohdanpk @dgruzd
+/crates/gkg-server/src/rate_limit.rs @michaelangeloio @bohdanpk @dgruzd
+/crates/gkg-server/src/tls.rs @michaelangeloio @bohdanpk @dgruzd
+/docs/design-documents/security.md @michaelangeloio @bohdanpk @dgruzd
 
 # Query engine
 /crates/query-engine/ @michaelusa
