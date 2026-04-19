@@ -10,15 +10,6 @@ use super::config::make_graph_config;
 use super::datasets::{LanceDatasets, to_lance_datasets};
 use super::validator::run_suite;
 
-/// Resets trace flag on drop, including during unwind.
-struct TraceGuard;
-
-impl Drop for TraceGuard {
-    fn drop(&mut self) {
-        code_graph::v2::trace::set_thread_trace(false);
-    }
-}
-
 /// Convert an arrow 58 RecordBatch to arrow 56 via IPC roundtrip.
 ///
 /// Arrow IPC format is stable across versions — serialize with arrow 58,
@@ -120,11 +111,7 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let root = tmp.path().to_string_lossy().to_string();
 
-    // Enable tracing if requested by the suite. Drop guard ensures cleanup
-    // even if the pipeline panics, preventing leaked trace state across tests.
     let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
-    code_graph::v2::trace::set_thread_trace(trace_any);
-    let _trace_guard = TraceGuard;
 
     // Single-thread rayon when tracing so trace output isn't interleaved
     let pool = if trace_any {
@@ -140,7 +127,9 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let datasets = match suite.pipeline.as_deref() {
         None | Some("generic") => {
-            let pipeline = Pipeline::new(PipelineConfig::default());
+            let mut config = PipelineConfig::default();
+            config.trace = trace_any;
+            let pipeline = Pipeline::new(config);
             let result = if let Some(pool) = &pool {
                 pool.install(|| pipeline.run(tmp.path()))
             } else {
@@ -183,10 +172,6 @@ pub async fn run_yaml_suite(yaml: &str) {
             output_to_datasets(output)
         }
     };
-
-    // Guard handles reset (including on panic), but also reset explicitly
-    // here so the flag is off before running assertions.
-    code_graph::v2::trace::set_thread_trace(false);
 
     let config = make_graph_config().expect("Failed to build graph config");
 

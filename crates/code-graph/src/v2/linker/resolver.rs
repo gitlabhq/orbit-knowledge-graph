@@ -37,7 +37,35 @@ impl<'a> FileResolver<'a> {
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
     ) -> Self {
-        let ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
+        Self::with_trace(
+            graph,
+            file_node,
+            def_nodes,
+            import_nodes,
+            rules,
+            settings,
+            false,
+        )
+    }
+
+    pub fn with_trace(
+        graph: &'a CodeGraph,
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
+        rules: &'a ResolutionRules,
+        settings: &'a ResolveSettings,
+        trace: bool,
+    ) -> Self {
+        let ctx = ResolveCtx::new(
+            graph,
+            file_node,
+            def_nodes,
+            import_nodes,
+            rules,
+            settings,
+            trace,
+        );
         let deadline = settings
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
@@ -141,6 +169,7 @@ impl<'a> ResolveCtx<'a> {
         import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
+        trace: bool,
     ) -> Self {
         let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
         Self {
@@ -155,7 +184,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
-            tracer: crate::v2::trace::thread_tracer(),
+            tracer: Tracer::new(trace),
         }
     }
 

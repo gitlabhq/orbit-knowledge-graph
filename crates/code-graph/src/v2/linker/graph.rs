@@ -256,12 +256,16 @@ impl CodeGraph {
     }
 
     pub fn finalize(&mut self) {
-        self.link_extends();
-        self.build_ancestor_table();
+        self.finalize_traced(false);
     }
 
-    fn build_ancestor_table(&mut self) {
-        let tracer = crate::v2::trace::thread_tracer();
+    pub fn finalize_traced(&mut self, trace: bool) {
+        self.link_extends(trace);
+        self.build_ancestor_table(trace);
+    }
+
+    fn build_ancestor_table(&mut self, trace: bool) {
+        let tracer = crate::v2::trace::Tracer::new(trace);
         let extends_only = EdgeFiltered(
             &self.graph,
             |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
@@ -573,8 +577,8 @@ impl CodeGraph {
 
     // ── Internal ────────────────────────────────────────────
 
-    fn link_extends(&mut self) {
-        let tracer = crate::v2::trace::thread_tracer();
+    fn link_extends(&mut self, trace: bool) {
+        let tracer = crate::v2::trace::Tracer::new(trace);
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {

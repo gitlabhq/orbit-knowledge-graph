@@ -65,12 +65,23 @@ pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        Self::process_files_traced(files, root_path, false)
+    }
+
+    fn process_files_traced(
+        files: &[FileInput],
+        root_path: &str,
+        trace: bool,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
+    /// When true, emit detailed engine/resolver trace events to stderr.
+    /// Propagated through the pipeline — no global state, safe for parallel tests.
+    pub trace: bool,
 }
 
 impl Default for PipelineConfig {
@@ -78,6 +89,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
+            trace: false,
         }
     }
 }
@@ -142,6 +154,13 @@ impl Pipeline {
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
 
+        // When trace is enabled via PipelineConfig, set the global flag so
+        // that registry-dispatched pipelines also trace. Safe because the test
+        // runner uses a single-threaded rayon pool when tracing.
+        if self.config.trace {
+            crate::v2::trace::set_thread_trace(true);
+        }
+
         for (language, files) in &files_by_language {
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
@@ -185,6 +204,10 @@ impl Pipeline {
         let imports_count = all_graphs.iter().map(|g| g.imports_iter().count()).sum();
         let references_count = all_graphs.iter().map(|g| g.edges().count()).sum();
         let edges_count = all_graphs.iter().map(|g| g.edge_count()).sum();
+
+        if self.config.trace {
+            crate::v2::trace::set_thread_trace(false);
+        }
 
         PipelineResult {
             graphs: all_graphs,
@@ -261,9 +284,10 @@ where
     P: crate::v2::dsl::types::DslLanguage + 'static,
     R: crate::v2::linker::HasRules + Send + Sync,
 {
-    fn process_files(
+    fn process_files_traced(
         files: &[FileInput],
         root_path: &str,
+        trace: bool,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
@@ -361,7 +385,7 @@ where
         }
 
         let mut graph = graph.into_inner().unwrap();
-        graph.finalize();
+        graph.finalize_traced(trace);
 
         // ── Phase 2: parallel parse_full + resolve (callback) ──
         let t2 = std::time::Instant::now();
@@ -402,14 +426,15 @@ where
                     }
                 };
 
-                let tracer = crate::v2::trace::thread_tracer();
-                let mut resolver = crate::v2::linker::FileResolver::new(
+                let tracer = crate::v2::trace::Tracer::new(trace);
+                let mut resolver = crate::v2::linker::FileResolver::with_trace(
                     &graph,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
                     &rules,
                     &rules.settings,
+                    trace,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
