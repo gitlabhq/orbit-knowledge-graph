@@ -17,7 +17,7 @@ use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
-use super::state::{GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
+use super::state::{DefinitionRangeIndex, GraphDef, GraphImport, GraphIndexes, StrId, StringPool};
 
 // ── Node + Edge types ───────────────────────────────────────────
 
@@ -174,16 +174,12 @@ impl CodeGraph {
         // Convert canonical defs → pool-backed GraphDefs.
         let def_base = self.defs.len() as u32;
         let mut def_nodes = Vec::with_capacity(definitions.len());
+        let mut definition_ranges = Vec::with_capacity(definitions.len());
 
         let graph_defs: Vec<GraphDef> = definitions
             .iter()
             .map(|d| GraphDef::from_canonical(d, &mut self.strings))
             .collect();
-        let file_range_index = self
-            .indexes
-            .definition_ranges
-            .entry(relative_path.clone())
-            .or_default();
 
         for (i, gdef) in graph_defs.iter().enumerate() {
             let id = DefId(def_base + i as u32);
@@ -202,7 +198,7 @@ impl CodeGraph {
                 let parent = &fqn_str[..sep_pos];
                 self.indexes.nested.insert(parent, name_str, def_node);
             }
-            file_range_index.insert(gdef.range, def_node);
+            definition_ranges.push((gdef.range, def_node));
 
             self.graph.add_edge(
                 file_node,
@@ -210,6 +206,11 @@ impl CodeGraph {
                 GraphEdge::structural(EdgeKind::Defines, NodeKind::File, NodeKind::Definition),
             );
         }
+
+        self.indexes.definition_ranges.insert(
+            relative_path.clone(),
+            DefinitionRangeIndex::from_ranges(definition_ranges),
+        );
 
         // Containment edges.
         for (i, gdef) in graph_defs.iter().enumerate() {

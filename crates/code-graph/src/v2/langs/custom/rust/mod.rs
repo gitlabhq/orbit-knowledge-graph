@@ -1,0 +1,930 @@
+use std::collections::{BTreeMap, HashMap, HashSet, VecDeque};
+use std::path::{Path, PathBuf};
+
+use anyhow::{Context, Result, anyhow, bail};
+use bumpalo::Bump;
+use cargo_metadata::Metadata;
+use cargo_platform::Platform;
+use cargo_util_schemas::manifest as cargo_manifest;
+use either::Either;
+use globset::{Glob, GlobMatcher};
+use ignore::WalkBuilder;
+use ra_ap_cfg::CfgAtom;
+use ra_ap_hir::{
+    CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
+    attach_db,
+};
+use ra_ap_ide::{CrateGraphBuilder, FileId, RootDatabase, SourceRoot};
+use ra_ap_ide_db::base_db::{
+    CrateOrigin, CrateWorkspaceData, Env, FileSet, VfsPath,
+    target::{Arch, TargetData},
+};
+use ra_ap_intern::Symbol;
+use ra_ap_load_cargo::{LoadCargoConfig, ProcMacroServerChoice, load_workspace};
+use ra_ap_paths::{AbsPathBuf, Utf8PathBuf};
+use ra_ap_project_model::{
+    CargoWorkspace, CfgOverrides, ManifestPath, ProjectWorkspace, ProjectWorkspaceKind, Sysroot,
+    WorkspaceBuildScripts,
+};
+use ra_ap_syntax::{
+    AstNode, Edition, SyntaxKind, SyntaxNode, SyntaxNodePtr, TextRange,
+    ast::{
+        self, BinaryOp, ElseBranch, HasArgList, HasLoopBody, HasModuleItem, HasName, HasVisibility,
+        StructKind, VisibilityKind,
+    },
+};
+use rayon::prelude::*;
+use tempfile::TempDir;
+use triomphe::Arc;
+
+use crate::v2::config::Language;
+use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
+use crate::v2::linker::CodeGraph;
+use crate::v2::pipeline::{
+    FileInput, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
+};
+use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
+
+mod local_flow;
+mod manifest;
+#[path = "ast.rs"]
+mod rust_ast;
+mod workspace;
+
+use self::local_flow::build_local_flow_index;
+use self::rust_ast::{
+    build_parsed_rust_file, fallback_file_module_parts, file_module_parts_from_workspace,
+};
+use self::workspace::{
+    WorkspaceCatalog, WorkspaceIndex, canonical_root_path, relative_path, standalone_workspace,
+    to_absolute_path,
+};
+
+pub struct RustPipeline;
+
+#[derive(Clone)]
+struct ParsedRustFile {
+    relative_path: String,
+    file_size: u64,
+    definitions: Vec<CanonicalDefinition>,
+    imports: Vec<CanonicalImport>,
+    edge_candidates: Vec<ResolvedEdgeCandidate>,
+}
+
+#[derive(Clone, Copy)]
+enum ImportVisibility {
+    Private,
+    Public,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct DefinitionSite {
+    relative_path: String,
+    start: u32,
+    end: u32,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct ResolvedEdgeCandidate {
+    source_relative_path: String,
+    source_start: u32,
+    source_end: u32,
+    target: DefinitionSite,
+}
+
+struct ByteLineIndex {
+    line_starts: Vec<usize>,
+}
+
+struct LocalFlowIndex {
+    targets_by_call_range: HashMap<(u32, u32), Vec<DefinitionSite>>,
+}
+
+struct EdgeCollectionResult {
+    edge_candidates: Vec<ResolvedEdgeCandidate>,
+}
+
+impl LanguagePipeline for RustPipeline {
+    fn process_files(
+        files: &[FileInput],
+        root_path: &str,
+        config: &PipelineConfig,
+    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        let canonical_root = canonical_root_path(root_path);
+        let root_path = canonical_root.as_str();
+        let workspaces = WorkspaceCatalog::load(root_path, config.worker_threads).ok();
+        let parsed = parse_rust_files(files, root_path, workspaces.as_ref())?;
+        let mut graph = build_graph(root_path, &parsed);
+
+        for file in &parsed {
+            for edge in &file.edge_candidates {
+                let Some(source_node) = graph
+                    .enclosing_definition_for_range(
+                        &edge.source_relative_path,
+                        edge.source_start,
+                        edge.source_end,
+                    )
+                    .or_else(|| graph.file_node_for_path(&edge.source_relative_path))
+                else {
+                    continue;
+                };
+                let Some(target_node) = graph.definition_for_range(
+                    &edge.target.relative_path,
+                    edge.target.start,
+                    edge.target.end,
+                ) else {
+                    continue;
+                };
+                if source_node != target_node {
+                    graph.add_call_edge(source_node, target_node);
+                }
+            }
+        }
+        graph.finalize();
+        Ok(PipelineOutput::Graph(Box::new(graph)))
+    }
+}
+
+fn parse_rust_files(
+    files: &[FileInput],
+    root_path: &str,
+    workspaces: Option<&WorkspaceCatalog>,
+) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+    if let Some(workspaces) = workspaces {
+        return parse_rust_files_with_workspaces(files, root_path, workspaces);
+    }
+
+    parse_rust_files_standalone(files, root_path)
+}
+
+fn parse_rust_files_with_workspaces(
+    files: &[FileInput],
+    root_path: &str,
+    workspaces: &WorkspaceCatalog,
+) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+    let mut parsed = Vec::with_capacity(files.len());
+    let mut errors = Vec::new();
+    let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces().len()];
+    let mut standalone = Vec::new();
+
+    for file in files {
+        let abs_path = to_absolute_path(root_path, file);
+        let relative_path = relative_path(root_path, &abs_path);
+        if let Some((workspace_id, _)) = workspaces.workspace_for_file(&relative_path) {
+            files_by_workspace[workspace_id].push(file.as_str());
+        } else {
+            standalone.push(file.as_str());
+        }
+    }
+
+    for (workspace_id, workspace_files) in files_by_workspace.iter().enumerate() {
+        if workspace_files.is_empty() {
+            continue;
+        }
+
+        let workspace = &workspaces.workspaces()[workspace_id];
+        let workspace_tasks = workspace_files
+            .iter()
+            .map(|_| workspace.clone())
+            .collect::<Vec<_>>();
+        let workspace_results = workspace_tasks
+            .into_par_iter()
+            .zip(workspace_files.par_iter())
+            .map(|(workspace, file)| parse_workspace_file(file, root_path, &workspace))
+            .collect::<Vec<_>>();
+
+        for result in workspace_results {
+            match result {
+                Ok(file) => parsed.push(file),
+                Err(err) => errors.push(err),
+            }
+        }
+    }
+
+    let standalone_results = standalone
+        .par_iter()
+        .map(|file_path| parse_rust_file_standalone(file_path, root_path))
+        .collect::<Vec<_>>();
+
+    for result in standalone_results {
+        match result {
+            Ok(file) => parsed.push(file),
+            Err(err) => errors.push(err),
+        }
+    }
+
+    if parsed.is_empty() && !errors.is_empty() {
+        Err(errors)
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn parse_rust_files_standalone(
+    files: &[FileInput],
+    root_path: &str,
+) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+    let results = files
+        .par_iter()
+        .map(|file_path| parse_rust_file_standalone(file_path, root_path))
+        .collect::<Vec<_>>();
+
+    let mut parsed = Vec::with_capacity(results.len());
+    let mut errors = Vec::new();
+
+    for result in results {
+        match result {
+            Ok(file) => parsed.push(file),
+            Err(err) => errors.push(err),
+        }
+    }
+
+    if parsed.is_empty() && !errors.is_empty() {
+        Err(errors)
+    } else {
+        Ok(parsed)
+    }
+}
+
+fn parse_workspace_file(
+    file_path: &str,
+    root_path: &str,
+    workspace: &WorkspaceIndex,
+) -> Result<ParsedRustFile, PipelineError> {
+    let abs_path = to_absolute_path(root_path, file_path);
+    let relative_path = relative_path(root_path, &abs_path);
+
+    let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
+        return parse_rust_file_standalone(file_path, root_path);
+    };
+
+    attach_db(&workspace.db, || {
+        let sema = Semantics::new(&workspace.db);
+        let source_file = sema.parse_guess_edition(file_id);
+        let source = source_file.syntax().text().to_string();
+        let file_module_parts = file_module_parts_from_workspace(&sema, workspace, file_id)
+            .unwrap_or_else(|| fallback_file_module_parts(&relative_path));
+        let crate_root_parts = workspace.crate_root_parts_for_file(file_id);
+        let edge_result = collect_resolved_edge_candidates(
+            &source_file,
+            &sema,
+            &workspace.db,
+            &workspace.paths_by_file_id,
+            &relative_path,
+        );
+        Ok(build_parsed_rust_file(
+            relative_path.clone(),
+            source,
+            file_module_parts,
+            crate_root_parts,
+            edge_result.edge_candidates,
+            source_file,
+            Some(&sema),
+            Some(workspace),
+        ))
+    })
+}
+
+fn parse_rust_file_standalone(
+    file_path: &str,
+    root_path: &str,
+) -> Result<ParsedRustFile, PipelineError> {
+    let abs_path = to_absolute_path(root_path, file_path);
+    let relative_path = relative_path(root_path, &abs_path);
+    let source = std::fs::read_to_string(&abs_path).map_err(|err| PipelineError {
+        file_path: file_path.to_string(),
+        error: format!("Read error: {err}"),
+    })?;
+    let file_module_parts = fallback_file_module_parts(&relative_path);
+    let workspace = standalone_workspace(&relative_path, source);
+    let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
+        return Err(PipelineError {
+            file_path: file_path.to_string(),
+            error: "standalone rust-analyzer workspace did not materialize file".to_string(),
+        });
+    };
+    let sema = Semantics::new(&workspace.db);
+    let source_file = sema.parse_guess_edition(file_id);
+    let edge_result = attach_db(&workspace.db, || {
+        collect_resolved_edge_candidates(
+            &source_file,
+            &sema,
+            &workspace.db,
+            &workspace.paths_by_file_id,
+            &relative_path,
+        )
+    });
+
+    Ok(build_parsed_rust_file(
+        relative_path.clone(),
+        source_file.syntax().text().to_string(),
+        file_module_parts,
+        Vec::new(),
+        edge_result.edge_candidates,
+        source_file,
+        None,
+        None,
+    ))
+}
+
+fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
+    let mut graph = CodeGraph::new_with_root(root_path.to_string());
+
+    for file in parsed {
+        let extension = Path::new(&file.relative_path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or("rs");
+
+        let _ = graph.add_file(
+            &file.relative_path,
+            extension,
+            Language::Rust,
+            file.file_size,
+            &file.definitions,
+            &file.imports,
+        );
+    }
+
+    graph
+}
+
+struct ResolvedEdgeCollector<'a> {
+    relative_path: &'a str,
+    sema: &'a Semantics<'a, RootDatabase>,
+    db: &'a RootDatabase,
+    paths_by_file_id: &'a HashMap<FileId, String>,
+    local_flow: LocalFlowIndex,
+    seen_edges: HashSet<ResolvedEdgeCandidate>,
+    seen_expanded_nodes: HashSet<SyntaxNodePtr>,
+    seen_expanded_sites: HashSet<(u32, u32, SyntaxKind)>,
+    edges: Vec<ResolvedEdgeCandidate>,
+}
+
+impl<'a> ResolvedEdgeCollector<'a> {
+    fn collect(mut self, source_file: &ast::SourceFile) -> Self {
+        for node in source_file.syntax().descendants() {
+            self.collect_node(node, None);
+        }
+        self
+    }
+
+    fn original_range_for_node(&self, node: &SyntaxNode) -> Option<TextRange> {
+        let file_range = self.sema.original_range(node).into_file_id(self.db);
+        (self.paths_by_file_id.get(&file_range.file_id)? == self.relative_path)
+            .then_some(file_range.range)
+    }
+
+    fn collect_node(&mut self, node: SyntaxNode, source_range: Option<TextRange>) {
+        if let Some(method_call) = ast::MethodCallExpr::cast(node.clone()) {
+            self.collect_method_call(method_call, source_range);
+            return;
+        }
+
+        if let Some(call_expr) = ast::CallExpr::cast(node.clone()) {
+            self.collect_call_expr(call_expr, source_range);
+            return;
+        }
+
+        if let Some(prefix_expr) = ast::PrefixExpr::cast(node.clone()) {
+            self.collect_prefix_expr(prefix_expr, source_range);
+            return;
+        }
+
+        if let Some(index_expr) = ast::IndexExpr::cast(node.clone()) {
+            self.collect_index_expr(index_expr, source_range);
+            return;
+        }
+
+        if let Some(bin_expr) = ast::BinExpr::cast(node.clone()) {
+            self.collect_bin_expr(bin_expr, source_range);
+            return;
+        }
+
+        if let Some(try_expr) = ast::TryExpr::cast(node.clone()) {
+            self.collect_try_expr(try_expr, source_range);
+            return;
+        }
+
+        if let Some(await_expr) = ast::AwaitExpr::cast(node.clone()) {
+            self.collect_await_expr(await_expr, source_range);
+            return;
+        }
+
+        if let Some(macro_call) = ast::MacroCall::cast(node) {
+            self.collect_macro_call(macro_call, source_range);
+        }
+    }
+
+    fn collect_method_call(
+        &mut self,
+        method_call: ast::MethodCallExpr,
+        source_range: Option<TextRange>,
+    ) {
+        let target = self
+            .sema
+            .resolve_method_call(&method_call)
+            .and_then(|function| {
+                hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+            })
+            .or_else(|| {
+                method_call_to_definition_fallback(
+                    self.sema,
+                    self.db,
+                    self.paths_by_file_id,
+                    &method_call,
+                )
+            });
+        self.push_target(
+            source_range.unwrap_or_else(|| method_call.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_call_expr(&mut self, call_expr: ast::CallExpr, source_range: Option<TextRange>) {
+        let Some(expr) = call_expr.expr() else {
+            return;
+        };
+
+        let mut targets = Vec::new();
+        let local_flow_targets = self
+            .local_flow
+            .targets_for_call(call_expr.syntax().text_range());
+
+        if let Some(flow_targets) = local_flow_targets {
+            targets.extend(flow_targets.iter().cloned());
+        } else if let Some(target) = self
+            .sema
+            .resolve_expr_as_callable(&expr)
+            .and_then(|callable| {
+                callable_to_definition_site(self.db, self.paths_by_file_id, callable.kind())
+            })
+            .or_else(|| {
+                path_expr_to_definition_site(self.sema, self.db, self.paths_by_file_id, &expr)
+            })
+            .or_else(|| {
+                field_expr_to_definition_site(self.sema, self.db, self.paths_by_file_id, &expr)
+            })
+        {
+            targets.push(target);
+        }
+
+        self.push_targets(
+            source_range.unwrap_or_else(|| call_expr.syntax().text_range()),
+            targets,
+        );
+    }
+
+    fn collect_prefix_expr(
+        &mut self,
+        prefix_expr: ast::PrefixExpr,
+        source_range: Option<TextRange>,
+    ) {
+        let target = self
+            .sema
+            .resolve_prefix_expr(&prefix_expr)
+            .and_then(|function| {
+                hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+            });
+        self.push_target(
+            source_range.unwrap_or_else(|| prefix_expr.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_index_expr(&mut self, index_expr: ast::IndexExpr, source_range: Option<TextRange>) {
+        let target = self
+            .sema
+            .resolve_index_expr(&index_expr)
+            .and_then(|function| {
+                hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+            });
+        self.push_target(
+            source_range.unwrap_or_else(|| index_expr.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_bin_expr(&mut self, bin_expr: ast::BinExpr, source_range: Option<TextRange>) {
+        if matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. })) {
+            return;
+        }
+
+        let target = self.sema.resolve_bin_expr(&bin_expr).and_then(|function| {
+            hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+        });
+        self.push_target(
+            source_range.unwrap_or_else(|| bin_expr.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_try_expr(&mut self, try_expr: ast::TryExpr, source_range: Option<TextRange>) {
+        let target = self.sema.resolve_try_expr(&try_expr).and_then(|function| {
+            hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+        });
+        self.push_target(
+            source_range.unwrap_or_else(|| try_expr.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_await_expr(&mut self, await_expr: ast::AwaitExpr, source_range: Option<TextRange>) {
+        let target = self
+            .sema
+            .resolve_await_to_poll(&await_expr)
+            .and_then(|function| {
+                hir_def_to_definition_site(self.db, self.paths_by_file_id, function)
+            });
+        self.push_target(
+            source_range.unwrap_or_else(|| await_expr.syntax().text_range()),
+            target,
+        );
+    }
+
+    fn collect_macro_call(&mut self, macro_call: ast::MacroCall, source_range: Option<TextRange>) {
+        let target = self
+            .sema
+            .resolve_macro_call(&macro_call)
+            .and_then(|macro_def| {
+                hir_def_to_definition_site(self.db, self.paths_by_file_id, macro_def)
+            });
+        self.push_target(
+            source_range.unwrap_or_else(|| macro_call.syntax().text_range()),
+            target,
+        );
+
+        let expanded = self.sema.expand_macro_call(&macro_call);
+        if let Some(expanded) = expanded {
+            for node in expanded.value.descendants() {
+                if !is_edge_relevant_node(&node) {
+                    continue;
+                }
+                let node_ptr = SyntaxNodePtr::new(&node);
+                if !self.seen_expanded_nodes.insert(node_ptr) {
+                    continue;
+                }
+                let original_range = self.original_range_for_node(&node);
+                let Some(original_range) = original_range else {
+                    continue;
+                };
+                let site_key = (
+                    u32::from(original_range.start()),
+                    u32::from(original_range.end()),
+                    node.kind(),
+                );
+                if !self.seen_expanded_sites.insert(site_key) {
+                    continue;
+                }
+                self.collect_node(node, Some(original_range));
+            }
+        }
+    }
+
+    fn push_targets(
+        &mut self,
+        call_range: TextRange,
+        targets: impl IntoIterator<Item = DefinitionSite>,
+    ) {
+        for target in targets {
+            self.push_target(call_range, Some(target));
+        }
+    }
+
+    fn push_target(&mut self, call_range: TextRange, target: Option<DefinitionSite>) {
+        let Some(target) = target else {
+            return;
+        };
+        let edge = ResolvedEdgeCandidate {
+            source_relative_path: self.relative_path.to_string(),
+            source_start: u32::from(call_range.start()),
+            source_end: u32::from(call_range.end()),
+            target,
+        };
+        if self.seen_edges.insert(edge.clone()) {
+            self.edges.push(edge);
+        }
+    }
+}
+
+fn is_edge_relevant_node(node: &SyntaxNode) -> bool {
+    let kind = node.kind();
+    ast::MethodCallExpr::can_cast(kind)
+        || ast::CallExpr::can_cast(kind)
+        || ast::PrefixExpr::can_cast(kind)
+        || ast::IndexExpr::can_cast(kind)
+        || ast::BinExpr::cast(node.clone()).is_some_and(|bin_expr| {
+            !matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. }))
+        })
+        || ast::TryExpr::can_cast(kind)
+        || ast::AwaitExpr::can_cast(kind)
+        || ast::MacroCall::can_cast(kind)
+}
+
+fn collect_resolved_edge_candidates(
+    source_file: &ast::SourceFile,
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    relative_path: &str,
+) -> EdgeCollectionResult {
+    let local_flow = build_local_flow_index(source_file, sema, db, paths_by_file_id);
+    let edge_candidates = ResolvedEdgeCollector {
+        relative_path,
+        sema,
+        db,
+        paths_by_file_id,
+        local_flow,
+        seen_edges: HashSet::new(),
+        seen_expanded_nodes: HashSet::new(),
+        seen_expanded_sites: HashSet::new(),
+        edges: Vec::new(),
+    }
+    .collect(source_file);
+    EdgeCollectionResult {
+        edge_candidates: edge_candidates.edges,
+    }
+}
+
+fn method_call_to_definition_fallback(
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    method_call: &ast::MethodCallExpr,
+) -> Option<DefinitionSite> {
+    if let Some(target) = sema
+        .resolve_method_call_as_callable(method_call)
+        .and_then(|callable| callable_to_definition_site(db, paths_by_file_id, callable.kind()))
+    {
+        return Some(target);
+    }
+
+    let receiver = method_call.receiver()?;
+    let receiver_ty = sema.type_of_expr(&receiver)?.adjusted();
+    let name_ref = method_call.name_ref()?;
+    let scope =
+        sema.scope_at_offset(method_call.syntax(), name_ref.syntax().text_range().start())?;
+    let method_name = name_ref.text().to_string();
+    let visible_traits = scope.visible_traits();
+
+    if let Some(target) = receiver_ty.autoderef(db).find_map(|candidate_ty| {
+        candidate_ty.iterate_method_candidates(db, &scope, None, |function| {
+            (function.name(db).as_str() == method_name)
+                .then(|| hir_def_to_definition_site(db, paths_by_file_id, function))
+                .flatten()
+        })
+    }) {
+        return Some(target);
+    }
+
+    if let Some(target) = sema
+        .resolve_method_call_fallback(method_call)
+        .and_then(|(definition, _)| definition.left())
+        .and_then(|function| hir_def_to_definition_site(db, paths_by_file_id, function))
+    {
+        return Some(target);
+    }
+
+    trait_method_to_definition_fallback(
+        db,
+        paths_by_file_id,
+        &visible_traits,
+        &receiver_ty,
+        &method_name,
+    )
+}
+
+fn trait_method_to_definition_fallback(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    visible_traits: &ra_ap_hir::VisibleTraits,
+    receiver_ty: &ra_ap_hir::Type<'_>,
+    method_name: &str,
+) -> Option<DefinitionSite> {
+    receiver_ty.autoderef(db).find_map(|_| {
+        visible_traits.0.iter().find_map(|trait_id| {
+            let trait_def = ra_ap_hir::Trait::from(*trait_id);
+            if !receiver_ty.impls_trait(db, trait_def, &[]) {
+                return None;
+            }
+            trait_def
+                .items_with_supertraits(db)
+                .into_iter()
+                .find_map(|item| match item {
+                    ra_ap_hir::AssocItem::Function(function)
+                        if function.name(db).as_str() == method_name =>
+                    {
+                        Some(function)
+                    }
+                    _ => None,
+                })
+                .and_then(|function| hir_def_to_definition_site(db, paths_by_file_id, function))
+        })
+    })
+}
+
+fn callable_to_definition_site(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    callable: CallableKind<'_>,
+) -> Option<DefinitionSite> {
+    match callable {
+        CallableKind::Function(function) => {
+            hir_def_to_definition_site(db, paths_by_file_id, function)
+        }
+        CallableKind::TupleStruct(strukt) => {
+            hir_def_to_definition_site(db, paths_by_file_id, strukt)
+        }
+        CallableKind::TupleEnumVariant(variant) => {
+            hir_def_to_definition_site(db, paths_by_file_id, variant)
+        }
+        CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_) => None,
+    }
+}
+
+fn resolved_site_for_expr(
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    expr: &ast::Expr,
+) -> Option<DefinitionSite> {
+    sema.resolve_expr_as_callable(expr)
+        .and_then(|callable| callable_to_definition_site(db, paths_by_file_id, callable.kind()))
+        .or_else(|| path_expr_to_definition_site(sema, db, paths_by_file_id, expr))
+        .or_else(|| field_expr_to_definition_site(sema, db, paths_by_file_id, expr))
+}
+
+fn path_expr_to_definition_site(
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    expr: &ast::Expr,
+) -> Option<DefinitionSite> {
+    let ast::Expr::PathExpr(path_expr) = expr else {
+        return None;
+    };
+    let path = path_expr.path()?;
+    sema.resolve_path(&path)
+        .and_then(|resolution| path_resolution_to_definition_site(db, paths_by_file_id, resolution))
+        .or_else(|| {
+            sema.resolve_path_per_ns(&path).and_then(|resolution| {
+                resolution
+                    .value_ns
+                    .or(resolution.type_ns)
+                    .or(resolution.macro_ns)
+                    .and_then(|path_resolution| {
+                        path_resolution_to_definition_site(db, paths_by_file_id, path_resolution)
+                    })
+            })
+        })
+}
+
+fn path_resolution_to_definition_site(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    resolution: PathResolution,
+) -> Option<DefinitionSite> {
+    match resolution {
+        PathResolution::Def(def) => module_def_to_definition_site(db, paths_by_file_id, def),
+        PathResolution::Local(_)
+        | PathResolution::TypeParam(_)
+        | PathResolution::ConstParam(_)
+        | PathResolution::SelfType(_)
+        | PathResolution::BuiltinAttr(_)
+        | PathResolution::ToolModule(_)
+        | PathResolution::DeriveHelper(_) => None,
+    }
+}
+
+fn field_expr_to_definition_site(
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    expr: &ast::Expr,
+) -> Option<DefinitionSite> {
+    let ast::Expr::FieldExpr(field_expr) = expr else {
+        return None;
+    };
+    sema.resolve_field_fallback(field_expr)
+        .and_then(|(resolution, _)| match resolution {
+            Either::Right(function) => hir_def_to_definition_site(db, paths_by_file_id, function),
+            Either::Left(_) => None,
+        })
+}
+
+fn module_def_to_definition_site(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    def: ModuleDef,
+) -> Option<DefinitionSite> {
+    match def {
+        ModuleDef::Module(_) => None,
+        ModuleDef::Function(function) => hir_def_to_definition_site(db, paths_by_file_id, function),
+        ModuleDef::Adt(adt) => match adt {
+            ra_ap_hir::Adt::Struct(strukt) => {
+                hir_def_to_definition_site(db, paths_by_file_id, strukt)
+            }
+            ra_ap_hir::Adt::Enum(enum_def) => {
+                hir_def_to_definition_site(db, paths_by_file_id, enum_def)
+            }
+            ra_ap_hir::Adt::Union(union_def) => {
+                hir_def_to_definition_site(db, paths_by_file_id, union_def)
+            }
+        },
+        ModuleDef::EnumVariant(variant) => {
+            hir_def_to_definition_site(db, paths_by_file_id, variant)
+        }
+        ModuleDef::Const(constant) => hir_def_to_definition_site(db, paths_by_file_id, constant),
+        ModuleDef::Static(static_item) => {
+            hir_def_to_definition_site(db, paths_by_file_id, static_item)
+        }
+        ModuleDef::Trait(trait_def) => hir_def_to_definition_site(db, paths_by_file_id, trait_def),
+        ModuleDef::TypeAlias(type_alias) => {
+            hir_def_to_definition_site(db, paths_by_file_id, type_alias)
+        }
+        ModuleDef::BuiltinType(_) => None,
+        ModuleDef::Macro(macro_def) => hir_def_to_definition_site(db, paths_by_file_id, macro_def),
+    }
+}
+
+fn hir_def_to_definition_site<D, N>(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    def: D,
+) -> Option<DefinitionSite>
+where
+    D: HasSource<Ast = N>,
+    N: AstNode,
+{
+    let source = def.source(db)?;
+    source_to_definition_site(db, paths_by_file_id, source)
+}
+
+fn source_to_definition_site<N: AstNode>(
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+    source: InFile<N>,
+) -> Option<DefinitionSite> {
+    let file_range = source
+        .syntax()
+        .original_file_range_rooted(db)
+        .into_file_id(db);
+    definition_site_for_range(paths_by_file_id, file_range.file_id, file_range.range)
+}
+
+fn definition_site_for_range(
+    paths_by_file_id: &HashMap<FileId, String>,
+    file_id: FileId,
+    range: TextRange,
+) -> Option<DefinitionSite> {
+    Some(DefinitionSite {
+        relative_path: paths_by_file_id.get(&file_id)?.clone(),
+        start: u32::from(range.start()),
+        end: u32::from(range.end()),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::manifest::repo_local_existing_file;
+    use super::workspace::relative_path_if_under_root;
+    use std::fs;
+    use tempfile::tempdir;
+
+    #[test]
+    fn relative_path_if_under_root_rejects_same_prefix_sibling() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let sibling_root = temp.path().join("repo2");
+        fs::create_dir_all(repo_root.join("src")).unwrap();
+        fs::create_dir_all(sibling_root.join("src")).unwrap();
+        let sibling_file = sibling_root.join("src/lib.rs");
+        fs::write(&sibling_file, "pub fn helper() {}\n").unwrap();
+
+        assert_eq!(
+            relative_path_if_under_root(
+                repo_root.to_string_lossy().as_ref(),
+                sibling_file.to_string_lossy().as_ref(),
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn repo_local_existing_file_only_accepts_files_under_repo_root() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let outside_root = temp.path().join("outside");
+        fs::create_dir_all(repo_root.join("src")).unwrap();
+        fs::create_dir_all(&outside_root).unwrap();
+
+        let inside_file = repo_root.join("src/lib.rs");
+        let outside_file = outside_root.join("lib.rs");
+        fs::write(&inside_file, "pub fn inside() {}\n").unwrap();
+        fs::write(&outside_file, "pub fn outside() {}\n").unwrap();
+
+        let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
+        assert!(inside.ends_with("repo/src/lib.rs"));
+        assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+    }
+}

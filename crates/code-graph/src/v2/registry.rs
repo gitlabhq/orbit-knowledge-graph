@@ -90,6 +90,5 @@ register_v2_pipelines! {
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
-    Tag("rust_ra") => [RustPipeline],
     Tag("ruby_prism") => [RubyPipeline],
 }

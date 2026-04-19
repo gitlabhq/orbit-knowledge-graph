@@ -254,6 +254,20 @@ impl DefinitionRangeIndex {
         }
     }
 
+    pub fn from_ranges(ranges: impl IntoIterator<Item = (Range, NodeIndex)>) -> Self {
+        let intervals = ranges
+            .into_iter()
+            .map(|(range, node)| Interval {
+                start: range.byte_offset.0 as u64,
+                stop: range.byte_offset.1 as u64,
+                val: node,
+            })
+            .collect();
+        Self {
+            lapper: Lapper::new(intervals),
+        }
+    }
+
     pub fn insert(&mut self, range: Range, node: NodeIndex) {
         self.lapper.insert(Interval {
             start: range.byte_offset.0 as u64,
