@@ -207,6 +207,19 @@ impl Extract {
         emit(&self.emit, &target)
     }
 
+    /// Navigate + extract, then transform the result with access to the
+    /// origin node. The origin node gives full tree context — walk
+    /// ancestors for scope, siblings for decorators, anything.
+    pub fn apply_with<D: Doc>(
+        &self,
+        node: &Node<'_, D>,
+        transform: impl FnOnce(String, &Node<'_, D>) -> String,
+    ) -> Option<String> {
+        let target = self.navigate(node)?;
+        let raw = emit(&self.emit, &target)?;
+        Some(transform(raw, node))
+    }
+
     pub fn navigate<'r, D: Doc>(&self, node: &Node<'r, D>) -> Option<Node<'r, D>> {
         let mut cur = node.clone();
         for step in &self.steps {
