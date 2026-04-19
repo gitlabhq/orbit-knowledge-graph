@@ -258,6 +258,7 @@ impl LanguageSpec {
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
     /// Type names in `New` steps are resolved via `import_map`.
+    #[allow(clippy::too_many_arguments)]
     fn build_expression_chain(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -1023,20 +1024,18 @@ impl LanguageSpec {
                     },
                     block_id: state.current_block.0,
                 });
-                if !imp.wildcard && !imp.path.is_empty() {
-                    if !effective_name.is_empty() {
-                        state.import_map.insert(
-                            effective_name.to_string(),
-                            format!("{}{}{}", imp.path, sep, effective_name),
-                        );
-                        // Write import to SSA so alias chasing finds it
-                        let ssa_name = state.arena.alloc_str(effective_name);
-                        state.ssa.write_variable(
-                            ssa_name,
-                            state.current_block,
-                            super::ssa::SsaValue::ImportRef(import_idx),
-                        );
-                    }
+                if !imp.wildcard && !imp.path.is_empty() && !effective_name.is_empty() {
+                    state.import_map.insert(
+                        effective_name.to_string(),
+                        format!("{}{}{}", imp.path, sep, effective_name),
+                    );
+                    // Write import to SSA so alias chasing finds it
+                    let ssa_name = state.arena.alloc_str(effective_name);
+                    state.ssa.write_variable(
+                        ssa_name,
+                        state.current_block,
+                        super::ssa::SsaValue::ImportRef(import_idx),
+                    );
                 }
             }
 
