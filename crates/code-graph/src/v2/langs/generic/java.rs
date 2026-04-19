@@ -34,8 +34,15 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     }
     if let Some(interfaces) = node.field("interfaces") {
         for child in interfaces.children() {
-            if type_kinds.iter().any(|&k| k == child.kind().as_ref()) {
+            let ck = child.kind();
+            if type_kinds.iter().any(|&k| k == ck.as_ref()) {
                 result.push(child.text().to_string());
+            } else if ck.as_ref() == "type_list" {
+                for inner in child.children() {
+                    if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
+                        result.push(inner.text().to_string());
+                    }
+                }
             }
         }
     }

@@ -5,7 +5,6 @@ tests:
   # ── K8: test_kotlin_reference_resolution_to_nested_classes ──
 
   - name: "Parent.GrandChild.greet -> Parent.Child.GrandChild.greet"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.nestedclasses.Parent.GrandChild.greet'

@@ -420,16 +420,7 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let mut start_nodes = self
-            .indexes
-            .by_fqn
-            .lookup(scope_fqn, |idx| self.def_fqn(idx) == scope_fqn);
-        if start_nodes.is_empty() {
-            start_nodes = self
-                .indexes
-                .by_name
-                .lookup(scope_fqn, |idx| self.def_name(idx) == scope_fqn);
-        }
+        let start_nodes = self.resolve_scope_nodes(scope_fqn);
         if start_nodes.is_empty() {
             return false;
         }
@@ -591,7 +582,7 @@ impl CodeGraph {
                 let child_fqn = self.strings.get(self.defs[id.0 as usize].fqn).to_string();
                 for &super_id in &meta.super_types {
                     let super_name = self.strings.get(super_id);
-                    let targets = self.resolve_type_to_nodes(super_name);
+                    let targets = self.resolve_scope_nodes(super_name);
                     let resolved_fqns: Vec<String> = targets
                         .iter()
                         .filter(|&&t| t != idx)
@@ -628,7 +619,10 @@ impl CodeGraph {
         }
     }
 
-    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
+    /// Resolve a type name to graph nodes. Tries FQN index first, then
+    /// name index, then qualified name resolution (split on the def's own
+    /// FQN separator and resolve via nested index).
+    fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
         let by_fqn = self
             .indexes
             .by_fqn
@@ -636,9 +630,42 @@ impl CodeGraph {
         if !by_fqn.is_empty() {
             return by_fqn;
         }
-        self.indexes
+        let by_name = self
+            .indexes
             .by_name
-            .lookup(name, |idx| self.def_name(idx) == name)
+            .lookup(name, |idx| self.def_name(idx) == name);
+        if !by_name.is_empty() {
+            return by_name;
+        }
+        // Qualified bare name (e.g. "Child.GrandChild"): resolve first
+        // segment by name to find a def, use that def's fqn_sep as the
+        // separator, then nested lookup for the remaining segment.
+        // Try common separators to find the split point.
+        for sep in &[".", "::"] {
+            if let Some((first, rest)) = name.split_once(sep) {
+                let bases = self
+                    .indexes
+                    .by_name
+                    .lookup(first, |idx| self.def_name(idx) == first);
+                if bases.is_empty() {
+                    continue;
+                }
+                let mut result_vec = Vec::new();
+                for &base in &bases {
+                    let base_fqn = self.def_fqn(base);
+                    self.indexes.nested.lookup_into(
+                        base_fqn,
+                        rest,
+                        |idx| self.def_name(idx) == rest,
+                        &mut result_vec,
+                    );
+                }
+                if !result_vec.is_empty() {
+                    return result_vec.into();
+                }
+            }
+        }
+        SmallVec::new()
     }
 
     /// Compute stable IDs for all nodes. Returns a dense Vec indexed by

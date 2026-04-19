@@ -30,7 +30,6 @@ tests:
   # ── J5: test_java_reference_to_deep_nested_class ──
 
   - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.helpers.Helpers.InnerInnerHelpers.innerInnerDoHelp'
@@ -42,7 +41,6 @@ tests:
   # ── J6: test_java_reference_resolve_type_failing_on_nested_type ──
 
   - name: "GrandChild.greet -> Child.GrandChild.greet (nested type regression)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.edgecases.ResolveTypeFailingOnNestedChild.GrandChild.greet'
