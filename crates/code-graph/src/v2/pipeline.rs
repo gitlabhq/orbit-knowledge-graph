@@ -65,23 +65,13 @@ pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        Self::process_files_traced(files, root_path, crate::v2::trace::is_thread_trace())
-    }
-
-    fn process_files_traced(
-        files: &[FileInput],
-        root_path: &str,
-        trace: bool,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
-    /// When true, emit detailed engine/resolver trace events to stderr.
-    /// Propagated through the pipeline — no global state, safe for parallel tests.
-    pub trace: bool,
 }
 
 impl Default for PipelineConfig {
@@ -89,7 +79,6 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
-            trace: false,
         }
     }
 }
@@ -131,7 +120,7 @@ impl Pipeline {
         Self { config }
     }
 
-    pub fn run(&self, root: &Path) -> PipelineResult {
+    pub fn run(&self, root: &Path, tracer: &crate::v2::trace::Tracer) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
@@ -154,19 +143,12 @@ impl Pipeline {
         let mut files_parsed = 0usize;
         let mut files_skipped = 0usize;
 
-        // When trace is enabled via PipelineConfig, set the global flag so
-        // that registry-dispatched pipelines also trace. Safe because the test
-        // runner uses a single-threaded rayon pool when tracing.
-        if self.config.trace {
-            crate::v2::trace::set_thread_trace(true);
-        }
-
         for (language, files) in &files_by_language {
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(*language, files, &root_str) {
+            match crate::v2::registry::dispatch_language(*language, files, &root_str, tracer) {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -204,10 +186,6 @@ impl Pipeline {
         let imports_count = all_graphs.iter().map(|g| g.imports_iter().count()).sum();
         let references_count = all_graphs.iter().map(|g| g.edges().count()).sum();
         let edges_count = all_graphs.iter().map(|g| g.edge_count()).sum();
-
-        if self.config.trace {
-            crate::v2::trace::set_thread_trace(false);
-        }
 
         PipelineResult {
             graphs: all_graphs,
@@ -284,10 +262,10 @@ where
     P: crate::v2::dsl::types::DslLanguage + 'static,
     R: crate::v2::linker::HasRules + Send + Sync,
 {
-    fn process_files_traced(
+    fn process_files(
         files: &[FileInput],
         root_path: &str,
-        trace: bool,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
@@ -385,7 +363,7 @@ where
         }
 
         let mut graph = graph.into_inner().unwrap();
-        graph.finalize_traced(trace);
+        graph.finalize(tracer);
 
         // ── Phase 2: parallel parse_full + resolve (callback) ──
         let t2 = std::time::Instant::now();
@@ -426,15 +404,14 @@ where
                     }
                 };
 
-                let tracer = crate::v2::trace::Tracer::new(trace);
-                let mut resolver = crate::v2::linker::FileResolver::with_trace(
+                let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
                     &rules,
                     &rules.settings,
-                    trace,
+                    tracer,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
@@ -463,9 +440,6 @@ where
                     },
                     &tracer,
                 );
-
-                tracer.dump_grouped(&format!("{path} [engine]"));
-                resolver.dump_trace(&format!("{path} [resolver]"));
 
                 let inferred = inferred_result.unwrap_or_default();
 
@@ -526,6 +500,7 @@ where
                             &info.import_nodes,
                             &rules,
                             &rules.settings,
+                            tracer,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {
@@ -578,9 +553,11 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], "/")
-            .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let output =
+            crate::v2::registry::dispatch_language(language, &[path.to_string()], "/", &tracer)
+                .unwrap_or_else(|| panic!("Language {language} not supported"))
+                .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         match output {
             PipelineOutput::Graph(g) => *g,
             PipelineOutput::Batches(_) => panic!("expected Graph output"),
@@ -741,7 +718,8 @@ namespace MyApp {
         .unwrap();
 
         let pipeline = Pipeline::new(PipelineConfig::default());
-        let result = pipeline.run(root);
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let result = pipeline.run(root, &tracer);
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");

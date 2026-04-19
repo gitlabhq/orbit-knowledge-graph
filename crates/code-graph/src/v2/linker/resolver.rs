@@ -36,26 +36,7 @@ impl<'a> FileResolver<'a> {
         import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
-    ) -> Self {
-        Self::with_trace(
-            graph,
-            file_node,
-            def_nodes,
-            import_nodes,
-            rules,
-            settings,
-            false,
-        )
-    }
-
-    pub fn with_trace(
-        graph: &'a CodeGraph,
-        file_node: NodeIndex,
-        def_nodes: &'a [NodeIndex],
-        import_nodes: &'a [NodeIndex],
-        rules: &'a ResolutionRules,
-        settings: &'a ResolveSettings,
-        trace: bool,
+        tracer: &'a Tracer,
     ) -> Self {
         let ctx = ResolveCtx::new(
             graph,
@@ -64,7 +45,7 @@ impl<'a> FileResolver<'a> {
             import_nodes,
             rules,
             settings,
-            trace,
+            tracer,
         );
         let deadline = settings
             .per_file_timeout
@@ -158,7 +139,7 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
-    tracer: Tracer,
+    tracer: &'a Tracer,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -169,7 +150,7 @@ impl<'a> ResolveCtx<'a> {
         import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
-        trace: bool,
+        tracer: &'a Tracer,
     ) -> Self {
         let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
         Self {
@@ -184,7 +165,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
-            tracer: Tracer::new(trace),
+            tracer,
         }
     }
 

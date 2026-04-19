@@ -3,6 +3,7 @@ use std::fmt::Write;
 
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
+use code_graph::v2::trace::Tracer;
 use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
 
 use super::assertions::{Severity, TestSuite};
@@ -112,6 +113,7 @@ pub async fn run_yaml_suite(yaml: &str) {
     let root = tmp.path().to_string_lossy().to_string();
 
     let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
+    let tracer = Tracer::new(trace_any);
 
     // Single-thread rayon when tracing so trace output isn't interleaved
     let pool = if trace_any {
@@ -127,13 +129,11 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let datasets = match suite.pipeline.as_deref() {
         None | Some("generic") => {
-            let mut config = PipelineConfig::default();
-            config.trace = trace_any;
-            let pipeline = Pipeline::new(config);
+            let pipeline = Pipeline::new(PipelineConfig::default());
             let result = if let Some(pool) = &pool {
-                pool.install(|| pipeline.run(tmp.path()))
+                pool.install(|| pipeline.run(tmp.path(), &tracer))
             } else {
-                pipeline.run(tmp.path())
+                pipeline.run(tmp.path(), &tracer)
             };
             assert!(
                 result.errors.is_empty(),
@@ -160,7 +160,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
             let run = || {
-                dispatch_by_tag(tag, &files, &root)
+                dispatch_by_tag(tag, &files, &root, &tracer)
                     .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"))
             };
@@ -172,6 +172,9 @@ pub async fn run_yaml_suite(yaml: &str) {
             output_to_datasets(output)
         }
     };
+
+    // Dump trace once, after all execution is complete
+    tracer.dump(&suite.name);
 
     let config = make_graph_config().expect("Failed to build graph config");
 

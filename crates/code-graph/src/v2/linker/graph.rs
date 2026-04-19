@@ -255,17 +255,12 @@ impl CodeGraph {
         self.indexes.drop_construction_indexes();
     }
 
-    pub fn finalize(&mut self) {
-        self.finalize_traced(false);
+    pub fn finalize(&mut self, tracer: &crate::v2::trace::Tracer) {
+        self.link_extends(tracer);
+        self.build_ancestor_table(tracer);
     }
 
-    pub fn finalize_traced(&mut self, trace: bool) {
-        self.link_extends(trace);
-        self.build_ancestor_table(trace);
-    }
-
-    fn build_ancestor_table(&mut self, trace: bool) {
-        let tracer = crate::v2::trace::Tracer::new(trace);
+    fn build_ancestor_table(&mut self, tracer: &crate::v2::trace::Tracer) {
         let extends_only = EdgeFiltered(
             &self.graph,
             |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
@@ -577,8 +572,7 @@ impl CodeGraph {
 
     // ── Internal ────────────────────────────────────────────
 
-    fn link_extends(&mut self, trace: bool) {
-        let tracer = crate::v2::trace::Tracer::new(trace);
+    fn link_extends(&mut self, tracer: &crate::v2::trace::Tracer) {
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
@@ -854,7 +848,8 @@ mod tests {
             let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
             cg.add_file(path, ext, Language::Python, 100, defs, &[]);
         }
-        cg.finalize();
+        let tracer = crate::v2::trace::Tracer::new(false);
+        cg.finalize(&tracer);
         cg
     }
 

@@ -608,7 +608,7 @@ impl LanguageSpec {
             &[(u32, String)],                            // inferred return types
         ),
     {
-        let noop = crate::v2::trace::noop_tracer();
+        let noop = crate::v2::trace::Tracer::new(false);
         self.parse_full_and_resolve_traced(source, file_path, language, &mut on_ref, &noop)
     }
 

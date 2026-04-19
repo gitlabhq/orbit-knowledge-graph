@@ -16,10 +16,10 @@ use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOu
 pub struct RubyPipeline;
 
 impl LanguagePipeline for RubyPipeline {
-    fn process_files_traced(
+    fn process_files(
         files: &[FileInput],
         root_path: &str,
-        _trace: bool,
+        _tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();
