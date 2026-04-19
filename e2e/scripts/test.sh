@@ -34,11 +34,14 @@ log "Waiting for tests to complete (timeout: ${TIMEOUT_SECONDS}s)"
 result=timeout
 SECONDS=0
 while [ "$SECONDS" -lt "$TIMEOUT_SECONDS" ]; do
+  # Modern Job objects emit multiple True conditions (SuccessCriteriaMet +
+  # Complete on success; FailureTarget + Failed on failure), so jsonpath
+  # returns a space-joined list. Match Complete/Failed via substring.
   status=$($KC get job/"$JOB_NAME" -n "$NS_GKG" \
-    -o jsonpath='{.status.conditions[?(@.status=="True")].type}' 2>/dev/null || true)
-  case "$status" in
-    Complete) result=pass; break ;;
-    Failed)   result=fail; break ;;
+    -o jsonpath='{range .status.conditions[?(@.status=="True")]}{.type} {end}' 2>/dev/null || true)
+  case " $status " in
+    *" Complete "*) result=pass; break ;;
+    *" Failed "*)   result=fail; break ;;
   esac
   log "Tests running... (${SECONDS}s elapsed)"
   sleep "$POLL_INTERVAL"
