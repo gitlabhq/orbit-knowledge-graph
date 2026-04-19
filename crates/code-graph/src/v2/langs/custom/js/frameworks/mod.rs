@@ -1,16 +1,14 @@
 //! Framework-specific hooks plugged into the JS pipeline.
 //!
-//! Anything that requires knowing about Vue/Svelte/Astro/React-RSC before
-//! running the standard JS analyzer lives here. The rest of the pipeline
-//! only calls `has_embedded_scripts` / `extract_scripts` / `detect_directive`
+//! Anything that requires knowing about Vue/Svelte/Astro before running
+//! the standard JS analyzer lives here. The rest of the pipeline only
+//! calls `has_embedded_scripts` / `extract_scripts` / `combine_scripts`
 //! and the per-framework analyzer hooks re-exported below.
 
-pub mod directives;
-pub mod vue;
+mod vue;
 
 use oxc_linter::loader::{JavaScriptSource, PartialLoader};
 
-pub use directives::{JsDirective, detect_directive};
 pub(in crate::v2::langs::custom::js) use vue::extract_vue_options_api;
 
 use super::constants::is_sfc_extension;

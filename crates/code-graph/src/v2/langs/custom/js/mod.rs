@@ -10,27 +10,28 @@
 mod analyze;
 mod constants;
 mod extract;
-pub mod frameworks;
+mod frameworks;
 mod modules;
 mod pipeline;
 mod resolve;
 mod types;
 mod workspace;
 
-pub use analyze::JsAnalyzer;
-pub use frameworks::extract_scripts;
-pub use modules::{
-    JsExportName, JsModuleBinding, JsModuleBindingInput, JsModuleBindingTarget,
-    JsModuleBindingTargetInput, JsModuleGraphBuilder, JsModuleIndex, JsModuleRecord, JsPhase1File,
-    JsPhase1FileInfo, JsStarReexport,
-};
 pub use pipeline::JsPipeline;
-pub use resolve::JsCrossFileResolver;
-pub use types::{
-    CjsExport, ExportedBinding, ImportedName, JsCallConfidence, JsCallEdge, JsCallSite,
-    JsCallTarget, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis, JsImport,
-    JsImportKind, JsImportedBinding, JsImportedCall, JsInvocationKind, JsInvocationSupport,
-    JsMemberKind, JsModuleInfo, JsPendingLocalCall, JsResolutionMode, JsResolvedCallRelationship,
-    OwnedImportEntry,
+
+// Internal `super::` shorthand for sibling modules. Nothing outside this
+// module reads these names; `pub(super)` keeps them accessible via
+// `super::Foo` without leaking JS implementation detail into the crate's
+// public surface.
+pub(super) use analyze::JsAnalyzer;
+pub(super) use modules::{
+    JsExportName, JsModuleBinding, JsModuleBindingInput, JsModuleBindingTargetInput,
+    JsModuleGraphBuilder, JsModuleIndex, JsModuleRecord, JsPhase1File, JsPhase1FileInfo,
+    JsStarReexport,
 };
-pub use workspace::{WorkspacePackage, WorkspaceProbe};
+pub(super) use types::{
+    CjsExport, ExportedBinding, ImportedName, JsCallEdge, JsCallTarget, JsDef, JsDefKind,
+    JsFileAnalysis, JsImport, JsImportKind, JsInvocationKind, JsModuleInfo, JsPendingLocalCall,
+    JsResolutionMode, JsResolvedCallRelationship,
+};
+pub(super) use workspace::WorkspaceProbe;

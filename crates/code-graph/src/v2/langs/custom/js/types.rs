@@ -2,8 +2,6 @@ use crate::utils::Range;
 use crate::v2::types::{ExpressionStep, ssa::ParseValue};
 use std::collections::HashMap;
 
-use super::frameworks::JsDirective;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JsInvocationKind {
     Call,
@@ -67,10 +65,8 @@ impl JsInvocationSupport {
 #[derive(Debug, Clone, Default)]
 pub struct JsModuleInfo {
     pub exports: HashMap<String, ExportedBinding>,
-    pub imports: Vec<OwnedImportEntry>,
     pub star_export_sources: Vec<String>,
     pub cjs_exports: Vec<CjsExport>,
-    pub has_module_syntax: bool,
     pub definition_fqns: HashMap<String, Range>,
 }
 
@@ -159,16 +155,6 @@ impl ExportedBinding {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct OwnedImportEntry {
-    pub specifier: String,
-    pub imported_name: ImportedName,
-    pub local_name: String,
-    pub resolution_mode: JsResolutionMode,
-    pub is_type: bool,
-    pub range: Range,
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ImportedName {
     Named(String),
@@ -213,7 +199,6 @@ pub struct JsFileAnalysis {
     pub local_calls: Vec<JsPendingLocalCall>,
     pub calls: Vec<JsCallEdge>,
     pub classes: Vec<JsClassInfo>,
-    pub directive: Option<JsDirective>,
     pub module_info: JsModuleInfo,
 }
 
@@ -245,8 +230,6 @@ pub enum JsDefKind {
     ComputedProperty { class_fqn: String },
     Watcher { class_fqn: String },
     LifecycleHook { class_fqn: String },
-    Getter { class_fqn: String },
-    Setter { class_fqn: String },
     Interface,
     TypeAlias,
     Enum,
@@ -261,9 +244,7 @@ impl JsDefKind {
             Self::Method { class_fqn, .. }
             | Self::ComputedProperty { class_fqn }
             | Self::Watcher { class_fqn }
-            | Self::LifecycleHook { class_fqn }
-            | Self::Getter { class_fqn }
-            | Self::Setter { class_fqn } => Some(class_fqn),
+            | Self::LifecycleHook { class_fqn } => Some(class_fqn),
             _ => None,
         }
     }
@@ -281,8 +262,6 @@ impl JsDefKind {
             Self::ComputedProperty { .. } => "ComputedProperty",
             Self::Watcher { .. } => "Watcher",
             Self::LifecycleHook { .. } => "LifecycleHook",
-            Self::Getter { .. } => "Getter",
-            Self::Setter { .. } => "Setter",
             Self::Interface => "Interface",
             Self::TypeAlias => "TypeAlias",
             Self::Enum => "Enum",
@@ -293,29 +272,15 @@ impl JsDefKind {
     }
 }
 
+/// Class definition metadata consumed by the cross-file resolver.
+///
+/// Only `fqn` and `extends` are read downstream; we intentionally do not
+/// retain per-class `range` or member lists here since those come in via
+/// the `JsDef` stream and the graph-wide member binding index.
 #[derive(Debug, Clone)]
 pub struct JsClassInfo {
-    pub name: String,
     pub fqn: String,
-    pub range: Range,
     pub extends: Option<String>,
-    pub members: Vec<JsClassMember>,
-}
-
-#[derive(Debug, Clone)]
-pub struct JsClassMember {
-    pub name: String,
-    pub kind: JsMemberKind,
-    pub is_static: bool,
-    pub range: Range,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum JsMemberKind {
-    Method,
-    Getter,
-    Setter,
-    Property,
 }
 
 #[derive(Debug, Clone)]
@@ -339,8 +304,6 @@ pub enum JsImportKind {
 pub struct JsCallEdge {
     pub caller: JsCallSite,
     pub callee: JsCallTarget,
-    pub call_range: Range,
-    pub confidence: JsCallConfidence,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -353,35 +316,11 @@ pub struct JsResolvedCallRelationship {
 
 #[derive(Debug, Clone)]
 pub enum JsCallSite {
-    Definition { fqn: String, range: Range },
+    Definition { range: Range },
     ModuleLevel,
 }
 
 #[derive(Debug, Clone)]
 pub enum JsCallTarget {
-    Direct {
-        fqn: String,
-        range: Range,
-    },
-    ThisMethod {
-        method_name: String,
-        resolved_fqn: Option<String>,
-        resolved_range: Option<Range>,
-    },
-    SuperMethod {
-        method_name: String,
-        resolved_fqn: Option<String>,
-        resolved_range: Option<Range>,
-    },
-    ImportedCall {
-        imported_call: JsImportedCall,
-    },
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum JsCallConfidence {
-    Known,
-    Annotated,
-    Inferred,
-    Guessed,
+    ImportedCall { imported_call: JsImportedCall },
 }

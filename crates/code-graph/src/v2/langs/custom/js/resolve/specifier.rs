@@ -72,10 +72,7 @@ impl JsCrossFileResolver {
                             member_path,
                             invocation_kind,
                         },
-                } = &call.callee
-                else {
-                    continue;
-                };
+                } = &call.callee;
 
                 let resolved = match self.resolve_specifier(
                     &abs_path,

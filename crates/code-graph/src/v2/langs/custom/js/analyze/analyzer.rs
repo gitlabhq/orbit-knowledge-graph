@@ -11,9 +11,8 @@ use std::collections::HashMap;
 
 use super::super::frameworks::extract_vue_options_api;
 use super::super::types::{
-    ExportedBinding, ImportedName, JsClassInfo, JsClassMember, JsDef, JsDefKind, JsFileAnalysis,
-    JsImport, JsImportKind, JsInvocationSupport, JsMemberKind, JsModuleInfo, JsResolutionMode,
-    OwnedImportEntry,
+    ExportedBinding, ImportedName, JsClassInfo, JsDef, JsDefKind, JsFileAnalysis, JsImport,
+    JsImportKind, JsInvocationSupport, JsModuleInfo,
 };
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
@@ -283,7 +282,6 @@ fn extract_class_members(
             continue;
         };
 
-        let mut members = Vec::new();
         for element in elements.iter() {
             if !element.kind.is_method() {
                 continue;
@@ -295,7 +293,7 @@ fn extract_class_members(
             let is_static = element.r#static;
 
             method_defs.push(JsDef {
-                name: method_name.clone(),
+                name: method_name,
                 fqn,
                 kind: JsDefKind::Method {
                     class_fqn: class_name.clone(),
@@ -306,24 +304,11 @@ fn extract_class_members(
                 type_annotation: None,
                 invocation_support: Some(JsInvocationSupport::function()),
             });
-
-            members.push(JsClassMember {
-                name: method_name,
-                kind: JsMemberKind::Method,
-                is_static,
-                range,
-            });
         }
 
-        let class_range = ctx
-            .lt
-            .span_to_range(ctx.nodes.get_node(class_node_id).span());
         classes.push(JsClassInfo {
-            name: class_name.clone(),
             fqn: class_name,
-            range: class_range,
             extends,
-            members,
         });
     }
 
@@ -603,7 +588,6 @@ fn build_module_info(
     invocation_support_by_range: &HashMap<(usize, usize), JsInvocationSupport>,
 ) -> JsModuleInfo {
     let mut exports = HashMap::new();
-    let mut imports = Vec::new();
     let mut star_export_sources = Vec::new();
     let definition_fqns: HashMap<String, Range> =
         defs.iter().map(|d| (d.fqn.clone(), d.range)).collect();
@@ -734,27 +718,10 @@ fn build_module_info(
         }
     }
 
-    for entry in &parsed.module_record.import_entries {
-        imports.push(OwnedImportEntry {
-            specifier: entry.module_request.name.to_string(),
-            imported_name: match &entry.import_name {
-                ImportImportName::Name(n) => ImportedName::Named(n.name.to_string()),
-                ImportImportName::Default(_) => ImportedName::Default,
-                ImportImportName::NamespaceObject => ImportedName::Namespace,
-            },
-            local_name: entry.local_name.name.to_string(),
-            resolution_mode: JsResolutionMode::Import,
-            is_type: entry.is_type,
-            range: lt.span_to_range(entry.module_request.span),
-        });
-    }
-
     JsModuleInfo {
         exports,
-        imports,
         star_export_sources,
         cjs_exports: vec![],
-        has_module_syntax: parsed.module_record.has_module_syntax,
         definition_fqns,
     }
 }
@@ -835,7 +802,6 @@ impl JsAnalyzer {
         let imports = extract_imports(&ctx, &parsed);
         let (local_calls, calls) =
             extract_ssa_calls(&ctx, &parsed.program, &defs, &imports, &class_hierarchy);
-        let directive = super::super::frameworks::detect_directive(&parsed.program.directives);
 
         let cjs_exports = extract_cjs_exports(
             nodes,
@@ -876,21 +842,6 @@ impl JsAnalyzer {
             }
         }
 
-        for imp in &imports {
-            if let JsImportKind::CjsRequire { imported_name } = &imp.kind {
-                module_info.imports.push(OwnedImportEntry {
-                    specifier: imp.specifier.clone(),
-                    imported_name: imported_name
-                        .as_ref()
-                        .map_or(ImportedName::Default, |n| ImportedName::Named(n.clone())),
-                    local_name: imp.local_name.clone(),
-                    resolution_mode: JsResolutionMode::Require,
-                    is_type: false,
-                    range: imp.range,
-                });
-            }
-        }
-
         Ok(JsFileAnalysis {
             relative_path: relative_path.to_string(),
             defs,
@@ -898,7 +849,6 @@ impl JsAnalyzer {
             local_calls,
             calls,
             classes,
-            directive,
             module_info,
         })
     }

@@ -107,10 +107,7 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
     fn source_site(&self) -> JsCallSite {
         self.current_enclosing_def()
             .and_then(|idx| self.defs.get(idx as usize))
-            .map(|def| JsCallSite::Definition {
-                fqn: def.fqn.clone(),
-                range: def.range,
-            })
+            .map(|def| JsCallSite::Definition { range: def.range })
             .unwrap_or(JsCallSite::ModuleLevel)
     }
 
@@ -161,8 +158,6 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
                 | JsDefKind::ComputedProperty { .. }
                 | JsDefKind::Watcher { .. }
                 | JsDefKind::LifecycleHook { .. }
-                | JsDefKind::Getter { .. }
-                | JsDefKind::Setter { .. }
         ) {
             return;
         }
@@ -333,16 +328,10 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
             .collect()
     }
 
-    fn record_imported_call(
-        &mut self,
-        imported_call: JsImportedCall,
-        call_range: crate::utils::Range,
-    ) {
+    fn record_imported_call(&mut self, imported_call: JsImportedCall) {
         self.imported_calls.push(JsCallEdge {
             caller: self.source_site(),
             callee: JsCallTarget::ImportedCall { imported_call },
-            call_range,
-            confidence: super::super::types::JsCallConfidence::Known,
         });
     }
 
@@ -350,20 +339,16 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
         &mut self,
         callee: &Expression<'a>,
         invocation_kind: JsInvocationKind,
-        call_range: crate::utils::Range,
     ) {
         if let Expression::Identifier(identifier) = callee.get_inner_expression()
             && let Some(binding) =
                 binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
         {
-            self.record_imported_call(
-                JsImportedCall {
-                    binding,
-                    member_path: Vec::new(),
-                    invocation_kind,
-                },
-                call_range,
-            );
+            self.record_imported_call(JsImportedCall {
+                binding,
+                member_path: Vec::new(),
+                invocation_kind,
+            });
             return;
         }
 
@@ -375,7 +360,7 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
                 invocation_kind,
             )
         {
-            self.record_imported_call(imported_call, call_range);
+            self.record_imported_call(imported_call);
             return;
         }
 
@@ -487,29 +472,17 @@ impl<'a> Visit<'a> for JsSsaCallExtractor<'a, '_> {
     }
 
     fn visit_call_expression(&mut self, it: &CallExpression<'a>) {
-        self.record_invocation_from_expression(
-            &it.callee,
-            JsInvocationKind::Call,
-            self.ctx.lt.span_to_range(it.span),
-        );
+        self.record_invocation_from_expression(&it.callee, JsInvocationKind::Call);
         walk::walk_call_expression(self, it);
     }
 
     fn visit_new_expression(&mut self, it: &NewExpression<'a>) {
-        self.record_invocation_from_expression(
-            &it.callee,
-            JsInvocationKind::Construct,
-            self.ctx.lt.span_to_range(it.span),
-        );
+        self.record_invocation_from_expression(&it.callee, JsInvocationKind::Construct);
         walk::walk_new_expression(self, it);
     }
 
     fn visit_tagged_template_expression(&mut self, it: &TaggedTemplateExpression<'a>) {
-        self.record_invocation_from_expression(
-            &it.tag,
-            JsInvocationKind::TaggedTemplate,
-            self.ctx.lt.span_to_range(it.span),
-        );
+        self.record_invocation_from_expression(&it.tag, JsInvocationKind::TaggedTemplate);
         walk::walk_tagged_template_expression(self, it);
     }
 

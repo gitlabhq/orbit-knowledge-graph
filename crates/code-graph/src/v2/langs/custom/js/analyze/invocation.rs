@@ -58,9 +58,7 @@ pub(in crate::v2::langs::custom::js) fn invocation_support_for_js_def_kind(
         JsDefKind::Function
         | JsDefKind::Method { .. }
         | JsDefKind::LifecycleHook { .. }
-        | JsDefKind::Watcher { .. }
-        | JsDefKind::Getter { .. }
-        | JsDefKind::Setter { .. } => Some(JsInvocationSupport::function()),
+        | JsDefKind::Watcher { .. } => Some(JsInvocationSupport::function()),
         _ => None,
     }
 }

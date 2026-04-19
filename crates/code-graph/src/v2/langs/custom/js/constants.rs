@@ -32,17 +32,6 @@ pub const EVAL_EXTENSIONS: &[&str] = &[
     "svelte", "astro",
 ];
 
-/// Files at the repo root that JS resolution cares about.
-pub const MANIFEST_FILENAMES: &[&str] = &[
-    "bun.lock",
-    "bun.lockb",
-    "bunfig.toml",
-    "package.json",
-    "pnpm-workspace.yaml",
-    "tsconfig.json",
-    "jsconfig.json",
-];
-
 /// Filenames whose presence marks a project as Bun-first.
 pub const BUN_SIGNAL_FILES: &[&str] = &["bun.lock", "bun.lockb", "bunfig.toml"];
 

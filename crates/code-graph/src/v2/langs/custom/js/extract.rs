@@ -138,7 +138,6 @@ fn file_backed_module(
             local_calls: Vec::new(),
             calls: Vec::new(),
             classes: Vec::new(),
-            directive: None,
             module_info: JsModuleInfo::default(),
         },
         phase1: JsPhase1File {
@@ -253,8 +252,6 @@ fn canonical_def_kind(kind: &JsDefKind) -> DefKind {
         JsDefKind::Method { .. } => DefKind::Method,
         JsDefKind::LifecycleHook { .. } => DefKind::Method,
         JsDefKind::Watcher { .. } => DefKind::Method,
-        JsDefKind::Getter { .. } => DefKind::Method,
-        JsDefKind::Setter { .. } => DefKind::Method,
         JsDefKind::ComputedProperty { .. } => DefKind::Property,
         JsDefKind::Variable => DefKind::Property,
         JsDefKind::EnumMember => DefKind::EnumEntry,
@@ -330,7 +327,7 @@ fn module_bindings(analysis: &JsFileAnalysis) -> Vec<JsModuleBindingInput> {
     let mut bindings = Vec::new();
 
     let mut named_exports: Vec<_> = analysis.module_info.exports.iter().collect();
-    named_exports.sort_by(|(left, _), (right, _)| left.cmp(right));
+    named_exports.sort_by_key(|(name, _)| name.as_str());
     for (export_name, binding) in named_exports {
         bindings.push(module_binding(export_name, binding, &local_fqns));
     }
