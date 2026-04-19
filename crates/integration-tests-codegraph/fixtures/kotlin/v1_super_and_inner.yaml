@@ -5,7 +5,6 @@ tests:
   # ── K2: test_kotlin_inheritance_and_super_calls ──
 
   - name: "Foo.foo -> Bar.bar (super call)"
-    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.foo'
@@ -17,7 +16,6 @@ tests:
   # ── K3: test_kotlin_inner_class_calls ──
 
   - name: "Foo.foo -> Foo.fooInFooBody (same-class call)"
-    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.foo'
@@ -27,7 +25,6 @@ tests:
       - { row_count: 1 }
 
   - name: "InnerFoo.innerFoo -> Foo.fooInFooBody (inner class accesses enclosing)"
-    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.foo.Foo.InnerFoo.innerFoo'
