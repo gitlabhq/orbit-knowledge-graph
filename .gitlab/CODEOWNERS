@@ -1,0 +1,25 @@
+# Default: core team reviews everything
+* @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
+
+# Auth and security
+/crates/gkg-server/src/auth/ @michaelusa
+/crates/gkg-server/src/redaction/ @michaelusa
+/crates/gkg-server/src/rate_limit.rs @michaelusa
+/crates/gkg-server/src/tls.rs @michaelusa
+/docs/design-documents/security.md @michaelusa
+
+# Query engine
+/crates/query-engine/ @michaelusa
+
+# Indexer
+/crates/indexer/ @jgdoyon
+
+# Configuration
+/config/default.yaml @michaelusa @bohdanpk
+/crates/gkg-server-config/ @michaelusa @bohdanpk
+
+# Ontology
+/config/ontology/ @michaelusa @bohdanpk @dgruzd
+
+# Proto / API surface
+/crates/gkg-server/proto/ @michaelusa @michaelangeloio
