@@ -197,19 +197,33 @@ async fn client_drops_stream_before_response() {
 
     match result {
         Ok((tx, mut stream)) => {
+            // Disconnect the client immediately.
             drop(tx);
+
+            // Server should respond with an error or close the stream.
+            let mut got_terminal = false;
             while let Some(msg) = next_msg(&mut stream).await {
                 match msg {
                     Ok(m) => {
                         if let Some(execute_query_message::Content::Error(_)) = m.content {
+                            got_terminal = true;
                             break;
                         }
                     }
-                    Err(_) => break,
+                    Err(_) => {
+                        got_terminal = true;
+                        break;
+                    }
                 }
+            }
+            // Stream closed cleanly (None from next_msg) is also acceptable —
+            // the server noticed the disconnect and stopped.
+            if !got_terminal {
+                // Stream ended with no messages — still valid, server cleaned up.
             }
         }
         Err(status) => {
+            // Transport-level rejection on open is acceptable.
             assert!(
                 matches!(
                     status.code(),
@@ -236,63 +250,28 @@ mod redaction_exchange {
     };
     use gkg_server::redaction::RedactionExchangeError;
 
-    /// Helper: spawn `request_authorization`, intercept the `RedactionRequired`
-    /// the server sends, and return the `result_id` + channel for sending a reply.
+    /// Simulate the server side of a redaction exchange using channels.
+    /// Spawns a task that reads one message from the client, validates it
+    /// using the same logic as `RedactionService`, and returns the result.
+    /// Returns the expected `result_id` and a sender for injecting the
+    /// client's response.
     async fn start_exchange() -> (
         String,
         tokio::sync::mpsc::Sender<ExecuteQueryMessage>,
         tokio::task::JoinHandle<
             Result<gkg_server::redaction::RedactionExchangeResult, RedactionExchangeError>,
         >,
-        tokio::sync::mpsc::Receiver<Result<ExecuteQueryMessage, tonic::Status>>,
     ) {
-        let (server_tx, server_rx) =
-            tokio::sync::mpsc::channel::<Result<ExecuteQueryMessage, tonic::Status>>(4);
         let (client_tx, client_rx) = tokio::sync::mpsc::channel::<ExecuteQueryMessage>(4);
-
-        // Wrap client_rx into a type that implements futures::Stream + Send.
         let client_stream = tokio_stream::wrappers::ReceiverStream::new(client_rx);
 
-        // We need a tonic::Streaming, but can't construct one from a plain stream.
-        // Instead, use the mock approach: implement the exchange protocol manually
-        // by calling the redaction service in a spawned task that reads from a
-        // tonic codec-compatible source.
-        //
-        // Since tonic::Streaming requires a hyper Body, we go one level deeper
-        // and test using raw channel sends that mirror the bidi stream protocol.
-
-        let client_tx_clone = client_tx.clone();
-
-        // The request_authorization function needs a real tonic::Streaming.
-        // We can't easily construct one in tests. Instead, test the error
-        // conversion paths directly.
-        //
-        // Spawn a mock "server" that:
-        // 1. Sends a RedactionRequired with a known result_id
-        // 2. Reads the client's response from client_tx
-        // 3. Validates it (same logic as RedactionService)
         let result_id = uuid::Uuid::new_v4().to_string();
         let rid = result_id.clone();
 
-        // Send the RedactionRequired to the "client".
-        let required_msg = ExecuteQueryMessage {
-            content: Some(execute_query_message::Content::Redaction(
-                RedactionExchange {
-                    content: Some(redaction_exchange::Content::Required(RedactionRequired {
-                        result_id: rid.clone(),
-                        resources: vec![],
-                    })),
-                },
-            )),
-        };
-        server_tx.send(Ok(required_msg)).await.unwrap();
-
         let handle = tokio::spawn(async move {
-            // Read client response from client_stream.
             use futures::StreamExt;
             match client_stream.into_future().await {
                 (Some(msg), _) => {
-                    // Validate using the same logic as RedactionService.
                     use gkg_server::redaction::RedactionMessage;
                     let exchange = msg.unwrap_redaction()?;
 
@@ -327,12 +306,12 @@ mod redaction_exchange {
             }
         });
 
-        (result_id, client_tx_clone, handle, server_rx)
+        (result_id, client_tx, handle)
     }
 
     #[tokio::test]
     async fn result_id_mismatch_returns_invalid_argument() {
-        let (_result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (_result_id, client_tx, handle) = start_exchange().await;
 
         // Send response with wrong result_id.
         let wrong_response = ExecuteQueryMessage {
@@ -361,7 +340,7 @@ mod redaction_exchange {
 
     #[tokio::test]
     async fn correct_result_id_succeeds() {
-        let (result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (result_id, client_tx, handle) = start_exchange().await;
 
         let correct_response = ExecuteQueryMessage {
             content: Some(execute_query_message::Content::Redaction(
@@ -388,7 +367,7 @@ mod redaction_exchange {
 
     #[tokio::test]
     async fn stream_closed_returns_cancelled() {
-        let (_result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (_result_id, client_tx, handle) = start_exchange().await;
 
         // Drop sender without responding — simulates client disconnect.
         drop(client_tx);
@@ -402,7 +381,7 @@ mod redaction_exchange {
 
     #[tokio::test]
     async fn wrong_oneof_variant_returns_invalid_argument() {
-        let (_result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (_result_id, client_tx, handle) = start_exchange().await;
 
         // Send RedactionRequired instead of RedactionResponse (wrong direction).
         let wrong_msg = ExecuteQueryMessage {
@@ -426,7 +405,7 @@ mod redaction_exchange {
 
     #[tokio::test]
     async fn non_redaction_message_returns_invalid_argument() {
-        let (_result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (_result_id, client_tx, handle) = start_exchange().await;
 
         // Send an ExecuteQueryRequest instead of a RedactionExchange.
         let wrong_msg = ExecuteQueryMessage {
@@ -449,7 +428,7 @@ mod redaction_exchange {
 
     #[tokio::test]
     async fn client_error_message_returns_aborted() {
-        let (_result_id, client_tx, handle, _server_rx) = start_exchange().await;
+        let (_result_id, client_tx, handle) = start_exchange().await;
 
         // Client sends an error message.
         let error_msg = ExecuteQueryMessage {
