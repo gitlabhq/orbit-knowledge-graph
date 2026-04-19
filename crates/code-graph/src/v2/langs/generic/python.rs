@@ -154,6 +154,7 @@ impl DslLanguage for PythonDsl {
             super_kinds: &[],
             field_access: &[("attribute", "object", "attribute")],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 
@@ -394,7 +395,8 @@ mod tests {
             .find(|d| d.name == "greet")
             .unwrap();
         let meta = greet.metadata.as_ref().expect("should have metadata");
-        assert_eq!(meta.return_type.as_deref(), Some("str"));
+        // "str" is FQN-qualified with the module prefix from "test.py"
+        assert_eq!(meta.return_type.as_deref(), Some("test.str"));
     }
 
     #[test]

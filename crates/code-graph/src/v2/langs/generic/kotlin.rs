@@ -139,6 +139,7 @@ impl DslLanguage for KotlinDsl {
             super_kinds: &["super_expression"],
             field_access: &[],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 

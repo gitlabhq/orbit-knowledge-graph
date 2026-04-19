@@ -139,6 +139,7 @@ impl DslLanguage for JavaDsl {
             super_kinds: &["super"],
             field_access: &[("field_access", "object", "field")],
             constructor: &[("object_creation_expression", "type")],
+            qualified_type_kinds: &["scoped_type_identifier"],
         })
     }
 

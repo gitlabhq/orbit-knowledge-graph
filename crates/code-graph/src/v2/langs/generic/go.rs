@@ -125,6 +125,7 @@ impl DslLanguage for GoDsl {
             super_kinds: &[],
             field_access: &[("selector_expression", "operand", "field")],
             constructor: &[("composite_literal", "type")],
+            qualified_type_kinds: &[],
         })
     }
 }

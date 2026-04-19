@@ -285,19 +285,41 @@ impl LanguageSpec {
             return;
         }
 
-        // Constructor (new Foo())
+        // Constructor (new Foo() or new Outer.Inner())
         for &(ctor_kind, type_field) in cc.constructor {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
-                    let bare = type_node.text().to_string();
-                    let resolved = if let Some(fqn) = import_map.get(&bare) {
-                        fqn.clone()
-                    } else if let Some(prefix) = module_prefix {
-                        format!("{prefix}{sep}{bare}")
+                    let tk = type_node.kind();
+                    // Qualified type (e.g. scoped_type_identifier): the type node
+                    // has multiple named children representing segments. Extract
+                    // them as Ident (first, resolved via imports) + Field (rest).
+                    if cc.qualified_type_kinds.contains(&tk.as_ref()) {
+                        let mut segments = type_node.children().filter(|c| c.is_named());
+                        if let Some(first) = segments.next() {
+                            let name = first.text().to_string();
+                            let resolved = if let Some(fqn) = import_map.get(&name) {
+                                fqn.clone()
+                            } else if let Some(prefix) = module_prefix {
+                                format!("{prefix}{sep}{name}")
+                            } else {
+                                name
+                            };
+                            chain.push(ExpressionStep::New(resolved));
+                            for seg in segments {
+                                chain.push(ExpressionStep::Field(seg.text().to_string()));
+                            }
+                        }
                     } else {
-                        bare
-                    };
-                    chain.push(ExpressionStep::New(resolved));
+                        let bare = type_node.text().to_string();
+                        let resolved = if let Some(fqn) = import_map.get(&bare) {
+                            fqn.clone()
+                        } else if let Some(prefix) = module_prefix {
+                            format!("{prefix}{sep}{bare}")
+                        } else {
+                            bare
+                        };
+                        chain.push(ExpressionStep::New(resolved));
+                    }
                 }
                 return;
             }

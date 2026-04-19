@@ -172,6 +172,12 @@ pub struct ChainConfig {
     pub field_access: &'static [(&'static str, &'static str, &'static str)],
     /// Constructor node kinds + type_field.
     pub constructor: &'static [(&'static str, &'static str)],
+    /// Type node kinds inside constructors that are qualified (e.g.
+    /// `scoped_type_identifier` for Java's `new Outer.Inner()`).
+    /// When the constructor's type field has this kind, decompose it
+    /// into chain steps (Ident for the base, Field for nested parts,
+    /// New for the final segment) instead of treating it as a single name.
+    pub qualified_type_kinds: &'static [&'static str],
 }
 
 impl Rule for ReferenceRule {

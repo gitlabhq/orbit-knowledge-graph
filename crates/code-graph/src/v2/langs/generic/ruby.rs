@@ -114,6 +114,7 @@ impl DslLanguage for RubyDsl {
             super_kinds: &["super"],
             field_access: &[("call", "receiver", "method")],
             constructor: &[],
+            qualified_type_kinds: &[],
         })
     }
 
