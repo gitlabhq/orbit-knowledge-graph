@@ -9,6 +9,7 @@ mod server {
     pub mod data_correctness;
     pub mod graph_formatter;
     pub mod graph_stats;
+    pub mod grpc_streaming;
     pub mod grpc_tls;
     pub mod health;
     pub mod hydration;

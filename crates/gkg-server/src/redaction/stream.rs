@@ -40,6 +40,7 @@ impl RedactionExchangeError {
     }
 }
 
+#[derive(Debug)]
 pub struct RedactionExchangeResult {
     pub authorizations: Vec<ResourceAuthorization>,
 }

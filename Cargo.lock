@@ -5796,6 +5796,7 @@ dependencies = [
  "indexer",
  "integration-testkit",
  "jsonschema",
+ "jsonwebtoken 10.3.0",
  "labkit",
  "ontology",
  "opentelemetry",
@@ -5818,6 +5819,7 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
+ "uuid",
  "zstd",
 ]
 
