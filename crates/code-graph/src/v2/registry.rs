@@ -24,13 +24,6 @@ use crate::v2::pipeline::{
 ///
 /// Pipeline types wrapped in `[]` to avoid comma ambiguity in generics.
 macro_rules! register_v2_pipelines {
-    // Entry points — match first entry to avoid catch-all recursion.
-    (Tag($tag:literal) => $p:tt , $($rest:tt)*) => {
-        register_v2_pipelines!(@munch [] [[$tag => $p]] $($rest)*);
-    };
-    ($v:ident => $p:tt , $($rest:tt)*) => {
-        register_v2_pipelines!(@munch [[$v => $p]] [] $($rest)*);
-    };
     // Done.
     (@munch [$($langs:tt)*] [$($tags:tt)*]) => {
         register_v2_pipelines!(@emit_lang $($langs)*);
@@ -40,15 +33,9 @@ macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $p]] $($rest)*);
     };
-    (@munch [$($langs:tt)*] [$($tags:tt)*] Tag($tag:literal) => $p:tt) => {
-        register_v2_pipelines!(@munch [$($langs)*] [$($tags)* [$tag => $p]]);
-    };
     // Language entry.
     (@munch [$($langs:tt)*] [$($tags:tt)*] $v:ident => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)* [$v => $p]] [$($tags)*] $($rest)*);
-    };
-    (@munch [$($langs:tt)*] [$($tags:tt)*] $v:ident => $p:tt) => {
-        register_v2_pipelines!(@munch [$($langs)* [$v => $p]] [$($tags)*]);
     };
     // Emit dispatch_language (called by Pipeline::run).
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
@@ -77,6 +64,9 @@ macro_rules! register_v2_pipelines {
                 _ => return None,
             })
         }
+    };
+    ($($entries:tt)*) => {
+        register_v2_pipelines!(@munch [] [] $($entries)*);
     };
 }
 

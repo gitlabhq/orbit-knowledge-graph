@@ -238,7 +238,6 @@ impl ManifestCache {
 }
 
 pub(super) fn build_project_workspace(
-    _root_path: &str,
     manifest_path: &Path,
     manifest_cache: &mut ManifestCache,
     embedded_sysroot: &EmbeddedSysroot,

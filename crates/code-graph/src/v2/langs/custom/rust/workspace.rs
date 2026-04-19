@@ -25,8 +25,7 @@ impl WorkspaceIndex {
         worker_threads: usize,
         embedded_sysroot: &EmbeddedSysroot,
     ) -> Result<Self> {
-        let workspace =
-            build_project_workspace(root_path, manifest_path, manifest_cache, embedded_sysroot)?;
+        let workspace = build_project_workspace(manifest_path, manifest_cache, embedded_sysroot)?;
         let worker_threads = if worker_threads == 0 {
             num_cpus::get()
         } else {

@@ -268,14 +268,6 @@ impl DefinitionRangeIndex {
         }
     }
 
-    pub fn insert(&mut self, range: Range, node: NodeIndex) {
-        self.lapper.insert(Interval {
-            start: range.byte_offset.0 as u64,
-            stop: range.byte_offset.1 as u64,
-            val: node,
-        });
-    }
-
     pub fn find_enclosing(&self, start: u32, end: u32) -> Option<NodeIndex> {
         self.lapper
             .find(start as u64, end as u64)
