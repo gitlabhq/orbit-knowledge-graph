@@ -92,7 +92,6 @@ tests:
   # ── J1: test_java_reference_resolution_main (14 assertions) ──
 
   - name: "Main.main -> Traceable annotation"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -121,7 +120,6 @@ tests:
       - { row_count: 1 }
 
   - name: "Main.main -> Bar.baz (pattern variable instanceof)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -197,7 +195,6 @@ tests:
       - { row_count: 1 }
 
   - name: "Main.main -> Outer.Inner.innerStatic (nested class static method)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'

@@ -593,6 +593,10 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             if let Some((parent, _)) = fqn.rsplit_once(ctx.rules.fqn_separator) {
                                 next_types.push(parent.to_string());
                             }
+                        } else if gdef.kind.is_type_container() {
+                            // Nested type access (e.g. Outer.Inner.method()):
+                            // propagate the type's own FQN so the chain continues
+                            next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
                 }
