@@ -14,7 +14,7 @@ use crate::v2::pipeline::PipelineError;
 use super::{
     CjsExport, ExportedBinding, ImportedName, JsAnalyzer, JsDef, JsDefKind, JsExportName,
     JsFileAnalysis, JsImport, JsImportKind, JsModuleBindingInput, JsModuleBindingTargetInput,
-    JsModuleInfo, JsPhase1File, JsStarReexport, extract_scripts,
+    JsModuleInfo, JsPhase1File, JsStarReexport,
 };
 
 #[derive(Debug, Clone)]
@@ -69,48 +69,22 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
     ) {
         return Ok(stub);
     }
-    let sources =
-        source_variants(&relative_path, &extension, &source).map_err(|error| PipelineError {
+    let (virtual_path, source_text) = prepared_source(&relative_path, &extension, &source)
+        .map_err(|error| PipelineError {
             file_path: relative_path.clone(),
             error,
         })?;
 
-    let mut all_defs = Vec::new();
-    let mut all_imports = Vec::new();
-    let mut all_local_calls = Vec::new();
-    let mut all_calls = Vec::new();
-    let mut all_classes = Vec::new();
-    let mut directive = None;
-    let mut module_info = JsModuleInfo::default();
-
-    for (virtual_path, source_text) in sources {
-        let analysis = JsAnalyzer::analyze_file(&source_text, &virtual_path, &relative_path)
-            .map_err(|error| PipelineError {
-                file_path: relative_path.clone(),
-                error,
-            })?;
-
-        if directive.is_none() {
-            directive = analysis.directive;
-        }
-        module_info.merge(analysis.module_info);
-        all_defs.extend(analysis.defs);
-        all_imports.extend(analysis.imports);
-        all_local_calls.extend(analysis.local_calls);
-        all_calls.extend(analysis.calls);
-        all_classes.extend(analysis.classes);
-    }
-
-    let analysis = JsFileAnalysis {
-        relative_path: relative_path.clone(),
-        defs: all_defs,
-        imports: all_imports,
-        local_calls: all_local_calls,
-        calls: all_calls,
-        classes: all_classes,
-        directive,
-        module_info,
-    };
+    // One analyzer call per file. SFCs with multiple `<script>` blocks
+    // go through `frameworks::combine_scripts` first, so the analyzer
+    // never sees the N-blocks-to-merge shape that silently dropped
+    // colliding bindings in the old multi-pass path.
+    let mut analysis = JsAnalyzer::analyze_file(&source_text, &virtual_path, &relative_path)
+        .map_err(|error| PipelineError {
+            file_path: relative_path.clone(),
+            error,
+        })?;
+    analysis.relative_path = relative_path.clone();
 
     let phase1 = JsPhase1File {
         path: relative_path.clone(),
@@ -149,17 +123,7 @@ fn file_backed_module(
         || super::constants::DATA_EXTENSIONS.contains(&extension);
     let primary_binding = is_file_backed.then(|| JsModuleBindingInput {
         export_name: JsExportName::Primary,
-        binding: ExportedBinding {
-            local_fqn: "default".to_string(),
-            range: SourceRange::empty(),
-            definition_range: None,
-            invocation_support: None,
-            member_bindings: Default::default(),
-            is_type: false,
-            is_default: true,
-            reexport_source: None,
-            reexport_imported_name: None,
-        },
+        binding: ExportedBinding::primary(None, SourceRange::empty()),
         target: JsModuleBindingTargetInput::File {
             path: relative_path.to_string(),
         },
@@ -190,30 +154,26 @@ fn file_backed_module(
     })
 }
 
-fn source_variants(
+/// Pick the single (virtual_path, source) tuple the analyzer runs on.
+///
+/// For SFCs, every `<script>` block is concatenated into one buffer so
+/// the analyzer, OXC parser, and SSA pass each run once per file.
+fn prepared_source(
     relative_path: &str,
     extension: &str,
     source: &str,
-) -> Result<Vec<(String, String)>, String> {
+) -> Result<(String, String), String> {
     if !super::frameworks::has_embedded_scripts(extension) {
-        return Ok(vec![(relative_path.to_string(), source.to_string())]);
+        return Ok((relative_path.to_string(), source.to_string()));
     }
-    extract_scripts(source, extension).map(|blocks| {
-        blocks
-            .into_iter()
-            .map(|block| {
-                let virtual_ext = if block.source_type.is_typescript() {
-                    "ts"
-                } else {
-                    "js"
-                };
-                (
-                    format!("{relative_path}.{virtual_ext}"),
-                    block.source_text.to_string(),
-                )
-            })
-            .collect()
-    })
+    let combined = super::frameworks::combine_scripts(source, extension)?;
+    if combined.block_count == 0 {
+        // No `<script>` block found — treat the raw SFC as empty source
+        // so the analyzer emits no defs rather than tripping on markup.
+        return Ok((format!("{relative_path}.js"), String::new()));
+    }
+    let virtual_ext = if combined.is_typescript { "ts" } else { "js" };
+    Ok((format!("{relative_path}.{virtual_ext}"), combined.source))
 }
 
 fn extension_for(path: &str) -> String {
@@ -417,24 +377,14 @@ fn cjs_binding(
             invocation_support,
         } => Some(JsModuleBindingInput {
             export_name: JsExportName::Primary,
-            binding: ExportedBinding {
-                local_fqn: local_fqn.clone().unwrap_or_else(|| "default".to_string()),
-                range: *range,
-                definition_range: local_fqn
-                    .as_ref()
-                    .and_then(|fqn| local_definition_ranges.get(fqn).copied()),
-                invocation_support: *invocation_support,
-                member_bindings: Default::default(),
-                is_type: false,
-                is_default: true,
-                reexport_source: None,
-                reexport_imported_name: None,
-            },
-            target: local_fqn
-                .as_ref()
-                .filter(|fqn| local_fqns.contains(fqn.as_str()))
-                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
-                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
+            binding: ExportedBinding::primary(local_fqn.clone(), *range)
+                .with_definition_range(
+                    local_fqn
+                        .as_ref()
+                        .and_then(|fqn| local_definition_ranges.get(fqn).copied()),
+                )
+                .with_invocation_support(*invocation_support),
+            target: cjs_local_target(local_fqn, local_fqns),
         }),
         CjsExport::Named {
             name,
@@ -443,26 +393,30 @@ fn cjs_binding(
             invocation_support,
         } => Some(JsModuleBindingInput {
             export_name: JsExportName::Named(name.clone()),
-            binding: ExportedBinding {
-                local_fqn: local_fqn.clone().unwrap_or_else(|| name.clone()),
-                range: *range,
-                definition_range: local_fqn
+            binding: ExportedBinding::local(
+                local_fqn.clone().unwrap_or_else(|| name.clone()),
+                *range,
+            )
+            .with_definition_range(
+                local_fqn
                     .as_ref()
                     .and_then(|fqn| local_definition_ranges.get(fqn).copied()),
-                invocation_support: *invocation_support,
-                member_bindings: Default::default(),
-                is_type: false,
-                is_default: false,
-                reexport_source: None,
-                reexport_imported_name: None,
-            },
-            target: local_fqn
-                .as_ref()
-                .filter(|fqn| local_fqns.contains(fqn.as_str()))
-                .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
-                .unwrap_or(JsModuleBindingTargetInput::Unresolved),
+            )
+            .with_invocation_support(*invocation_support),
+            target: cjs_local_target(local_fqn, local_fqns),
         }),
     }
+}
+
+fn cjs_local_target(
+    local_fqn: &Option<String>,
+    local_fqns: &FxHashSet<&str>,
+) -> JsModuleBindingTargetInput {
+    local_fqn
+        .as_ref()
+        .filter(|fqn| local_fqns.contains(fqn.as_str()))
+        .map(|fqn| JsModuleBindingTargetInput::LocalDefinition { fqn: fqn.clone() })
+        .unwrap_or(JsModuleBindingTargetInput::Unresolved)
 }
 
 fn binding_target_input(

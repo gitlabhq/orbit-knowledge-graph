@@ -430,17 +430,9 @@ fn build_export_member_bindings(
             continue;
         };
 
-        let member_binding = ExportedBinding {
-            local_fqn: def.fqn.clone(),
-            range: def.range,
-            definition_range: Some(def.range),
-            invocation_support: Some(JsInvocationSupport::function()),
-            member_bindings: HashMap::new(),
-            is_type: false,
-            is_default: false,
-            reexport_source: None,
-            reexport_imported_name: None,
-        };
+        let member_binding = ExportedBinding::local(def.fqn.clone(), def.range)
+            .with_definition_range(Some(def.range))
+            .with_invocation_support(Some(JsInvocationSupport::function()));
 
         by_local
             .entry(class_fqn.clone())
@@ -566,20 +558,15 @@ fn default_export_binding(
         let oxc::ast::ast::Statement::ExportDefaultDeclaration(export_default) = statement else {
             return None;
         };
-        Some(ExportedBinding {
-            local_fqn: "default".to_string(),
-            range: lt.span_to_range(export_default.span()),
-            definition_range: None,
-            invocation_support: None,
-            member_bindings: export_member_bindings_by_local
-                .get("default")
-                .cloned()
-                .unwrap_or_default(),
-            is_type: false,
-            is_default: true,
-            reexport_source: None,
-            reexport_imported_name: None,
-        })
+        Some(
+            ExportedBinding::primary(None, lt.span_to_range(export_default.span()))
+                .with_member_bindings(
+                    export_member_bindings_by_local
+                        .get("default")
+                        .cloned()
+                        .unwrap_or_default(),
+                ),
+        )
     })
 }
 
@@ -595,17 +582,11 @@ fn exported_binding_from_expression(
                 .get(identifier.name.as_str())
                 .copied()?;
             let definition_range = definition_fqns.get(identifier.name.as_str()).copied()?;
-            Some(ExportedBinding {
-                local_fqn: identifier.name.to_string(),
-                range: definition_range,
-                definition_range: Some(definition_range),
-                invocation_support: Some(support),
-                member_bindings: HashMap::new(),
-                is_type: false,
-                is_default: false,
-                reexport_source: None,
-                reexport_imported_name: None,
-            })
+            Some(
+                ExportedBinding::local(identifier.name.to_string(), definition_range)
+                    .with_definition_range(Some(definition_range))
+                    .with_invocation_support(Some(support)),
+            )
         }
         oxc::ast::ast::Expression::ArrowFunctionExpression(_)
         | oxc::ast::ast::Expression::FunctionExpression(_)
@@ -672,20 +653,13 @@ fn build_module_info(
                 })
             })
             .unwrap_or_default();
-        exports.insert(
-            export_name,
-            ExportedBinding {
-                definition_range,
-                local_fqn,
-                range: export_range,
-                invocation_support,
-                member_bindings,
-                is_type: entry.is_type,
-                is_default,
-                reexport_source: None,
-                reexport_imported_name: None,
-            },
-        );
+        let mut binding = ExportedBinding::local(local_fqn, export_range)
+            .with_definition_range(definition_range)
+            .with_invocation_support(invocation_support)
+            .with_member_bindings(member_bindings);
+        binding.is_type = entry.is_type;
+        binding.is_default = is_default;
+        exports.insert(export_name, binding);
     }
 
     if !exports.contains_key("default")
@@ -743,17 +717,13 @@ fn build_module_info(
             };
             exports.insert(
                 export_name,
-                ExportedBinding {
-                    local_fqn: format!("reexport:{}", module_request.name),
-                    range: lt.span_to_range(entry.span),
-                    definition_range: None,
-                    invocation_support: None,
-                    member_bindings: HashMap::new(),
-                    is_type: entry.is_type,
-                    is_default: false,
-                    reexport_source: Some(module_request.name.to_string()),
+                ExportedBinding::reexport(
+                    format!("reexport:{}", module_request.name),
+                    lt.span_to_range(entry.span),
+                    module_request.name.to_string(),
                     reexport_imported_name,
-                },
+                    entry.is_type,
+                ),
             );
         }
     }
@@ -891,16 +861,10 @@ impl JsAnalyzer {
             module_info
                 .exports
                 .entry("default".to_string())
-                .or_insert_with(|| ExportedBinding {
-                    local_fqn: vc.fqn.clone(),
-                    range: vc.range,
-                    definition_range: Some(vc.range),
-                    invocation_support: Some(JsInvocationSupport::class()),
-                    member_bindings: HashMap::new(),
-                    is_type: false,
-                    is_default: true,
-                    reexport_source: None,
-                    reexport_imported_name: None,
+                .or_insert_with(|| {
+                    ExportedBinding::primary(Some(vc.fqn.clone()), vc.range)
+                        .with_definition_range(Some(vc.range))
+                        .with_invocation_support(Some(JsInvocationSupport::class()))
                 });
             // Also patch existing default binding if it has stale "default" fqn
             if let Some(binding) = module_info.exports.get_mut("default")

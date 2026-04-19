@@ -326,42 +326,28 @@ mod tests {
             bindings: vec![
                 JsModuleBindingInput {
                     export_name: JsExportName::Named("normalize".to_string()),
-                    binding: ExportedBinding {
-                        local_fqn: "normalize".to_string(),
-                        range: SourceRange::new(
+                    binding: ExportedBinding::local(
+                        "normalize".to_string(),
+                        SourceRange::new(
                             SourcePosition::new(4, 0),
                             SourcePosition::new(4, 20),
                             (43, 63),
                         ),
-                        definition_range: None,
-                        invocation_support: None,
-                        member_bindings: Default::default(),
-                        is_type: false,
-                        is_default: false,
-                        reexport_source: None,
-                        reexport_imported_name: None,
-                    },
+                    ),
                     target: JsModuleBindingTargetInput::LocalDefinition {
                         fqn: "normalize".to_string(),
                     },
                 },
                 JsModuleBindingInput {
                     export_name: JsExportName::Primary,
-                    binding: ExportedBinding {
-                        local_fqn: "normalize".to_string(),
-                        range: SourceRange::new(
+                    binding: ExportedBinding::primary(
+                        Some("normalize".to_string()),
+                        SourceRange::new(
                             SourcePosition::new(5, 0),
                             SourcePosition::new(5, 30),
                             (64, 94),
                         ),
-                        definition_range: None,
-                        invocation_support: None,
-                        member_bindings: Default::default(),
-                        is_type: false,
-                        is_default: true,
-                        reexport_source: None,
-                        reexport_imported_name: None,
-                    },
+                    ),
                     target: JsModuleBindingTargetInput::LocalDefinition {
                         fqn: "normalize".to_string(),
                     },
@@ -423,17 +409,7 @@ mod tests {
             imports: Vec::new(),
             bindings: vec![JsModuleBindingInput {
                 export_name: JsExportName::Named("schema".to_string()),
-                binding: ExportedBinding {
-                    local_fqn: "schema".to_string(),
-                    range: SourceRange::empty(),
-                    definition_range: None,
-                    invocation_support: None,
-                    member_bindings: Default::default(),
-                    is_type: false,
-                    is_default: false,
-                    reexport_source: None,
-                    reexport_imported_name: None,
-                },
+                binding: ExportedBinding::local("schema".to_string(), SourceRange::empty()),
                 target: JsModuleBindingTargetInput::File {
                     path: "src/schema.graphql".to_string(),
                 },

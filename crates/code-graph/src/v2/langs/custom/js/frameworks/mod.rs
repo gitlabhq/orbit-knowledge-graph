@@ -29,3 +29,45 @@ pub fn extract_scripts<'a>(
     PartialLoader::parse(extension, source)
         .ok_or_else(|| format!("failed to parse embedded scripts for .{extension} file"))
 }
+
+/// Source text derived from an SFC's `<script>` blocks, flattened into
+/// one buffer so the analyzer sees a single module instead of N.
+pub struct CombinedScripts {
+    /// Concatenation of every `<script>` block, separated by a newline
+    /// so two blocks never merge into one statement.
+    pub source: String,
+    /// `true` iff at least one source block was TypeScript; the
+    /// combined source is analysed as TS in that case.
+    pub is_typescript: bool,
+    /// Number of script blocks combined. Zero means "no `<script>`
+    /// block was found at all"; callers fall back to the raw source.
+    pub block_count: usize,
+}
+
+/// Fold every `<script>` block in an SFC into one analyzer input.
+///
+/// A single OXC parse + SemanticBuilder run covers every block,
+/// eliminating the per-block merge path (and the silent-overwrite
+/// bug that merge hid for SFCs with both `<script>` and
+/// `<script setup>`). Block scopes flatten into one module, which
+/// is fine for def / import / call extraction — Vue's runtime
+/// scoping rules are not what we model.
+pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts, String> {
+    let blocks = extract_scripts(source, extension)?;
+    let mut combined = String::new();
+    let mut is_typescript = false;
+    for block in &blocks {
+        if block.source_type.is_typescript() {
+            is_typescript = true;
+        }
+        if !combined.is_empty() {
+            combined.push('\n');
+        }
+        combined.push_str(block.source_text);
+    }
+    Ok(CombinedScripts {
+        source: combined,
+        is_typescript,
+        block_count: blocks.len(),
+    })
+}

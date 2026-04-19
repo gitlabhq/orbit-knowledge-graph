@@ -1,7 +1,6 @@
 use crate::utils::Range;
 use crate::v2::types::{ExpressionStep, ssa::ParseValue};
 use std::collections::HashMap;
-use std::collections::hash_map::Entry;
 
 use super::frameworks::JsDirective;
 
@@ -75,46 +74,6 @@ pub struct JsModuleInfo {
     pub definition_fqns: HashMap<String, Range>,
 }
 
-impl JsModuleInfo {
-    pub fn merge(&mut self, other: Self) {
-        merge_unique_map(&mut self.exports, other.exports, "export");
-        self.imports.extend(other.imports);
-        self.star_export_sources.extend(other.star_export_sources);
-        self.cjs_exports.extend(other.cjs_exports);
-        self.has_module_syntax |= other.has_module_syntax;
-        merge_unique_map(
-            &mut self.definition_fqns,
-            other.definition_fqns,
-            "definition_fqn",
-        );
-    }
-}
-
-/// Merge `from` into `into`, keeping the existing entry on collision.
-///
-/// Collisions only happen for SFCs whose `<script>` and `<script setup>`
-/// blocks both declare the same name. We keep the first-seen binding
-/// (deterministic because `extract::source_variants` walks blocks in
-/// source order) and log the dropped entry so regressions surface in
-/// tests rather than silently losing an export.
-fn merge_unique_map<V>(into: &mut HashMap<String, V>, from: HashMap<String, V>, label: &str) {
-    for (key, value) in from {
-        match into.entry(key) {
-            Entry::Vacant(entry) => {
-                entry.insert(value);
-            }
-            Entry::Occupied(entry) => {
-                debug_assert!(false, "duplicate {label} merge for key {}", entry.key());
-                log::debug!(
-                    "js pipeline: dropping duplicate {label} '{}' from later script block",
-                    entry.key()
-                );
-                let _ = value;
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ExportedBinding {
     pub local_fqn: String,
@@ -126,6 +85,78 @@ pub struct ExportedBinding {
     pub is_default: bool,
     pub reexport_source: Option<String>,
     pub reexport_imported_name: Option<ImportedName>,
+}
+
+impl Default for ExportedBinding {
+    fn default() -> Self {
+        Self {
+            local_fqn: String::new(),
+            range: Range::empty(),
+            definition_range: None,
+            invocation_support: None,
+            member_bindings: HashMap::new(),
+            is_type: false,
+            is_default: false,
+            reexport_source: None,
+            reexport_imported_name: None,
+        }
+    }
+}
+
+impl ExportedBinding {
+    /// Plain named export pointing at a local definition.
+    pub fn local(local_fqn: String, range: Range) -> Self {
+        Self {
+            local_fqn,
+            range,
+            ..Self::default()
+        }
+    }
+
+    /// `export default ...` or `module.exports = ...`. The local FQN
+    /// defaults to `"default"` if the caller has no better candidate.
+    pub fn primary(local_fqn: Option<String>, range: Range) -> Self {
+        Self {
+            local_fqn: local_fqn.unwrap_or_else(|| "default".to_string()),
+            range,
+            is_default: true,
+            ..Self::default()
+        }
+    }
+
+    /// `export { foo } from "./bar"` — name kept from the caller,
+    /// source and optional imported name propagate through resolution.
+    pub fn reexport(
+        local_fqn: String,
+        range: Range,
+        source: String,
+        imported: Option<ImportedName>,
+        is_type: bool,
+    ) -> Self {
+        Self {
+            local_fqn,
+            range,
+            is_type,
+            reexport_source: Some(source),
+            reexport_imported_name: imported,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_definition_range(mut self, range: Option<Range>) -> Self {
+        self.definition_range = range;
+        self
+    }
+
+    pub fn with_invocation_support(mut self, support: Option<JsInvocationSupport>) -> Self {
+        self.invocation_support = support;
+        self
+    }
+
+    pub fn with_member_bindings(mut self, members: HashMap<String, ExportedBinding>) -> Self {
+        self.member_bindings = members;
+        self
+    }
 }
 
 #[derive(Debug, Clone)]
