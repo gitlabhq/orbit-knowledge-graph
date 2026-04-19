@@ -3,6 +3,7 @@
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
+use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
@@ -41,6 +42,11 @@ impl<'a> FileResolver<'a> {
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
         Self { ctx, deadline }
+    }
+
+    /// Dump resolver trace events to stderr. Call after all refs are resolved.
+    pub fn dump_trace(&self, header: &str) {
+        self.ctx.tracer.dump_grouped(header);
     }
 
     /// Register inferred return types from the current file's Phase 2 pass.
@@ -124,6 +130,7 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
+    tracer: Tracer,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -148,6 +155,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
+            tracer: crate::v2::trace::thread_tracer(),
         }
     }
 
@@ -161,6 +169,31 @@ impl<'a> ResolveCtx<'a> {
             self.rules.fqn_separator,
             &mut self.scratch,
         );
+        if let Some(iid) = self.graph.graph[import_node].import_id() {
+            let gimp = &self.graph.imports[iid.0 as usize];
+            let path = self.graph.str(gimp.path);
+            let name = gimp.name.map(|n| self.graph.str(n)).unwrap_or("");
+            let fqn = if path.is_empty() {
+                name.to_string()
+            } else {
+                format!("{path}{}{name}", self.rules.fqn_separator)
+            };
+            let result_fqns: Vec<String> = result
+                .iter()
+                .filter_map(|&n| {
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
+                })
+                .collect();
+            self.tracer.event(TraceEvent::ImportResolve {
+                import_fqn: fqn,
+                found: !result.is_empty(),
+                result_fqns,
+            });
+        }
         self.import_cache.insert(import_node, result.clone());
         result
     }
@@ -191,6 +224,12 @@ impl<'a> ResolveCtx<'a> {
                 self.graph
                     .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
                 if !result.is_empty() {
+                    self.tracer.event(TraceEvent::ImplicitSubScope {
+                        scope_fqn: scope_fqn.to_string(),
+                        sub_scope: sub.to_string(),
+                        member_name: member_name.to_string(),
+                        found: true,
+                    });
                     break;
                 }
             }
@@ -206,9 +245,32 @@ impl<'a> ResolveCtx<'a> {
                 self.rules.fqn_separator,
                 &mut result,
             );
+            if !result.is_empty() {
+                self.tracer.event(TraceEvent::ReceiverTypeLookup {
+                    type_name: scope_fqn.to_string(),
+                    member_name: member_name.to_string(),
+                    found_count: result.len(),
+                });
+            }
         }
 
         let found = !result.is_empty();
+        let result_fqns: Vec<String> = result
+            .iter()
+            .filter_map(|&n| {
+                self.graph.graph[n].def_id().map(|d| {
+                    self.graph
+                        .str(self.graph.defs[d.0 as usize].fqn)
+                        .to_string()
+                })
+            })
+            .collect();
+        self.tracer.event(TraceEvent::NestedLookup {
+            scope_fqn: scope_fqn.to_string(),
+            member_name: member_name.to_string(),
+            found,
+            result_fqns,
+        });
         if found {
             out.extend_from_slice(&result);
         }
@@ -217,12 +279,55 @@ impl<'a> ResolveCtx<'a> {
     }
 }
 
+fn format_reaching(reaching: &[ParseValue]) -> Vec<String> {
+    reaching
+        .iter()
+        .map(|v| match v {
+            ParseValue::LocalDef(i) => format!("LocalDef({i})"),
+            ParseValue::ImportRef(i) => format!("ImportRef({i})"),
+            ParseValue::Type(t) => format!("Type({t})"),
+            ParseValue::Opaque => "Opaque".to_string(),
+        })
+        .collect()
+}
+
+fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
+    chain.map(|c| c.iter().map(|s| format!("{s:?}")).collect())
+}
+
 fn resolve_single(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
-    if r.chain.is_some() {
+    ctx.tracer.event(TraceEvent::ResolveStart {
+        name: r.name.to_string(),
+        chain: format_chain(r.chain),
+        reaching: format_reaching(r.reaching),
+        enclosing_def: r.enclosing_def.and_then(|i| {
+            ctx.def_nodes
+                .get(i as usize)
+                .and_then(|&n| ctx.graph.graph[n].def_id())
+                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+        }),
+    });
+
+    let result = if r.chain.is_some() {
         resolve_chain(ctx, r)
     } else {
         resolve_bare(ctx, r)
-    }
+    };
+
+    let target_fqns: Vec<String> = result
+        .iter()
+        .filter_map(|&n| {
+            ctx.graph.graph[n]
+                .def_id()
+                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+        })
+        .collect();
+    ctx.tracer.event(TraceEvent::ResolveResult {
+        name: r.name.to_string(),
+        targets: target_fqns,
+    });
+
+    result
 }
 
 fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
@@ -231,6 +336,7 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
     }
 
     for stage in &ctx.rules.bare_stages.clone() {
+        let stage_name = format!("{stage:?}");
         let result = match stage {
             ResolveStage::SSA => {
                 if r.reaching.is_empty() {
@@ -271,6 +377,20 @@ fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 }
             }
         };
+        let result_fqns: Vec<String> = result
+            .iter()
+            .filter_map(|&n| {
+                ctx.graph.graph[n]
+                    .def_id()
+                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+            })
+            .collect();
+        ctx.tracer.event(TraceEvent::ResolveBareStage {
+            stage: stage_name,
+            name: r.name.to_string(),
+            result_count: result.len(),
+            result_fqns,
+        });
         if !result.is_empty() {
             let mut seen = rustc_hash::FxHashSet::default();
             let mut result = result;
@@ -298,29 +418,91 @@ fn resolve_from_reaching(
                         let name = ctx.graph.str(gdef.name);
                         let fqn = ctx.graph.str(gdef.fqn);
                         if ref_name == name {
-                            // Constructor call: ref matches class name
+                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                result: format!("constructor -> {fqn}"),
+                            });
                             result.push(node);
                         } else if !ctx.lookup_nested_cached(fqn, ref_name, &mut result) {
-                            // Instance call: try call_method fallback
                             if let Some(call_method) = ctx.rules.hooks.call_method {
+                                let before = result.len();
                                 ctx.lookup_nested_cached(fqn, call_method, &mut result);
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: if result.len() > before {
+                                        format!("call_method({call_method}) found")
+                                    } else {
+                                        format!("{fqn}.{ref_name} not found, call_method({call_method}) not found")
+                                    },
+                                });
+                            } else {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("{fqn}.{ref_name} not found"),
+                                });
                             }
+                        } else {
+                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                result: format!("nested {fqn}.{ref_name} found"),
+                            });
                         }
                     } else {
+                        let fqn = ctx.graph.str(gdef.fqn);
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                            result: format!("direct -> {fqn}"),
+                        });
                         result.push(node);
                     }
                 }
             }
             ParseValue::ImportRef(i) => {
                 if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
-                    result.extend(ctx.resolve_import_cached(import_node));
+                    let resolved = ctx.resolve_import_cached(import_node);
+                    let fqns: Vec<String> = resolved
+                        .iter()
+                        .filter_map(|&n| {
+                            ctx.graph.graph[n].def_id().map(|d| {
+                                ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string()
+                            })
+                        })
+                        .collect();
+                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                        value: format!("ImportRef({i})"),
+                        result: if fqns.is_empty() {
+                            "import not resolved".to_string()
+                        } else {
+                            format!("import -> [{}]", fqns.join(", "))
+                        },
+                    });
+                    result.extend(resolved);
                 }
             }
             ParseValue::Type(type_fqn) => {
-                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result)
-                    && let Some(call_method) = ctx.rules.hooks.call_method
-                {
-                    ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
+                let before = result.len();
+                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result) {
+                    if let Some(call_method) = ctx.rules.hooks.call_method {
+                        ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({type_fqn})"),
+                            result: if result.len() > before {
+                                format!("call_method({call_method}) found")
+                            } else {
+                                format!("{type_fqn}.{ref_name} not found, call_method({call_method}) not found")
+                            },
+                        });
+                    } else {
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({type_fqn})"),
+                            result: format!("{type_fqn}.{ref_name} not found"),
+                        });
+                    }
+                } else {
+                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                        value: format!("Type({type_fqn})"),
+                        result: format!("nested {type_fqn}.{ref_name} found"),
+                    });
                 }
             }
             ParseValue::Opaque => {}
@@ -337,6 +519,11 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
 
     let mut current_types: Vec<String> = resolve_base_type_fqns(ctx, &chain[0], r.reaching);
 
+    ctx.tracer.event(TraceEvent::ResolveChainBase {
+        step: format!("{:?}", chain[0]),
+        types: current_types.clone(),
+    });
+
     if current_types.is_empty() {
         if ctx.settings.chain_fallback
             && let Some(last_name) = chain.last().and_then(|s| match s {
@@ -344,6 +531,9 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                 _ => None,
             })
         {
+            ctx.tracer.event(TraceEvent::ResolveChainFallback {
+                name: last_name.to_string(),
+            });
             let fallback = RefData {
                 name: last_name,
                 chain: None,
@@ -403,11 +593,33 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             if let Some((parent, _)) = fqn.rsplit_once(ctx.rules.fqn_separator) {
                                 next_types.push(parent.to_string());
                             }
+                        } else if gdef.kind.is_type_container() {
+                            // Nested type access (e.g. Outer.Inner.method()):
+                            // propagate the type's own FQN so the chain continues
+                            next_types.push(ctx.graph.str(gdef.fqn).to_string());
                         }
                     }
                 }
             }
         }
+
+        let found_fqns: Vec<String> = found_nodes
+            .iter()
+            .filter_map(|&n| {
+                ctx.graph.graph[n]
+                    .def_id()
+                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
+            })
+            .collect();
+        ctx.tracer.event(TraceEvent::ResolveChainStep {
+            depth,
+            step: format!("{step:?}"),
+            member_name: member_name.to_string(),
+            scope_types: current_types.clone(),
+            found_count: found_nodes.len(),
+            found_fqns,
+            next_types: next_types.clone(),
+        });
 
         if is_last {
             let mut seen = rustc_hash::FxHashSet::default();
@@ -436,6 +648,10 @@ fn resolve_base_type_fqns(
             for value in reaching {
                 match value {
                     ParseValue::Type(fqn) => {
+                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({fqn})"),
+                            result: format!("base type -> {fqn}"),
+                        });
                         types.push(fqn.clone());
                     }
                     ParseValue::LocalDef(i) => {
@@ -443,14 +659,33 @@ fn resolve_base_type_fqns(
                             && let Some(did) = ctx.graph.graph[node].def_id()
                         {
                             let gdef = &ctx.graph.defs[did.0 as usize];
+                            let fqn = ctx.graph.str(gdef.fqn);
                             if gdef.kind.is_type_container() {
-                                types.push(ctx.graph.str(gdef.fqn).to_string());
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (container) -> {fqn}"),
+                                });
+                                types.push(fqn.to_string());
                             } else if let Some(meta) = &gdef.metadata
                                 && let Some(rt) = meta.return_type
                             {
-                                types.push(ctx.graph.str(rt).to_string());
+                                let rt_str = ctx.graph.str(rt);
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (return_type) -> {rt_str}"),
+                                });
+                                types.push(rt_str.to_string());
                             } else if let Some(rt) = ctx.inferred_returns.get(&node) {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("base type (inferred) -> {rt}"),
+                                });
                                 types.push(rt.clone());
+                            } else {
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: "no type info".to_string(),
+                                });
                             }
                         }
                     }
@@ -460,13 +695,36 @@ fn resolve_base_type_fqns(
                             for def_idx in resolved {
                                 if let Some(did) = ctx.graph.graph[def_idx].def_id() {
                                     let gdef = &ctx.graph.defs[did.0 as usize];
+                                    let fqn = ctx.graph.str(gdef.fqn);
                                     if gdef.kind.is_type_container() {
-                                        types.push(ctx.graph.str(gdef.fqn).to_string());
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (container) -> {fqn}"),
+                                        });
+                                        types.push(fqn.to_string());
                                     } else if let Some(meta) = &gdef.metadata
                                         && let Some(rt) = meta.return_type
                                     {
-                                        types.push(ctx.graph.str(rt).to_string());
+                                        let rt_str = ctx.graph.str(rt);
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (return_type) -> {rt_str}"),
+                                        });
+                                        types.push(rt_str.to_string());
                                     } else if let Some(rt) = ctx.inferred_returns.get(&def_idx) {
+                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                            value: format!(
+                                                "ImportRef({i}) -> {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (inferred) -> {rt}"),
+                                        });
                                         types.push(rt.clone());
                                     }
                                 }

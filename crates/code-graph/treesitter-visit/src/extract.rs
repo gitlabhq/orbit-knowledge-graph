@@ -33,6 +33,8 @@ pub enum Step {
     Try(Axis<'static>, Match<'static>),
     /// Fail pipeline if current node doesn't match (no navigation).
     Where(Match<'static>),
+    /// Navigate to the n-th match along axis. Negative n counts from end (-1 = last).
+    Nth(Axis<'static>, Match<'static>, isize),
 }
 
 /// How to produce a string from the final node.
@@ -116,7 +118,7 @@ impl Extract {
         Self::from_step(Step::Nav(axis, m))
     }
 
-    fn terminal(emit: Emit) -> Self {
+    pub fn terminal(emit: Emit) -> Self {
         Self {
             steps: SmallVec::new(),
             emit,
@@ -155,6 +157,10 @@ impl Extract {
     }
     pub fn nav(self, axis: Axis<'static>, m: Match<'static>) -> Self {
         self.push(Step::Nav(axis, m))
+    }
+    /// Navigate to the n-th match. Negative n counts from end (-1 = last).
+    pub fn nth(self, axis: Axis<'static>, m: Match<'static>, n: isize) -> Self {
+        self.push(Step::Nth(axis, m, n))
     }
 
     // Optional steps (stay at current node on failure)
@@ -263,6 +269,7 @@ impl Extract {
                         cur = next;
                     }
                 }
+                Step::Nth(axis, m, n) => cur = cur.nth(*axis, *m, *n)?,
                 Step::Where(m) => {
                     if !m.test(&cur) {
                         return None;

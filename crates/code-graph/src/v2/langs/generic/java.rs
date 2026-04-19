@@ -107,6 +107,22 @@ impl DslLanguage for JavaDsl {
             reference("type_identifier")
                 .name_from(text())
                 .when(!parent_is("object_creation_expression")),
+            // Method references: Executor::executeFn
+            reference("method_reference")
+                .name_from(
+                    Extract::terminal(treesitter_visit::extract::Emit::Text).nth(
+                        Child,
+                        Kind("identifier"),
+                        -1,
+                    ),
+                )
+                .receiver_via(
+                    Extract::terminal(treesitter_visit::extract::Emit::Text).nth(
+                        Child,
+                        Kind("identifier"),
+                        0,
+                    ),
+                ),
             // Annotation references: @Override, @Deprecated
             references(&["marker_annotation", "annotation"]).name_from(field("name")),
         ]
@@ -150,6 +166,7 @@ impl DslLanguage for JavaDsl {
     fn bindings() -> Vec<BindingRule> {
         let skip = &[
             "int", "long", "short", "byte", "float", "double", "boolean", "char", "void", "String",
+            "var",
         ];
         let java_type = |rule: BindingRule| {
             rule.typed(
@@ -183,6 +200,11 @@ impl DslLanguage for JavaDsl {
             binding("assignment_expression", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
+            // instanceof pattern variable: `expr instanceof Bar bar`
+            binding("instanceof_expression", BindingKind::Assignment)
+                .name_from(&["name"])
+                .typed(vec![field("right")], skip)
+                .no_value(),
         ]
     }
 
