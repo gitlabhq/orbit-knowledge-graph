@@ -35,7 +35,7 @@ tests:
   # ── J7: test_java_deep_initializer_chain_does_not_stack_overflow ──
 
   - name: "DeepInitializerChain indexes without stack overflow"
-    skip: true
+    skip: false
     query: |
       MATCH (d:Definition)
       WHERE d.file_path ENDS WITH 'DeepInitializerChain.java'

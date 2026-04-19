@@ -257,7 +257,7 @@ impl LanguageSpec {
         Some((name, node_to_range(node), expression))
     }
 
-    /// Recursively walk a receiver expression, building the chain
+    /// Iteratively walk a receiver expression, building the chain
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
     /// Type names in `New` steps are resolved via `import_map`.
@@ -272,185 +272,195 @@ impl LanguageSpec {
         sep: &str,
         tracer: &Tracer,
     ) {
-        let kind = node.kind();
-        let kind_ref = kind.as_ref();
+        // Collect deferred steps (outermost first) while walking inward to
+        // the base. Then push the base, then the deferred steps in reverse.
+        let mut deferred: Vec<ExpressionStep> = Vec::new();
+        let mut current = node.clone();
 
-        // Identifier base
-        if cc.ident_kinds.contains(&kind_ref) {
-            let text = node.text().to_string();
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Ident".to_string(),
-                text: text.clone(),
-            });
-            chain.push(ExpressionStep::Ident(text));
-            return;
-        }
+        loop {
+            let kind: String = current.kind().to_string();
+            let kind_ref: &str = &kind;
 
-        // this/self
-        if cc.this_kinds.contains(&kind_ref) {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "This".to_string(),
-                text: node.text().to_string(),
-            });
-            chain.push(ExpressionStep::This);
-            return;
-        }
+            // ── Terminal cases (base of the chain) ──
 
-        // super
-        if cc.super_kinds.contains(&kind_ref) {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Super".to_string(),
-                text: node.text().to_string(),
-            });
-            chain.push(ExpressionStep::Super);
-            return;
-        }
-
-        // Qualified type reference (e.g. Outer.Inner as receiver in new Outer.Inner()).
-        // Decompose into Ident(first) + Field(rest) with import resolution on first segment.
-        if cc.qualified_type_kinds.contains(&kind_ref) {
-            let mut segments = node.children().filter(|c| c.is_named());
-            if let Some(first) = segments.next() {
-                let name = first.text().to_string();
-                let resolved = if let Some(fqn) = import_map.get(&name) {
-                    fqn.clone()
-                } else if let Some(prefix) = module_prefix {
-                    format!("{prefix}{sep}{name}")
-                } else {
-                    name.clone()
-                };
+            // Identifier base
+            if cc.ident_kinds.contains(&kind_ref) {
+                let text = current.text().to_string();
                 tracer.event(TraceEvent::ChainStepMatched {
                     node_kind: kind_ref.to_string(),
-                    category: "Ident(qualified)".to_string(),
-                    text: resolved.clone(),
+                    category: "Ident".to_string(),
+                    text: text.clone(),
                 });
-                chain.push(ExpressionStep::Ident(resolved));
-                for seg in segments {
-                    let seg_text = seg.text().to_string();
+                chain.push(ExpressionStep::Ident(text));
+                break;
+            }
+
+            // this/self
+            if cc.this_kinds.contains(&kind_ref) {
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "This".to_string(),
+                    text: current.text().to_string(),
+                });
+                chain.push(ExpressionStep::This);
+                break;
+            }
+
+            // super
+            if cc.super_kinds.contains(&kind_ref) {
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "Super".to_string(),
+                    text: current.text().to_string(),
+                });
+                chain.push(ExpressionStep::Super);
+                break;
+            }
+
+            // Qualified type reference (e.g. Outer.Inner as receiver in new Outer.Inner()).
+            if cc.qualified_type_kinds.contains(&kind_ref) {
+                let mut segments = current.children().filter(|c| c.is_named());
+                if let Some(first) = segments.next() {
+                    let name = first.text().to_string();
+                    let resolved = if let Some(fqn) = import_map.get(&name) {
+                        fqn.clone()
+                    } else if let Some(prefix) = module_prefix {
+                        format!("{prefix}{sep}{name}")
+                    } else {
+                        name.clone()
+                    };
                     tracer.event(TraceEvent::ChainStepMatched {
                         node_kind: kind_ref.to_string(),
-                        category: "Field(qualified)".to_string(),
-                        text: seg_text.clone(),
+                        category: "Ident(qualified)".to_string(),
+                        text: resolved.clone(),
                     });
-                    chain.push(ExpressionStep::Field(seg_text));
+                    chain.push(ExpressionStep::Ident(resolved));
+                    for seg in segments {
+                        let seg_text = seg.text().to_string();
+                        tracer.event(TraceEvent::ChainStepMatched {
+                            node_kind: kind_ref.to_string(),
+                            category: "Field(qualified)".to_string(),
+                            text: seg_text.clone(),
+                        });
+                        chain.push(ExpressionStep::Field(seg_text));
+                    }
                 }
+                break;
             }
-            return;
-        }
 
-        // Constructor (new Foo() or new Outer.Inner())
-        for &(ctor_kind, type_field) in cc.constructor {
-            if kind_ref == ctor_kind {
-                if let Some(type_node) = node.field(type_field) {
-                    let tk = type_node.kind();
-                    if cc.qualified_type_kinds.contains(&tk.as_ref()) {
-                        let mut segments = type_node.children().filter(|c| c.is_named());
-                        if let Some(first) = segments.next() {
-                            let name = first.text().to_string();
-                            let resolved = if let Some(fqn) = import_map.get(&name) {
+            // Constructor (new Foo() or new Outer.Inner())
+            let mut matched_ctor = false;
+            for &(ctor_kind, type_field) in cc.constructor {
+                if kind_ref == ctor_kind {
+                    if let Some(type_node) = current.field(type_field) {
+                        let tk = type_node.kind();
+                        if cc.qualified_type_kinds.contains(&tk.as_ref()) {
+                            let mut segments = type_node.children().filter(|c| c.is_named());
+                            if let Some(first) = segments.next() {
+                                let name = first.text().to_string();
+                                let resolved = if let Some(fqn) = import_map.get(&name) {
+                                    fqn.clone()
+                                } else if let Some(prefix) = module_prefix {
+                                    format!("{prefix}{sep}{name}")
+                                } else {
+                                    name
+                                };
+                                tracer.event(TraceEvent::ChainStepMatched {
+                                    node_kind: kind_ref.to_string(),
+                                    category: "New(qualified)".to_string(),
+                                    text: resolved.clone(),
+                                });
+                                chain.push(ExpressionStep::New(resolved));
+                                for seg in segments {
+                                    chain.push(ExpressionStep::Field(seg.text().to_string()));
+                                }
+                            }
+                        } else {
+                            let bare = type_node.text().to_string();
+                            let resolved = if let Some(fqn) = import_map.get(&bare) {
                                 fqn.clone()
                             } else if let Some(prefix) = module_prefix {
-                                format!("{prefix}{sep}{name}")
+                                format!("{prefix}{sep}{bare}")
                             } else {
-                                name
+                                bare
                             };
                             tracer.event(TraceEvent::ChainStepMatched {
                                 node_kind: kind_ref.to_string(),
-                                category: "New(qualified)".to_string(),
+                                category: "New".to_string(),
                                 text: resolved.clone(),
                             });
                             chain.push(ExpressionStep::New(resolved));
-                            for seg in segments {
-                                chain.push(ExpressionStep::Field(seg.text().to_string()));
-                            }
                         }
-                    } else {
-                        let bare = type_node.text().to_string();
-                        let resolved = if let Some(fqn) = import_map.get(&bare) {
-                            fqn.clone()
-                        } else if let Some(prefix) = module_prefix {
-                            format!("{prefix}{sep}{bare}")
-                        } else {
-                            bare
-                        };
+                    }
+                    matched_ctor = true;
+                    break;
+                }
+            }
+            if matched_ctor {
+                break;
+            }
+
+            // ── Recursive cases (defer step, advance inward) ──
+
+            // Field access (obj.field) — defer the Field step, advance to obj
+            let mut matched_fa = false;
+            for fa in &cc.field_access {
+                if kind_ref == fa.kind {
+                    if let Some(name) = fa.member.apply(&current) {
                         tracer.event(TraceEvent::ChainStepMatched {
                             node_kind: kind_ref.to_string(),
-                            category: "New".to_string(),
-                            text: resolved.clone(),
+                            category: "Field".to_string(),
+                            text: name.clone(),
                         });
-                        chain.push(ExpressionStep::New(resolved));
+                        deferred.push(ExpressionStep::Field(name));
                     }
+                    if let Some(obj) = fa.object.navigate(&current) {
+                        current = obj;
+                        matched_fa = true;
+                    }
+                    break;
                 }
-                return;
             }
-        }
+            if matched_fa {
+                continue;
+            }
 
-        // Field access (obj.field)
-        for fa in &cc.field_access {
-            if kind_ref == fa.kind {
-                if let Some(obj) = fa.object.navigate(node) {
-                    self.build_expression_chain(
-                        &obj,
-                        chain,
-                        cc,
-                        import_map,
-                        module_prefix,
-                        sep,
-                        tracer,
-                    );
-                }
-                if let Some(name) = fa.member.apply(node) {
+            // Call expression — defer the Call step, advance to receiver
+            if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
+                let rule = &self.refs[rule_idx];
+                if let Some(name) = rule.extract().apply(&current) {
                     tracer.event(TraceEvent::ChainStepMatched {
                         node_kind: kind_ref.to_string(),
-                        category: "Field".to_string(),
+                        category: "Call".to_string(),
                         text: name.clone(),
                     });
-                    chain.push(ExpressionStep::Field(name));
+                    deferred.push(ExpressionStep::Call(name));
                 }
-                return;
+                if let Some(extract) = &rule.receiver_extract
+                    && let Some(recv) = extract.navigate(&current)
+                {
+                    current = recv;
+                    continue;
+                }
+                // No receiver — this call is the base
+                break;
             }
-        }
 
-        // Call expression with object field (method_invocation, call_expression)
-        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
-            let rule = &self.refs[rule_idx];
-            if let Some(extract) = &rule.receiver_extract
-                && let Some(recv) = extract.navigate(node)
-            {
-                self.build_expression_chain(
-                    &recv,
-                    chain,
-                    cc,
-                    import_map,
-                    module_prefix,
-                    sep,
-                    tracer,
-                );
-            }
-            if let Some(name) = rule.extract().apply(node) {
+            // Fallback: treat as identifier
+            let text = current.text().to_string();
+            if !text.is_empty() {
                 tracer.event(TraceEvent::ChainStepMatched {
                     node_kind: kind_ref.to_string(),
-                    category: "Call".to_string(),
-                    text: name.clone(),
+                    category: "Fallback".to_string(),
+                    text: text.clone(),
                 });
-                chain.push(ExpressionStep::Call(name));
+                chain.push(ExpressionStep::Ident(text));
             }
-            return;
+            break;
         }
 
-        // Fallback: treat as identifier
-        let text = node.text().to_string();
-        if !text.is_empty() {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Fallback".to_string(),
-                text: text.clone(),
-            });
-            chain.push(ExpressionStep::Ident(text));
-        }
+        // Append deferred steps in reverse (innermost was deferred last)
+        chain.extend(deferred.into_iter().rev());
     }
 
     fn evaluate_imports(
