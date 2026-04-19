@@ -268,7 +268,7 @@ tests:
       - { row: { kind: Calls } }
 
   - name: "Main.main -> EnumClass.enumMethod1 (enum constant method)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.app.Main.main'

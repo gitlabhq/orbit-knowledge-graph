@@ -35,7 +35,7 @@ tests:
       - { row_count: 1 }
 
   - name: "main -> Baz.baz (interface through inheritance)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'

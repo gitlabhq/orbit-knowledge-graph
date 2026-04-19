@@ -763,6 +763,33 @@ fn resolve_base_type_fqns(
                     ParseValue::Opaque => {}
                 }
             }
+            // Fallback: when reaching defs produce no types (e.g. chain base
+            // is an untracked name like a same-package class), try resolving
+            // the base name via import strategies to find its FQN.
+            if types.is_empty() {
+                if let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step {
+                    let fallback = RefData {
+                        name,
+                        chain: None,
+                        reaching: &[],
+                        enclosing_def: None,
+                    };
+                    let nodes = resolve_bare(ctx, &fallback);
+                    for n in nodes {
+                        if let Some(did) = ctx.graph.graph[n].def_id() {
+                            let gdef = &ctx.graph.defs[did.0 as usize];
+                            if gdef.kind.is_type_container() {
+                                let fqn = ctx.graph.str(gdef.fqn).to_string();
+                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("bare({name})"),
+                                    result: format!("base type (import fallback) -> {fqn}"),
+                                });
+                                types.push(fqn);
+                            }
+                        }
+                    }
+                }
+            }
             types
         }
         ExpressionStep::Super => reaching
