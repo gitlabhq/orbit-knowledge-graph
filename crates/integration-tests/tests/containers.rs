@@ -10,7 +10,6 @@ mod server {
     pub mod graph_formatter;
     pub mod graph_stats;
     pub mod grpc_rate_limit;
-    pub mod grpc_streaming;
     pub mod grpc_tls;
     pub mod health;
     pub mod hydration;

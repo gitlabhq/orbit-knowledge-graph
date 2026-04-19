@@ -5854,7 +5854,6 @@ dependencies = [
  "tokio-stream",
  "tonic",
  "tower",
- "uuid",
  "zstd",
 ]
 

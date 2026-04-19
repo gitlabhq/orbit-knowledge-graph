@@ -54,4 +54,3 @@ opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "test
 zstd = "0.13.3"
 jsonwebtoken = { workspace = true }
 sqlparser.workspace = true
-uuid = { workspace = true }
