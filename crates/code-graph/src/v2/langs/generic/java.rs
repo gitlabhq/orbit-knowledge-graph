@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
 use treesitter_visit::Axis::*;
@@ -61,7 +61,7 @@ impl DslLanguage for JavaDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(ExtractList::Fn(java_super_types));
+        let class_meta = || metadata().super_types(java_super_types);
 
         vec![
             scopes(

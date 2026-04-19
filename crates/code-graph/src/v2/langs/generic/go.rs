@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::*;
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
 use treesitter_visit::extract::Extract;
@@ -48,7 +48,7 @@ impl DslLanguage for GoDsl {
             scope("type_spec", "Struct")
                 .def_kind(DefKind::Class)
                 .when(field_kind("type", &["struct_type"]))
-                .metadata(metadata().super_types(ExtractList::Fn(go_embedded_types))),
+                .metadata(metadata().super_types(go_embedded_types)),
             scope("type_spec", "Interface")
                 .def_kind(DefKind::Interface)
                 .when(field_kind("type", &["interface_type"])),

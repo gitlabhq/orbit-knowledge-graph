@@ -102,7 +102,26 @@ impl LanguageSpec {
             scope_stack.push(Arc::from(name.as_str()));
         }
 
-        if let Some(m) = self.evaluate_scope(node, node_kind_ref, import_map, sep) {
+        let module_prefix: Option<String> = if top_level_depth > 0 {
+            Some(
+                scope_stack[..top_level_depth]
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep),
+            )
+        } else {
+            None
+        };
+        if let Some(m) = self.evaluate_scope(node, node_kind_ref, |bare, _origin| {
+            if let Some(fqn) = import_map.get(&bare) {
+                return fqn.clone();
+            }
+            if let Some(prefix) = &module_prefix {
+                return format!("{prefix}{sep}{bare}");
+            }
+            bare
+        }) {
             let is_top_level = scope_stack.len() <= top_level_depth;
 
             if m.creates_scope {
@@ -173,8 +192,7 @@ impl LanguageSpec {
         &self,
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
+        resolve: impl Fn(String, &Node<StrDoc<SupportLang>>) -> String,
     ) -> Option<ScopeMatch> {
         let indices = self.scope_dispatch.get(node_kind)?;
         let rule = indices
@@ -190,7 +208,7 @@ impl LanguageSpec {
             def_kind: rule.resolve_def_kind(),
             range: node_to_range(node),
             creates_scope: rule.creates_scope,
-            metadata: rule.extract_metadata(node, import_map, sep),
+            metadata: rule.extract_metadata(node, &resolve),
         })
     }
 
@@ -199,6 +217,7 @@ impl LanguageSpec {
         node: &Node<StrDoc<SupportLang>>,
         node_kind: &str,
         import_map: &rustc_hash::FxHashMap<String, String>,
+        module_prefix: Option<&str>,
         sep: &str,
     ) -> Option<(String, crate::utils::Range, Option<Vec<ExpressionStep>>)> {
         let indices = self.ref_dispatch.get(node_kind)?;
@@ -217,7 +236,14 @@ impl LanguageSpec {
             .and_then(|(extract, cc)| {
                 let receiver_node = extract.navigate(node)?;
                 let mut chain = Vec::new();
-                self.build_expression_chain(&receiver_node, &mut chain, cc, import_map, sep);
+                self.build_expression_chain(
+                    &receiver_node,
+                    &mut chain,
+                    cc,
+                    import_map,
+                    module_prefix,
+                    sep,
+                );
                 chain.push(ExpressionStep::Call(name.clone()));
                 if chain.len() > 1 { Some(chain) } else { None }
             });
@@ -235,6 +261,7 @@ impl LanguageSpec {
         chain: &mut Vec<ExpressionStep>,
         cc: &super::types::ChainConfig,
         import_map: &rustc_hash::FxHashMap<String, String>,
+        module_prefix: Option<&str>,
         sep: &str,
     ) {
         let kind = node.kind();
@@ -263,7 +290,13 @@ impl LanguageSpec {
             if kind_ref == ctor_kind {
                 if let Some(type_node) = node.field(type_field) {
                     let bare = type_node.text().to_string();
-                    let resolved = super::extractors::resolve_type_via_map(&bare, import_map, sep);
+                    let resolved = if let Some(fqn) = import_map.get(&bare) {
+                        fqn.clone()
+                    } else if let Some(prefix) = module_prefix {
+                        format!("{prefix}{sep}{bare}")
+                    } else {
+                        bare
+                    };
                     chain.push(ExpressionStep::New(resolved));
                 }
                 return;
@@ -281,13 +314,20 @@ impl LanguageSpec {
                     .or_else(|| node.child_of_kind(member_field));
 
                 if let Some(obj) = obj {
-                    self.build_expression_chain(&obj, chain, cc, import_map, sep);
+                    self.build_expression_chain(&obj, chain, cc, import_map, module_prefix, sep);
                 } else if let Some(ref member_node) = member {
                     // No named field for the object — use the first named child
                     // that isn't the member node.
                     let mr = member_node.range();
                     if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
-                        self.build_expression_chain(&obj, chain, cc, import_map, sep);
+                        self.build_expression_chain(
+                            &obj,
+                            chain,
+                            cc,
+                            import_map,
+                            module_prefix,
+                            sep,
+                        );
                     }
                 }
                 if let Some(field) = member {
@@ -308,7 +348,7 @@ impl LanguageSpec {
             if let Some(extract) = &rule.receiver_extract
                 && let Some(recv) = extract.navigate(node)
             {
-                self.build_expression_chain(&recv, chain, cc, import_map, sep);
+                self.build_expression_chain(&recv, chain, cc, import_map, module_prefix, sep);
             }
             if let Some(name) = rule.extract().apply(node) {
                 chain.push(ExpressionStep::Call(name));
@@ -655,8 +695,29 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(name.as_str()));
         }
 
+        // Module-level scope prefix for FQN resolution (package/module, not class/method)
+        let module_prefix: Option<String> = if state.top_level_depth > 0 {
+            Some(
+                state.scope_stack[..state.top_level_depth]
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep),
+            )
+        } else {
+            None
+        };
+
         // Scope matching → push def + optional SSA self/super writes
-        if let Some(m) = self.evaluate_scope(node, nk, &state.import_map, sep) {
+        if let Some(m) = self.evaluate_scope(node, nk, |bare, _origin| {
+            if let Some(fqn) = state.import_map.get(&bare) {
+                return fqn.clone();
+            }
+            if let Some(prefix) = &module_prefix {
+                return format!("{prefix}{sep}{bare}");
+            }
+            bare
+        }) {
             let is_top_level = state.scope_stack.len() <= state.top_level_depth;
             let def_index = state.defs.len() as u32;
 
@@ -840,8 +901,15 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → Type(bare_name), matching walker behavior
-                        super::ssa::SsaValue::Type(state.arena.alloc_str(&type_ann))
+                        // Type annotation → resolve to FQN
+                        let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
+                            fqn.clone()
+                        } else if let Some(prefix) = &module_prefix {
+                            format!("{prefix}{sep}{type_ann}")
+                        } else {
+                            type_ann
+                        };
+                        super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         // RHS callee name → Alias for SSA copy propagation
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
@@ -911,7 +979,7 @@ impl LanguageSpec {
 
             // Reference handling → SSA read → PendingRef
             if let Some((name, _range, expression)) =
-                self.evaluate_reference(node, nk, &state.import_map, sep)
+                self.evaluate_reference(node, nk, &state.import_map, module_prefix.as_deref(), sep)
             {
                 // For chains, read SSA for the base identifier (not the terminal).
                 // For bare refs, read SSA for the name itself.

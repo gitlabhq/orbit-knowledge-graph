@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{
     self, BindingRule, BranchRule, ChainConfig, DslLanguage, ImportRule, LanguageHooks, LoopRule,
     ReferenceRule, ScopeRule, binding, branch, loop_rule, reference, scope, scopes,
@@ -32,7 +32,7 @@ impl DslLanguage for RubyDsl {
         vec![
             scope("class", "Class")
                 .def_kind(DefKind::Class)
-                .metadata(metadata().super_types(ExtractList::Fn(ruby_super_types))),
+                .metadata(metadata().super_types(ruby_super_types)),
             scope("module", "Module").def_kind(DefKind::Class),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),

@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
@@ -86,7 +86,7 @@ impl DslLanguage for KotlinDsl {
             scope_fn("class_declaration", classify_kotlin_class)
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
-                .metadata(metadata().super_types(ExtractList::Fn(kotlin_super_types))),
+                .metadata(metadata().super_types(kotlin_super_types)),
             scopes(&["object_declaration", "companion_object"], "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),

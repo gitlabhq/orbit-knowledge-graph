@@ -94,12 +94,9 @@ impl ScopeRule {
     pub(crate) fn extract_metadata(
         &self,
         node: &N<'_>,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
+        resolve: impl Fn(String, &N<'_>) -> String,
     ) -> Option<Box<DefinitionMetadata>> {
-        self.metadata_rule
-            .as_ref()?
-            .extract_metadata(node, import_map, sep)
+        self.metadata_rule.as_ref()?.extract_metadata(node, resolve)
     }
 
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
@@ -461,7 +458,7 @@ pub struct BindingRule {
 }
 
 pub struct TypeExtract {
-    pub extracts: Vec<super::extractors::Extract>,
+    pub extracts: Vec<Extract>,
     pub skip_types: &'static [&'static str],
 }
 
@@ -497,11 +494,7 @@ impl BindingRule {
         self
     }
 
-    pub fn typed(
-        mut self,
-        extracts: Vec<super::extractors::Extract>,
-        skip: &'static [&'static str],
-    ) -> Self {
+    pub fn typed(mut self, extracts: Vec<Extract>, skip: &'static [&'static str]) -> Self {
         self.type_extract = Some(TypeExtract {
             extracts,
             skip_types: skip,

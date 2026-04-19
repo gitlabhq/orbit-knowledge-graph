@@ -1,5 +1,5 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::extractors::{ExtractList, metadata};
+use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
@@ -97,11 +97,11 @@ impl DslLanguage for PythonDsl {
     }
 
     fn scopes() -> Vec<ScopeRule> {
-        let class_meta = || metadata().super_types(ExtractList::Fn(python_super_types));
+        let class_meta = || metadata().super_types(python_super_types);
         let func_meta = || {
             metadata()
                 .return_type(field("return_type"))
-                .decorators(ExtractList::Fn(python_decorators))
+                .decorators(python_decorators)
         };
 
         let mut rules = vec![

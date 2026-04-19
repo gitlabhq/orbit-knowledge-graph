@@ -1,11 +1,7 @@
 //! Domain-specific metadata extraction built on `treesitter_visit::extract`.
-//!
-//! Re-exports the core `Extract` type and constructors from treesitter-visit.
-//! Adds `MetadataRule` (scope metadata), `ExtractList` (multi-value),
-//! and `resolve_type_via_map` (import-map FQN resolution).
 
 use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Match, Node, SupportLang};
+use treesitter_visit::{Node, SupportLang};
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
@@ -15,77 +11,16 @@ pub use treesitter_visit::extract::{
     no_extract, text,
 };
 
-// ── Multi-value extraction ──────────────────────────────────────
-
-/// How to extract a list of strings from a tree-sitter node.
-/// Used for super_types, decorators, etc.
-pub enum ExtractList {
-    /// Extract all children of a specific kind from a named field.
-    ChildrenOfField(&'static str, &'static [&'static str]),
-    /// Extract text of all children matching these kinds directly on the node.
-    ChildrenOfKind(&'static [&'static str]),
-    /// Extract text from a named field, then split on a separator.
-    FieldSplit(&'static str, &'static str),
-    /// Walk up to parent, collect children of this kind.
-    Decorators(&'static str),
-    /// Custom function for complex extraction.
-    Fn(fn(&N<'_>) -> Vec<String>),
-}
-
-impl ExtractList {
-    pub fn extract(&self, node: &N<'_>) -> Vec<String> {
-        match self {
-            ExtractList::ChildrenOfField(field_name, kinds) => {
-                let Some(field_node) = node.field(field_name) else {
-                    return vec![];
-                };
-                field_node
-                    .children_matching(Match::AnyKind(kinds))
-                    .map(|c| c.text().to_string())
-                    .collect()
-            }
-            ExtractList::ChildrenOfKind(kinds) => node
-                .children_matching(Match::AnyKind(kinds))
-                .map(|c| c.text().to_string())
-                .collect(),
-            ExtractList::FieldSplit(field_name, sep) => {
-                let Some(field_node) = node.field(field_name) else {
-                    return vec![];
-                };
-                field_node
-                    .text()
-                    .split(sep)
-                    .map(|s| s.trim().to_string())
-                    .filter(|s| !s.is_empty())
-                    .collect()
-            }
-            ExtractList::Decorators(decorator_kind) => {
-                if let Some(parent) = node.find(
-                    treesitter_visit::Axis::Parent,
-                    Match::Kind("decorated_definition"),
-                ) {
-                    parent
-                        .children_matching(Match::Kind(decorator_kind))
-                        .map(|c| c.text().trim_start_matches('@').trim().to_string())
-                        .collect()
-                } else {
-                    vec![]
-                }
-            }
-            ExtractList::Fn(f) => f(node),
-        }
-    }
-}
-
 // ── Metadata extraction ─────────────────────────────────────────
 
 /// Declarative metadata extraction rules for a scope definition.
+/// Single-value fields use `Extract`. Multi-value fields use `fn(&Node) -> Vec<String>`.
 pub struct MetadataRule {
-    pub super_types: Option<ExtractList>,
+    pub super_types: Option<fn(&N<'_>) -> Vec<String>>,
     pub return_type: Option<Extract>,
     pub type_annotation: Option<Extract>,
     pub receiver_type: Option<Extract>,
-    pub decorators: Option<ExtractList>,
+    pub decorators: Option<fn(&N<'_>) -> Vec<String>>,
     pub companion_of: Option<Extract>,
 }
 
@@ -107,8 +42,8 @@ impl MetadataRule {
         }
     }
 
-    pub fn super_types(mut self, extract: ExtractList) -> Self {
-        self.super_types = Some(extract);
+    pub fn super_types(mut self, f: fn(&N<'_>) -> Vec<String>) -> Self {
+        self.super_types = Some(f);
         self
     }
     pub fn return_type(mut self, extract: Extract) -> Self {
@@ -123,8 +58,8 @@ impl MetadataRule {
         self.receiver_type = Some(extract);
         self
     }
-    pub fn decorators(mut self, extract: ExtractList) -> Self {
-        self.decorators = Some(extract);
+    pub fn decorators(mut self, f: fn(&N<'_>) -> Vec<String>) -> Self {
+        self.decorators = Some(f);
         self
     }
     pub fn companion_of(mut self, extract: Extract) -> Self {
@@ -132,44 +67,30 @@ impl MetadataRule {
         self
     }
 
-    /// Extract metadata from a node. Type names are resolved against
-    /// the file's imports to produce FQNs where possible.
+    /// Extract metadata from a node. The `resolve` closure transforms
+    /// bare type names into FQNs using tree context + import map.
     pub fn extract_metadata(
         &self,
         node: &N<'_>,
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        sep: &'static str,
+        resolve: impl Fn(String, &N<'_>) -> String,
     ) -> Option<Box<crate::v2::types::DefinitionMetadata>> {
         let super_types: Vec<String> = self
             .super_types
-            .as_ref()
-            .map(|e| {
-                e.extract(node)
-                    .into_iter()
-                    .map(|s| resolve_type_via_map(&s, import_map, sep))
-                    .collect()
-            })
+            .map(|f| f(node).into_iter().map(|s| resolve(s, node)).collect())
             .unwrap_or_default();
         let return_type = self
             .return_type
             .as_ref()
-            .and_then(|e| e.apply(node))
-            .map(|s| resolve_type_via_map(&s, import_map, sep));
+            .and_then(|e| e.apply_with(node, &resolve));
         let type_annotation = self
             .type_annotation
             .as_ref()
-            .and_then(|e| e.apply(node))
-            .map(|s| resolve_type_via_map(&s, import_map, sep));
+            .and_then(|e| e.apply_with(node, &resolve));
         let receiver_type = self
             .receiver_type
             .as_ref()
-            .and_then(|e| e.apply(node))
-            .map(|s| resolve_type_via_map(&s, import_map, sep));
-        let decorators = self
-            .decorators
-            .as_ref()
-            .map(|e| e.extract(node))
-            .unwrap_or_default();
+            .and_then(|e| e.apply_with(node, &resolve));
+        let decorators = self.decorators.map(|f| f(node)).unwrap_or_default();
         let companion_of = self.companion_of.as_ref().and_then(|e| e.apply(node));
 
         let has_data = !super_types.is_empty()
@@ -196,16 +117,4 @@ impl MetadataRule {
 
 pub fn metadata() -> MetadataRule {
     MetadataRule::new()
-}
-
-/// Resolve a bare type name to a full FQN using the pre-built import map.
-pub fn resolve_type_via_map(
-    bare_name: &str,
-    import_map: &rustc_hash::FxHashMap<String, String>,
-    _sep: &str,
-) -> String {
-    import_map
-        .get(bare_name)
-        .cloned()
-        .unwrap_or_else(|| bare_name.to_string())
 }
