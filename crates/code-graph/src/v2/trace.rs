@@ -712,9 +712,11 @@ pub fn noop_tracer() -> Tracer {
     Tracer::new(false)
 }
 
-/// Return a `&'static Tracer` that is always disabled. Leaked once on first
-/// call so that SSA engine can store `&'a Tracer` without lifetime gymnastics
-/// when no tracer is explicitly provided.
+/// Return a `&'static Tracer` that is always disabled. One-time allocation
+/// via `OnceLock` — `get_or_init` runs the closure exactly once, all
+/// subsequent calls return the same pointer. Single 24-byte leak for the
+/// process lifetime so SSA engine can store `&'a Tracer` without lifetime
+/// gymnastics when no tracer is explicitly provided.
 pub fn leaked_noop_tracer() -> &'static Tracer {
     use std::sync::OnceLock;
     static NOOP: OnceLock<&'static Tracer> = OnceLock::new();

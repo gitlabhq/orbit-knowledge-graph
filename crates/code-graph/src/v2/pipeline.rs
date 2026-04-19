@@ -71,8 +71,6 @@ pub trait LanguagePipeline {
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
-    /// When true, emit detailed trace events for SSA, engine, and resolver.
-    pub trace: bool,
 }
 
 impl Default for PipelineConfig {
@@ -80,7 +78,6 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
-            trace: false,
         }
     }
 }

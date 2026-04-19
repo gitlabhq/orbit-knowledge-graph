@@ -347,8 +347,9 @@ impl<'r, D: Doc> Node<'r, D> {
             Axis::PrevSibling => self.nth_iter(self.prev_all(), criterion, n),
             Axis::NextSibling => self.nth_iter(self.next_all(), criterion, n),
             Axis::Ancestor => self.nth_iter(self.parent_chain(), criterion, n),
+            Axis::Descendant => self.nth_iter(self.dfs(), criterion, n),
             // Single-value axes: only n==0 or n==-1 makes sense
-            Axis::Parent | Axis::Field(_) | Axis::Descendant => {
+            Axis::Parent | Axis::Field(_) => {
                 if n == 0 || n == -1 {
                     self.find(axis, criterion)
                 } else {
