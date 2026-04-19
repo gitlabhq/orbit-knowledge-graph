@@ -271,17 +271,21 @@ where
             import_nodes: Vec<petgraph::graph::NodeIndex>,
         }
 
-        // ── Phase 1: single parse per file (parallel) → FileAnalysis + graph build
+        /// Refs + inferred returns kept for Phase 2. Defs and imports
+        /// are dropped after graph insertion to avoid holding duplicates.
+        struct StashedRefs {
+            refs: Vec<crate::v2::dsl::engine::AnalyzedRef>,
+            inferred_returns: Vec<(u32, String)>,
+        }
+
+        // ── Phase 1: single parse per file (parallel) → graph build + stash refs
         let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
         let pb = progress_bar(file_count as u64, "analyze + graph");
         let errors = Mutex::new(Vec::new());
         let total_defs = std::sync::atomic::AtomicUsize::new(0);
         let total_imports = std::sync::atomic::AtomicUsize::new(0);
 
-        let parse_results: Vec<(
-            Option<FileInfo>,
-            Option<crate::v2::dsl::engine::FileAnalysis>,
-        )> = files
+        let parse_results: Vec<(Option<FileInfo>, Option<StashedRefs>)> = files
             .par_iter()
             .map(|path| {
                 let abs_path = format!("{root_path}/{path}");
@@ -327,6 +331,7 @@ where
                         &analysis.imports,
                     )
                 };
+                // defs + imports dropped here — only refs survive
 
                 pb.inc(1);
                 (
@@ -335,7 +340,10 @@ where
                         def_nodes,
                         import_nodes,
                     }),
-                    Some(analysis),
+                    Some(StashedRefs {
+                        refs: analysis.refs,
+                        inferred_returns: analysis.inferred_returns,
+                    }),
                 )
             })
             .collect();
@@ -354,11 +362,10 @@ where
 
         let mut graph = graph.into_inner().unwrap();
 
-        // Merge inferred return types into graph BEFORE finalize,
-        // so ancestor table + indexes see the return types.
-        for (info_opt, analysis_opt) in &parse_results {
-            if let (Some(info), Some(analysis)) = (info_opt, analysis_opt) {
-                for (def_idx, rt) in &analysis.inferred_returns {
+        // Merge inferred return types into graph BEFORE finalize.
+        for (info_opt, stashed_opt) in &parse_results {
+            if let (Some(info), Some(stashed)) = (info_opt, stashed_opt) {
+                for (def_idx, rt) in &stashed.inferred_returns {
                     if let Some(&node) = info.def_nodes.get(*def_idx as usize)
                         && let Some(did) = graph.graph[node].def_id()
                     {
@@ -387,8 +394,8 @@ where
 
         let resolve_results: Vec<Vec<EdgeTriple>> = parse_results
             .par_iter()
-            .map(|(info_opt, analysis_opt)| -> Vec<EdgeTriple> {
-                let (Some(info), Some(analysis)) = (info_opt, analysis_opt) else {
+            .map(|(info_opt, stashed_opt)| -> Vec<EdgeTriple> {
+                let (Some(info), Some(stashed)) = (info_opt, stashed_opt) else {
                     pb2.inc(1);
                     return Vec::new();
                 };
@@ -402,12 +409,10 @@ where
                     &rules.settings,
                 );
 
-                // Inferred returns are already in the graph — feed them to
-                // the resolver for chain resolution fallbacks.
-                resolver.set_inferred_returns(&analysis.inferred_returns);
+                resolver.set_inferred_returns(&stashed.inferred_returns);
 
                 let mut edges = Vec::new();
-                for r in &analysis.refs {
+                for r in &stashed.refs {
                     resolver.resolve(
                         &r.name,
                         r.chain.as_deref(),

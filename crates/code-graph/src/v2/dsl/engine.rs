@@ -384,6 +384,15 @@ impl LanguageSpec {
             state.scope_stack.push(Arc::from(module.as_str()));
         }
         state.top_level_depth = state.scope_stack.len();
+        if state.top_level_depth > 0 {
+            state.module_prefix = Some(
+                state.scope_stack[..state.top_level_depth]
+                    .iter()
+                    .map(|s| s.as_ref())
+                    .collect::<Vec<_>>()
+                    .join(sep),
+            );
+        }
 
         self.walk_full(&root, &mut state, sep);
 
@@ -452,10 +461,10 @@ impl LanguageSpec {
             })
             .collect();
 
-        // Build analyzed refs with reaching defs
+        // Build analyzed refs with reaching defs (take ownership, no clones)
         let refs: Vec<AnalyzedRef> = pending_refs
-            .iter()
-            .map(|pending| {
+            .into_iter()
+            .map(|mut pending| {
                 let reaching = state
                     .ssa
                     .read_variable_stateless(pending.ssa_key, pending.block);
@@ -467,7 +476,7 @@ impl LanguageSpec {
                         .collect();
 
                 // Instance attr rewrite: check compound SSA keys for self.field patterns
-                let mut chain_owned: Option<Vec<ExpressionStep>> = pending.chain.clone();
+                let mut chain_owned: Option<Vec<ExpressionStep>> = pending.chain.take();
                 if let Some(chain) = &chain_owned
                     && chain.len() >= 3
                     && parse_values
@@ -517,7 +526,7 @@ impl LanguageSpec {
                 }
 
                 AnalyzedRef {
-                    name: pending.name.clone(),
+                    name: pending.name,
                     chain: chain_owned,
                     reaching: parse_values,
                     enclosing_def: pending.enclosing_def,
@@ -550,30 +559,31 @@ impl LanguageSpec {
         let nk = node_kind.as_ref();
         let mut pushed_scope = false;
 
-        // Package node
+        // Package node — recompute cached module_prefix
         if let Some((pkg_kind, ref pkg_extract)) = self.package_node
             && nk == pkg_kind
             && let Some(name) = pkg_extract.apply(node)
         {
             state.scope_stack.push(Arc::from(name.as_str()));
+            if state.top_level_depth > 0 {
+                state.module_prefix = Some(
+                    state.scope_stack[..state.top_level_depth]
+                        .iter()
+                        .map(|s| s.as_ref())
+                        .collect::<Vec<_>>()
+                        .join(sep),
+                );
+            }
         }
 
-        // Module-level scope prefix for FQN resolution (package/module, not class/method)
-        let module_prefix: Option<String> = if state.top_level_depth > 0 {
-            Some(
-                state.scope_stack[..state.top_level_depth]
-                    .iter()
-                    .map(|s| s.as_ref())
-                    .collect::<Vec<_>>()
-                    .join(sep),
-            )
-        } else {
-            None
-        };
+        // Cached — only changes when package_node is hit (once per file).
+        // Clone the Option<String> to avoid holding a borrow on state across
+        // mutable operations. This is a single String::clone per walk_full
+        // call, vs the old N×(Vec+join) per file.
+        let module_prefix = state.module_prefix.clone();
 
         // Single dispatch lookup for all rule types
-        let empty_actions = smallvec::SmallVec::<[super::types::ActionRef; 3]>::new();
-        let actions = self.dispatch.get(nk).unwrap_or(&empty_actions);
+        let actions = self.dispatch.get(nk).map(|v| v.as_slice()).unwrap_or(&[]);
 
         // Scope matching → push def + SSA writes via WalkCtx
         if let Some(m) = self.evaluate_scope(node, actions, |bare, _origin| {
@@ -981,6 +991,9 @@ struct WalkCtx<'a> {
     import_map: rustc_hash::FxHashMap<String, String>,
     top_level_depth: usize,
     in_return: bool,
+    /// Cached module prefix (scope_stack[..top_level_depth] joined by sep).
+    /// Recomputed only when the package node is hit.
+    module_prefix: Option<String>,
 }
 
 impl<'a> WalkCtx<'a> {
@@ -1002,6 +1015,7 @@ impl<'a> WalkCtx<'a> {
             import_map: rustc_hash::FxHashMap::default(),
             top_level_depth: 0,
             in_return: false,
+            module_prefix: None,
         }
     }
 
