@@ -42,6 +42,8 @@ pub enum Emit {
     None,
     /// Try `field("name")`, then first child matching these kinds.
     Name(&'static [&'static str]),
+    /// Collect text of all children matching this criterion.
+    Children(Match<'static>),
 }
 
 pub const IDENT_KINDS: &[&str] = &[
@@ -188,6 +190,13 @@ impl Extract {
         self
     }
 
+    /// Collect text of all children matching this criterion.
+    /// Use with `apply_all()` instead of `apply()`.
+    pub fn collect(mut self, m: Match<'static>) -> Self {
+        self.emit = Emit::Children(m);
+        self
+    }
+
     // Composition
     pub fn inner(self, container: &'static str, target: &'static str) -> Self {
         self.try_child(container).try_descendant(target)
@@ -218,6 +227,30 @@ impl Extract {
         let target = self.navigate(node)?;
         let raw = emit(&self.emit, &target)?;
         Some(transform(raw, node))
+    }
+
+    /// Navigate, then collect all children matching the `Emit::Children`
+    /// criterion. Returns empty vec on navigation failure or non-Children emit.
+    pub fn apply_all<D: Doc>(&self, node: &Node<'_, D>) -> Vec<String> {
+        let Some(target) = self.navigate(node) else {
+            return vec![];
+        };
+        emit_all(&self.emit, &target)
+    }
+
+    /// Like `apply_all`, but transform each collected string with tree context.
+    pub fn apply_all_with<D: Doc>(
+        &self,
+        node: &Node<'_, D>,
+        transform: impl Fn(String, &Node<'_, D>) -> String,
+    ) -> Vec<String> {
+        let Some(target) = self.navigate(node) else {
+            return vec![];
+        };
+        emit_all(&self.emit, &target)
+            .into_iter()
+            .map(|s| transform(s, node))
+            .collect()
     }
 
     pub fn navigate<'r, D: Doc>(&self, node: &Node<'r, D>) -> Option<Node<'r, D>> {
@@ -259,6 +292,22 @@ fn emit<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Option<String> {
             }
             None
         }
+        Emit::Children(_) => {
+            // Single-value fallback: return first match
+            emit_all(mode, node).into_iter().next()
+        }
+    }
+}
+
+fn emit_all<D: Doc>(mode: &Emit, node: &Node<'_, D>) -> Vec<String> {
+    match mode {
+        Emit::Children(m) => node
+            .children()
+            .filter(|c| m.test(c))
+            .map(|c| c.text().to_string())
+            .collect(),
+        // For non-Children emit, produce 0 or 1 element
+        other => emit(other, node).into_iter().collect(),
     }
 }
 
@@ -363,5 +412,45 @@ mod tests {
         });
 
         assert_eq!(fqn, Some("Outer.Inner.method".to_string()));
+    }
+
+    #[test]
+    fn test_apply_all_collects_children() {
+        let code = "class Foo:\n    def a(self): pass\n    def b(self): pass\n    x = 1";
+        let root = SupportLang::Python.ast_grep(code);
+        let cls = root.root().children().next().unwrap();
+
+        // Collect all function_definition names from the class body
+        let methods = field("body")
+            .collect(Match::Kind("function_definition"))
+            .apply_all(&cls);
+        // text() of function_definition nodes includes full "def a(self): pass"
+        assert_eq!(methods.len(), 2);
+        assert!(methods[0].contains("a"));
+        assert!(methods[1].contains("b"));
+    }
+
+    #[test]
+    fn test_apply_all_with_transforms() {
+        let code = "class Foo:\n    def a(self): pass\n    def b(self): pass";
+        let root = SupportLang::Python.ast_grep(code);
+        let cls = root.root().children().next().unwrap();
+
+        let fqns = field("body")
+            .collect(Match::Kind("function_definition"))
+            .apply_all_with(&cls, |method_text, origin| {
+                let cls_name = origin.field("name").unwrap().text().to_string();
+                // Just extract function name from the full text
+                let fn_name = method_text
+                    .split('(')
+                    .next()
+                    .unwrap_or("")
+                    .trim()
+                    .strip_prefix("def ")
+                    .unwrap_or("")
+                    .trim();
+                format!("{cls_name}.{fn_name}")
+            });
+        assert_eq!(fqns, vec!["Foo.a", "Foo.b"]);
     }
 }
