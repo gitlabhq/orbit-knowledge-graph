@@ -163,9 +163,7 @@ mod tests {
     fn javascript_and_typescript_extensions_are_split() {
         assert_eq!(
             Language::JavaScript.file_extensions(),
-            &[
-                "js", "jsx", "mjs", "cjs", "vue", "svelte", "astro", "graphql", "gql", "json"
-            ]
+            &["js", "jsx", "mjs", "cjs", "vue", "graphql", "gql", "json"]
         );
         assert_eq!(
             Language::TypeScript.file_extensions(),
