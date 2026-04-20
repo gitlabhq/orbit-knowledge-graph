@@ -37,7 +37,7 @@ fixtures:
       }
 
 tests:
-  - name: "outer calls Handler.Handle, Fallback.Handle, Fallback.Retry, Handler.Close"
+  - name: "outer calls Handle, Retry, and Close with correct shadowing"
     queries:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
