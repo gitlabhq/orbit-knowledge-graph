@@ -6,7 +6,7 @@ pub use specifier::JsCrossFileResolver;
 
 use std::sync::OnceLock;
 
-use crate::v2::linker::rules::{ChainMode, ReceiverMode, ResolveStage};
+use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
 use crate::v2::linker::{CodeGraph, FileResolver, GraphEdge, ResolutionRules, ResolveSettings};
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
@@ -151,7 +151,6 @@ fn js_local_rules() -> &'static ResolutionRules {
             "js_local_ssa",
             vec![ResolveStage::SSA],
             vec![],
-            ChainMode::ValueFlow,
             ReceiverMode::None,
             "::",
             &["this"],
