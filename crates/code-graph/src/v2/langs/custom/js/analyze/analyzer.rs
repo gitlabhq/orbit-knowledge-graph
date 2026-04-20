@@ -736,23 +736,38 @@ impl JsAnalyzer {
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, String> {
-        // Single pass over lines: longest line + line count. Avoids two
-        // traversals of multi-MB inputs and closes the bypass where a file
-        // with many lines just under the old 50 KB cap slipped through.
+        // Single pass over lines: longest line + line count. Split on
+        // both `\n` and `\r` so a file that uses classic Mac line
+        // endings (CR-only) cannot bypass the minified heuristic by
+        // looking like one giant line to `source.lines()`.
         let mut line_count = 0usize;
         let mut max_line_len = 0usize;
-        for line in source.lines() {
-            line_count += 1;
-            if line.len() > max_line_len {
-                max_line_len = line.len();
+        let mut current_line_len = 0usize;
+        for byte in source.bytes() {
+            if byte == b'\n' || byte == b'\r' {
+                if current_line_len > max_line_len {
+                    max_line_len = current_line_len;
+                }
+                current_line_len = 0;
+                line_count += 1;
+            } else {
+                current_line_len += 1;
             }
-            if max_line_len > Self::MAX_LINE_LENGTH {
+            if max_line_len.max(current_line_len) > Self::MAX_LINE_LENGTH {
                 return Err(format!(
-                    "Skipping {file_path}: line too long ({max_line_len} bytes, max {})",
+                    "Skipping {file_path}: line too long ({} bytes, max {})",
+                    max_line_len.max(current_line_len),
                     Self::MAX_LINE_LENGTH
                 ));
             }
         }
+        if current_line_len > max_line_len {
+            max_line_len = current_line_len;
+        }
+        if current_line_len > 0 {
+            line_count += 1;
+        }
+        let _ = max_line_len;
 
         let line_count = line_count.max(1);
         let avg_line_len = source.len() / line_count;
