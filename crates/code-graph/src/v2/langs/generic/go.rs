@@ -42,6 +42,12 @@ impl DslLanguage for GoDsl {
                         ),
                     ),
                 ),
+            // Interface method specs — nested inside the interface scope,
+            // so they get FQNs like Repository.Get.
+            scope("method_elem", "Method")
+                .def_kind(DefKind::Method)
+                .no_scope()
+                .metadata(metadata().return_type(field("result"))),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
@@ -88,6 +94,32 @@ impl DslLanguage for GoDsl {
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right"),
+            binding("parameter_declaration", BindingKind::Assignment)
+                .name_from(&["name"])
+                .typed(
+                    vec![field("type").inner("pointer_type", "type_identifier")],
+                    &[
+                        "int",
+                        "int8",
+                        "int16",
+                        "int32",
+                        "int64",
+                        "uint",
+                        "uint8",
+                        "uint16",
+                        "uint32",
+                        "uint64",
+                        "float32",
+                        "float64",
+                        "complex64",
+                        "complex128",
+                        "string",
+                        "bool",
+                        "byte",
+                        "rune",
+                        "error",
+                    ],
+                ),
         ]
     }
 
