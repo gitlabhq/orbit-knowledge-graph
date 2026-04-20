@@ -5,6 +5,7 @@
 
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
+use smallvec::SmallVec;
 
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
@@ -55,7 +56,7 @@ pub(crate) fn apply_import_strategies(
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep, scratch),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
             ImportStrategy::FilePath => vec![],
-            ImportStrategy::GlobalName => global_name(graph, name),
+            ImportStrategy::GlobalName => global_name(graph, file_node, name),
         };
         if !candidates.is_empty() {
             return candidates;
@@ -225,7 +226,7 @@ fn same_package(
     vec![]
 }
 
-fn global_name(graph: &CodeGraph, name: &str) -> Vec<NodeIndex> {
+fn global_name(graph: &CodeGraph, _file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
     graph
         .indexes
         .by_name
