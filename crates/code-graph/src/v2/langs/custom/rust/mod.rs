@@ -20,8 +20,8 @@ use ra_ap_ide_db::base_db::{
     target::{Arch, TargetData},
 };
 use ra_ap_intern::Symbol;
-use ra_ap_load_cargo::{LoadCargoConfig, ProcMacroServerChoice, load_workspace};
-use ra_ap_paths::{AbsPathBuf, Utf8PathBuf};
+use ra_ap_load_cargo::{ProcMacroServerChoice, ProjectFolders};
+use ra_ap_paths::{AbsPath, AbsPathBuf, Utf8PathBuf};
 use ra_ap_project_model::{
     CargoWorkspace, CfgOverrides, ManifestPath, ProjectJson, ProjectJsonData, ProjectWorkspace,
     ProjectWorkspaceKind, RustSourceWorkspaceConfig, Sysroot, WorkspaceBuildScripts,
@@ -33,6 +33,7 @@ use ra_ap_syntax::{
         StructKind,
     },
 };
+use ra_ap_vfs::{self as vfs, FileExcluded, Vfs, loader};
 use rayon::prelude::*;
 use triomphe::Arc;
 
@@ -108,11 +109,11 @@ impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
-        config: &PipelineConfig,
+        _config: &PipelineConfig,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
-        let workspaces = match WorkspaceCatalog::load(root_path, config.worker_threads) {
+        let workspaces = match WorkspaceCatalog::load(root_path, files) {
             Ok(catalog) => Some(catalog),
             Err(err) => {
                 tracing::warn!(
@@ -302,7 +303,7 @@ fn parse_rust_file_standalone(
         error: format!("Read error: {err}"),
     })?;
     let file_module_parts = fallback_file_module_parts(&relative_path);
-    let workspace = standalone_workspace(&relative_path, source);
+    let workspace = standalone_workspace(&relative_path, source, Path::new(root_path));
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
         return Err(PipelineError {
             file_path: file_path.to_string(),

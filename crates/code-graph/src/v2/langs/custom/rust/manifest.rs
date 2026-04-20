@@ -2,6 +2,10 @@ use super::sysroot::EmbeddedSysroot;
 use super::workspace::{discover_manifest_paths_for_root, normalize_existing_path};
 use super::*;
 
+/// Upper bound on a Cargo.toml file we will read off disk. Real manifests are
+/// well under this; anything larger is rejected before the read allocates.
+const MAX_MANIFEST_BYTES: u64 = 4 * 1024 * 1024;
+
 pub(super) struct ManifestCache {
     pub(super) root_path: PathBuf,
     pub(super) manifest_paths: Vec<PathBuf>,
@@ -98,6 +102,19 @@ impl ManifestCache {
         };
 
         if !self.parsed.contains_key(&manifest_path) {
+            // Cargo manifests are human-authored config. Anything multi-megabyte is
+            // almost certainly adversarial or malformed; bail before `read_to_string`
+            // allocates unbounded memory on the indexer.
+            if let Ok(meta) = std::fs::metadata(&manifest_path)
+                && meta.len() > MAX_MANIFEST_BYTES
+            {
+                bail!(
+                    "Cargo manifest {} is {} bytes, exceeds {} byte cap",
+                    manifest_path.display(),
+                    meta.len(),
+                    MAX_MANIFEST_BYTES
+                );
+            }
             let source = std::fs::read_to_string(&manifest_path).with_context(|| {
                 format!("failed to read Cargo manifest {}", manifest_path.display())
             })?;
@@ -1553,4 +1570,38 @@ fn is_dep_feature_activated(
         }
     }
     false
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tempfile::tempdir;
+
+    #[test]
+    fn oversized_cargo_manifest_is_rejected() {
+        let temp = tempdir().unwrap();
+        let root = std::fs::canonicalize(temp.path()).unwrap();
+        let manifest = root.join("Cargo.toml");
+        // Write a manifest whose bytes exceed MAX_MANIFEST_BYTES with filler in
+        // a comment so the TOML grammar would otherwise be valid.
+        let padding = "#".repeat((MAX_MANIFEST_BYTES + 1) as usize);
+        std::fs::write(
+            &manifest,
+            format!(
+                "[package]\nname = \"big\"\nversion = \"0.0.0\"\nedition = \"2021\"\n{padding}\n"
+            ),
+        )
+        .unwrap();
+
+        let mut cache =
+            ManifestCache::new(root.to_string_lossy().as_ref()).expect("cache should open");
+        let err = cache
+            .load(&manifest)
+            .err()
+            .expect("oversized manifest must be rejected");
+        assert!(
+            err.to_string().contains("exceeds"),
+            "unexpected error: {err}"
+        );
+    }
 }

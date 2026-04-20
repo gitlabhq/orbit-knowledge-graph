@@ -133,6 +133,7 @@ ra_ap_load-cargo = "0.0.328"
 ra_ap_paths = "0.0.328"
 ra_ap_project_model = "0.0.328"
 ra_ap_syntax = "0.0.328"
+ra_ap_vfs = "0.0.328"
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"

@@ -46,6 +46,7 @@ ra_ap_load-cargo = { workspace = true }
 ra_ap_paths = { workspace = true }
 ra_ap_project_model = { workspace = true }
 ra_ap_syntax = { workspace = true }
+ra_ap_vfs = { workspace = true }
 smallvec = { workspace = true }
 stacker = { workspace = true }
 strum = { workspace = true }
