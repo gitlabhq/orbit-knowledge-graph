@@ -86,6 +86,22 @@
 --     User 2 -> MR 2000, User 3 -> MR 2000
 --     User 1 -> MR 2002
 --
+--   ─── Organization 2 (cross-org isolation test data) ───
+--
+--   Groups:
+--     900 Org2 Root Group (public, path 2/900/)
+--
+--   Projects:
+--     9000 Org2 Project (public, path 2/900/9000/)
+--
+--   MergeRequests:
+--     9100 Org2 MR (opened, path 2/900/9000/)
+--
+--   Edges:
+--     User 1 -> Group 900 (MEMBER_OF, path 2/900/)
+--     Group 900 -> Project 9000 (CONTAINS, path 2/900/9000/)
+--     User 1 -> MR 9100 (AUTHORED, path 2/900/9000/)
+--
 --   WorkItem edges:
 --     AUTHORED:      User 1 -> WI 4000, User 2 -> WI 4001, User 1 -> WI 4002, User 3 -> WI 4003
 --     IN_GROUP:      WI 4000 -> Group 100, WI 4001 -> Group 100, WI 4002 -> Group 101, WI 4003 -> Group 102
@@ -204,3 +220,21 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 2, 'User', 'APPROVED', 2000, 'MergeRequest'),
     ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest'),
     ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest');
+
+-- Organization 2: cross-org isolation test data.
+-- User 1 (alice) exists in both orgs — her User row is global (gl_user has
+-- no traversal_path), but her edges and the resources below are in org 2.
+
+INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VALUES
+    (900, 'Org2 Root Group', 'org2-root', 'public', '2/900/');
+
+INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) VALUES
+    (9000, 'Org2 Project', 'org2-root/org2-project', 'public', '2/900/9000/');
+
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
+    (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', '2/900/9000/');
+
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group'),
+    ('2/900/9000/', 900, 'Group', 'CONTAINS', 9000, 'Project'),
+    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest');
