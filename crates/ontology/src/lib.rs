@@ -19,6 +19,7 @@
 pub mod constants;
 mod entities;
 pub mod etl;
+pub mod introspection;
 mod json_schema;
 mod loading;
 

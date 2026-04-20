@@ -183,8 +183,38 @@ enum Commands {
         #[arg(long)]
         local: bool,
     },
-    /// Generate ClickHouse DDL from the ontology
+    /// Describe the graph schema (entities, edges, properties) visible to the
+    /// local DuckDB index. Use --all to include server-only entities.
     Schema {
+        /// Expand one or more entities to show their properties and edges.
+        /// Pass `*` to expand every entity.
+        #[arg(long, short = 'e', value_name = "NODE", num_args = 0..)]
+        expand: Vec<String>,
+
+        /// Emit JSON instead of the default LLM-friendly TOON format.
+        #[arg(long)]
+        raw: bool,
+
+        /// Include the full server ontology (debugging aid). Default is
+        /// restricted to entities present in the local DuckDB.
+        #[arg(long)]
+        all: bool,
+
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+    },
+    /// Maintainer-only tools (DDL generation, etc.)
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Generate ClickHouse DDL from the ontology
+    Ddl {
         /// Path to ontology directory (default: embedded)
         #[arg(long, short)]
         ontology: Option<PathBuf>,
@@ -253,14 +283,51 @@ async fn main() -> Result<()> {
             local,
         } => run_compile(json, traversal_paths, ontology, format, local),
         Commands::Schema {
+            expand,
+            raw,
+            all,
             ontology,
-            prefix,
-            diff,
-        } => run_schema(ontology, prefix, diff),
+        } => run_schema_introspect(expand, raw, all, ontology),
+        Commands::Debug { command } => match command {
+            DebugCommands::Ddl {
+                ontology,
+                prefix,
+                diff,
+            } => run_ddl(ontology, prefix, diff),
+        },
     }
 }
 
-fn run_schema(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
+fn run_schema_introspect(
+    expand: Vec<String>,
+    raw: bool,
+    all: bool,
+    ontology_path: Option<PathBuf>,
+) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let scope = if all {
+        ontology::introspection::IntrospectionScope::All
+    } else {
+        ontology::introspection::IntrospectionScope::Local
+    };
+
+    let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
+
+    if raw {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
+            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
+        println!("{toon}");
+    }
+    Ok(())
+}
+
+fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
     let ont = match ontology_path {
         Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
         None => Ontology::load_embedded().context("failed to load embedded ontology")?,
