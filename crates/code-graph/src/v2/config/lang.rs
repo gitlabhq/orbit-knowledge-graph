@@ -81,14 +81,27 @@ define_languages! {
     },
     JavaScript => {
         support_lang: JavaScript,
-        extensions: ["js"],
+        // `.svelte` and `.astro` are intentionally absent: OXC's
+        // PartialLoader accepts them, but the pipeline has no test
+        // coverage for either, so we do not claim support. Add them
+        // back alongside the first fixture suite that exercises them.
+        extensions: [
+            "js",
+            "jsx",
+            "mjs",
+            "cjs",
+            "vue",
+            "graphql",
+            "gql",
+            "json"
+        ],
         exclude: ["min.js"],
         separator: "::",
         names: ["javascript", "js"],
     },
     TypeScript => {
         support_lang: TypeScript,
-        extensions: ["ts"],
+        extensions: ["ts", "tsx", "mts", "cts"],
         exclude: [],
         separator: "::",
         names: ["typescript", "ts"],
@@ -148,7 +161,13 @@ mod tests {
 
     #[test]
     fn javascript_and_typescript_extensions_are_split() {
-        assert_eq!(Language::JavaScript.file_extensions(), &["js"]);
-        assert_eq!(Language::TypeScript.file_extensions(), &["ts"]);
+        assert_eq!(
+            Language::JavaScript.file_extensions(),
+            &["js", "jsx", "mjs", "cjs", "vue", "graphql", "gql", "json"]
+        );
+        assert_eq!(
+            Language::TypeScript.file_extensions(),
+            &["ts", "tsx", "mts", "cts"]
+        );
     }
 }

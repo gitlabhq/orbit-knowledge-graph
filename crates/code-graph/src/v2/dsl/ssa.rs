@@ -176,6 +176,62 @@ impl<'a> SsaEngine<'a> {
         });
     }
 
+    /// Create a sealed successor block with a single predecessor.
+    pub fn add_sealed_successor(&mut self, predecessor: BlockId) -> BlockId {
+        let block = self.add_block();
+        self.add_predecessor(block, predecessor);
+        self.seal_block(block);
+        block
+    }
+
+    /// Create and seal a join block from the provided predecessors.
+    pub fn add_sealed_join<I>(&mut self, predecessors: I) -> BlockId
+    where
+        I: IntoIterator<Item = BlockId>,
+    {
+        let block = self.add_block();
+        for predecessor in predecessors {
+            self.add_predecessor(block, predecessor);
+        }
+        self.seal_block(block);
+        block
+    }
+
+    /// Create a sealed branch block from a shared predecessor.
+    pub fn add_branch_block(&mut self, predecessor: BlockId) -> BlockId {
+        self.add_sealed_successor(predecessor)
+    }
+
+    /// Create a join block for one or more branch exits, with an optional
+    /// fallthrough predecessor when one side of the branch is absent.
+    pub fn add_branch_join<I>(&mut self, fallthrough: Option<BlockId>, branch_exits: I) -> BlockId
+    where
+        I: IntoIterator<Item = BlockId>,
+    {
+        let mut predecessors = SmallVec::<[BlockId; 3]>::new();
+        predecessors.extend(branch_exits);
+        if let Some(fallthrough) = fallthrough {
+            predecessors.push(fallthrough);
+        }
+        self.add_sealed_join(predecessors)
+    }
+
+    /// Create a loop header/body pair from the current predecessor block.
+    pub fn begin_loop(&mut self, predecessor: BlockId) -> (BlockId, BlockId) {
+        let header = self.add_block();
+        self.add_predecessor(header, predecessor);
+        let body = self.add_sealed_successor(header);
+        (header, body)
+    }
+
+    /// Close a loop by wiring the body exit back into the header and creating
+    /// a sealed exit block.
+    pub fn finish_loop(&mut self, header: BlockId, body_exit: BlockId) -> BlockId {
+        self.add_predecessor(header, body_exit);
+        self.seal_block(header);
+        self.add_sealed_successor(header)
+    }
+
     /// Seal a block — all predecessors are now known.
     /// Resolves any incomplete phi nodes that were deferred.
     pub(crate) fn seal_block(&mut self, block: BlockId) {
@@ -364,10 +420,12 @@ impl<'a> SsaEngine<'a> {
 
         // Different values or cycle detected: fall back to phi creation.
         // Re-collect all operands properly with cycle-breaking phi.
+        // `add_phi_operands` finishes with `try_remove_trivial_phi`, so
+        // the value we return here is already the replacement when the
+        // phi collapsed.
         let phi_id = self.new_phi(block, variable);
         self.write_variable_interned(variable, block, SsaValue::Phi(phi_id));
-        self.add_phi_operands(variable, phi_id);
-        self.try_remove_trivial_phi(phi_id)
+        self.add_phi_operands(variable, phi_id)
     }
 
     /// Internal write that takes an already-interned name.
@@ -395,7 +453,17 @@ impl<'a> SsaEngine<'a> {
         id
     }
 
-    fn add_phi_operands(&mut self, variable: &'a str, phi_id: PhiId) {
+    /// Populate a phi's operands by reading its variable at every
+    /// predecessor, then attempt trivial-phi removal per Braun Algorithm 4.
+    ///
+    /// The return value is the phi itself (`SsaValue::Phi(phi_id)`) when
+    /// the phi survives simplification, or the replacement value when
+    /// every non-self operand is identical. Callers that created the
+    /// phi via the marker path (`read_variable_marker`) propagate the
+    /// replacement upward; `seal_block` ignores the return value because
+    /// the replacement has already propagated through phi users and
+    /// `current_def`.
+    fn add_phi_operands(&mut self, variable: &'a str, phi_id: PhiId) -> SsaValue<'a> {
         let block = self.phis[phi_id.0].block;
         let preds: SmallVec<[BlockId; 2]> = self.blocks[block.0].predecessors.clone();
         for pred in preds {
@@ -411,6 +479,7 @@ impl<'a> SsaEngine<'a> {
             }
             self.phis[phi_id.0].operands.push(val);
         }
+        self.try_remove_trivial_phi(phi_id)
     }
 
     /// Remove trivial phi: if it references only one real value (plus itself),
@@ -679,6 +748,45 @@ mod tests {
 
         let result = ssa.read_variable_stateless("x", exit);
         assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
+    }
+
+    /// Braun et al. Algorithm 4: sealing a block must invoke
+    /// `tryRemoveTrivialPhi` on every operand-less phi it resolves.
+    /// When the deferred phi's predecessors all agree on a single
+    /// value, the phi must collapse rather than survive as dead
+    /// scaffolding in the SSA graph.
+    #[test]
+    fn unsealed_block_trivial_phi_collapses_on_seal() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        let header = ssa.add_block();
+        let body = ssa.add_block();
+        let exit = ssa.add_block();
+
+        ssa.add_predecessor(header, entry);
+        ssa.add_predecessor(body, header);
+        ssa.add_predecessor(exit, header);
+
+        ssa.seal_block(entry);
+
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        // Read while header is unsealed: forces an incomplete phi.
+        let _ = ssa.read_variable_stateless("x", body);
+
+        // Back-edge writes the same value as entry.
+        ssa.write_variable("x", body, SsaValue::LocalDef(0));
+
+        ssa.seal_block(body);
+        ssa.add_predecessor(header, body);
+        ssa.seal_block(header);
+        ssa.seal_block(exit);
+
+        let result = ssa.read_variable_stateless("x", exit);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
+        assert!(
+            ssa.stats.phis_trivial > 0,
+            "seal_block must route through tryRemoveTrivialPhi (Algorithm 4)",
+        );
     }
 
     #[test]

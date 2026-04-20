@@ -12,5 +12,8 @@ pub(crate) fn make_graph_config() -> anyhow::Result<GraphConfig> {
         .with_relationship("FileToImportedSymbol", "source_id", "target_id")
         .with_relationship("DefinitionToDefinition", "source_id", "target_id")
         .with_relationship("DefinitionToImportedSymbol", "source_id", "target_id")
+        .with_relationship("ImportedSymbolToImportedSymbol", "source_id", "target_id")
+        .with_relationship("ImportedSymbolToDefinition", "source_id", "target_id")
+        .with_relationship("ImportedSymbolToFile", "source_id", "target_id")
         .build()?)
 }

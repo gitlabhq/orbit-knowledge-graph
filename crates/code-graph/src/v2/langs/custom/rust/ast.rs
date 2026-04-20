@@ -809,11 +809,18 @@ impl RustStructureExtractor {
 
         self.imports.push(CanonicalImport {
             import_type,
+            binding_kind: if wildcard {
+                crate::v2::types::ImportBindingKind::Namespace
+            } else {
+                crate::v2::types::ImportBindingKind::Named
+            },
+            mode: crate::v2::types::ImportMode::Declarative,
             path,
             name,
             alias,
             scope_fqn: scope_fqn(module_parts),
             range: self.line_index.range(range),
+            is_type_only: false,
             wildcard,
         });
     }

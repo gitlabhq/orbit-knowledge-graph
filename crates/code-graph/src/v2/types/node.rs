@@ -84,6 +84,26 @@ pub struct DefinitionMetadata {
     pub decorators: Vec<String>,
     /// If this is a companion object, the FQN of the owning class.
     pub companion_of: Option<String>,
+    /// Whether the definition is exported from the file/module.
+    pub is_exported: bool,
+}
+
+/// Language-agnostic import binding categories.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ImportBindingKind {
+    #[default]
+    Named,
+    Primary,
+    Namespace,
+    SideEffect,
+}
+
+/// Whether a binding enters scope through a declarative import form or a runtime load primitive.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Hash)]
+pub enum ImportMode {
+    #[default]
+    Declarative,
+    Runtime,
 }
 
 /// A parsed import, language-agnostic.
@@ -91,11 +111,15 @@ pub struct DefinitionMetadata {
 pub struct CanonicalImport {
     /// Language-specific import type (e.g. "RequireRelative", "FromImport").
     pub import_type: &'static str,
+    pub binding_kind: ImportBindingKind,
+    pub mode: ImportMode,
     pub path: String,
     pub name: Option<String>,
     pub alias: Option<String>,
     pub scope_fqn: Option<Fqn>,
     pub range: Range,
+    /// Whether this import exists only in the type space (`import type`, etc.).
+    pub is_type_only: bool,
     /// Whether this is a wildcard import (e.g. `from foo import *`,
     /// `import java.util.*`). Set by the parser; the resolver uses
     /// this to drive wildcard import lookup instead of matching on

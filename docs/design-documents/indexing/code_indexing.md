@@ -103,10 +103,9 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-graph/parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
-| `code-graph/linker` crate | Streaming indexing pipeline, graph data model, analysis |
+| `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/`, the preserved legacy parser/linker stack in `src/legacy/`, and shared code-indexing utilities |
+| `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and shared by the legacy and generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
-
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
@@ -193,20 +192,26 @@ After acquiring the lock, the service downloads the full repository archive from
 
 ##### Parser architecture
 
-The code parser supports seven languages using four parser backends:
+The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
-- **TypeScript and JavaScript** use the SWC parser. Minified files are skipped.
-- **Python, Kotlin, Java, and C#** use tree-sitter grammars.
+- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
+- **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
+- **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
+- **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules, enforces file-count, byte, statement, and recursion budgets, treats `process.env` as an empty object, and allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
 - **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree, attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data, disables proc macros and build-script execution, and layers parser-time SSA over rust-analyzer for local callable flow such as aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`.
+- **Python, Kotlin, Java, and C#** use tree-sitter grammars.
+- **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 
 - **Definitions** such as classes, modules, methods, functions, constants, and interfaces. Each carries a fully qualified name (FQN), source range, and language-specific type.
 - **Imported symbols** with their import path, identifier, optional alias, and scope.
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
+
+For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity. A second OXC-driven pass records invocation sites, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
 
 ##### Streaming indexing pipeline
 

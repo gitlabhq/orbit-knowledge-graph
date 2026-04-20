@@ -1,0 +1,127 @@
+name: "JavaScript GitLab monolith CommonJS config patterns"
+pipeline: js
+fixtures:
+  - path: config/helpers/patched_crypto.js
+    content: |
+      function createHash() {
+        return {
+          update() {
+            return this;
+          },
+          digest() {
+            return 'hash';
+          },
+        };
+      }
+
+      module.exports = {
+        createHash,
+      };
+
+  - path: config/helpers/incremental_webpack_compiler/index.js
+    content: |
+      function createIncrementalWebpackCompiler() {
+        return {
+          run() {
+            return 'ok';
+          },
+        };
+      }
+
+      module.exports = createIncrementalWebpackCompiler;
+
+  - path: config/helpers/vendor_dll_hash.js
+    content: |
+      function vendorDllHash() {
+        return 'dll';
+      }
+
+      module.exports = vendorDllHash;
+
+  - path: config/webpack.config.js
+    content: |
+      const crypto = require('./helpers/patched_crypto');
+      const createIncrementalWebpackCompiler = require('./helpers/incremental_webpack_compiler');
+      const vendorDllHash = require('./helpers/vendor_dll_hash');
+
+      function buildCompiler() {
+        const compiler = createIncrementalWebpackCompiler();
+        return compiler.run();
+      }
+
+      function buildHash() {
+        return crypto.createHash().update('x').digest('hex');
+      }
+
+      function buildDllHash() {
+        return vendorDllHash();
+      }
+
+      module.exports = {
+        buildCompiler,
+        buildHash,
+        buildDllHash,
+      };
+
+  - path: config/consumer.js
+    content: |
+      const webpackConfig = require('./webpack.config');
+
+      function runCompiler() {
+        return webpackConfig.buildCompiler();
+      }
+
+      function runHash() {
+        return webpackConfig.buildHash();
+      }
+
+      function runDllHash() {
+        return webpackConfig.buildDllHash();
+      }
+
+tests:
+  - name: CommonJS bare require call resolves helper factory
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'config/webpack.config.js'
+        AND callee.file_path = 'config/helpers/incremental_webpack_compiler/index.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "buildCompiler", callee: "createIncrementalWebpackCompiler" } }
+
+  - name: CommonJS namespace member call resolves helper method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'config/webpack.config.js'
+        AND callee.file_path = 'config/helpers/patched_crypto.js'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "buildHash", callee: "createHash" } }
+
+  - name: Consumer module member call resolves into webpack config export
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'config/consumer.js'
+        AND callee.file_path = 'config/webpack.config.js'
+        AND caller.name = 'runCompiler'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runCompiler", callee: "buildCompiler" } }
+
+  - name: Consumer module member call resolves second exported function
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'config/consumer.js'
+        AND callee.file_path = 'config/webpack.config.js'
+        AND caller.name = 'runDllHash'
+      RETURN caller.name AS caller, callee.name AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runDllHash", callee: "buildDllHash" } }
