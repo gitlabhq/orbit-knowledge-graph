@@ -8,6 +8,8 @@
 
 use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
+use petgraph::algo::tarjan_scc;
+use petgraph::graph::{DiGraph, NodeIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
@@ -478,8 +480,7 @@ impl<'a> SsaEngine<'a> {
             return;
         }
 
-        // Build a petgraph DiGraph of phi-to-phi edges for SCC computation.
-        use petgraph::graph::{DiGraph, NodeIndex};
+        // Build a DiGraph of phi-to-phi edges for SCC computation.
         let mut phi_graph = DiGraph::<PhiId, ()>::new();
         let mut phi_to_node: FxHashMap<PhiId, NodeIndex> = FxHashMap::default();
 
@@ -499,7 +500,7 @@ impl<'a> SsaEngine<'a> {
         }
 
         // tarjan_scc returns SCCs in reverse topological order.
-        let sccs = petgraph::algo::tarjan_scc(&phi_graph);
+        let sccs = tarjan_scc(&phi_graph);
 
         for scc_nodes in &sccs {
             if scc_nodes.len() <= 1 {
