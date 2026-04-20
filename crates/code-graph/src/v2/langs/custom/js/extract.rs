@@ -316,22 +316,45 @@ fn canonical_definitions(analysis: &JsFileAnalysis) -> Vec<CanonicalDefinition> 
 
 fn canonical_definition(definition: &JsDef, extends: Option<&String>) -> CanonicalDefinition {
     let mut metadata = DefinitionMetadata {
-        type_annotation: definition.type_annotation.clone(),
+        type_annotation: definition
+            .type_annotation
+            .as_deref()
+            .map(truncate_identifier),
         is_exported: definition.is_exported,
         ..DefinitionMetadata::default()
     };
     if let Some(extends) = extends {
-        metadata.super_types.push(extends.clone());
+        metadata.super_types.push(truncate_identifier(extends));
     }
 
+    let fqn_truncated = truncate_identifier(&definition.fqn);
     CanonicalDefinition {
         definition_type: definition.kind.as_str(),
         kind: canonical_def_kind(&definition.kind),
-        name: definition.name.clone(),
-        fqn: Fqn::from_parts(&[definition.fqn.as_str()], "::"),
+        name: truncate_identifier(&definition.name),
+        fqn: Fqn::from_parts(&[fqn_truncated.as_str()], "::"),
         range: to_range(definition.range),
-        is_top_level: !definition.fqn.contains("::"),
+        is_top_level: !fqn_truncated.contains("::"),
         metadata: Some(Box::new(metadata)),
+    }
+}
+
+/// JS identifiers are attacker-controlled and carry into the graph as
+/// hash keys and display strings. A source with 100 MB of contiguous
+/// identifier text can hold the whole thing in memory for the life of
+/// the pipeline. Cap at 1 KiB, which is still two orders of magnitude
+/// past any realistic human-written name.
+fn truncate_identifier(value: &str) -> String {
+    const MAX: usize = 1024;
+    if value.len() <= MAX {
+        value.to_string()
+    } else {
+        // Slice on char boundary: step back from MAX until we hit one.
+        let mut end = MAX;
+        while end > 0 && !value.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &value[..end])
     }
 }
 
@@ -406,9 +429,9 @@ fn canonical_import(import_entry: &JsImport) -> CanonicalImport {
         import_type,
         binding_kind,
         mode,
-        path: import_entry.specifier.clone(),
-        name,
-        alias,
+        path: truncate_identifier(&import_entry.specifier),
+        name: name.as_deref().map(truncate_identifier),
+        alias: alias.as_deref().map(truncate_identifier),
         scope_fqn: None,
         range: to_range(import_entry.range),
         is_type_only: import_entry.is_type,
