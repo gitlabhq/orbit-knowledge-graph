@@ -27,10 +27,10 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.setup' AND e.edge_kind = 'Calls'
-          RETURN callee.name AS callee
+          RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "Listen" } }
+          - { row: { callee: "main.Listen" } }
       # No edges to unrelated definitions
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)

@@ -34,11 +34,11 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.Start' AND e.edge_kind = 'Calls'
-          RETURN callee.name AS callee
+          RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "Info" } }
-          - { row: { callee: "process" } }
+          - { row: { callee: "main.Info" } }
+          - { row: { callee: "main.process" } }
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.Start' AND callee.name = 'Error'
@@ -50,11 +50,11 @@ tests:
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main.process' AND e.edge_kind = 'Calls'
-      RETURN callee.name AS callee
+      RETURN callee.fqn AS callee
       ORDER BY callee
     assert:
-      - { row: { callee: "Error" } }
-      - { row: { callee: "Info" } }
+      - { row: { callee: "main.Error" } }
+      - { row: { callee: "main.Info" } }
 
   - name: "recursive calls itself"
     query: |

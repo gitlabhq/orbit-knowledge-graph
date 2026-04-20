@@ -37,20 +37,20 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
-          RETURN callee.name AS callee
+          RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "Build" } }
-          - { row: { callee: "NewBuilder" } }
-          - { row: { callee: "NewBuilder" } }
-          - { row: { callee: "SetAge" } }
-          - { row: { callee: "SetName" } }
-          - { row: { callee: "SetName" } }
+          - { row: { callee: "main.Build" } }
+          - { row: { callee: "main.NewBuilder" } }
+          - { row: { callee: "main.NewBuilder" } }
+          - { row: { callee: "main.SetAge" } }
+          - { row: { callee: "main.SetName" } }
+          - { row: { callee: "main.SetName" } }
       # Exactly 6 call edges, no false positives
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
-          RETURN callee.name AS callee
+          RETURN callee.fqn AS callee
         assert:
           - { row_count: 6 }
 

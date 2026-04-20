@@ -43,8 +43,8 @@ tests:
       - query: |
           MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
           WHERE caller.fqn = 'main.multiAssign' AND e.edge_kind = 'Calls'
-          RETURN callee.name AS callee
+          RETURN callee.fqn AS callee
           ORDER BY callee
         assert:
-          - { row: { callee: "Bark" } }
-          - { row: { callee: "Meow" } }
+          - { row: { callee: "main.Bark" } }
+          - { row: { callee: "main.Meow" } }
