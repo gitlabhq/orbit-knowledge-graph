@@ -143,13 +143,38 @@ fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
 pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
-    if let Some(s) = payload.downcast_ref::<&'static str>() {
+    let raw = if let Some(s) = payload.downcast_ref::<&'static str>() {
         (*s).to_string()
     } else if let Some(s) = payload.downcast_ref::<String>() {
         s.clone()
     } else {
         "unknown panic".to_string()
+    };
+    sanitize_panic_message(&raw)
+}
+
+/// Panic payloads from OXC can embed source snippets (byte ranges of
+/// the file that triggered the panic). The surrounding pipeline writes
+/// this into a `PipelineError` that lands in logs and downstream
+/// telemetry, so a hostile repository could steer arbitrary repository
+/// bytes into observability pipelines. Keep only printable ASCII and
+/// cap the length so the message remains useful for debugging but
+/// cannot exfiltrate arbitrary content.
+fn sanitize_panic_message(raw: &str) -> String {
+    const MAX: usize = 256;
+    let mut out = String::with_capacity(MAX.min(raw.len()));
+    for ch in raw.chars() {
+        if out.len() >= MAX {
+            out.push('…');
+            break;
+        }
+        if ch == ' ' || (ch.is_ascii_graphic()) {
+            out.push(ch);
+        } else {
+            out.push('?');
+        }
     }
+    out
 }
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, PipelineError> {
