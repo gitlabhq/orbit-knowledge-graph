@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::path::{Component, Path, PathBuf};
 
 use crate::utils::Range as SourceRange;
 use crate::v2::config::Language;
@@ -65,6 +65,40 @@ pub fn analyze_files(
     (analyzed, errors)
 }
 
+/// Reject relative paths that could escape the repo clone.
+///
+/// A malicious repository is *not* expected to produce absolute paths or `..`
+/// components through the walker, but we defend in depth: the symlink check
+/// also catches a committed `link -> /etc/...` whose target the walker would
+/// happily hand us as a "file".
+fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, String> {
+    if relative_path.contains('\0') || relative_path.contains('\n') {
+        return Err("relative path contains NUL or newline".to_string());
+    }
+    let rel = Path::new(relative_path);
+    if rel.is_absolute() {
+        return Err(format!("refusing absolute path: {relative_path}"));
+    }
+    for component in rel.components() {
+        match component {
+            Component::ParentDir => {
+                return Err(format!("refusing `..` in path: {relative_path}"));
+            }
+            Component::Prefix(_) | Component::RootDir => {
+                return Err(format!("refusing rooted path: {relative_path}"));
+            }
+            _ => {}
+        }
+    }
+    let joined = Path::new(root_path).join(rel);
+    let meta = std::fs::symlink_metadata(&joined)
+        .map_err(|err| format!("stat {}: {err}", joined.display()))?;
+    if !meta.file_type().is_file() {
+        return Err(format!("refusing non-regular file: {}", joined.display()));
+    }
+    Ok(joined)
+}
+
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&'static str>() {
         (*s).to_string()
@@ -76,7 +110,11 @@ fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
 }
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, PipelineError> {
-    let absolute_path = Path::new(root_path).join(relative_path);
+    let absolute_path =
+        safe_repo_join(root_path, relative_path).map_err(|error| PipelineError {
+            file_path: relative_path.to_string(),
+            error: error.to_string(),
+        })?;
     let source = std::fs::read_to_string(&absolute_path).map_err(|error| PipelineError {
         file_path: relative_path.to_string(),
         error: error.to_string(),
