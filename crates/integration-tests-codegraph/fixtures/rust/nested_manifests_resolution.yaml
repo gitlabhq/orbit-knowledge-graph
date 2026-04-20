@@ -1,0 +1,51 @@
+name: "Rust: nested manifests without a root Cargo.toml"
+fixtures:
+  - path: libs/shared/Cargo.toml
+    content: |
+      [package]
+      name = "shared-lib"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: libs/shared/src/lib.rs
+    content: |
+      pub fn helper() {}
+
+  - path: services/app/Cargo.toml
+    content: |
+      [package]
+      name = "service-app"
+      version = "0.1.0"
+      edition = "2021"
+
+      [dependencies]
+      shared-lib = { path = "../../libs/shared" }
+
+  - path: services/app/src/main.rs
+    content: |
+      use shared_lib::helper;
+
+      pub fn boot() {
+          helper();
+      }
+
+tests:
+  - name: "path dependency resolves even without a repo-root manifest"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'services/app/src/main.rs'
+        AND caller.name = 'boot'
+        AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'services/app/src/main.rs', tgt: 'libs/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
+
+  - name: "nested manifest local crate keeps its crate-qualified FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'services/app/src/main.rs' AND d.name = 'boot'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'service_app::boot' } }

@@ -653,3 +653,226 @@ pub(super) async fn admin_only_admin_neighbors_dynamic_wildcard_includes_admin_f
         "admin wildcard must expose is_auditor column in dynamic hydration"
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Cross-organization isolation
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Org 1 user searching for projects must not see org 2's project (id 9000).
+pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+            "limit": 50
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_node_ids("Project", &[1000, 1001, 1002, 1003, 1004]);
+    resp.assert_node_absent("Project", 9000);
+}
+
+/// Org 1 user traversing User->MR must not see org 2's MR (id 9100),
+/// even though User 1 (alice) authored it in org 2.
+pub(super) async fn cross_org_traversal_excludes_other_org(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 50
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+
+    // Alice + her 2 org 1 MRs.
+    resp.assert_node_count(3);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
+    resp.assert_node_absent("MergeRequest", 9100);
+}
+
+/// Org 1 aggregation counting groups must not include org 2's group (id 900).
+pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/".into()]).unwrap(),
+    )
+    .await;
+
+    // Org 1 groups should have counts; org 2 group must be absent.
+    resp.assert_node("Group", 100, |n| {
+        n.prop_i64("member_count").unwrap_or(0) > 0
+    });
+    resp.assert_node_absent("Group", 900);
+}
+
+/// Org 2 user can see their own data and nothing from org 1.
+pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
+    let mut svc = MockRedactionService::new();
+    svc.allow("user", &[1]);
+    svc.allow("group", &[900]);
+    svc.allow("project", &[9000]);
+    svc.allow("merge_request", &[9100]);
+
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+            "limit": 50
+        }"#,
+        &svc,
+        SecurityContext::new(2, vec!["2/".into()]).unwrap(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_ids("Project", &[9000]);
+    resp.assert_node_absent("Project", 1000);
+    resp.assert_node_absent("Project", 1001);
+    resp.assert_node_absent("Project", 1002);
+    resp.assert_node_absent("Project", 1003);
+    resp.assert_node_absent("Project", 1004);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregation: compiled SQL security assertions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Aggregation compiled SQL must contain startsWith(traversal_path, ?) for
+/// every gl_* table alias. This asserts the SecurityPass output directly
+/// rather than relying on CheckPass alone.
+pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("startsWith"),
+        "aggregation SQL must contain startsWith filter, got:\n{sql}"
+    );
+    assert!(
+        sql.contains("traversal_path"),
+        "aggregation SQL must filter on traversal_path, got:\n{sql}"
+    );
+    // The bound parameter for the path prefix must appear.
+    let param_strs: Vec<_> = compiled
+        .base
+        .params
+        .iter()
+        .map(|(k, v)| format!("{k}={v:?}"))
+        .collect();
+    assert!(
+        sql.contains("1/100/") || param_strs.iter().any(|s| s.contains("1/100/")),
+        "compiled SQL or params must contain '1/100/', got SQL:\n{sql}\nparams: {param_strs:?}"
+    );
+}
+
+/// Multi-path SecurityContext with aggregation: compiled SQL must contain
+/// startsWith predicates for both paths (via LCP + OR).
+pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("startsWith"),
+        "multi-path aggregation SQL must contain startsWith, got:\n{sql}"
+    );
+
+    // Both path prefixes must appear in SQL or params.
+    let all_text = format!("{sql} {:?}", compiled.base.params);
+    assert!(
+        all_text.contains("1/100/"),
+        "compiled output must contain '1/100/', got:\n{all_text}"
+    );
+    assert!(
+        all_text.contains("1/102/"),
+        "compiled output must contain '1/102/', got:\n{all_text}"
+    );
+}
+
+/// Multi-path aggregation returns correct scoped counts from both namespaces
+/// and excludes groups outside the scope.
+pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap(),
+    )
+    .await;
+
+    // Group 100: members 1, 2, 6 (edges in 1/100/) = 3
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    // Group 102: members 1, 4 (edges in 1/102/) = 2
+    resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
+    // Group 101 is outside both paths.
+    resp.assert_node_absent("Group", 101);
+}

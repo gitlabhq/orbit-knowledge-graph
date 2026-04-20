@@ -1,8 +1,11 @@
-use std::collections::BTreeMap;
 use std::sync::Arc;
 
 use ontology::Ontology;
-use serde::{Deserialize, Serialize};
+use ontology::introspection::{
+    IntrospectionScope, SchemaDomain, SchemaEdge, SchemaResponse, build_schema_edges,
+    build_schema_response,
+};
+use serde::Deserialize;
 use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
@@ -78,7 +81,7 @@ impl ToolService {
     }
 
     pub fn build_schema_toon(&self, expand_nodes: &[String]) -> Result<String, ExecutorError> {
-        let response = self.build_graph_schema_response(expand_nodes)?;
+        let response = self.build_graph_schema_response(expand_nodes);
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
@@ -103,7 +106,7 @@ impl ToolService {
 
         let format = parse_format(arguments);
         let expand_nodes = args.expand_nodes.as_deref().unwrap_or(&[]);
-        let response = self.build_graph_schema_response(expand_nodes)?;
+        let response = self.build_graph_schema_response(expand_nodes);
 
         let result = match format {
             OutputFormat::Llm => self.format_as_toon(&response)?,
@@ -114,123 +117,19 @@ impl ToolService {
         Ok(ToolPlan::Immediate { result })
     }
 
-    fn build_graph_schema_response(
-        &self,
-        expand_nodes: &[String],
-    ) -> Result<GraphSchemaResponse, ExecutorError> {
-        let domains = self.build_domains(expand_nodes);
-        let edges = self.build_edges();
-
-        Ok(GraphSchemaResponse { domains, edges })
+    fn build_graph_schema_response(&self, expand_nodes: &[String]) -> SchemaResponse {
+        build_schema_response(&self.ontology, IntrospectionScope::All, expand_nodes)
     }
 
-    pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<DomainInfo> {
-        let mut domain_map: BTreeMap<String, Vec<NodeInfo>> = BTreeMap::new();
-
-        for node in self.ontology.nodes() {
-            let domain_name = if node.domain.is_empty() {
-                "other".to_string()
-            } else {
-                node.domain.clone()
-            };
-
-            let should_expand = expand_nodes.iter().any(|n| n == "*" || n == &node.name);
-
-            let node_info = if should_expand {
-                let props: Vec<String> = node
-                    .fields
-                    .iter()
-                    .map(|f| {
-                        let nullable = if f.nullable { "?" } else { "" };
-                        format!(
-                            "{}:{}{}",
-                            f.name,
-                            f.data_type.to_string().to_lowercase(),
-                            nullable
-                        )
-                    })
-                    .collect();
-
-                let rels = self.get_node_relationships(&node.name);
-
-                NodeInfo::Expanded {
-                    name: node.name.clone(),
-                    props,
-                    out: rels.outgoing,
-                    r#in: rels.incoming,
-                }
-            } else {
-                NodeInfo::Name(node.name.clone())
-            };
-
-            domain_map.entry(domain_name).or_default().push(node_info);
-        }
-
-        domain_map
-            .into_iter()
-            .map(|(name, nodes)| DomainInfo { name, nodes })
-            .collect()
+    pub fn build_domains(&self, expand_nodes: &[String]) -> Vec<SchemaDomain> {
+        self.build_graph_schema_response(expand_nodes).domains
     }
 
-    pub fn build_edges(&self) -> Vec<EdgeInfo> {
-        self.ontology
-            .edge_names()
-            .map(|edge_name| {
-                let variants = self.ontology.get_edge(edge_name).unwrap_or(&[]);
-
-                let mut sources: Vec<String> =
-                    variants.iter().map(|e| e.source_kind.clone()).collect();
-                sources.sort();
-                sources.dedup();
-
-                let mut targets: Vec<String> =
-                    variants.iter().map(|e| e.target_kind.clone()).collect();
-                targets.sort();
-                targets.dedup();
-
-                EdgeInfo {
-                    name: edge_name.to_string(),
-                    from: sources,
-                    to: targets,
-                }
-            })
-            .collect()
+    pub fn build_edges(&self) -> Vec<SchemaEdge> {
+        build_schema_edges(&self.ontology, IntrospectionScope::All)
     }
 
-    fn get_node_relationships(&self, node_name: &str) -> NodeRelationships {
-        let mut outgoing = Vec::new();
-        let mut incoming = Vec::new();
-
-        for edge_name in self.ontology.edge_names() {
-            if let Some(edges) = self.ontology.get_edge(edge_name) {
-                let mut has_outgoing = false;
-                let mut has_incoming = false;
-
-                for edge in edges {
-                    if edge.source_kind == node_name {
-                        has_outgoing = true;
-                    }
-                    if edge.target_kind == node_name {
-                        has_incoming = true;
-                    }
-                }
-
-                if has_outgoing {
-                    outgoing.push(edge_name.to_string());
-                }
-                if has_incoming {
-                    incoming.push(edge_name.to_string());
-                }
-            }
-        }
-
-        outgoing.sort();
-        incoming.sort();
-
-        NodeRelationships { outgoing, incoming }
-    }
-
-    fn format_as_toon(&self, response: &GraphSchemaResponse) -> Result<Value, ExecutorError> {
+    fn format_as_toon(&self, response: &SchemaResponse) -> Result<Value, ExecutorError> {
         let options = EncodeOptions::default();
         let toon_str = encode(response, &options).map_err(|e| {
             ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
@@ -254,45 +153,10 @@ struct GetGraphSchemaArgs {
     expand_nodes: Option<Vec<String>>,
 }
 
-#[derive(Debug, Serialize)]
-struct GraphSchemaResponse {
-    domains: Vec<DomainInfo>,
-    edges: Vec<EdgeInfo>,
-}
-
-#[derive(Debug, Serialize)]
-pub struct DomainInfo {
-    pub name: String,
-    pub nodes: Vec<NodeInfo>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(untagged)]
-pub enum NodeInfo {
-    Name(String),
-    Expanded {
-        name: String,
-        props: Vec<String>,
-        out: Vec<String>,
-        r#in: Vec<String>,
-    },
-}
-
-#[derive(Debug, Serialize)]
-pub struct EdgeInfo {
-    pub name: String,
-    pub from: Vec<String>,
-    pub to: Vec<String>,
-}
-
-struct NodeRelationships {
-    outgoing: Vec<String>,
-    incoming: Vec<String>,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
+    use ontology::introspection::SchemaNode;
 
     fn get_toon_output(args: &str) -> String {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
@@ -606,7 +470,7 @@ mod tests {
         for domain in &domains {
             for node in &domain.nodes {
                 assert!(
-                    matches!(node, NodeInfo::Expanded { .. }),
+                    matches!(node, SchemaNode::Expanded { .. }),
                     "All nodes should be expanded with wildcard"
                 );
             }

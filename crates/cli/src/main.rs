@@ -7,8 +7,10 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use code_graph::legacy::linker::analysis::types::GraphData;
 use code_graph::legacy::linker::indexer::{
-    IndexingConfig, RepositoryIndexer, RepositoryIndexingResult,
+    ErroredFile as LegacyErroredFile, IndexingConfig, RepositoryIndexer,
+    SkippedFile as LegacySkippedFile,
 };
 use code_graph::legacy::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
@@ -19,6 +21,7 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
 
@@ -68,6 +71,26 @@ struct GraphStats {
 struct ProcessingStats {
     skipped_files: usize,
     errored_files: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct IndexGraphStats {
+    directories: usize,
+    files: usize,
+    definitions: usize,
+    imported_symbols: usize,
+    relationships: usize,
+    relationship_types: HashMap<String, usize>,
+    definition_types: HashMap<String, usize>,
+}
+
+struct IndexRunResult {
+    total_processing_time: Duration,
+    skipped_files: Vec<LegacySkippedFile>,
+    errored_files: Vec<LegacyErroredFile>,
+    graph_data: Option<GraphData>,
+    graph_stats: Option<IndexGraphStats>,
+    database_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -160,8 +183,38 @@ enum Commands {
         #[arg(long)]
         local: bool,
     },
-    /// Generate ClickHouse DDL from the ontology
+    /// Describe the graph schema (entities, edges, properties) visible to the
+    /// local DuckDB index. Use --all to include server-only entities.
     Schema {
+        /// Expand one or more entities to show their properties and edges.
+        /// Pass `*` to expand every entity.
+        #[arg(long, short = 'e', value_name = "NODE", num_args = 1..)]
+        expand: Vec<String>,
+
+        /// Emit JSON instead of the default LLM-friendly TOON format.
+        #[arg(long)]
+        raw: bool,
+
+        /// Include the full server ontology (debugging aid). Default is
+        /// restricted to entities present in the local DuckDB.
+        #[arg(long)]
+        all: bool,
+
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+    },
+    /// Maintainer-only tools (DDL generation, etc.)
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Generate ClickHouse DDL from the ontology
+    Ddl {
         /// Path to ontology directory (default: embedded)
         #[arg(long, short)]
         ontology: Option<PathBuf>,
@@ -188,7 +241,7 @@ async fn main() -> Result<()> {
             verbose,
             v2,
         } => {
-            let level = if verbose { Level::DEBUG } else { Level::INFO };
+            let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
                 .with_max_level(level)
                 .with_target(verbose)
@@ -230,14 +283,51 @@ async fn main() -> Result<()> {
             local,
         } => run_compile(json, traversal_paths, ontology, format, local),
         Commands::Schema {
+            expand,
+            raw,
+            all,
             ontology,
-            prefix,
-            diff,
-        } => run_schema(ontology, prefix, diff),
+        } => run_schema_introspect(expand, raw, all, ontology),
+        Commands::Debug { command } => match command {
+            DebugCommands::Ddl {
+                ontology,
+                prefix,
+                diff,
+            } => run_ddl(ontology, prefix, diff),
+        },
     }
 }
 
-fn run_schema(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
+fn run_schema_introspect(
+    expand: Vec<String>,
+    raw: bool,
+    all: bool,
+    ontology_path: Option<PathBuf>,
+) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let scope = if all {
+        ontology::introspection::IntrospectionScope::All
+    } else {
+        ontology::introspection::IntrospectionScope::Local
+    };
+
+    let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
+
+    if raw {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
+            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
+        println!("{toon}");
+    }
+    Ok(())
+}
+
+fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
     let ont = match ontology_path {
         Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
         None => Ontology::load_embedded().context("failed to load embedded ontology")?,
@@ -464,7 +554,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
         }
 
         let result = if use_v2 {
-            index_repo_v2(&git, &store, &ontology).await
+            index_repo_v2(&git, &store, &ontology, threads).await
         } else {
             index_repo(&git, &config, &store, &ontology).await
         };
@@ -477,7 +567,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
                     .unwrap_or_else(|| "repository".to_string());
                 let mut output = build_index_output(&repo_name, &key, &result, show_stats);
                 output.database_path = Some(db_path.display().to_string());
-                info!("{}", serde_json::to_string_pretty(&output)?);
+                println!("{}", serde_json::to_string_pretty(&output)?);
             }
             Err(e) => {
                 tracing::error!("failed to index {key}: {e:#}");
@@ -509,7 +599,7 @@ async fn index_repo(
     config: &IndexingConfig,
     store: &workspace::Workspace,
     ontology: &Ontology,
-) -> Result<RepositoryIndexingResult> {
+) -> Result<IndexRunResult> {
     // v1 pipeline — unchanged
     let key = git.repo_path.to_string_lossy().to_string();
     let repo_name = git
@@ -571,23 +661,35 @@ async fn index_repo(
             None,
             Some(git),
         )?;
+        result.database_path = Some(db_path.display().to_string());
     }
 
-    Ok(result)
+    Ok(IndexRunResult {
+        total_processing_time: result.total_processing_time,
+        skipped_files: result.skipped_files,
+        errored_files: result.errored_files,
+        graph_data: result.graph_data,
+        graph_stats: None,
+        database_path: result.database_path,
+    })
 }
 
 async fn index_repo_v2(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
-) -> Result<RepositoryIndexingResult> {
+    worker_threads: usize,
+) -> Result<IndexRunResult> {
+    let start_time = std::time::Instant::now();
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
 
     // Run v2 pipeline
-    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig::default());
-    let tracer = code_graph::v2::trace::Tracer::new(false);
-    let v2_result = pipeline.run(std::path::Path::new(&root_path), &tracer);
+    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig {
+        worker_threads,
+        ..Default::default()
+    });
+    let v2_result = pipeline.run(std::path::Path::new(&root_path));
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {
@@ -596,6 +698,29 @@ async fn index_repo_v2(
     }
 
     let graphs = v2_result.graphs;
+    let graph_stats = summarize_v2_graphs(&graphs);
+    let db_path = store.db_path();
+    let client =
+        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
+
+    let node_tables: Vec<String> = ontology
+        .local_entity_names()
+        .iter()
+        .map(|name| {
+            ontology
+                .get_node(name)
+                .expect("local entity must exist")
+                .destination_table
+                .clone()
+        })
+        .collect();
+    let edge_table = ontology
+        .local_edge_table_name()
+        .context("local_db.edge_table.name must be configured")?;
+
+    client
+        .delete_project(git.project_id, &node_tables, edge_table)
+        .context("failed to clear existing project data")?;
 
     // Convert to Arrow and write to DuckDB
     for graph in &graphs {
@@ -607,107 +732,126 @@ async fn index_repo_v2(
             ontology,
         )
         .context("failed to convert v2 graph data to Arrow")?;
-
-        let db_path = store.db_path();
-        let client = duckdb_client::DuckDbClient::open(&db_path)
-            .context("failed to open DuckDB for writing")?;
-
-        let node_tables: Vec<String> = ontology
-            .local_entity_names()
-            .iter()
-            .map(|name| {
-                ontology
-                    .get_node(name)
-                    .expect("local entity must exist")
-                    .destination_table
-                    .clone()
-            })
-            .collect();
-        let edge_table = ontology
-            .local_edge_table_name()
-            .context("local_db.edge_table.name must be configured")?;
-
-        client
-            .delete_project(git.project_id, &node_tables, edge_table)
-            .context("failed to clear existing project data")?;
         client
             .insert_graph(local_data)
             .context("failed to insert graph data")?;
-        workspace::set_status(
-            &client,
-            &key,
-            git.project_id,
-            workspace::RepoStatus::Indexed,
-            None,
-            Some(git),
-        )?;
     }
+    workspace::set_status(
+        &client,
+        &key,
+        git.project_id,
+        workspace::RepoStatus::Indexed,
+        None,
+        Some(git),
+    )?;
+
     // Return a minimal v1-compatible result for stats output
-    Ok(RepositoryIndexingResult {
-        total_processing_time: std::time::Duration::ZERO,
-        repository_name: git
-            .repo_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_default(),
-        repository_path: key,
+    Ok(IndexRunResult {
+        total_processing_time: start_time.elapsed(),
         skipped_files: vec![],
         errored_files: vec![],
-        errors: v2_result
-            .errors
-            .iter()
-            .map(|e| (e.file_path.clone(), e.error.clone()))
-            .collect(),
         graph_data: None,
-        database_path: None,
-        database_loaded: true,
+        graph_stats: Some(graph_stats),
+        database_path: Some(db_path.display().to_string()),
     })
+}
+
+fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> IndexGraphStats {
+    let mut relationship_types = HashMap::new();
+    let mut definition_types = HashMap::new();
+    let mut directories = 0;
+    let mut files = 0;
+    let mut definitions = 0;
+    let mut imported_symbols = 0;
+    let mut relationships = 0;
+
+    for graph in graphs {
+        directories += graph.directories().count();
+        files += graph.files().count();
+        imported_symbols += graph.imports_iter().count();
+        relationships += graph.edge_count();
+
+        for (_, _, def) in graph.definitions() {
+            definitions += 1;
+            *definition_types
+                .entry(format!("{:?}", def.kind))
+                .or_insert(0) += 1;
+        }
+
+        for (_, _, edge) in graph.edges() {
+            *relationship_types
+                .entry(edge.relationship.label())
+                .or_insert(0) += 1;
+        }
+    }
+
+    IndexGraphStats {
+        directories,
+        files,
+        definitions,
+        imported_symbols,
+        relationships,
+        relationship_types,
+        definition_types,
+    }
 }
 
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &RepositoryIndexingResult,
+    result: &IndexRunResult,
     show_stats: bool,
 ) -> IndexOutput {
-    let (graph, rel_counts, def_counts) = match result.graph_data {
-        Some(ref gd) => {
-            let mut rel_counts: HashMap<String, usize> = HashMap::new();
-            for rel in &gd.relationships {
-                *rel_counts
-                    .entry(format!("{:?}", rel.relationship_type))
-                    .or_default() += 1;
+    let (graph, rel_counts, def_counts) =
+        match (result.graph_data.as_ref(), result.graph_stats.as_ref()) {
+            (Some(gd), _) => {
+                let mut rel_counts: HashMap<String, usize> = HashMap::new();
+                for rel in &gd.relationships {
+                    *rel_counts
+                        .entry(format!("{:?}", rel.relationship_type))
+                        .or_default() += 1;
+                }
+                let mut def_counts: HashMap<String, usize> = HashMap::new();
+                for def in &gd.definition_nodes {
+                    *def_counts
+                        .entry(format!("{:?}", def.definition_type))
+                        .or_default() += 1;
+                }
+                (
+                    GraphStats {
+                        directories: gd.directory_nodes.len(),
+                        files: gd.file_nodes.len(),
+                        definitions: gd.definition_nodes.len(),
+                        imported_symbols: gd.imported_symbol_nodes.len(),
+                        relationships: gd.relationships.len(),
+                    },
+                    rel_counts,
+                    def_counts,
+                )
             }
-            let mut def_counts: HashMap<String, usize> = HashMap::new();
-            for def in &gd.definition_nodes {
-                *def_counts
-                    .entry(format!("{:?}", def.definition_type))
-                    .or_default() += 1;
-            }
-            (
+            (None, Some(stats)) => (
                 GraphStats {
-                    directories: gd.directory_nodes.len(),
-                    files: gd.file_nodes.len(),
-                    definitions: gd.definition_nodes.len(),
-                    imported_symbols: gd.imported_symbol_nodes.len(),
-                    relationships: gd.relationships.len(),
+                    directories: stats.directories,
+                    files: stats.files,
+                    definitions: stats.definitions,
+                    imported_symbols: stats.imported_symbols,
+                    relationships: stats.relationships,
                 },
-                rel_counts,
-                def_counts,
-            )
-        }
-        None => (
-            GraphStats {
-                directories: 0,
-                files: 0,
-                definitions: 0,
-                imported_symbols: 0,
-                relationships: 0,
-            },
-            HashMap::new(),
-            HashMap::new(),
-        ),
-    };
+                stats.relationship_types.clone(),
+                stats.definition_types.clone(),
+            ),
+            (None, None) => (
+                GraphStats {
+                    directories: 0,
+                    files: 0,
+                    definitions: 0,
+                    imported_symbols: 0,
+                    relationships: 0,
+                },
+                HashMap::new(),
+                HashMap::new(),
+            ),
+        };
 
     let detailed = show_stats.then(|| DetailedStats {
         skipped_files: result
@@ -739,7 +883,7 @@ fn build_index_output(
             skipped_files: result.skipped_files.len(),
             errored_files: result.errored_files.len(),
         },
-        database_path: None,
+        database_path: result.database_path.clone(),
         detailed,
     }
 }

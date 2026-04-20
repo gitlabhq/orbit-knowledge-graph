@@ -39,7 +39,11 @@ members = [
 labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "594f02c" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
+cargo-platform = "0.3.3"
+cargo-util-schemas = "0.13.0"
+cargo_metadata = "0.23.1"
 enum-as-inner = "0.7.0"
+either = "1.15.0"
 datafusion = { version = "53.0.0", default-features = false, features = ["sql", "nested_expressions"] }
 clap = { version = "4.5.57", features = ["derive", "env"] }
 dirs = "6"
@@ -91,6 +95,7 @@ gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag =
 thiserror = "2.0.18"
 tokio-stream = "0.1.18"
 toml = "1.0.0"
+toon-format = { version = "0.4.1", default-features = false }
 opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
@@ -120,6 +125,16 @@ lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
+ra_ap_hir = "0.0.328"
+ra_ap_cfg = "0.0.328"
+ra_ap_ide = "0.0.328"
+ra_ap_ide_db = "0.0.328"
+ra_ap_intern = "0.0.328"
+ra_ap_load-cargo = "0.0.328"
+ra_ap_paths = "0.0.328"
+ra_ap_project_model = "0.0.328"
+ra_ap_syntax = "0.0.328"
+ra_ap_vfs = "0.0.328"
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"
@@ -132,6 +147,7 @@ tonic-build = "0.14.2"
 tonic-prost = "0.14.2"
 tonic-prost-build = "0.14.2"
 tower = "0.5.3"
+triomphe = "0.1.15"
 base64 = "0.22.1"
 moka = { version = "0.12", features = ["future"] }
 

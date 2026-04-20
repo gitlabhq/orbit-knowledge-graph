@@ -165,6 +165,15 @@ async fn data_correctness() {
         security::admin_only_non_admin_neighbors_dynamic_center_node_strips_admin_fields,
         security::admin_only_non_admin_path_finding_dynamic_wildcard_strips_admin_fields,
         security::admin_only_admin_neighbors_dynamic_wildcard_includes_admin_fields,
+        // security: cross-organization isolation
+        security::cross_org_search_excludes_other_org,
+        security::cross_org_traversal_excludes_other_org,
+        security::cross_org_aggregation_excludes_other_org,
+        security::cross_org_inverse_isolation,
+        // security: aggregation SQL assertions
+        security::aggregation_sql_contains_traversal_path_filter,
+        security::aggregation_multi_path_sql_contains_both_filters,
+        security::aggregation_multi_path_returns_union_of_scopes,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

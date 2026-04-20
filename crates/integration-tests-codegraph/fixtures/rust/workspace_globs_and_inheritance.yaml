@@ -1,0 +1,89 @@
+name: "Rust: workspace globs and inherited dependencies"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/*"]
+      exclude = ["crates/ignored"]
+      resolver = "2"
+
+      [workspace.package]
+      version = "0.1.0"
+      edition = "2021"
+
+      [workspace.dependencies]
+      shared-lib = { path = "crates/shared" }
+      ignored-lib = { path = "crates/ignored" }
+
+  - path: crates/shared/Cargo.toml
+    content: |
+      [package]
+      name = "shared-lib"
+      version.workspace = true
+      edition.workspace = true
+
+  - path: crates/shared/src/lib.rs
+    content: |
+      pub fn helper() {}
+
+  - path: crates/ignored/Cargo.toml
+    content: |
+      [package]
+      name = "ignored-lib"
+      version.workspace = true
+      edition.workspace = true
+
+  - path: crates/ignored/src/lib.rs
+    content: |
+      pub fn secret() {}
+
+  - path: crates/app/Cargo.toml
+    content: |
+      [package]
+      name = "app-cli"
+      version.workspace = true
+      edition.workspace = true
+
+      [dependencies]
+      shared-lib.workspace = true
+      ignored-lib.workspace = true
+
+  - path: crates/app/src/main.rs
+    content: |
+      use ignored_lib::secret;
+      use shared_lib::helper;
+
+      pub fn call_workspace_deps() {
+          helper();
+          secret();
+      }
+
+tests:
+  - name: "workspace dependency inheritance resolves both local path crates"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'crates/app/src/main.rs'
+        AND caller.name = 'call_workspace_deps'
+      RETURN callee.file_path AS file, callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { file: 'crates/ignored/src/lib.rs', fqn: 'ignored_lib::secret' } }
+      - { row: { file: 'crates/shared/src/lib.rs', fqn: 'shared_lib::helper' } }
+
+  - name: "excluded crate is still indexed when it is a local path dependency"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'crates/ignored/src/lib.rs' AND d.name = 'secret'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'ignored_lib::secret' } }
+
+  - name: "workspace inherited edition and version still yield crate-qualified FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'crates/app/src/main.rs' AND d.name = 'call_workspace_deps'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'app_cli::call_workspace_deps' } }
