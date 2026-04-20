@@ -1,4 +1,4 @@
-FROM registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest AS builder
+FROM registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest AS builder
 
 WORKDIR /build
 COPY . .
