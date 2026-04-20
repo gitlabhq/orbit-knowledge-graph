@@ -1,0 +1,84 @@
+name: "Go: variable declarations, reassignment, and grouped parameters"
+fixtures:
+  - path: vars.go
+    content: |
+      package main
+
+      type Cat struct{}
+      func (c *Cat) Meow() {}
+
+      type Dog struct{}
+      func (d *Dog) Bark() {}
+
+      type Repository interface{}
+      func (r *Repository) Query() {}
+
+      func varDecl() {
+          var animal Cat
+          animal.Meow()
+      }
+
+      func separateVars() {
+          a := Cat{}
+          a.Meow()
+          b := Dog{}
+          b.Bark()
+      }
+
+      func reassigned() {
+          x := Cat{}
+          x.Meow()
+          x = Dog{}
+          x.Bark()
+      }
+
+      func groupedParams(a, b Repository) {
+          a.Query()
+          b.Query()
+      }
+
+tests:
+  - name: "varDecl calls Meow via var declaration type"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.varDecl' AND e.edge_kind = 'Calls'
+          RETURN callee.fqn AS callee
+        assert:
+          - { row: { callee: "main.Meow" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.varDecl' AND callee.name = 'Bark'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "separateVars calls Meow and Bark without cross-contamination"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.separateVars' AND e.edge_kind = 'Calls'
+          RETURN callee.fqn AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "main.Bark" } }
+          - { row: { callee: "main.Meow" } }
+
+  - name: "reassigned: both Meow and Bark resolve (phi merges both types)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main.reassigned' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row: { callee: "main.Bark" } }
+      - { row: { callee: "main.Meow" } }
+
+  - name: "groupedParams: both a and b resolve Query"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main.groupedParams' AND e.edge_kind = 'Calls'
+        AND callee.name = 'Query'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Query" } }

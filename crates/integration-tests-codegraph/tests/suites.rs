@@ -129,7 +129,7 @@ yaml_test!(go_composite_literals, "go/composite_literals.yaml");
 yaml_test!(go_scope_and_branching, "go/scope_and_branching.yaml");
 yaml_test!(go_multiple_embedding, "go/multiple_embedding.yaml");
 yaml_test!(go_higher_order, "go/higher_order.yaml");
-yaml_test!(go_var_reassignment, "go/var_reassignment.yaml");
+yaml_test!(go_var_declaration, "go/var_declaration.yaml");
 
 // Java v1 parity
 yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");

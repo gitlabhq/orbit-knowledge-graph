@@ -121,7 +121,35 @@ impl DslLanguage for GoDsl {
                 .typed(vec![field("type")], &[]),
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right"),
+                .value_from("right")
+                .typed(
+                    vec![
+                        field("right")
+                            .then(child_of_kind("composite_literal"))
+                            .then(field("type")),
+                    ],
+                    &[
+                        "int",
+                        "int8",
+                        "int16",
+                        "int32",
+                        "int64",
+                        "uint",
+                        "uint8",
+                        "uint16",
+                        "uint32",
+                        "uint64",
+                        "float32",
+                        "float64",
+                        "complex64",
+                        "complex128",
+                        "string",
+                        "bool",
+                        "byte",
+                        "rune",
+                        "error",
+                    ],
+                ),
             binding("parameter_declaration", BindingKind::Assignment)
                 .name_from(&["name"])
                 .typed(
