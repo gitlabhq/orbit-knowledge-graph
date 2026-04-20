@@ -1,5 +1,6 @@
 mod evaluator;
 mod specifier;
+mod webpack;
 
 pub use specifier::JsCrossFileResolver;
 
@@ -25,6 +26,7 @@ pub fn attach_resolution_edges(
     file_infos: &FxHashMap<String, JsPhase1FileInfo>,
     modules_index: &JsModuleIndex,
     probe: &WorkspaceProbe,
+    tracer: &crate::v2::trace::Tracer,
 ) {
     let lookup = GraphLookup::from_graph(graph);
     let mut seen = FxHashSet::default();
@@ -35,6 +37,7 @@ pub fn attach_resolution_edges(
             analyzed,
             file_infos.get(&analyzed.relative_path),
             &mut seen,
+            tracer,
         );
     }
 
@@ -83,6 +86,7 @@ fn add_local_call_edges(
     analyzed: &ResolvedJsFile,
     file_info: Option<&JsPhase1FileInfo>,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
+    tracer: &crate::v2::trace::Tracer,
 ) {
     let Some(file_info) = file_info else {
         return;
@@ -97,6 +101,7 @@ fn add_local_call_edges(
         &file_info.import_nodes,
         rules,
         settings,
+        tracer,
     );
 
     let mut resolved = Vec::new();

@@ -34,9 +34,22 @@ pub fn analyze_files(
     files: &[String],
     root_path: &str,
 ) -> (Vec<AnalyzedJsFile>, Vec<PipelineError>) {
+    // `catch_unwind` isolates per-file panics: a malformed input that trips
+    // an OXC invariant takes down that file's analysis, not the pipeline.
     let results: Vec<_> = files
         .par_iter()
-        .map(|relative_path| analyze_file(relative_path, root_path))
+        .map(|relative_path| {
+            std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                analyze_file(relative_path, root_path)
+            }))
+            .unwrap_or_else(|panic_payload| {
+                let message = panic_message(&panic_payload);
+                Err(PipelineError {
+                    file_path: relative_path.clone(),
+                    error: format!("panic during analysis: {message}"),
+                })
+            })
+        })
         .collect();
 
     let mut analyzed = Vec::with_capacity(results.len());
@@ -50,6 +63,16 @@ pub fn analyze_files(
     }
 
     (analyzed, errors)
+}
+
+fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, PipelineError> {

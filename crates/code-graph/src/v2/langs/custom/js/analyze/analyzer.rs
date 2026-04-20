@@ -727,27 +727,37 @@ fn build_module_info(
 }
 
 impl JsAnalyzer {
-    const MAX_LINE_LENGTH: usize = 50_000;
+    const MAX_LINE_LENGTH: usize = 5_000;
+    const MAX_AVG_LINE_LENGTH: usize = 200;
+    const MINIFIED_SIZE_THRESHOLD: usize = 5_000;
 
     pub fn analyze_file(
         source: &str,
         file_path: &str,
         relative_path: &str,
     ) -> Result<JsFileAnalysis, String> {
-        // Skip files with extremely long lines (generated/minified bundles).
-        if let Some(line) = source.lines().find(|l| l.len() > Self::MAX_LINE_LENGTH) {
-            return Err(format!(
-                "Skipping {file_path}: line too long ({} bytes, max {})",
-                line.len(),
-                Self::MAX_LINE_LENGTH
-            ));
+        // Single pass over lines: longest line + line count. Avoids two
+        // traversals of multi-MB inputs and closes the bypass where a file
+        // with many lines just under the old 50 KB cap slipped through.
+        let mut line_count = 0usize;
+        let mut max_line_len = 0usize;
+        for line in source.lines() {
+            line_count += 1;
+            if line.len() > max_line_len {
+                max_line_len = line.len();
+            }
+            if max_line_len > Self::MAX_LINE_LENGTH {
+                return Err(format!(
+                    "Skipping {file_path}: line too long ({max_line_len} bytes, max {})",
+                    Self::MAX_LINE_LENGTH
+                ));
+            }
         }
 
-        // Skip minified files: average line length > 500 bytes indicates
-        // bundled/minified output, not human-written source.
-        let line_count = source.lines().count().max(1);
+        let line_count = line_count.max(1);
         let avg_line_len = source.len() / line_count;
-        if avg_line_len > 500 && source.len() > 5_000 {
+        if avg_line_len > Self::MAX_AVG_LINE_LENGTH && source.len() > Self::MINIFIED_SIZE_THRESHOLD
+        {
             return Err(format!(
                 "Skipping {file_path}: likely minified (avg line {avg_line_len} bytes, {line_count} lines)"
             ));

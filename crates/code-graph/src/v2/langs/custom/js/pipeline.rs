@@ -14,6 +14,7 @@ impl LanguagePipeline for JsPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         if files.is_empty() {
             return Ok(PipelineOutput::Graph(Box::new(CodeGraph::new_with_root(
@@ -44,8 +45,15 @@ impl LanguagePipeline for JsPipeline {
         let probe = WorkspaceProbe::load(Path::new(root_path), files);
 
         let (mut graph, modules) = builder.into_parts();
-        attach_resolution_edges(&mut graph, &resolved_files, &file_infos, &modules, &probe);
-        graph.finalize();
+        attach_resolution_edges(
+            &mut graph,
+            &resolved_files,
+            &file_infos,
+            &modules,
+            &probe,
+            tracer,
+        );
+        graph.finalize(tracer);
 
         if errors.is_empty() {
             Ok(PipelineOutput::Graph(Box::new(graph)))

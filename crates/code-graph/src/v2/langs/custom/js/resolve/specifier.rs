@@ -8,7 +8,7 @@ use super::super::types::{
     JsResolvedCallRelationship,
 };
 use super::super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord, WorkspaceProbe};
-use super::evaluator::load_project_aliases;
+use super::webpack::load_project_aliases;
 
 pub struct JsCrossFileResolver {
     import_resolver: Resolver,

@@ -14,7 +14,7 @@
 use oxc_resolver::{TsconfigDiscovery, TsconfigOptions, TsconfigReferences};
 use std::path::{Path, PathBuf};
 
-use super::constants::{BUN_SIGNAL_FILES, WEBPACK_CONFIG_CANDIDATES};
+use super::constants::{BUN_SIGNAL_FILES, is_webpack_config_path};
 
 /// Every manifest/config fact the JS pipeline derives from the
 /// repository root, computed once.
@@ -44,12 +44,14 @@ impl WorkspaceProbe {
         let tsconfig_path = existing_file(&root_dir, "tsconfig.json");
         let jsconfig_path = existing_file(&root_dir, "jsconfig.json");
 
-        let webpack_configs = WEBPACK_CONFIG_CANDIDATES
+        // webpack configs live anywhere in the repo — pop-culture
+        // convention is root or `config/`, monolith convention is
+        // `ee/`, and we have seen them in package sub-folders too. We
+        // reuse the indexed file list instead of re-walking the tree.
+        let webpack_configs = indexed_paths
             .iter()
-            .filter_map(|relative| {
-                let path = root_dir.join(relative);
-                path.is_file().then_some(path)
-            })
+            .filter(|path| is_webpack_config_path(path))
+            .map(|relative| root_dir.join(relative))
             .collect();
 
         let bun_signal_present = BUN_SIGNAL_FILES

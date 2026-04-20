@@ -35,18 +35,32 @@ pub const EVAL_EXTENSIONS: &[&str] = &[
 /// Filenames whose presence marks a project as Bun-first.
 pub const BUN_SIGNAL_FILES: &[&str] = &["bun.lock", "bun.lockb", "bunfig.toml"];
 
-/// Candidate paths for a webpack config file, in the order the
-/// evaluator probes them.
-pub const WEBPACK_CONFIG_CANDIDATES: &[&str] = &[
-    "webpack.config.js",
-    "webpack.config.cjs",
-    "webpack.config.mjs",
-    "webpack.config.ts",
-    "config/webpack.config.js",
-    "config/webpack.config.cjs",
-    "config/webpack.config.mjs",
-    "config/webpack.config.ts",
-];
+/// Basename prefix of a webpack config file. The webpack module walks
+/// the indexed file list (in memory) for anything whose basename starts
+/// with `WEBPACK_CONFIG_STEM.` and ends in a JS/TS extension, so configs
+/// tucked away in any sub-folder are discovered without re-walking the
+/// filesystem.
+pub const WEBPACK_CONFIG_STEM: &str = "webpack.config";
+
+/// Extensions the webpack-config probe accepts. Kept narrow (plain JS
+/// / CJS / MJS / TS) because that is what webpack itself loads.
+pub const WEBPACK_CONFIG_EXTENSIONS: &[&str] = &["js", "cjs", "mjs", "ts"];
+
+/// True iff `relative_path` looks like a webpack config, based on its
+/// basename (`webpack.config.{js,cjs,mjs,ts}`). Folder-agnostic.
+pub fn is_webpack_config_path(relative_path: &str) -> bool {
+    let basename = relative_path
+        .rsplit(['/', '\\'])
+        .next()
+        .unwrap_or(relative_path);
+    let Some(rest) = basename.strip_prefix(WEBPACK_CONFIG_STEM) else {
+        return false;
+    };
+    let Some(ext) = rest.strip_prefix('.') else {
+        return false;
+    };
+    WEBPACK_CONFIG_EXTENSIONS.contains(&ext)
+}
 
 /// Options whose value is an object of executable members
 /// (`methods`, `computed`, `watch`).

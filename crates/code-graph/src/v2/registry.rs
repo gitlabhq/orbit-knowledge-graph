@@ -102,16 +102,19 @@ mod tests {
 
     #[test]
     fn javascript_pipeline_is_registered() {
-        assert!(dispatch_language(Language::JavaScript, &[], "/").is_some());
+        let tracer = crate::v2::trace::Tracer::new(false);
+        assert!(dispatch_language(Language::JavaScript, &[], "/", &tracer).is_some());
     }
 
     #[test]
     fn typescript_pipeline_is_registered() {
-        assert!(dispatch_language(Language::TypeScript, &[], "/").is_some());
+        let tracer = crate::v2::trace::Tracer::new(false);
+        assert!(dispatch_language(Language::TypeScript, &[], "/", &tracer).is_some());
     }
 
     #[test]
     fn js_pipeline_tag_is_registered() {
-        assert!(dispatch_by_tag("js", &[], "/").is_some());
+        let tracer = crate::v2::trace::Tracer::new(false);
+        assert!(dispatch_by_tag("js", &[], "/", &tracer).is_some());
     }
 }

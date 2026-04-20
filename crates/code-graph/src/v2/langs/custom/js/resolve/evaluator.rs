@@ -2,7 +2,6 @@ use oxc::allocator::Allocator;
 use oxc::ast::ast::{Expression, ObjectExpression, ObjectPropertyKind, Statement};
 use oxc::parser::Parser;
 use oxc::span::SourceType;
-use oxc_resolver::AliasValue;
 use rustc_hash::FxHashMap;
 use std::path::{Path, PathBuf};
 
@@ -13,7 +12,7 @@ const MAX_EVAL_TOTAL_BYTES: u64 = 1024 * 1024;
 const MAX_EVAL_STATEMENTS: usize = 2048;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
-enum EvaluatedValue {
+pub(super) enum EvaluatedValue {
     Bool(bool),
     String(String),
     Object(FxHashMap<String, EvaluatedValue>),
@@ -39,113 +38,12 @@ struct AliasEvalState {
 }
 
 #[derive(Default)]
-struct ModuleEvalCache {
+pub(super) struct ModuleEvalCache {
     exports: FxHashMap<PathBuf, Option<EvaluatedValue>>,
     total_bytes: u64,
 }
 
-pub(super) fn load_project_aliases(
-    probe: &super::super::WorkspaceProbe,
-) -> Vec<(String, Vec<AliasValue>)> {
-    let root_dir = probe.root_dir();
-    let mut cache = ModuleEvalCache::default();
-    probe
-        .webpack_configs()
-        .iter()
-        .find_map(|config_path| {
-            let aliases = load_webpack_aliases(root_dir, config_path, &mut cache);
-            (!aliases.is_empty()).then_some(aliases)
-        })
-        .unwrap_or_default()
-}
-
-fn load_webpack_aliases(
-    root_dir: &Path,
-    config_path: &Path,
-    cache: &mut ModuleEvalCache,
-) -> Vec<(String, Vec<AliasValue>)> {
-    let Some(exports) = evaluate_module_exports(root_dir, config_path, cache, 0) else {
-        return vec![];
-    };
-
-    let mut aliases = Vec::new();
-    let config_dir = config_path.parent().unwrap_or(root_dir);
-    collect_aliases_from_value(&exports, root_dir, config_dir, &mut aliases);
-    aliases.sort_by(|left, right| left.0.cmp(&right.0));
-    aliases
-}
-
-fn collect_aliases_from_value(
-    value: &EvaluatedValue,
-    root_dir: &Path,
-    config_dir: &Path,
-    aliases: &mut Vec<(String, Vec<AliasValue>)>,
-) {
-    match value {
-        EvaluatedValue::Object(object) => {
-            if let Some(resolve) = object.get("resolve").and_then(as_object)
-                && let Some(alias_value) = resolve.get("alias")
-            {
-                merge_alias_entries(alias_value, root_dir, config_dir, aliases);
-            }
-
-            if let Some(alias_value) = object.get("alias") {
-                merge_alias_entries(alias_value, root_dir, config_dir, aliases);
-            }
-        }
-        EvaluatedValue::Array(items) => {
-            for item in items {
-                collect_aliases_from_value(item, root_dir, config_dir, aliases);
-            }
-        }
-        _ => {}
-    }
-}
-
-fn merge_alias_entries(
-    value: &EvaluatedValue,
-    root_dir: &Path,
-    config_dir: &Path,
-    aliases: &mut Vec<(String, Vec<AliasValue>)>,
-) {
-    let Some(object) = as_object(value) else {
-        return;
-    };
-
-    for (alias_key, alias_value) in object {
-        let resolved_values = alias_values_from_evaluated(alias_value, root_dir, config_dir);
-        if resolved_values.is_empty() {
-            continue;
-        }
-        aliases.push((alias_key.clone(), resolved_values));
-    }
-}
-
-fn alias_values_from_evaluated(
-    value: &EvaluatedValue,
-    root_dir: &Path,
-    config_dir: &Path,
-) -> Vec<AliasValue> {
-    match value {
-        EvaluatedValue::String(path) => {
-            if Path::new(path).is_absolute() || path.starts_with('.') {
-                contained_repo_path(root_dir, config_dir, path)
-                    .map(|resolved| vec![AliasValue::Path(resolved.to_string_lossy().to_string())])
-                    .unwrap_or_default()
-            } else {
-                vec![AliasValue::Path(path.clone())]
-            }
-        }
-        EvaluatedValue::Bool(false) => vec![AliasValue::Ignore],
-        EvaluatedValue::Array(values) => values
-            .iter()
-            .flat_map(|value| alias_values_from_evaluated(value, root_dir, config_dir))
-            .collect(),
-        _ => vec![],
-    }
-}
-
-fn evaluate_module_exports(
+pub(super) fn evaluate_module_exports(
     root_dir: &Path,
     module_path: &Path,
     cache: &mut ModuleEvalCache,
@@ -1056,7 +954,11 @@ fn canonical_repo_existing_path(root_dir: &Path, path: &Path) -> Option<PathBuf>
     canonical.starts_with(root_dir).then_some(canonical)
 }
 
-fn contained_repo_path(root_dir: &Path, config_dir: &Path, path: &str) -> Option<PathBuf> {
+pub(super) fn contained_repo_path(
+    root_dir: &Path,
+    config_dir: &Path,
+    path: &str,
+) -> Option<PathBuf> {
     let candidate = if Path::new(path).is_absolute() {
         PathBuf::from(path)
     } else {
