@@ -573,11 +573,13 @@ impl<'a> SsaEngine<'a> {
     /// Call after `seal_remaining()`.
     pub fn remove_redundant_phi_sccs(&mut self) {
         let phi_ids: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
-        self.remove_redundant_phi_sccs_inner(&phi_ids);
+        self.remove_redundant_phi_sccs_inner(&phi_ids, 0);
     }
 
-    fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId]) {
-        if phi_ids.len() < 2 {
+    const MAX_SCC_DEPTH: usize = 32;
+
+    fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId], depth: usize) {
+        if phi_ids.len() < 2 || depth >= Self::MAX_SCC_DEPTH {
             return;
         }
 
@@ -668,7 +670,7 @@ impl<'a> SsaEngine<'a> {
             } else if outer_values.len() > 1 && !inner_phis.is_empty() {
                 // Multiple external values — recurse on inner phis that
                 // have no external operands (they might form a sub-SCC).
-                self.remove_redundant_phi_sccs_inner(&inner_phis);
+                self.remove_redundant_phi_sccs_inner(&inner_phis, depth + 1);
             }
         }
     }
