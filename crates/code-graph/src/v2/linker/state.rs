@@ -114,7 +114,7 @@ impl<const N: usize> VerifiedMap<N> {
     /// `key_fn` extracts a sort key from each NodeIndex (e.g. FQN string).
     pub fn sort_all(&mut self, key_fn: impl Fn(NodeIndex) -> String) {
         for entries in self.inner.values_mut() {
-            entries.sort_by(|a, b| key_fn(*a).cmp(&key_fn(*b)));
+            entries.sort_by_cached_key(|idx| key_fn(*idx));
         }
     }
 
