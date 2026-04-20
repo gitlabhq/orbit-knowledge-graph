@@ -722,6 +722,10 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
     )
     .await;
 
+    // Org 1 groups should have counts; org 2 group must be absent.
+    resp.assert_node("Group", 100, |n| {
+        n.prop_i64("member_count").unwrap_or(0) > 0
+    });
     resp.assert_node_absent("Group", 900);
 }
 
