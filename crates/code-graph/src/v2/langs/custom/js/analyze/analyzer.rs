@@ -775,6 +775,16 @@ impl JsAnalyzer {
         let semantic_ret = SemanticBuilder::new()
             .with_check_syntax_error(true)
             .build(&parsed.program);
+        // A file that failed semantic analysis has an inconsistent
+        // scoping/symbols view; downstream SSA and class extraction
+        // assume the view is valid. Skip these files rather than
+        // emitting misleading definitions based on partial state.
+        if !semantic_ret.errors.is_empty() {
+            return Err(format!(
+                "OXC semantic errors on {file_path} ({} diagnostics)",
+                semantic_ret.errors.len()
+            ));
+        }
         let semantic = semantic_ret.semantic;
         let scoping = semantic.scoping();
         let nodes = semantic.nodes();
