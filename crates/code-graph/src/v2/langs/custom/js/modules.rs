@@ -119,8 +119,18 @@ pub struct JsModuleIndex {
 
 impl JsModuleIndex {
     pub fn module_for_path(&self, file_path: &str) -> Option<&JsModuleRecord> {
-        self.modules_by_path.get(file_path)
+        self.modules_by_path.get(&normalize_module_key(file_path))
     }
+}
+
+/// Normalize a module-index key so the builder and resolver cannot miss
+/// a module just because one called it `./foo/bar.ts` and the other
+/// called it `foo/bar.ts` (or `foo/bar.ts/`). Strips leading `./`,
+/// trims trailing slashes, and canonicalizes path separators to `/`.
+fn normalize_module_key(path: &str) -> String {
+    let trimmed = path.strip_prefix("./").unwrap_or(path);
+    let trimmed = trimmed.trim_end_matches('/');
+    trimmed.replace('\\', "/")
 }
 
 pub struct JsModuleGraphBuilder {
@@ -218,8 +228,9 @@ impl JsModuleGraphBuilder {
             })
             .collect();
 
+        let key = normalize_module_key(&relative_path);
         self.modules.modules_by_path.insert(
-            relative_path.clone(),
+            key,
             JsModuleRecord {
                 file_path: relative_path,
                 file_node,
