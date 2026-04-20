@@ -71,40 +71,72 @@ convention). The prefix is applied at the call site when constructing ClickHouse
 
 ### Webserver prefix injection
 
-The webserver reads the active schema version once on startup (no hot-swap; a pod restart is
-required after a migration completes) and passes the derived prefix through the entire query
-pipeline:
+The webserver pins the table prefix to its **embedded** `SCHEMA_VERSION` at startup. The prefix
+flows through the query pipeline once and never changes for the lifetime of the process — a binary
+upgrade is the only way to switch to a new prefix. The active version recorded in
+`gkg_schema_version` is consulted only by the readiness gate (see below), not by the query path.
 
 ```text
 startup
-  → schema_version::init()           # creates gkg_schema_version if absent
-  → schema_version::read_active_version()   # reads active row; None → defaults to v0
-  → schema_version::table_prefix(version)   # "" for v0, "v1_" for v1, …
+  → schema_version::init()                         # creates gkg_schema_version if absent
+  → schema_version::table_prefix(SCHEMA_VERSION)   # "" for v0, "v1_" for v1, …
   → GrpcServer::new(…, table_prefix)
   → QueryPipelineService::new(…, table_prefix)
-  → QueryPipelineContext { table_prefix }   # shared across all pipeline stages
+  → QueryPipelineContext { table_prefix }          # shared across all pipeline stages
   → CompilationStage calls compile(…, &ctx.table_prefix)
   → normalize() prepends prefix to every node table name and edge table name
   → lower() uses input.compiler.default_edge_table (already prefixed) instead of a
     compile-time constant
 ```
 
-Fresh installs (no `gkg_schema_version` row found) default to version 0 (empty prefix) so that
-unprefixed tables from before schema versioning was introduced continue to work.
-
 The query compiler does not access ClickHouse metadata to discover which tables exist — the prefix
-is injected top-down from the startup read and flows through without further I/O.
+is injected top-down from the embedded version and flows through without further I/O.
+
+### Webserver readiness gate
+
+A background task (`SchemaWatcher`) polls `gkg_schema_version` every
+`schema.version_poll_interval_secs` seconds (default `5`) and classifies the result against the
+binary's embedded version:
+
+| Database active version vs. binary | State | `/ready` response | Action |
+|---|---|---|---|
+| missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
+| `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
+| `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
+| `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+
+`/live` is never gated on the watcher — Kubernetes keeps the pod alive while it waits for the
+indexer to promote the matching version. When the binary detects a newer active version than it
+supports, the watcher cancels the shared `CancellationToken`, the gRPC and HTTP servers exit
+their `tokio::select`, and the process returns. Kubernetes restarts the pod; if the operator
+deployed the wrong (too-old) binary, `CrashLoopBackoff` surfaces the mistake instead of silently
+serving the wrong schema.
+
+Transient ClickHouse errors during a poll keep the previous state — the watcher does not
+flap to `Pending` on a single failed read.
+
+Implemented in `crates/gkg-server/src/schema_watcher.rs`.
+
+#### Observability
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated`) | Value `1` for the active state, `0` otherwise |
 
 ### Configuration
 
 ```yaml
 schema:
-  max_retained_versions: 2  # total table-sets to keep (default: 2, minimum: 2)
+  max_retained_versions: 2          # total table-sets to keep (default: 2, minimum: 2)
+  version_poll_interval_secs: 5     # webserver readiness-gate poll cadence (default: 5, minimum: 1)
 ```
 
-With the default of 2: after migrating to version N, the indexer keeps the N active tables and
-the N−1 rollback target, and drops older table-sets automatically. The value is validated at
-startup — values below 2 are rejected.
+With `max_retained_versions: 2`: after migrating to version N, the indexer keeps the N active
+tables and the N−1 rollback target, and drops older table-sets automatically. The value is
+validated at startup — values below 2 are rejected.
+
+`version_poll_interval_secs` controls how often the webserver re-reads the active version from
+`gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below).
 
 ## CI and local enforcement
 
@@ -214,7 +246,11 @@ When completion is detected:
 2. The `migrating` version is marked `active`.
 3. The `gkg_schema_migration_completed_total` counter is incremented.
 
-Webserver pods must be restarted after the version transitions to pick up the new active prefix.
+Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
+on the next poll, and pods built for an older version detect `active > embedded` and exit via
+the `SchemaWatcher` shutdown path described above. No manual restart is required for either
+fleet — Kubernetes recycles the old pods and routes traffic to the new ones once they pass
+their readiness check.
 
 ### Automatic cleanup via retention window
 

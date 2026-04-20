@@ -6,10 +6,15 @@ use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use clickhouse_client::ArrowClickHouseClient;
 use gitlab_client::GitlabClient;
+use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
 use gkg_server::webserver::create_router;
 use gkg_server_config::GitlabClientConfiguration;
 use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext};
 use tower::ServiceExt;
+
+fn ready_watcher() -> Arc<SchemaWatcher> {
+    SchemaWatcher::for_state(SchemaState::Ready, 0)
+}
 
 fn live_request() -> Request<Body> {
     Request::get("/live").body(Body::empty()).unwrap()
@@ -37,7 +42,7 @@ async fn live_returns_ok() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client, None);
+    let router = create_router(client, None, ready_watcher());
 
     let (status, json) = parse_response(router.oneshot(live_request()).await.unwrap()).await;
 
@@ -49,7 +54,7 @@ async fn live_returns_ok() {
 #[tokio::test]
 async fn ready_returns_ok_when_clickhouse_healthy() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let router = create_router(ctx.create_client(), None);
+    let router = create_router(ctx.create_client(), None, ready_watcher());
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -71,7 +76,7 @@ async fn ready_returns_503_when_clickhouse_unreachable() {
         None,
         &std::collections::HashMap::new(),
     );
-    let router = create_router(client, None);
+    let router = create_router(client, None, ready_watcher());
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -105,7 +110,7 @@ fn unreachable_gitlab_client() -> Arc<GitlabClient> {
 #[tokio::test]
 async fn ready_skips_gitlab_probe_when_no_client() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let router = create_router(ctx.create_client(), None);
+    let router = create_router(ctx.create_client(), None, ready_watcher());
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 
@@ -124,7 +129,11 @@ async fn ready_skips_gitlab_probe_when_no_client() {
 #[tokio::test]
 async fn ready_reports_gitlab_unhealthy_when_unreachable() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
-    let router = create_router(ctx.create_client(), Some(unreachable_gitlab_client()));
+    let router = create_router(
+        ctx.create_client(),
+        Some(unreachable_gitlab_client()),
+        ready_watcher(),
+    );
 
     let (status, json) = parse_response(router.oneshot(ready_request()).await.unwrap()).await;
 

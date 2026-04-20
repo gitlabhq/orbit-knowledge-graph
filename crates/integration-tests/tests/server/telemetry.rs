@@ -1,9 +1,11 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::body::Body;
 use axum::http::Request;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server::pipeline::OTelPipelineObserver;
+use gkg_server::schema_watcher::{SchemaState, SchemaWatcher};
 use gkg_server::webserver::create_router;
 use opentelemetry::global;
 use opentelemetry_sdk::metrics::data::{AggregatedMetrics, HistogramDataPoint, MetricData};
@@ -52,10 +54,14 @@ fn dummy_client() -> ArrowClickHouseClient {
     )
 }
 
+fn ready_watcher() -> Arc<SchemaWatcher> {
+    SchemaWatcher::for_state(SchemaState::Ready, 0)
+}
+
 #[tokio::test]
 async fn http_request_records_duration_metric() {
     let (provider, exporter) = setup_meter_provider();
-    let router = create_router(dummy_client(), None);
+    let router = create_router(dummy_client(), None, ready_watcher());
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     let response = router.oneshot(request).await.unwrap();
@@ -76,7 +82,7 @@ async fn http_request_records_duration_metric() {
 #[tokio::test]
 async fn http_metric_has_correct_attributes() {
     let (provider, exporter) = setup_meter_provider();
-    let router = create_router(dummy_client(), None);
+    let router = create_router(dummy_client(), None, ready_watcher());
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     router.oneshot(request).await.unwrap();
@@ -116,7 +122,7 @@ async fn correlation_id_echoed_in_response() {
         .init()
         .expect("labkit init");
 
-    let router = create_router(dummy_client(), None);
+    let router = create_router(dummy_client(), None, ready_watcher());
 
     let request = Request::get("/live")
         .header("x-request-id", "test-correlation-789")
@@ -137,7 +143,7 @@ async fn correlation_id_generated_when_absent() {
         .init()
         .expect("labkit init");
 
-    let router = create_router(dummy_client(), None);
+    let router = create_router(dummy_client(), None, ready_watcher());
 
     let request = Request::get("/live").body(Body::empty()).unwrap();
     let response = router.oneshot(request).await.unwrap();

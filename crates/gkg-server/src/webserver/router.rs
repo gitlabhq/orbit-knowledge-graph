@@ -11,12 +11,15 @@ use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 use tokio::time::timeout;
 
+use crate::schema_watcher::{SchemaState, SchemaWatcher};
+
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppState {
     pub graph_client: ArrowClickHouseClient,
     pub gitlab_client: Option<Arc<GitlabClient>>,
+    pub schema_watcher: Arc<SchemaWatcher>,
 }
 
 #[derive(Serialize)]
@@ -49,6 +52,14 @@ async fn live() -> Json<HealthResponse> {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let mut unhealthy_components = Vec::new();
+
+    match state.schema_watcher.current() {
+        SchemaState::Ready => {}
+        SchemaState::Pending => unhealthy_components.push("schema_pending"),
+        SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
+    }
+
     let graph_healthy = timeout(HEALTH_CHECK_TIMEOUT, state.graph_client.execute("SELECT 1"))
         .await
         .is_ok_and(|r| r.is_ok());
@@ -68,7 +79,6 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
         None => true,
     };
 
-    let mut unhealthy_components = Vec::new();
     if !graph_healthy {
         unhealthy_components.push("clickhouse_graph");
     }
@@ -97,10 +107,12 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
 pub fn create_router(
     graph_client: ArrowClickHouseClient,
     gitlab_client: Option<Arc<GitlabClient>>,
+    schema_watcher: Arc<SchemaWatcher>,
 ) -> Router {
     let state = AppState {
         graph_client,
         gitlab_client,
+        schema_watcher,
     };
 
     Router::new()

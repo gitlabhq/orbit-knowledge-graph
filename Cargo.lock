@@ -6185,6 +6185,7 @@ dependencies = [
  "testcontainers-modules",
  "tokio",
  "tokio-stream",
+ "tokio-util",
  "tonic",
  "tower",
  "zstd",

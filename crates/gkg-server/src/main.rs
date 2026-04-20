@@ -2,6 +2,7 @@
 static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
 
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
@@ -11,10 +12,12 @@ use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
+use gkg_server::schema_watcher::SchemaWatcher;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
 use gkg_server_config::AppConfig;
 use indexer::schema;
+use indexer::schema::version::SCHEMA_VERSION;
 use indexer::{DispatcherConfig, IndexerConfig};
 use query_engine::compiler::input::QueryType;
 use strum::VariantNames;
@@ -107,19 +110,22 @@ async fn main() -> anyhow::Result<()> {
         Mode::Webserver => {
             config.schema.validate()?;
             let graph = config.graph.build_client();
-            let active_version = schema::version::read_active_version(&graph)
-                .await?
-                .ok_or_else(|| {
-                    anyhow::anyhow!(
-                        "no active schema version in ClickHouse — \
-                         indexer must run first to initialize the schema"
-                    )
-                })?;
-            let prefix = schema::version::table_prefix(active_version);
-            info!(version = active_version, table_prefix = %prefix, "resolved active schema version");
+            schema::version::init(&graph).await?;
+
+            let embedded = *SCHEMA_VERSION;
+            let prefix = schema::version::table_prefix(embedded);
+            info!(version = embedded, table_prefix = %prefix, "pinned to embedded schema version");
             let ontology =
                 Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
-            run_webserver(&config, ontology).await
+
+            let watcher = SchemaWatcher::spawn(
+                graph,
+                embedded,
+                Duration::from_secs(config.schema.version_poll_interval_secs),
+                shutdown.clone(),
+            );
+
+            run_webserver(&config, ontology, watcher, shutdown.clone()).await
         }
     };
 
@@ -131,6 +137,8 @@ async fn main() -> anyhow::Result<()> {
 async fn run_webserver(
     config: &AppConfig,
     ontology: Arc<ontology::Ontology>,
+    schema_watcher: Arc<SchemaWatcher>,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
@@ -160,8 +168,13 @@ async fn run_webserver(
     info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
-    let http_server =
-        HttpServer::bind(config.bind_address, graph_client, Some(gitlab_client)).await?;
+    let http_server = HttpServer::bind(
+        config.bind_address,
+        graph_client,
+        Some(gitlab_client),
+        schema_watcher,
+    )
+    .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
     let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
@@ -192,5 +205,6 @@ async fn run_webserver(
     tokio::select! {
         res = http_server.run() => res.map_err(Into::into),
         res = grpc_server.run() => res.map_err(Into::into),
+        _ = shutdown.cancelled() => Ok(()),
     }
 }
