@@ -679,6 +679,15 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
             }
         }
 
+        // Constructor method hook: when Call("new") (or similar) finds no
+        // nested member, the call returns an instance of the receiver type.
+        if found_nodes.is_empty()
+            && matches!(step, ExpressionStep::Call(_))
+            && ctx.rules.hooks.constructor_methods.contains(&member_name)
+        {
+            next_types.extend(current_types.iter().cloned());
+        }
+
         let found_fqns: Vec<String> = found_nodes
             .iter()
             .filter_map(|&n| {

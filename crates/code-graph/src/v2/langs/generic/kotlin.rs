@@ -359,6 +359,7 @@ impl HasRules for KotlinRules {
         .with_implicit_sub_scopes(&["Companion"])
         .with_hooks(ResolverHooks {
             call_method: Some("invoke"),
+            ..Default::default()
         })
     }
 }

@@ -55,6 +55,7 @@ pub(crate) fn apply_import_strategies(
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep, scratch),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
             ImportStrategy::FilePath => vec![],
+            ImportStrategy::GlobalName => global_name(graph, name),
         };
         if !candidates.is_empty() {
             return candidates;
@@ -222,6 +223,19 @@ fn same_package(
         }
     }
     vec![]
+}
+
+fn global_name(graph: &CodeGraph, name: &str) -> Vec<NodeIndex> {
+    graph
+        .indexes
+        .by_name
+        .lookup(name, |idx| {
+            graph.def_name(idx) == name
+                && graph.graph[idx]
+                    .def_id()
+                    .is_some_and(|d| graph.defs[d.0 as usize].is_top_level)
+        })
+        .to_vec()
 }
 
 fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {

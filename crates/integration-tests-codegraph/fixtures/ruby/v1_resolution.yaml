@@ -7,7 +7,7 @@ tests:
 
   # ── R1: test_notification_service_call_resolution ──
   - name: "UsersController::destroy -> NotificationService::notify"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::destroy'
@@ -19,7 +19,7 @@ tests:
 
   # ── R2: test_send_welcome_email_resolution ──
   - name: "UsersController::create -> User::send_welcome_email"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::create'
@@ -30,7 +30,7 @@ tests:
       - { row_count: 1 }
 
   - name: "User::send_welcome_email -> EmailService::send_welcome"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'User::send_welcome_email'
@@ -42,7 +42,7 @@ tests:
 
   # ── R3: test_static_method_call_resolution ──
   - name: "Application::test_user_creation_flow -> User::create_with_profile"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_user_creation_flow'
@@ -53,7 +53,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Application::test_authentication_flow -> AuthService::create_session"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
@@ -64,7 +64,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Application::test_authentication_flow -> AuthService::authenticate_token"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
@@ -75,7 +75,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Application::test_authentication_flow -> AuthService::refresh_session"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Application::test_authentication_flow'
@@ -87,7 +87,7 @@ tests:
 
   # ── R5: test_chained_method_call_resolution ──
   - name: "UsersController::show -> User::get_profile"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::show'
@@ -98,7 +98,7 @@ tests:
       - { row_count: 1 }
 
   - name: "User::get_profile -> Profile::find_by_user_id"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'User::get_profile'
@@ -154,7 +154,7 @@ tests:
       - { row_count: 1 }
 
   - name: "NotificationService::notify -> EmailService::send_notification"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
@@ -166,7 +166,7 @@ tests:
 
   # ── R11: test_ruby_instance_variable_resolution ──
   - name: "UsersController::show -> User::get_profile (through @user)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::show'
@@ -178,7 +178,7 @@ tests:
 
   # ── R14: test_ruby_cross_service_calls ──
   - name: "User::send_welcome_email -> EmailService::send_welcome (cross-service)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'User::send_welcome_email'
@@ -190,7 +190,7 @@ tests:
 
   # ── R15: test_ruby_private_method_calls ──
   - name: "User::send_notification -> NotificationService::notify"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'User::send_notification'
@@ -202,7 +202,7 @@ tests:
 
   # ── R16: test_ruby_variable_assignment_tracking ──
   - name: "UsersController::create -> User::send_welcome_email (through user = User.new)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'UsersController::create'

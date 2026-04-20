@@ -302,6 +302,7 @@ impl HasRules for PythonRules {
         )
         .with_hooks(ResolverHooks {
             call_method: Some("__call__"),
+            ..Default::default()
         })
     }
 }

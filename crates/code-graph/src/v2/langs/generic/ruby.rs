@@ -78,7 +78,8 @@ impl DslLanguage for RubyDsl {
             binding("assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right")
-                .instance_attrs(&["@"]),
+                .instance_attrs(&["@"])
+                .typed(vec![field("right").then(field("receiver"))], &[]),
             binding("operator_assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .no_value(),
@@ -278,11 +279,19 @@ impl HasRules for RubyRules {
                 ResolveStage::ImplicitMember,
                 ResolveStage::ImportStrategies,
             ],
-            vec![ImportStrategy::ScopeFqnWalk, ImportStrategy::SameFile],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::SameFile,
+                ImportStrategy::GlobalName,
+            ],
             ReceiverMode::None,
             "::",
             &["self"],
             Some("super"),
         )
+        .with_hooks(crate::v2::linker::rules::ResolverHooks {
+            constructor_methods: &["new"],
+            ..Default::default()
+        })
     }
 }
