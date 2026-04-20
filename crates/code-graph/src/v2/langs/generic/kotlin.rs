@@ -32,10 +32,9 @@ fn extract_user_type(node: &N<'_>) -> Option<String> {
     if let Some(ci) = node
         .children()
         .find(|c| c.kind() == "constructor_invocation")
+        && let Some(ut) = ci.children().find(|c| c.kind() == "user_type")
     {
-        if let Some(ut) = ci.children().find(|c| c.kind() == "user_type") {
-            return Some(ut.text().to_string());
-        }
+        return Some(ut.text().to_string());
     }
     None
 }

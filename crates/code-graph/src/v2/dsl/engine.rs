@@ -25,12 +25,11 @@ fn resolve_type_name(
     if let Some(fqn) = import_map.get(name) {
         return fqn.clone();
     }
-    if name.contains(sep) {
-        if let Some((first, rest)) = name.split_once(sep) {
-            if let Some(fqn) = import_map.get(first) {
-                return format!("{fqn}{sep}{rest}");
-            }
-        }
+    if name.contains(sep)
+        && let Some((first, rest)) = name.split_once(sep)
+        && let Some(fqn) = import_map.get(first)
+    {
+        return format!("{fqn}{sep}{rest}");
     }
     if let Some(prefix) = module_prefix {
         return format!("{prefix}{sep}{name}");
@@ -1598,7 +1597,7 @@ mod tests {
             b"def foo(): pass\nfoo()",
             "test.py",
             Language::Python,
-            |name, _chain, _reaching, _enclosing, _inferred| {
+            &mut |name: &str, _chain, _reaching, _enclosing, _inferred| {
                 ref_names.push(name.to_string());
             },
             &tracer,

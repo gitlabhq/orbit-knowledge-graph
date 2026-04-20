@@ -438,7 +438,7 @@ where
                             ));
                         }
                     },
-                    &tracer,
+                    tracer,
                     Some(&graph),
                 );
 

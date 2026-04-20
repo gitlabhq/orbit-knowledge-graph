@@ -417,7 +417,7 @@ mod tests {
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                |name, _, _, _, _| ref_names.push(name.to_string()),
+                &mut |name: &str, _, _, _, _| ref_names.push(name.to_string()),
                 &tracer,
                 None,
             )

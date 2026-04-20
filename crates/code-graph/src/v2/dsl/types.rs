@@ -597,10 +597,10 @@ impl BindingRule {
         // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name.
         if let Some(cc) = &spec.chain_config {
             for fa in &cc.field_access {
-                if vk_ref == fa.kind {
-                    if let Some(obj) = fa.object.navigate(&value_node) {
-                        return Some(obj.text().to_string());
-                    }
+                if vk_ref == fa.kind
+                    && let Some(obj) = fa.object.navigate(&value_node)
+                {
+                    return Some(obj.text().to_string());
                 }
             }
         }
