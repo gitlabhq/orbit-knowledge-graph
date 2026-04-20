@@ -27,12 +27,10 @@ fixtures:
     content: |
       package main
 
-      type UserService struct {
-          db Database
-      }
+      type UserService struct{}
 
-      func NewUserService(db Database) *UserService {
-          return &UserService{db: db}
+      func NewUserService() *UserService {
+          return &UserService{}
       }
 
       func (s *UserService) FindUser(id int) *User {
@@ -66,7 +64,7 @@ fixtures:
           db := NewDatabase()
           db.Query("SELECT 1")
 
-          svc := NewUserService(db)
+          svc := NewUserService()
           user := svc.FindUser(1)
           user.Greet()
 
@@ -76,97 +74,128 @@ fixtures:
       }
 
 tests:
-  # ── Simple function calls ──
+  # ── Definitions ──
 
-  - name: "main calls NewDatabase"
+  - name: "All structs and interfaces defined with correct FQNs"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'NewDatabase'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Struct', 'Interface']
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
     assert:
-      - { row_count: 1 }
+      - { row: { name: "Admin", fqn: "main.Admin" } }
+      - { row: { name: "Database", fqn: "main.Database" } }
+      - { row: { name: "User", fqn: "main.User" } }
+      - { row: { name: "UserService", fqn: "main.UserService" } }
 
-  - name: "main calls NewUserService"
+  - name: "All methods defined with correct FQNs"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'NewUserService'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY fqn
     assert:
-      - { row_count: 1 }
+      - { row: { name: "Close", fqn: "main.Close" } }
+      - { row: { name: "DeleteUser", fqn: "main.DeleteUser" } }
+      - { row: { name: "FindUser", fqn: "main.FindUser" } }
+      - { row: { name: "Greet", fqn: "main.Greet" } }
+      - { row: { name: "Promote", fqn: "main.Promote" } }
+      - { row: { name: "Query", fqn: "main.Query" } }
+      - { row: { name: "Save", fqn: "main.Save" } }
 
-  # ── Method calls via return type ──
-
-  - name: "main calls db.Query via NewDatabase return type"
+  - name: "Constructor functions defined"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'Query'
-      RETURN callee.fqn AS callee
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.name IN ['NewDatabase', 'NewUserService', 'main']
+      RETURN d.name AS name, d.fqn AS fqn
+      ORDER BY name
     assert:
-      - { row: { callee: "main.Query" } }
+      - { row: { name: "NewDatabase", fqn: "main.NewDatabase" } }
+      - { row: { name: "NewUserService", fqn: "main.NewUserService" } }
+      - { row: { name: "main", fqn: "main.main" } }
 
-  - name: "main calls svc.FindUser via NewUserService return type"
+  # ── Struct embedding ──
+
+  - name: "Admin extends User via struct embedding"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'FindUser'
-      RETURN callee.fqn AS callee
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main.Admin' AND e.edge_kind = 'Extends'
+      RETURN callee.fqn AS parent
     assert:
-      - { row: { callee: "main.FindUser" } }
+      - { row: { parent: "main.User" } }
 
-  - name: "main calls Greet (directly and via embedding)"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'Greet'
-      RETURN callee.fqn AS callee
-    assert:
-      - { row_count: 2 }
+  # ── Simple function calls from main ──
 
-  # ── Struct embedding (promoted methods) ──
+  - name: "main calls exactly NewDatabase, NewUserService, FindUser, Greet, Promote, Query"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.main' AND e.edge_kind = 'Calls'
+          RETURN callee.fqn AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "main.FindUser" } }
+          - { row: { callee: "main.Greet" } }
+          - { row: { callee: "main.Greet" } }
+          - { row: { callee: "main.NewDatabase" } }
+          - { row: { callee: "main.NewUserService" } }
+          - { row: { callee: "main.Promote" } }
+          - { row: { callee: "main.Query" } }
+      # No false positives: main does NOT call Close, Save, or DeleteUser
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.main'
+            AND callee.name IN ['Close', 'Save', 'DeleteUser']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  # ── Method chaining via return types ──
+
+  - name: "db.Query resolves to Database.Query via NewDatabase return type"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Query'
+          RETURN callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      # No false positive to Close
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Close'
+          RETURN callee.fqn
+        assert:
+          - { empty: true }
+
+  # ── Promoted method via embedding ──
 
   - name: "admin.Greet resolves via User embedding"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'main' AND callee.name = 'Promote'
+      WHERE caller.fqn = 'main.main' AND callee.fqn = 'main.Greet'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "main.Promote" } }
+      - { row_count: 2 }
 
   # ── Intra-service method calls ──
 
-  - name: "DeleteUser calls FindUser via self"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'DeleteUser' AND callee.name = 'FindUser'
-      RETURN callee.fqn AS callee
-    assert:
-      - { row: { callee: "main.FindUser" } }
-
-  - name: "DeleteUser calls user.Save via FindUser return type"
-    query: |
-      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'DeleteUser' AND callee.name = 'Save'
-      RETURN callee.fqn AS callee
-    assert:
-      - { row: { callee: "main.Save" } }
-
-  # ── Definitions exist ──
-
-  - name: "All structs defined"
-    query: |
-      MATCH (d:Definition)
-      WHERE d.definition_type IN ['Struct', 'Interface']
-      RETURN d.name AS name
-      ORDER BY name
-    assert:
-      - { row: { name: "Admin" } }
-      - { row: { name: "Database" } }
-      - { row: { name: "User" } }
-      - { row: { name: "UserService" } }
-
-  - name: "Struct embedding produces extends edge"
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.name = 'Admin' AND callee.name = 'User'
-        AND e.edge_kind = 'Extends'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
-    assert:
-      - { row_count: 1 }
+  - name: "DeleteUser calls exactly FindUser and Save"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.DeleteUser' AND e.edge_kind = 'Calls'
+          RETURN callee.fqn AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "main.FindUser" } }
+          - { row: { callee: "main.Save" } }
+      # No false positive to other UserService methods
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.DeleteUser'
+            AND callee.name IN ['Query', 'Close', 'Greet', 'Promote']
+          RETURN callee.name
+        assert:
+          - { empty: true }

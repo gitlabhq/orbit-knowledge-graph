@@ -1,0 +1,46 @@
+name: "Go: higher-order functions and closures"
+fixtures:
+  - path: higher.go
+    content: |
+      package main
+
+      type Processor struct{}
+      func (p *Processor) Process() {}
+
+      func apply(fn func()) {
+          fn()
+      }
+
+      func makeProcessor() *Processor {
+          return &Processor{}
+      }
+
+      func caller() {
+          p := makeProcessor()
+          p.Process()
+
+          apply(func() {
+              p.Process()
+          })
+      }
+
+tests:
+  - name: "caller calls makeProcessor, Process, and apply"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.caller' AND e.edge_kind = 'Calls'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "Process" } }
+          - { row: { callee: "apply" } }
+          - { row: { callee: "makeProcessor" } }
+
+  - name: "apply defined as Function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'main.apply'
+      RETURN d.definition_type AS kind
+    assert:
+      - { row: { kind: "Function" } }

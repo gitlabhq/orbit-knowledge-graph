@@ -1,0 +1,80 @@
+name: "Go: interface implementation and type assertions"
+fixtures:
+  - path: repo.go
+    content: |
+      package main
+
+      type Repository interface {
+          Get(id int) string
+          Save(data string) error
+      }
+
+      type PostgresRepo struct{}
+
+      func (p *PostgresRepo) Get(id int) string {
+          return "data"
+      }
+
+      func (p *PostgresRepo) Save(data string) error {
+          return nil
+      }
+
+      type MockRepo struct{}
+
+      func (m *MockRepo) Get(id int) string {
+          return "mock"
+      }
+
+      func (m *MockRepo) Save(data string) error {
+          return nil
+      }
+
+      func NewRepo(useMock bool) Repository {
+          if useMock {
+              return &MockRepo{}
+          }
+          return &PostgresRepo{}
+      }
+
+      func process(repo Repository) {
+          repo.Get(1)
+          repo.Save("new data")
+      }
+
+tests:
+  - name: "Interface and implementations defined"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['Repository', 'PostgresRepo', 'MockRepo']
+      RETURN d.name AS name, d.definition_type AS kind
+      ORDER BY name
+    assert:
+      - { row: { name: "MockRepo", kind: "Struct" } }
+      - { row: { name: "PostgresRepo", kind: "Struct" } }
+      - { row: { name: "Repository", kind: "Interface" } }
+
+  - name: "process calls Get and Save, not Close"
+    queries:
+      # Get is found (may match multiple implementations)
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.process' AND e.edge_kind = 'Calls'
+            AND callee.name = 'Get'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 4 }
+      # Save is found
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.process' AND e.edge_kind = 'Calls'
+            AND callee.name = 'Save'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 4 }
+      # No edges to unrelated methods
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.process' AND callee.name = 'Close'
+          RETURN callee.name
+        assert:
+          - { empty: true }

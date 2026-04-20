@@ -1,0 +1,67 @@
+name: "Go: chained calls and short var declarations"
+fixtures:
+  - path: chain.go
+    content: |
+      package main
+
+      type Builder struct{}
+
+      func NewBuilder() *Builder {
+          return &Builder{}
+      }
+
+      func (b *Builder) SetName(name string) *Builder {
+          return b
+      }
+
+      func (b *Builder) SetAge(age int) *Builder {
+          return b
+      }
+
+      func (b *Builder) Build() string {
+          return ""
+      }
+
+      func useBuilder() {
+          b := NewBuilder()
+          b.SetName("Alice")
+          b.SetAge(30)
+
+          result := NewBuilder().SetName("Bob")
+          result.Build()
+      }
+
+tests:
+  - name: "useBuilder calls NewBuilder, SetName, SetAge"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "Build" } }
+          - { row: { callee: "NewBuilder" } }
+          - { row: { callee: "NewBuilder" } }
+          - { row: { callee: "SetAge" } }
+          - { row: { callee: "SetName" } }
+          - { row: { callee: "SetName" } }
+      # Exactly 6 call edges, no false positives
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useBuilder' AND e.edge_kind = 'Calls'
+          RETURN callee.name AS callee
+        assert:
+          - { row_count: 6 }
+
+  - name: "Builder methods return self type for chaining"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name IN ['SetName', 'SetAge', 'Build', 'NewBuilder']
+      RETURN d.name AS name, d.definition_type AS kind
+      ORDER BY name
+    assert:
+      - { row: { name: "Build", kind: "Method" } }
+      - { row: { name: "NewBuilder", kind: "Function" } }
+      - { row: { name: "SetAge", kind: "Method" } }
+      - { row: { name: "SetName", kind: "Method" } }

@@ -1,0 +1,57 @@
+name: "Go: multiple struct embedding"
+fixtures:
+  - path: multi_embed.go
+    content: |
+      package main
+
+      type Reader struct{}
+      func (r *Reader) Read() {}
+
+      type Writer struct{}
+      func (w *Writer) Write() {}
+
+      type Closer struct{}
+      func (c *Closer) Close() {}
+
+      type ReadWriter struct {
+          Reader
+          Writer
+      }
+
+      type ReadWriteCloser struct {
+          ReadWriter
+          Closer
+      }
+
+      func useRWC() {
+          rwc := ReadWriteCloser{}
+          rwc.Read()
+          rwc.Write()
+          rwc.Close()
+      }
+
+tests:
+  - name: "Embedding hierarchy defined"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+          RETURN child.name AS child, parent.name AS parent
+          ORDER BY child, parent
+        assert:
+          - { row: { child: "ReadWriteCloser", parent: "Closer" } }
+          - { row: { child: "ReadWriteCloser", parent: "ReadWriter" } }
+          - { row: { child: "ReadWriter", parent: "Reader" } }
+          - { row: { child: "ReadWriter", parent: "Writer" } }
+
+  - name: "useRWC calls Read, Write, Close via promoted methods"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useRWC' AND e.edge_kind = 'Calls'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "Close" } }
+          - { row: { callee: "Read" } }
+          - { row: { callee: "Write" } }
