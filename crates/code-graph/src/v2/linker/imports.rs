@@ -55,6 +55,10 @@ pub(crate) fn apply_import_strategies(
             ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep, scratch),
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep, scratch),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
+            // Stub: resolve by matching import paths to file paths in the graph.
+            // Blocked on ImportResolver trait (.sessions/import-resolver-trait.md)
+            // which provides per-language file-tree context for path resolution
+            // (Python source roots, JS tsconfig paths, Ruby require_relative).
             ImportStrategy::FilePath => vec![],
             ImportStrategy::GlobalName => global_name(graph, file_node, name),
         };
