@@ -650,6 +650,7 @@ impl LanguageSpec {
         self.walk_full(&root, &mut state, sep);
 
         state.ssa.seal_remaining();
+        state.ssa.remove_redundant_phi_sccs();
 
         let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
 
