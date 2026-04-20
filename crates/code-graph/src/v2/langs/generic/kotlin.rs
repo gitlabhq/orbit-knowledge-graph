@@ -194,10 +194,10 @@ impl DslLanguage for KotlinDsl {
 
     fn imports() -> Vec<ImportRule> {
         fn kotlin_import_classify(node: &N<'_>) -> &'static str {
-            if node
-                .children()
-                .any(|c| c.kind() == "MULT" || c.text() == "*")
-            {
+            if node.children().any(|c| {
+                let k = c.kind();
+                k == "MULT" || k == "wildcard_import" || c.text() == "*"
+            }) {
                 return "WildcardImport";
             }
             if node.has(Child, Kind("import_alias")) {
@@ -209,7 +209,8 @@ impl DslLanguage for KotlinDsl {
         vec![
             import("import_header")
                 .classify(kotlin_import_classify)
-                .split_last("."),
+                .split_last(".")
+                .wildcard_child("wildcard_import"),
         ]
     }
 
