@@ -181,6 +181,20 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     Ok(ctx)
 }
 
+/// Ensure `expr` sits in `GROUP BY` for aggregation queries. The identity
+/// columns pushed into SELECT (`_gkg_*_pk`, `_gkg_*_id`) are functionally
+/// dependent on the group key, but DuckDB's strict GROUP BY requires them
+/// in the clause. ClickHouse accepts the redundancy.
+fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
+    if query_type != QueryType::Aggregation {
+        return;
+    }
+    if q.group_by.is_empty() || q.group_by.contains(&expr) {
+        return;
+    }
+    q.group_by.push(expr);
+}
+
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
@@ -298,13 +312,18 @@ fn enforce_return_columns(
         } else {
             // Table-centric: search, aggregation — node tables are in FROM.
             if needs_separate_pk {
+                let pk_expr = Expr::col(&node.id, DEFAULT_PRIMARY_KEY);
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
                 if !has_pk {
                     q.select.push(SelectExpr {
-                        expr: Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                        expr: pk_expr.clone(),
                         alias: Some(pk_col),
                     });
                 }
+                // The pk lands in SELECT regardless of who put it there, so
+                // guard GROUP BY membership separately: idempotent on re-entry
+                // and robust if a lowerer pre-populates the pk column.
+                ensure_in_group_by(q, input.query_type, pk_expr);
             }
 
             let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
@@ -316,12 +335,7 @@ fn enforce_return_columns(
                     expr: id_expr.clone(),
                     alias: Some(id_col.clone()),
                 });
-                if input.query_type == QueryType::Aggregation
-                    && !q.group_by.is_empty()
-                    && !q.group_by.contains(&id_expr)
-                {
-                    q.group_by.push(id_expr);
-                }
+                ensure_in_group_by(q, input.query_type, id_expr);
             }
 
             if !has_type {
@@ -711,6 +725,74 @@ mod tests {
             q.group_by
         );
         assert_eq!(q.group_by.len(), 2); // username + id
+    }
+
+    #[test]
+    fn aggregation_adds_separate_pk_to_group_by() {
+        use crate::input::{AggFunction, InputAggregation};
+
+        // When the group-by node has redaction_id_column != "id", enforce
+        // emits a separate _gkg_*_pk column. DuckDB rejects SELECT columns
+        // that aren't in GROUP BY, so the pk must be appended.
+        let input = Input {
+            query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "f".to_string(),
+                    entity: Some("File".to_string()),
+                    table: Some("gl_file".to_string()),
+                    redaction_id_column: "project_id".to_string(),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".to_string(),
+                    entity: Some("Definition".to_string()),
+                    table: Some("gl_definition".to_string()),
+                    ..Default::default()
+                },
+            ],
+            aggregations: vec![InputAggregation {
+                function: AggFunction::Count,
+                target: Some("d".to_string()),
+                group_by: Some("f".to_string()),
+                property: None,
+                alias: Some("defs".to_string()),
+            }],
+            limit: 10,
+            ..Input::default()
+        };
+
+        let query = Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("f", "path"),
+                alias: Some("f_path".into()),
+            }],
+            from: TableRef::scan("gl_file", "f"),
+            group_by: vec![Expr::col("f", "path")],
+            limit: Some(10),
+            ..Default::default()
+        };
+
+        let mut node = Node::Query(Box::new(query));
+        enforce_return(&mut node, &input).unwrap();
+
+        let Node::Query(q) = node else {
+            panic!("expected Query")
+        };
+
+        let pk_expr = Expr::col("f", "id");
+        let id_expr = Expr::col("f", "project_id");
+        assert!(
+            q.group_by.contains(&pk_expr),
+            "separate pk column must be in GROUP BY: {:?}",
+            q.group_by
+        );
+        assert!(
+            q.group_by.contains(&id_expr),
+            "redaction id column must be in GROUP BY: {:?}",
+            q.group_by
+        );
+        assert_eq!(q.group_by.len(), 3); // path + id + project_id
     }
 
     #[test]
