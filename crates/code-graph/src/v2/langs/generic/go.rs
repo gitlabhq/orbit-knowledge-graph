@@ -8,6 +8,28 @@ use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+
+const GO_PRIMITIVE_TYPES: &[&str] = &[
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
+    "string",
+    "bool",
+    "byte",
+    "rune",
+    "error",
+];
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -93,27 +115,7 @@ impl DslLanguage for GoDsl {
                             .then(child_of_kind("composite_literal"))
                             .then(field("type")),
                     ],
-                    &[
-                        "int",
-                        "int8",
-                        "int16",
-                        "int32",
-                        "int64",
-                        "uint",
-                        "uint8",
-                        "uint16",
-                        "uint32",
-                        "uint64",
-                        "float32",
-                        "float64",
-                        "complex64",
-                        "complex128",
-                        "string",
-                        "bool",
-                        "byte",
-                        "rune",
-                        "error",
-                    ],
+                    GO_PRIMITIVE_TYPES,
                 ),
             binding("var_spec", BindingKind::Assignment)
                 .name_from(&["name"])
@@ -128,53 +130,13 @@ impl DslLanguage for GoDsl {
                             .then(child_of_kind("composite_literal"))
                             .then(field("type")),
                     ],
-                    &[
-                        "int",
-                        "int8",
-                        "int16",
-                        "int32",
-                        "int64",
-                        "uint",
-                        "uint8",
-                        "uint16",
-                        "uint32",
-                        "uint64",
-                        "float32",
-                        "float64",
-                        "complex64",
-                        "complex128",
-                        "string",
-                        "bool",
-                        "byte",
-                        "rune",
-                        "error",
-                    ],
+                    GO_PRIMITIVE_TYPES,
                 ),
             binding("parameter_declaration", BindingKind::Assignment)
                 .name_from(&["name"])
                 .typed(
                     vec![field("type").inner("pointer_type", "type_identifier")],
-                    &[
-                        "int",
-                        "int8",
-                        "int16",
-                        "int32",
-                        "int64",
-                        "uint",
-                        "uint8",
-                        "uint16",
-                        "uint32",
-                        "uint64",
-                        "float32",
-                        "float64",
-                        "complex64",
-                        "complex128",
-                        "string",
-                        "bool",
-                        "byte",
-                        "rune",
-                        "error",
-                    ],
+                    GO_PRIMITIVE_TYPES,
                 ),
         ]
     }
