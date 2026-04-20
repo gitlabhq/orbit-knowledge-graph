@@ -1,15 +1,14 @@
-# Default: core team reviews everything
-* @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
+# Default: orbit team reviews everything
+* @gitlab-org/orbit
 
-# Auth and security
-/crates/gkg-server/src/auth/ @michaelangeloio @bohdanpk @dgruzd
-/crates/gkg-server/src/redaction/ @michaelangeloio @bohdanpk @dgruzd
-/crates/gkg-server/src/rate_limit.rs @michaelangeloio @bohdanpk @dgruzd
-/crates/gkg-server/src/tls.rs @michaelangeloio @bohdanpk @dgruzd
-/docs/design-documents/security.md @michaelangeloio @bohdanpk @dgruzd
+# Security-sensitive paths
+/crates/gkg-server/src/auth/ @gitlab-org/orbit
+/crates/gkg-server/src/redaction/ @gitlab-org/orbit
+/crates/utils/src/fs.rs @gitlab-org/orbit
+/docs/design-documents/security.md @gitlab-org/orbit
 
 # Query engine
-/crates/query-engine/ @michaelusa @michaelangeloio
+/crates/query-engine/ @gitlab-org/orbit
 
 # Proto / API surface
-/crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon
+/crates/gkg-server/proto/ @gitlab-org/orbit

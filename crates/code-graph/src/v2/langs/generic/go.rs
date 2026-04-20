@@ -8,6 +8,28 @@ use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+
+const GO_PRIMITIVE_TYPES: &[&str] = &[
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
+    "string",
+    "bool",
+    "byte",
+    "rune",
+    "error",
+];
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -86,39 +108,35 @@ impl DslLanguage for GoDsl {
         vec![
             binding("short_var_declaration", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right"),
+                .value_from("right")
+                .typed(
+                    vec![
+                        field("right")
+                            .then(child_of_kind("composite_literal"))
+                            .then(field("type")),
+                    ],
+                    GO_PRIMITIVE_TYPES,
+                ),
             binding("var_spec", BindingKind::Assignment)
                 .name_from(&["name"])
                 .value_from("value")
                 .typed(vec![field("type")], &[]),
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right"),
+                .value_from("right")
+                .typed(
+                    vec![
+                        field("right")
+                            .then(child_of_kind("composite_literal"))
+                            .then(field("type")),
+                    ],
+                    GO_PRIMITIVE_TYPES,
+                ),
             binding("parameter_declaration", BindingKind::Assignment)
                 .name_from(&["name"])
                 .typed(
                     vec![field("type").inner("pointer_type", "type_identifier")],
-                    &[
-                        "int",
-                        "int8",
-                        "int16",
-                        "int32",
-                        "int64",
-                        "uint",
-                        "uint8",
-                        "uint16",
-                        "uint32",
-                        "uint64",
-                        "float32",
-                        "float64",
-                        "complex64",
-                        "complex128",
-                        "string",
-                        "bool",
-                        "byte",
-                        "rune",
-                        "error",
-                    ],
+                    GO_PRIMITIVE_TYPES,
                 ),
         ]
     }
@@ -126,7 +144,7 @@ impl DslLanguage for GoDsl {
     fn branches() -> Vec<BranchRule> {
         vec![
             branch("if_statement")
-                .branches(&["consequence", "alternative"])
+                .branches(&["block"])
                 .condition("condition"),
             branch("expression_switch_statement")
                 .branches(&["expression_case", "default_case"])

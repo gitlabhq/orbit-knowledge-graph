@@ -1,0 +1,143 @@
+name: "Rust: precision and resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_precision_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod dep {
+          pub fn imported() {}
+
+          pub fn helper() {}
+
+          pub struct Service;
+
+          pub trait Pinger {
+              fn trait_ping(&self);
+
+              fn defaulted(&self) {
+                  helper();
+              }
+          }
+
+          impl Pinger for Service {
+              fn trait_ping(&self) {}
+          }
+
+          impl Service {
+              pub fn new() -> Self {
+                  Service
+              }
+
+              pub fn inherent_ping(&self) {}
+          }
+      }
+
+      use crate::dep::{Pinger, Service};
+      use crate::dep as dep_mod;
+
+      pub fn module_alias_call() {
+          dep_mod::imported();
+      }
+
+      pub fn local_closure_shadowing() {
+          let imported = || {};
+          imported();
+      }
+
+      pub fn external_only() {
+          let _ = std::mem::size_of::<usize>();
+      }
+
+      pub fn fn_pointer_from_assoc() {
+          let constructor: fn() -> Service = Service::new;
+          let _service = constructor();
+      }
+
+      pub fn generic_trait_bound<T: Pinger>(value: &T) {
+          value.trait_ping();
+      }
+
+      pub fn trait_default_dispatch<T: Pinger>(value: &T) {
+          value.defaulted();
+      }
+
+      pub fn inherent_call() {
+          let service = Service::new();
+          service.inherent_ping();
+      }
+
+tests:
+  - name: "module aliases resolve callable paths"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'module_alias_call' AND callee.name = 'imported'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/lib.rs', tgt: 'src/lib.rs' } }
+
+  - name: "local closure shadowing does not create a bogus local edge"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'local_closure_shadowing'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "external std calls do not create repo-local edges"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'external_only'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "associated functions stored in fn pointers still resolve"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'fn_pointer_from_assoc' AND callee.name = 'new'
+      RETURN caller.file_path AS src, callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/lib.rs', fqn: 'dep::Service::new', type: 'AssociatedFunction' } }
+
+  - name: "generic trait-bound method calls resolve to the trait method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'generic_trait_bound' AND callee.name = 'trait_ping'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'dep::Pinger::trait_ping', type: 'Method' } }
+
+  - name: "generic trait-bound default calls resolve to the trait default method"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'trait_default_dispatch' AND callee.name = 'defaulted'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'dep::Pinger::defaulted', type: 'Method' } }
+
+  - name: "trait default bodies still resolve their internal calls"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'dep::Pinger::defaulted' AND callee.name = 'helper'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'dep::helper', type: 'Function' } }
+
+  - name: "inherent methods still resolve on concrete receivers"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'inherent_call' AND callee.name = 'inherent_ping'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'dep::Service::inherent_ping', type: 'Method' } }

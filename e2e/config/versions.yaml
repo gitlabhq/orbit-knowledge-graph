@@ -5,12 +5,8 @@
 siphon:
   chart: "1.10.0"
   image:
-    # TEMP: pinned to a fork of siphon that bumps reconciler refresh-package
-    # _siphon_replicated_at to greatest(now64, max+1us/2us) so reconciler-corrected
-    # rows are visible to GKG indexer's incremental watermark scan.
-    # Tracked in https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/483
-    repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/siphon-test
-    tag: "recon-fresh-ts-1"
+    repository: registry.gitlab.com/gitlab-org/analytics-section/siphon
+    tag: "0.0.64-beta"
 
 gitlab:
   chart: "9.10.3-2450691409"

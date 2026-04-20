@@ -92,7 +92,7 @@ Filtered by `knowledge graph` label:
 | Repository | Purpose |
 |---|---|
 | [gitlab-org/orbit/knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | Main GKG service -- 19 Rust crates covering parsing, indexing, query compilation, serving, testing, and infrastructure. Single `gkg-server` binary runs in 4 modes (webserver, indexer, scheduler, health-check). |
-| [gitlab-org/orbit/build-images](https://gitlab.com/gitlab-org/orbit/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline |
+| [gitlab-org/rust/build-images](https://gitlab.com/gitlab-org/rust/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline (image: `orbit-knowledge-graph`) |
 | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Official production Helm chart for GKG (v1.0.0, application chart, uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns) |
 | [gitlab-org/orbit/gkg-e2e-harness](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) | GKE cluster bootstrap for e2e tests (cert-manager, GitLab Agent config) |
 | [gitlab-org/orbit/documentation/orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes (Feb 3-5, 2026) |
@@ -227,7 +227,7 @@ All Terraform lives in [config-mgmt](https://ops.gitlab.net/gitlab-com/gl-infra/
 |---|---|
 | GKG Server | [`gitlab-org/orbit/knowledge-graph/gkg`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/container_registry) |
 | Siphon | [`gitlab-org/analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon/container_registry) |
-| Rust Builder | [`gitlab-org/orbit/build-images/rust-builder`](https://gitlab.com/gitlab-org/orbit/build-images/container_registry) |
+| Rust Builder | [`gitlab-org/rust/build-images/orbit-knowledge-graph`](https://gitlab.com/gitlab-org/rust/build-images/container_registry) |
 
 ---
 

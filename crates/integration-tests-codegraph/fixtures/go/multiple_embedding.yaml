@@ -30,6 +30,26 @@ fixtures:
           rwc.Close()
       }
 
+      // Diamond embedding: both Foo and Bar define Dup().
+      // Go would reject this at compile time as ambiguous, but we
+      // pin down the resolver behavior: it picks the first ancestor
+      // in the sorted chain.
+      type Foo struct{}
+      func (f *Foo) Dup() {}
+
+      type Bar struct{}
+      func (b *Bar) Dup() {}
+
+      type Diamond struct {
+          Foo
+          Bar
+      }
+
+      func useDiamond() {
+          d := Diamond{}
+          d.Dup()
+      }
+
 tests:
   - name: "Embedding hierarchy defined"
     queries:
@@ -55,3 +75,18 @@ tests:
           - { row: { callee: "main.Close" } }
           - { row: { callee: "main.Read" } }
           - { row: { callee: "main.Write" } }
+
+  # Diamond embedding: Foo and Bar both define Dup(). Go would reject
+  # this as ambiguous at compile time. The resolver walks all ancestors
+  # and finds both Foo.Dup and Bar.Dup (2 NodeIndex values). Both share
+  # the FQN main.Dup (Go methods are package-scoped), and the query
+  # join produces 4 rows (2 edges × 2 matching Definition rows each).
+  - name: "Diamond ambiguity: resolver finds Dup from both ancestors"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.useDiamond' AND e.edge_kind = 'Calls'
+            AND callee.name = 'Dup'
+          RETURN callee.fqn AS callee
+        assert:
+          - { row_count: 4 }

@@ -48,7 +48,7 @@ futures = { workspace = true }
 tonic = { workspace = true }
 tonic-prost = { workspace = true }
 uuid = { workspace = true, features = ["v4"] }
-toon-format = { version = "0.4.1", default-features = false }
+toon-format = { workspace = true }
 
 [build-dependencies]
 tonic-prost-build = { workspace = true }

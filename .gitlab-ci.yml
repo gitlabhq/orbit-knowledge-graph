@@ -55,17 +55,17 @@ stages:
   - benchmark
   - ai
   - build
+  - e2e
   - publish
   - release
   - review
-  - e2e
 
 # Job Templates
 
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
@@ -523,7 +523,7 @@ code-indexing-benchmark-v2-linux:
     SCENARIO: v2
   parallel:
     matrix:
-      - GROUP: [python, java, kotlin, csharp, ruby, go]
+      - GROUP: [python, java, kotlin, csharp, ruby, go, rust]
 
 .code-indexing-benchmark-analyze-template:
   stage: benchmark

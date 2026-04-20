@@ -1,0 +1,93 @@
+name: "Rust: field-sensitive local flow"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_field_local_flow_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub struct Holder {
+          pub callback: fn(),
+      }
+
+      pub struct Pair(pub fn());
+
+      pub fn helper() {}
+      pub fn wrapper() {}
+
+      pub fn call_record_field() {
+          let holder = Holder { callback: helper };
+          (holder.callback)();
+      }
+
+      pub fn call_record_shorthand() {
+          let callback: fn() = helper;
+          let holder = Holder { callback };
+          (holder.callback)();
+      }
+
+      pub fn rebind_record_field() {
+          let mut holder = Holder { callback: helper };
+          holder = Holder { callback: wrapper };
+          (holder.callback)();
+      }
+
+      pub fn call_tuple_field() {
+          let pair = Pair(helper);
+          (pair.0)();
+      }
+
+      pub fn destructure_record_field() {
+          let holder = Holder { callback: helper };
+          let Holder { callback } = holder;
+          callback();
+      }
+
+tests:
+  - name: "record literal field calls resolve through the stored local target"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_record_field' AND callee.name = 'helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'helper' } }
+
+  - name: "record shorthand fields preserve callable aliases"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_record_shorthand' AND callee.name = 'helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'helper' } }
+
+  - name: "reassigning a record local invalidates stale field targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'rebind_record_field'
+      RETURN callee.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { name: 'wrapper' } }
+
+  - name: "tuple fields on tuple-struct constructors preserve callable targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_tuple_field' AND callee.name = 'helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'helper' } }
+
+  - name: "record destructuring reuses the tracked field target"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'destructure_record_field' AND callee.name = 'helper'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'helper' } }

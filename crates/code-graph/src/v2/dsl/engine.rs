@@ -1152,7 +1152,8 @@ impl LanguageSpec {
             // Binding handling → SSA write
             if let Some(&rule_idx) = self.binding_dispatch.get(nk).and_then(|v| v.first()) {
                 let rule = &self.bindings[rule_idx];
-                if let Some(name) = rule.extract_name(node) {
+                let names = rule.extract_names(node);
+                for name in &names {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
                         let resolved = resolve_type_name(
                             &type_ann,
@@ -1167,7 +1168,7 @@ impl LanguageSpec {
                         super::ssa::SsaValue::Opaque
                     };
 
-                    let ssa_name = state.arena.alloc_str(&name);
+                    let ssa_name = state.arena.alloc_str(name);
                     let is_instance_attr = rule
                         .instance_attr_prefixes
                         .iter()
@@ -1176,6 +1177,18 @@ impl LanguageSpec {
                         // Write to parent class block so sibling methods can read it
                         *state.saved_blocks.last().unwrap_or(&state.current_block)
                     } else {
+                        // If this variable already has a value in the current
+                        // block, split: create a new block so the previous
+                        // value is preserved for refs queued before this write.
+                        if state
+                            .ssa
+                            .has_variable_in_block(ssa_name, state.current_block)
+                        {
+                            let new_block = state.ssa.add_block();
+                            state.ssa.add_predecessor(new_block, state.current_block);
+                            state.ssa.seal_block(new_block);
+                            state.current_block = new_block;
+                        }
                         state.current_block
                     };
                     state.tracer.event(TraceEvent::BindingWrite {
@@ -1204,7 +1217,7 @@ impl LanguageSpec {
                                 .write_variable(compound_key, target_block, val.clone());
                         }
                     }
-                }
+                } // end for name in names
             }
 
             // Track return statement context + infer return type from bare identifiers
