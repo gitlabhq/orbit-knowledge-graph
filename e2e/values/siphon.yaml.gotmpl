@@ -57,6 +57,12 @@ appConfigDefaults:
     initial_data_snapshot_threads_per_table: 2
     memory_buffer_size_in_bytes: 10485760
     use_alter_publication_function: true
+    # Defaults are 3s and 2s respectively. e2e snapshots a small dataset so we
+    # tighten both polls to 1s to shave seconds off cold-start latency. Without
+    # these the snapshot/merge phase can push the per-entity 120s test budgets.
+    # Available since siphon 0.0.63-beta (gitlab-org/analytics-section/siphon!375).
+    snapshot_poll_interval_in_seconds: 1
+    merge_poll_interval_in_seconds: 1
   queueing:
     driver: "nats"
     url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
