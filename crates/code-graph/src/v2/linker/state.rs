@@ -33,6 +33,7 @@ use std::hash::{Hash, Hasher};
 use crate::v2::types::{DefKind, Range};
 use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
+use rust_lapper::{Interval, Lapper};
 use rustc_hash::{FxHashMap, FxHasher};
 use smallvec::SmallVec;
 
@@ -242,6 +243,55 @@ impl Default for NestedMap {
     }
 }
 
+pub struct DefinitionRangeIndex {
+    lapper: Lapper<u64, NodeIndex>,
+}
+
+impl DefinitionRangeIndex {
+    pub fn new() -> Self {
+        Self {
+            lapper: Lapper::new(Vec::new()),
+        }
+    }
+
+    pub fn from_ranges(ranges: impl IntoIterator<Item = (Range, NodeIndex)>) -> Self {
+        let intervals = ranges
+            .into_iter()
+            .map(|(range, node)| Interval {
+                start: range.byte_offset.0 as u64,
+                stop: range.byte_offset.1 as u64,
+                val: node,
+            })
+            .collect();
+        Self {
+            lapper: Lapper::new(intervals),
+        }
+    }
+
+    pub fn find_enclosing(&self, start: u32, end: u32) -> Option<NodeIndex> {
+        self.lapper
+            .find(start as u64, end as u64)
+            .filter(|interval| interval.start <= start as u64 && end as u64 <= interval.stop)
+            .min_by_key(|interval| interval.stop.saturating_sub(interval.start))
+            .map(|interval| interval.val)
+    }
+
+    pub fn find_enclosing_or_overlapping(&self, start: u32, end: u32) -> Option<NodeIndex> {
+        self.find_enclosing(start, end).or_else(|| {
+            self.lapper
+                .find(start as u64, end as u64)
+                .min_by_key(|interval| interval.stop.saturating_sub(interval.start))
+                .map(|interval| interval.val)
+        })
+    }
+}
+
+impl Default for DefinitionRangeIndex {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 // ── GraphIndexes ────────────────────────────────────────────────
 
 /// All resolution indexes for a CodeGraph, bundled together.
@@ -266,6 +316,8 @@ pub struct GraphIndexes {
     pub dir_index: Option<FxHashMap<String, NodeIndex>>,
     /// File path → node index. Only used during Phase 1 construction.
     pub file_index: Option<FxHashMap<String, NodeIndex>>,
+    /// File path → definition range index for source/target lookup.
+    pub definition_ranges: FxHashMap<String, DefinitionRangeIndex>,
 }
 
 impl GraphIndexes {
@@ -277,6 +329,7 @@ impl GraphIndexes {
             ancestors: FxHashMap::default(),
             dir_index: Some(FxHashMap::default()),
             file_index: Some(FxHashMap::default()),
+            definition_ranges: FxHashMap::default(),
         }
     }
 
