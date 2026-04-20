@@ -590,12 +590,11 @@ impl<'a> SsaEngine<'a> {
         }
         for &pid in phi_ids {
             for op in &self.phis[pid.0].operands {
-                if let SsaValue::Phi(target) = op {
-                    if let (Some(&src), Some(&tgt)) =
+                if let SsaValue::Phi(target) = op
+                    && let (Some(&src), Some(&tgt)) =
                         (phi_to_node.get(&pid), phi_to_node.get(target))
-                    {
-                        phi_graph.add_edge(src, tgt, ());
-                    }
+                {
+                    phi_graph.add_edge(src, tgt, ());
                 }
             }
         }
@@ -659,10 +658,10 @@ impl<'a> SsaEngine<'a> {
                     }
                     // Invalidate witnesses that reference collapsed phis.
                     for w in &mut phi.witnesses {
-                        if let Some(wv) = w {
-                            if phi_vals.contains(wv) {
-                                *w = None;
-                            }
+                        if let Some(wv) = w
+                            && phi_vals.contains(wv)
+                        {
+                            *w = None;
                         }
                     }
                 }

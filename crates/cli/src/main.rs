@@ -685,9 +685,11 @@ async fn index_repo_v2(
     let start_time = std::time::Instant::now();
 
     // Run v2 pipeline
-    let mut pipeline_config = code_graph::v2::PipelineConfig::default();
-    pipeline_config.max_file_size = config.max_file_size as u64;
-    pipeline_config.respect_gitignore = config.respect_gitignore;
+    let pipeline_config = code_graph::v2::PipelineConfig {
+        max_file_size: config.max_file_size as u64,
+        respect_gitignore: config.respect_gitignore,
+        ..Default::default()
+    };
     let pipeline = code_graph::v2::Pipeline::new(pipeline_config);
     let tracer = code_graph::v2::trace::Tracer::new(false);
 
