@@ -282,8 +282,8 @@ impl CodeGraph {
                 _ => String::new(),
             }
         };
-        self.indexes.by_name.sort_all(&fqn_of);
-        self.indexes.by_fqn.sort_all(&fqn_of);
+        self.indexes.by_name.sort_all(fqn_of);
+        self.indexes.by_fqn.sort_all(fqn_of);
         self.link_extends(tracer);
         self.build_ancestor_table(tracer);
     }
