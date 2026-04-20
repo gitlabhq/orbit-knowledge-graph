@@ -53,16 +53,26 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
 /// Walk a directory tree and reject any symlink that resolves outside
 /// `root` or is dangling. Deletes offending symlinks before returning
 /// the error.
+///
+/// The scan never short-circuits: every entry is visited and every bad
+/// symlink is deleted even if earlier entries failed. This prevents a
+/// malicious archive from planting multiple escaping symlinks where only
+/// the first gets cleaned up. The first error encountered is returned
+/// after the full traversal completes.
 pub fn validate_symlinks(root: &Path) -> io::Result<()> {
+    // Accumulates the first error without stopping the scan.
     let mut first_err: Option<io::Error> = None;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
             Ok(e) => e,
+            // Directory removed between iteration and read — safe to skip.
             Err(e) if e.kind() == io::ErrorKind::NotFound => continue,
             Err(e) => return Err(e),
         };
         for entry in entries {
+            // OS-level iteration errors are recorded but don't stop the scan,
+            // so remaining symlinks are still checked and cleaned up.
             let entry = match entry {
                 Ok(e) => e,
                 Err(e) => {
@@ -80,6 +90,9 @@ pub fn validate_symlinks(root: &Path) -> io::Result<()> {
             };
 
             if meta.is_symlink() {
+                // check_symlink deletes the symlink via remove_file before
+                // returning Err, so the bad link is gone regardless of
+                // whether we capture or propagate the error.
                 if let Err(e) = check_symlink(&path, root) {
                     first_err = first_err.or(Some(e));
                 }
