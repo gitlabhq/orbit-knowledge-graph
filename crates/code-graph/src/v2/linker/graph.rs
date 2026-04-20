@@ -642,27 +642,37 @@ impl CodeGraph {
         // separator, then nested lookup for the remaining segment.
         // Try common separators to find the split point.
         for sep in &[".", "::"] {
-            if let Some((first, rest)) = name.split_once(sep) {
-                let bases = self
-                    .indexes
-                    .by_name
-                    .lookup(first, |idx| self.def_name(idx) == first);
-                if bases.is_empty() {
-                    continue;
-                }
-                let mut result_vec = Vec::new();
-                for &base in &bases {
-                    let base_fqn = self.def_fqn(base);
+            let segments: Vec<&str> = name.split(sep).collect();
+            if segments.len() < 2 {
+                continue;
+            }
+            let mut current = self
+                .indexes
+                .by_name
+                .lookup(segments[0], |idx| self.def_name(idx) == segments[0]);
+            if current.is_empty() {
+                continue;
+            }
+            for &segment in &segments[1..] {
+                let mut next = SmallVec::new();
+                for &node in &current {
+                    let fqn = self.def_fqn(node);
+                    let mut found = Vec::new();
                     self.indexes.nested.lookup_into(
-                        base_fqn,
-                        rest,
-                        |idx| self.def_name(idx) == rest,
-                        &mut result_vec,
+                        fqn,
+                        segment,
+                        |idx| self.def_name(idx) == segment,
+                        &mut found,
                     );
+                    next.extend(found);
                 }
-                if !result_vec.is_empty() {
-                    return result_vec.into();
+                current = next;
+                if current.is_empty() {
+                    break;
                 }
+            }
+            if !current.is_empty() {
+                return current;
             }
         }
         SmallVec::new()

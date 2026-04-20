@@ -225,10 +225,13 @@ impl DslLanguage for KotlinDsl {
         let kotlin_type = |rule: BindingRule| {
             rule.typed(
                 vec![
-                    // variable_declaration > user_type (for typed bindings)
+                    // variable_declaration > user_type — extract full text so
+                    // dotted types like Parent.GrandChild are preserved. The
+                    // engine's dotted type resolution splits on separator and
+                    // resolves the first segment via imports.
                     child_of_kind("variable_declaration")
                         .then(child_of_kind("user_type"))
-                        .then(child_of_kind("type_identifier")),
+                        .then(text()),
                     // direct user_type child (for parameters)
                     field("user_type").inner("type_arguments", "type_identifier"),
                     field("type"),

@@ -597,27 +597,6 @@ impl LanguageSpec {
         source: &[u8],
         file_path: &str,
         language: Language,
-        mut on_ref: F,
-    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
-    where
-        F: FnMut(
-            &str,                                        // name
-            Option<&[crate::v2::types::ExpressionStep]>, // chain
-            &[crate::v2::types::ssa::ParseValue],        // reaching defs
-            Option<u32>,                                 // enclosing_def index
-            &[(u32, String)],                            // inferred return types
-        ),
-    {
-        let noop = crate::v2::trace::Tracer::new(false);
-        self.parse_full_and_resolve_traced(source, file_path, language, &mut on_ref, &noop)
-    }
-
-    /// Like `parse_full_and_resolve` but with an explicit tracer for debugging.
-    pub fn parse_full_and_resolve_traced<F>(
-        &self,
-        source: &[u8],
-        file_path: &str,
-        language: Language,
         on_ref: &mut F,
         tracer: &Tracer,
     ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
@@ -1538,6 +1517,7 @@ mod tests {
             vec![],
         );
         let mut ref_names = Vec::new();
+        let tracer = crate::v2::trace::Tracer::new(false);
         spec.parse_full_and_resolve(
             b"def foo(): pass\nfoo()",
             "test.py",
@@ -1545,6 +1525,7 @@ mod tests {
             |name, _chain, _reaching, _enclosing, _inferred| {
                 ref_names.push(name.to_string());
             },
+            &tracer,
         )
         .unwrap();
 

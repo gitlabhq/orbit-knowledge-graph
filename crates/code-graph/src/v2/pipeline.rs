@@ -417,7 +417,7 @@ where
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut inferred_set = false;
 
-                let inferred_result = spec.parse_full_and_resolve_traced(
+                let inferred_result = spec.parse_full_and_resolve(
                     &source,
                     path,
                     language,
