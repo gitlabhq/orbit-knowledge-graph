@@ -8,6 +8,10 @@ use crate::v2::types::{
     Range, Relationship, containment_relationship,
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
@@ -590,8 +594,27 @@ impl CodeGraph {
                     let super_name = self.strings.get(super_id);
                     let mut targets = self.resolve_scope_nodes(super_name);
                     targets.retain(|t| *t != idx);
-                    // Sort by FQN for deterministic edge ordering.
-                    targets.sort_by(|&a, &b| self.def_fqn(a).cmp(self.def_fqn(b)));
+                    // Disambiguate: when multiple candidates share a name,
+                    // prefer the one closest to the child's scope (longest
+                    // common FQN prefix) that isn't nested under the child.
+                    if targets.len() > 1 {
+                        let child_prefix = format!("{}.", child_fqn);
+                        targets.sort_by(|&a, &b| {
+                            let a_fqn = self.def_fqn(a);
+                            let b_fqn = self.def_fqn(b);
+                            let a_nested = a_fqn.starts_with(&child_prefix);
+                            let b_nested = b_fqn.starts_with(&child_prefix);
+                            // Non-nested before nested
+                            a_nested.cmp(&b_nested).then_with(|| {
+                                // Among non-nested: longest common prefix with
+                                // child_fqn wins (closer scope)
+                                let a_common = common_prefix_len(a_fqn, &child_fqn);
+                                let b_common = common_prefix_len(b_fqn, &child_fqn);
+                                b_common.cmp(&a_common)
+                            })
+                        });
+                        targets.truncate(1);
+                    }
                     let resolved_fqns: Vec<String> = targets
                         .iter()
                         .filter_map(|&t| {

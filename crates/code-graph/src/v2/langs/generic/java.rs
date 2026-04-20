@@ -67,6 +67,14 @@ impl DslLanguage for JavaDsl {
         Language::Java
     }
 
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            return_kinds: &["return_statement"],
+            adopt_sibling_refs: &["marker_annotation", "annotation"],
+            ..LanguageHooks::default()
+        }
+    }
+
     fn scopes() -> Vec<ScopeRule> {
         let class_meta = || metadata().super_types(java_super_types);
 
