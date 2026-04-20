@@ -181,6 +181,20 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     Ok(ctx)
 }
 
+/// Ensure `expr` sits in `GROUP BY` for aggregation queries. The identity
+/// columns pushed into SELECT (`_gkg_*_pk`, `_gkg_*_id`) are functionally
+/// dependent on the group key, but DuckDB's strict GROUP BY requires them
+/// in the clause. ClickHouse accepts the redundancy.
+fn ensure_in_group_by(q: &mut Query, query_type: QueryType, expr: Expr) {
+    if query_type != QueryType::Aggregation {
+        return;
+    }
+    if q.group_by.is_empty() || q.group_by.contains(&expr) {
+        return;
+    }
+    q.group_by.push(expr);
+}
+
 fn enforce_return_columns(
     q: &mut Query,
     input: &Input,
@@ -298,24 +312,18 @@ fn enforce_return_columns(
         } else {
             // Table-centric: search, aggregation — node tables are in FROM.
             if needs_separate_pk {
+                let pk_expr = Expr::col(&node.id, DEFAULT_PRIMARY_KEY);
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
                 if !has_pk {
-                    let pk_expr = Expr::col(&node.id, DEFAULT_PRIMARY_KEY);
                     q.select.push(SelectExpr {
                         expr: pk_expr.clone(),
                         alias: Some(pk_col),
                     });
-                    // In aggregation mode the pk is functionally dependent on
-                    // the group-by key (one row per group), but DuckDB's strict
-                    // GROUP BY requires it in the clause. ClickHouse accepts
-                    // the redundancy.
-                    if input.query_type == QueryType::Aggregation
-                        && !q.group_by.is_empty()
-                        && !q.group_by.contains(&pk_expr)
-                    {
-                        q.group_by.push(pk_expr);
-                    }
                 }
+                // The pk lands in SELECT regardless of who put it there, so
+                // guard GROUP BY membership separately: idempotent on re-entry
+                // and robust if a lowerer pre-populates the pk column.
+                ensure_in_group_by(q, input.query_type, pk_expr);
             }
 
             let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
@@ -327,12 +335,7 @@ fn enforce_return_columns(
                     expr: id_expr.clone(),
                     alias: Some(id_col.clone()),
                 });
-                if input.query_type == QueryType::Aggregation
-                    && !q.group_by.is_empty()
-                    && !q.group_by.contains(&id_expr)
-                {
-                    q.group_by.push(id_expr);
-                }
+                ensure_in_group_by(q, input.query_type, id_expr);
             }
 
             if !has_type {

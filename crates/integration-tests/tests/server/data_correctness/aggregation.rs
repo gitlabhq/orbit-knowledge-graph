@@ -480,6 +480,43 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
     resp.assert_node_absent("Group", 101);
 }
 
+pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &TestContext) {
+    // MergeRequestDiff has redaction.id_column = merge_request_id. When it's
+    // the group_by node, enforce.rs emits a separate `_gkg_d_pk` column
+    // alongside `_gkg_d_id`. Both must land in GROUP BY. Regression guard
+    // for the ClickHouse side of the compiler fix that added `_gkg_*_pk` to
+    // the GROUP BY clause for aggregations.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
+            ],
+            "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
+            "aggregations": [
+                {"function": "count", "target": "mr", "group_by": "d", "alias": "mr_count"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // Seed: MR 2000 HAS_DIFF {5000, 5001}, MR 2001 HAS_DIFF {5002}.
+    // Each diff has exactly one MR on the from side.
+    resp.assert_node("MergeRequestDiff", 5000, |n| {
+        n.prop_str("state") == Some("collected") && n.prop_i64("mr_count") == Some(1)
+    });
+    resp.assert_node("MergeRequestDiff", 5001, |n| {
+        n.prop_str("state") == Some("collected") && n.prop_i64("mr_count") == Some(1)
+    });
+    resp.assert_node("MergeRequestDiff", 5002, |n| {
+        n.prop_str("state") == Some("collected") && n.prop_i64("mr_count") == Some(1)
+    });
+}
+
 pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &TestContext) {
     // Empty traversal_paths — the query engine refuses to compile rather than
     // silently returning empty results. The defense-in-depth check_ast pass
