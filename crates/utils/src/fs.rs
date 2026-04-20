@@ -7,6 +7,24 @@
 use std::io;
 use std::path::{Path, PathBuf};
 
+/// Canonicalize `path` and return it only if the real target lives
+/// inside `root`. The path-traversal guard every subsystem that turns
+/// a user-supplied specifier into a filesystem read should route
+/// through.
+///
+/// Returns `None` when:
+/// - `path` does not exist
+/// - `path` is a dangling symlink
+/// - the canonical target resolves outside `root` (direct symlink
+///   escape, `../..` climb, Windows UNC redirect, etc.)
+///
+/// `root` is expected to already be canonical. Caller's responsibility
+/// to canonicalize it once at setup time.
+pub fn contained_canonical_path(root: &Path, path: &Path) -> Option<PathBuf> {
+    let canonical = std::fs::canonicalize(path).ok()?;
+    canonical.starts_with(root).then_some(canonical)
+}
+
 /// Create parent directories for `path`, validating that no existing
 /// path component resolves outside `root` via symlinks.
 ///
@@ -99,6 +117,38 @@ fn check_symlink(path: &Path, root: &Path) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn contained_canonical_path_accepts_path_inside_root() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/lib.rs"), b"").unwrap();
+
+        let target = root.join("src/lib.rs");
+        let resolved = contained_canonical_path(&root, &target).expect("contained");
+        assert!(resolved.starts_with(&root));
+    }
+
+    #[test]
+    fn contained_canonical_path_rejects_missing_path() {
+        let dir = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        assert!(contained_canonical_path(&root, &root.join("missing")).is_none());
+    }
+
+    #[test]
+    fn contained_canonical_path_rejects_symlink_escape() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+        #[cfg(unix)]
+        {
+            let escape = root.join("escape");
+            std::os::unix::fs::symlink(outside.path(), &escape).unwrap();
+            assert!(contained_canonical_path(&root, &escape).is_none());
+        }
+    }
 
     #[test]
     fn longest_ancestor_finds_existing_parent() {

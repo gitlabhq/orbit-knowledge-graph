@@ -973,9 +973,11 @@ fn normalize_path(path: PathBuf) -> PathBuf {
     normalized
 }
 
+/// Thin wrapper around `gkg_utils::fs::contained_canonical_path` so the
+/// evaluator's existing call sites read unchanged. All security-relevant
+/// path-containment logic lives in `crates/utils/src/fs.rs` as a SSOT.
 fn canonical_repo_existing_path(root_dir: &Path, path: &Path) -> Option<PathBuf> {
-    let canonical = std::fs::canonicalize(path).ok()?;
-    canonical.starts_with(root_dir).then_some(canonical)
+    gkg_utils::fs::contained_canonical_path(root_dir, path)
 }
 
 pub(super) fn contained_repo_path(
