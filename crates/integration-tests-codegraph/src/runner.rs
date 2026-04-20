@@ -131,9 +131,9 @@ pub async fn run_yaml_suite(yaml: &str) {
         None | Some("generic") => {
             let pipeline = Pipeline::new(PipelineConfig::default());
             let result = if let Some(pool) = &pool {
-                pool.install(|| pipeline.run(tmp.path(), &tracer))
+                pool.install(|| pipeline.run_with_tracer(tmp.path(), &tracer))
             } else {
-                pipeline.run(tmp.path(), &tracer)
+                pipeline.run_with_tracer(tmp.path(), &tracer)
             };
             assert!(
                 result.errors.is_empty(),
@@ -159,7 +159,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let output = dispatch_by_tag(tag, &files, &root, &PipelineConfig::default())
+            let output = dispatch_by_tag(tag, &files, &root, &PipelineConfig::default(), &tracer)
                 .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                 .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
             output_to_datasets(output)

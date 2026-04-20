@@ -66,6 +66,7 @@ pub trait LanguagePipeline {
         files: &[FileInput],
         root_path: &str,
         config: &PipelineConfig,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
@@ -122,7 +123,15 @@ impl Pipeline {
         Self { config }
     }
 
-    pub fn run(&self, root: &Path, tracer: &crate::v2::trace::Tracer) -> PipelineResult {
+    pub fn run(&self, root: &Path) -> PipelineResult {
+        self.run_with_tracer(root, crate::v2::trace::leaked_noop_tracer())
+    }
+
+    pub fn run_with_tracer(
+        &self,
+        root: &Path,
+        tracer: &crate::v2::trace::Tracer,
+    ) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
@@ -150,8 +159,13 @@ impl Pipeline {
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(*language, files, &root_str, &self.config)
-            {
+            match crate::v2::registry::dispatch_language(
+                *language,
+                files,
+                &root_str,
+                &self.config,
+                tracer,
+            ) {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -269,6 +283,7 @@ where
         files: &[FileInput],
         root_path: &str,
         _config: &PipelineConfig,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
@@ -563,6 +578,7 @@ mod tests {
             &[path.to_string()],
             "/",
             &PipelineConfig::default(),
+            crate::v2::trace::leaked_noop_tracer(),
         )
         .unwrap_or_else(|| panic!("Language {language} not supported"))
         .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
@@ -727,7 +743,7 @@ namespace MyApp {
 
         let pipeline = Pipeline::new(PipelineConfig::default());
         let tracer = crate::v2::trace::Tracer::new(false);
-        let result = pipeline.run(root, &tracer);
+        let result = pipeline.run_with_tracer(root, &tracer);
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");

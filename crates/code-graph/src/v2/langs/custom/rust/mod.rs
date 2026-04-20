@@ -110,6 +110,7 @@ impl LanguagePipeline for RustPipeline {
         files: &[FileInput],
         root_path: &str,
         _config: &PipelineConfig,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
@@ -147,7 +148,7 @@ impl LanguagePipeline for RustPipeline {
                 }
             }
         }
-        graph.finalize();
+        graph.finalize(tracer);
         Ok(PipelineOutput::Graph(Box::new(graph)))
     }
 }

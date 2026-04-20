@@ -44,9 +44,10 @@ macro_rules! register_v2_pipelines {
             files: &[FileInput],
             root_path: &str,
             config: &PipelineConfig,
+            tracer: &crate::v2::trace::Tracer,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match language {
-                $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, config),)*
+                $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, config, tracer),)*
                 _ => return None,
             })
         }
@@ -58,9 +59,10 @@ macro_rules! register_v2_pipelines {
             files: &[FileInput],
             root_path: &str,
             config: &PipelineConfig,
+            tracer: &crate::v2::trace::Tracer,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match tag {
-                $($tag => <$($pipeline)*>::process_files(files, root_path, config),)*
+                $($tag => <$($pipeline)*>::process_files(files, root_path, config, tracer),)*
                 _ => return None,
             })
         }
