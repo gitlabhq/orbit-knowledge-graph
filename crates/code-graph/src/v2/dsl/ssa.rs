@@ -223,7 +223,21 @@ impl<'a> SsaEngine<'a> {
         block: BlockId,
     ) -> ReachingDefs<'a> {
         self.stats.reads += 1;
-        let value = self.read_variable_internal(variable, block);
+        let mut value = self.read_variable_internal(variable, block);
+        // Chase aliases: if the value is Alias(target), read target in the
+        // same block. Bounded depth to prevent cycles.
+        let mut depth = 0;
+        while let SsaValue::Alias(target) = &value {
+            depth += 1;
+            if depth > 8 {
+                break;
+            }
+            let target_value = self.read_variable_internal(target, block);
+            if matches!(target_value, SsaValue::Opaque | SsaValue::Marker) {
+                break; // target has no useful value, keep the Alias
+            }
+            value = target_value;
+        }
         let result = self.resolve_value(&value);
         self.tracer.event(TraceEvent::SsaRead {
             variable: variable.to_string(),

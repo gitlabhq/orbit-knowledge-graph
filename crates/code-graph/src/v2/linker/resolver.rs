@@ -26,6 +26,9 @@ pub struct RefData<'a> {
 pub struct FileResolver<'a> {
     ctx: ResolveCtx<'a>,
     deadline: Option<std::time::Instant>,
+    /// Edges from definitions to external imported symbols. Stored
+    /// separately so they don't interfere with the failed_chains check.
+    import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
 }
 
 impl<'a> FileResolver<'a> {
@@ -36,12 +39,30 @@ impl<'a> FileResolver<'a> {
         import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
+        tracer: &'a Tracer,
     ) -> Self {
-        let ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, rules, settings);
+        let ctx = ResolveCtx::new(
+            graph,
+            file_node,
+            def_nodes,
+            import_nodes,
+            rules,
+            settings,
+            tracer,
+        );
         let deadline = settings
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
-        Self { ctx, deadline }
+        Self {
+            ctx,
+            deadline,
+            import_edges: Vec::new(),
+        }
+    }
+
+    /// Drain accumulated Definition → ImportedSymbol edges.
+    pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
+        std::mem::take(&mut self.import_edges)
     }
 
     /// Dump resolver trace events to stderr. Call after all refs are resolved.
@@ -81,6 +102,9 @@ impl<'a> FileResolver<'a> {
         };
         let targets = resolve_single(&mut self.ctx, &ref_data);
         if targets.is_empty() {
+            let mut imp_edges = Vec::new();
+            self.emit_imported_symbol_edges(reaching, enclosing_def, &mut imp_edges);
+            self.import_edges.extend(imp_edges);
             return;
         }
 
@@ -114,6 +138,48 @@ impl<'a> FileResolver<'a> {
             ));
         }
     }
+
+    /// Emit Definition → ImportedSymbol edges for external (unresolved) refs.
+    fn emit_imported_symbol_edges(
+        &self,
+        reaching: &[ParseValue],
+        enclosing_def: Option<u32>,
+        edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    ) {
+        let Some(enc) = enclosing_def else { return };
+        let Some(&src) = self.ctx.def_nodes.get(enc as usize) else {
+            return;
+        };
+        let src_def_kind = self.ctx.graph.graph[src]
+            .def_id()
+            .map(|did| self.ctx.graph.defs[did.0 as usize].kind);
+        let rel = Relationship {
+            edge_kind: EdgeKind::Calls,
+            source_node: NodeKind::Definition,
+            target_node: NodeKind::ImportedSymbol,
+            source_def_kind: src_def_kind,
+            target_def_kind: None,
+        };
+        // (a) Explicit imports from reaching defs
+        let before = edges.len();
+        for pv in reaching {
+            if let ParseValue::ImportRef(i) = pv
+                && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
+            {
+                edges.push((src, import_node, GraphEdge { relationship: rel }));
+            }
+        }
+        // (b) Wildcard imports: when no explicit import matched, any wildcard
+        // import from this file could cover the ref name.
+        if edges.len() == before {
+            for &import_node in self.ctx.import_nodes {
+                let imp = self.ctx.graph.import(import_node);
+                if imp.wildcard {
+                    edges.push((src, import_node, GraphEdge { relationship: rel }));
+                }
+            }
+        }
+    }
 }
 
 // ── internals ───────────────────────────────────────────────────
@@ -130,7 +196,7 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
-    tracer: Tracer,
+    tracer: &'a Tracer,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -141,6 +207,7 @@ impl<'a> ResolveCtx<'a> {
         import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
+        tracer: &'a Tracer,
     ) -> Self {
         let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
         Self {
@@ -155,7 +222,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
-            tracer: crate::v2::trace::thread_tracer(),
+            tracer,
         }
     }
 
@@ -525,24 +592,7 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
     });
 
     if current_types.is_empty() {
-        if ctx.settings.chain_fallback
-            && let Some(last_name) = chain.last().and_then(|s| match s {
-                ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
-                _ => None,
-            })
-        {
-            ctx.tracer.event(TraceEvent::ResolveChainFallback {
-                name: last_name.to_string(),
-            });
-            let fallback = RefData {
-                name: last_name,
-                chain: None,
-                reaching: &[],
-                enclosing_def: r.enclosing_def,
-            };
-            return resolve_bare(ctx, &fallback);
-        }
-        return vec![];
+        return chain_fallback(ctx, r, chain);
     }
 
     for (depth, step) in chain[1..].iter().enumerate() {
@@ -634,7 +684,37 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
         current_types = next_types;
     }
 
-    vec![]
+    chain_fallback(ctx, r, chain)
+}
+
+/// When chain resolution fails (empty base or mid-chain step failure),
+/// fall back to bare resolution of the terminal name. Handles extension
+/// functions, static methods, and other cases where the def isn't nested
+/// under the chain's resolved type.
+fn chain_fallback(
+    ctx: &mut ResolveCtx<'_>,
+    r: &RefData<'_>,
+    chain: &[ExpressionStep],
+) -> Vec<NodeIndex> {
+    if !ctx.settings.chain_fallback {
+        return vec![];
+    }
+    let Some(last_name) = chain.last().and_then(|s| match s {
+        ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
+        _ => None,
+    }) else {
+        return vec![];
+    };
+    ctx.tracer.event(TraceEvent::ResolveChainFallback {
+        name: last_name.to_string(),
+    });
+    let fallback = RefData {
+        name: last_name,
+        chain: None,
+        reaching: &[],
+        enclosing_def: r.enclosing_def,
+    };
+    resolve_bare(ctx, &fallback)
 }
 
 fn resolve_base_type_fqns(
@@ -732,6 +812,33 @@ fn resolve_base_type_fqns(
                         }
                     }
                     ParseValue::Opaque => {}
+                }
+            }
+            // Fallback: when reaching defs produce no types (e.g. chain base
+            // is an untracked name like a same-package class), try resolving
+            // the base name via import strategies to find its FQN.
+            if types.is_empty()
+                && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
+            {
+                let fallback = RefData {
+                    name,
+                    chain: None,
+                    reaching: &[],
+                    enclosing_def: None,
+                };
+                let nodes = resolve_bare(ctx, &fallback);
+                for n in nodes {
+                    if let Some(did) = ctx.graph.graph[n].def_id() {
+                        let gdef = &ctx.graph.defs[did.0 as usize];
+                        if gdef.kind.is_type_container() {
+                            let fqn = ctx.graph.str(gdef.fqn).to_string();
+                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("bare({name})"),
+                                result: format!("base type (import fallback) -> {fqn}"),
+                            });
+                            types.push(fqn);
+                        }
+                    }
                 }
             }
             types

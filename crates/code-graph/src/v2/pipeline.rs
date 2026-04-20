@@ -65,6 +65,7 @@ pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
@@ -119,7 +120,7 @@ impl Pipeline {
         Self { config }
     }
 
-    pub fn run(&self, root: &Path) -> PipelineResult {
+    pub fn run(&self, root: &Path, tracer: &crate::v2::trace::Tracer) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
@@ -147,7 +148,7 @@ impl Pipeline {
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(*language, files, &root_str) {
+            match crate::v2::registry::dispatch_language(*language, files, &root_str, tracer) {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -264,6 +265,7 @@ where
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
@@ -361,7 +363,7 @@ where
         }
 
         let mut graph = graph.into_inner().unwrap();
-        graph.finalize();
+        graph.finalize(tracer);
 
         // ── Phase 2: parallel parse_full + resolve (callback) ──
         let t2 = std::time::Instant::now();
@@ -402,7 +404,6 @@ where
                     }
                 };
 
-                let tracer = crate::v2::trace::thread_tracer();
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
@@ -410,12 +411,13 @@ where
                     &info.import_nodes,
                     &rules,
                     &rules.settings,
+                    tracer,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut inferred_set = false;
 
-                let inferred_result = spec.parse_full_and_resolve_traced(
+                let inferred_result = spec.parse_full_and_resolve(
                     &source,
                     path,
                     language,
@@ -436,13 +438,12 @@ where
                             ));
                         }
                     },
-                    &tracer,
+                    tracer,
+                    Some(&graph),
                 );
 
-                tracer.dump_grouped(&format!("{path} [engine]"));
-                resolver.dump_trace(&format!("{path} [resolver]"));
-
                 let inferred = inferred_result.unwrap_or_default();
+                edges.extend(resolver.drain_import_edges());
 
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
@@ -501,6 +502,7 @@ where
                             &info.import_nodes,
                             &rules,
                             &rules.settings,
+                            tracer,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {
@@ -553,9 +555,11 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], "/")
-            .unwrap_or_else(|| panic!("Language {language} not supported"))
-            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let output =
+            crate::v2::registry::dispatch_language(language, &[path.to_string()], "/", &tracer)
+                .unwrap_or_else(|| panic!("Language {language} not supported"))
+                .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         match output {
             PipelineOutput::Graph(g) => *g,
             PipelineOutput::Batches(_) => panic!("expected Graph output"),
@@ -716,7 +720,8 @@ namespace MyApp {
         .unwrap();
 
         let pipeline = Pipeline::new(PipelineConfig::default());
-        let result = pipeline.run(root);
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let result = pipeline.run(root, &tracer);
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");

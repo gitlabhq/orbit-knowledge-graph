@@ -19,6 +19,7 @@ impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        _tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();

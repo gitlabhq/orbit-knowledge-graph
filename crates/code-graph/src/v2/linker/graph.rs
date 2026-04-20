@@ -8,6 +8,10 @@ use crate::v2::types::{
     Range, Relationship, containment_relationship,
 };
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
+
+fn common_prefix_len(a: &str, b: &str) -> usize {
+    a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
+}
 use petgraph::graph::{DiGraph, NodeIndex};
 use petgraph::visit::{Bfs, EdgeFiltered};
 use rustc_hash::{FxHashMap, FxHasher};
@@ -255,13 +259,20 @@ impl CodeGraph {
         self.indexes.drop_construction_indexes();
     }
 
-    pub fn finalize(&mut self) {
-        self.link_extends();
-        self.build_ancestor_table();
+    /// Build extends edges and ancestor chains. Must be called after all
+    /// files are added and before resolution.
+    ///
+    /// NOTE: `link_extends` resolves super types via `by_name` index which
+    /// can return multiple nodes for the same name. When files are added via
+    /// `par_iter`, insertion order is non-deterministic, so the `by_name`
+    /// iteration order varies across runs. This causes flaky resolution when
+    /// two classes share a name (e.g. `kotlin_v1_same_class_name`).
+    pub fn finalize(&mut self, tracer: &crate::v2::trace::Tracer) {
+        self.link_extends(tracer);
+        self.build_ancestor_table(tracer);
     }
 
-    fn build_ancestor_table(&mut self) {
-        let tracer = crate::v2::trace::thread_tracer();
+    fn build_ancestor_table(&mut self, tracer: &crate::v2::trace::Tracer) {
         let extends_only = EdgeFiltered(
             &self.graph,
             |e: petgraph::graph::EdgeReference<'_, GraphEdge>| {
@@ -413,16 +424,7 @@ impl CodeGraph {
         member_name: &str,
         out: &mut Vec<NodeIndex>,
     ) -> bool {
-        let mut start_nodes = self
-            .indexes
-            .by_fqn
-            .lookup(scope_fqn, |idx| self.def_fqn(idx) == scope_fqn);
-        if start_nodes.is_empty() {
-            start_nodes = self
-                .indexes
-                .by_name
-                .lookup(scope_fqn, |idx| self.def_name(idx) == scope_fqn);
-        }
+        let start_nodes = self.resolve_scope_nodes(scope_fqn);
         if start_nodes.is_empty() {
             return false;
         }
@@ -523,6 +525,12 @@ impl CodeGraph {
         self.strings.get(self.def(idx).fqn)
     }
 
+    /// Returns the def kind.
+    #[inline]
+    pub fn def_kind(&self, idx: NodeIndex) -> crate::v2::types::DefKind {
+        self.def(idx).kind
+    }
+
     // ── Iterators ───────────────────────────────────────────
 
     pub fn directories(&self) -> impl Iterator<Item = (NodeIndex, &CanonicalDirectory)> {
@@ -573,8 +581,7 @@ impl CodeGraph {
 
     // ── Internal ────────────────────────────────────────────
 
-    fn link_extends(&mut self) {
-        let tracer = crate::v2::trace::thread_tracer();
+    fn link_extends(&mut self, tracer: &crate::v2::trace::Tracer) {
         let mut edges = Vec::new();
 
         for idx in self.graph.node_indices() {
@@ -585,10 +592,31 @@ impl CodeGraph {
                 let child_fqn = self.strings.get(self.defs[id.0 as usize].fqn).to_string();
                 for &super_id in &meta.super_types {
                     let super_name = self.strings.get(super_id);
-                    let targets = self.resolve_type_to_nodes(super_name);
+                    let mut targets = self.resolve_scope_nodes(super_name);
+                    targets.retain(|t| *t != idx);
+                    // Disambiguate: when multiple candidates share a name,
+                    // prefer the one closest to the child's scope (longest
+                    // common FQN prefix) that isn't nested under the child.
+                    if targets.len() > 1 {
+                        let child_prefix = format!("{}.", child_fqn);
+                        targets.sort_by(|&a, &b| {
+                            let a_fqn = self.def_fqn(a);
+                            let b_fqn = self.def_fqn(b);
+                            let a_nested = a_fqn.starts_with(&child_prefix);
+                            let b_nested = b_fqn.starts_with(&child_prefix);
+                            // Non-nested before nested
+                            a_nested.cmp(&b_nested).then_with(|| {
+                                // Among non-nested: longest common prefix with
+                                // child_fqn wins (closer scope)
+                                let a_common = common_prefix_len(a_fqn, &child_fqn);
+                                let b_common = common_prefix_len(b_fqn, &child_fqn);
+                                b_common.cmp(&a_common)
+                            })
+                        });
+                        targets.truncate(1);
+                    }
                     let resolved_fqns: Vec<String> = targets
                         .iter()
-                        .filter(|&&t| t != idx)
                         .filter_map(|&t| {
                             self.graph[t]
                                 .def_id()
@@ -601,9 +629,7 @@ impl CodeGraph {
                         resolved_to: resolved_fqns,
                     });
                     for &target in &targets {
-                        if target != idx {
-                            edges.push((idx, target));
-                        }
+                        edges.push((idx, target));
                     }
                 }
             }
@@ -622,7 +648,10 @@ impl CodeGraph {
         }
     }
 
-    fn resolve_type_to_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
+    /// Resolve a type name to graph nodes. Tries FQN index first, then
+    /// name index, then qualified name resolution (split on the def's own
+    /// FQN separator and resolve via nested index).
+    pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
         let by_fqn = self
             .indexes
             .by_fqn
@@ -630,9 +659,52 @@ impl CodeGraph {
         if !by_fqn.is_empty() {
             return by_fqn;
         }
-        self.indexes
+        let by_name = self
+            .indexes
             .by_name
-            .lookup(name, |idx| self.def_name(idx) == name)
+            .lookup(name, |idx| self.def_name(idx) == name);
+        if !by_name.is_empty() {
+            return by_name;
+        }
+        // Qualified bare name (e.g. "Child.GrandChild"): resolve first
+        // segment by name to find a def, use that def's fqn_sep as the
+        // separator, then nested lookup for the remaining segment.
+        // Try common separators to find the split point.
+        for sep in &[".", "::"] {
+            let segments: Vec<&str> = name.split(sep).collect();
+            if segments.len() < 2 {
+                continue;
+            }
+            let mut current = self
+                .indexes
+                .by_name
+                .lookup(segments[0], |idx| self.def_name(idx) == segments[0]);
+            if current.is_empty() {
+                continue;
+            }
+            for &segment in &segments[1..] {
+                let mut next = SmallVec::new();
+                for &node in &current {
+                    let fqn = self.def_fqn(node);
+                    let mut found = Vec::new();
+                    self.indexes.nested.lookup_into(
+                        fqn,
+                        segment,
+                        |idx| self.def_name(idx) == segment,
+                        &mut found,
+                    );
+                    next.extend(found);
+                }
+                current = next;
+                if current.is_empty() {
+                    break;
+                }
+            }
+            if !current.is_empty() {
+                return current;
+            }
+        }
+        SmallVec::new()
     }
 
     /// Compute stable IDs for all nodes. Returns a dense Vec indexed by
@@ -850,7 +922,8 @@ mod tests {
             let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
             cg.add_file(path, ext, Language::Python, 100, defs, &[]);
         }
-        cg.finalize();
+        let tracer = crate::v2::trace::Tracer::new(false);
+        cg.finalize(&tracer);
         cg
     }
 

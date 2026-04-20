@@ -34,8 +34,15 @@ fn java_super_types(node: &N<'_>) -> Vec<String> {
     }
     if let Some(interfaces) = node.field("interfaces") {
         for child in interfaces.children() {
-            if type_kinds.iter().any(|&k| k == child.kind().as_ref()) {
+            let ck = child.kind();
+            if type_kinds.iter().any(|&k| k == ck.as_ref()) {
                 result.push(child.text().to_string());
+            } else if ck.as_ref() == "type_list" {
+                for inner in child.children() {
+                    if type_kinds.iter().any(|&k| k == inner.kind().as_ref()) {
+                        result.push(inner.text().to_string());
+                    }
+                }
             }
         }
     }
@@ -60,6 +67,14 @@ impl DslLanguage for JavaDsl {
         Language::Java
     }
 
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            return_kinds: &["return_statement"],
+            adopt_sibling_refs: &["marker_annotation", "annotation"],
+            ..LanguageHooks::default()
+        }
+    }
+
     fn scopes() -> Vec<ScopeRule> {
         let class_meta = || metadata().super_types(java_super_types);
 
@@ -82,6 +97,14 @@ impl DslLanguage for JavaDsl {
             scope("enum_constant", "EnumConstant")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
+            scope("field_declaration", "Field")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .name_from(field("declarator").field("name"))
+                .metadata(
+                    metadata()
+                        .type_annotation(field("type").inner("type_arguments", "type_identifier")),
+                ),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("method_declaration", "Method")
                 .def_kind(DefKind::Method)
@@ -101,7 +124,17 @@ impl DslLanguage for JavaDsl {
             reference("method_invocation")
                 .name_from(field("name"))
                 .receiver("object"),
-            reference("object_creation_expression").name_from(field("type")),
+            // Simple constructor: new Foo() — extract type name directly
+            reference("object_creation_expression")
+                .name_from(field("type").inner("type_arguments", "type_identifier"))
+                .when(!has_descendant("scoped_type_identifier")),
+            // Qualified constructor: new Outer.Inner() — name is last segment,
+            // receiver is first segment. Chain becomes [Ident("Outer"), Call("Inner")]
+            // and the resolver looks up Inner as a nested member of Outer.
+            reference("object_creation_expression")
+                .name_from(field("type").nth(Child, Kind("type_identifier"), -1))
+                .when(has_descendant("scoped_type_identifier"))
+                .receiver_via(field("type").nth(Child, Kind("type_identifier"), 0)),
             // Bare type references: declarations, casts, instanceof, annotations.
             // Skip inside object_creation_expression (already tracked above).
             reference("type_identifier")
@@ -153,7 +186,11 @@ impl DslLanguage for JavaDsl {
             ident_kinds: &["identifier", "type_identifier"],
             this_kinds: &["this"],
             super_kinds: &["super"],
-            field_access: &[("field_access", "object", "field")],
+            field_access: vec![FieldAccessEntry {
+                kind: "field_access",
+                object: field("object"),
+                member: field("field"),
+            }],
             constructor: &[("object_creation_expression", "type")],
             qualified_type_kinds: &["scoped_type_identifier"],
         })
@@ -170,18 +207,26 @@ impl DslLanguage for JavaDsl {
         ];
         let java_type = |rule: BindingRule| {
             rule.typed(
-                vec![field("type").inner("type_arguments", "type_identifier")],
+                vec![
+                    // Dotted types (Outer.Inner): navigate to type field, match scoped_type_identifier,
+                    // emit full text. The engine resolves first segment via imports, appends rest.
+                    Extract::one(Field("type"), Kind("scoped_type_identifier")),
+                    // Simple types (Foo): strip generics, extract type_identifier text
+                    field("type").inner("type_arguments", "type_identifier"),
+                ],
                 skip,
             )
         };
         vec![
             java_type(
                 binding("local_variable_declaration", BindingKind::Assignment)
-                    .name_from(&["declarator", "name"]),
+                    .name_from(&["declarator", "name"])
+                    .value_from_extract(field("declarator").field("value")),
             ),
             java_type(
                 binding("field_declaration", BindingKind::Assignment)
                     .name_from(&["declarator", "name"])
+                    .value_from_extract(field("declarator").field("value"))
                     .instance_attrs(&["this."]),
             ),
             java_type(

@@ -27,7 +27,7 @@ tests:
   # ── J2: test_java_reference_resolution_to_imported_symbol ──
 
   - name: "Main.main -> ArrayList (imported symbol)"
-    skip: true
+    
     query: |
       MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'
@@ -38,7 +38,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Main.main -> List (imported symbol)"
-    skip: true
+    
     query: |
       MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'com.example.app.Main.main'

@@ -123,7 +123,11 @@ impl DslLanguage for GoDsl {
             ident_kinds: &["identifier", "field_identifier", "type_identifier"],
             this_kinds: &[],
             super_kinds: &[],
-            field_access: &[("selector_expression", "operand", "field")],
+            field_access: vec![FieldAccessEntry {
+                kind: "selector_expression",
+                object: field("operand"),
+                member: field("field"),
+            }],
             constructor: &[("composite_literal", "type")],
             qualified_type_kinds: &[],
         })

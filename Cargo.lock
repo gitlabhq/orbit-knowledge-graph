@@ -5833,6 +5833,7 @@ dependencies = [
  "globset",
  "lance-graph",
  "petgraph 0.8.3",
+ "rayon",
  "rustc-hash",
  "serde",
  "serde_json",

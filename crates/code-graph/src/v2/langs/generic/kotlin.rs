@@ -5,7 +5,7 @@ use crate::v2::types::DefKind;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::Extract;
-use treesitter_visit::extract::{child_of_kind, default_name, field, no_extract, text};
+use treesitter_visit::extract::{child_of_kind, constant, default_name, field, no_extract, text};
 use treesitter_visit::predicate::*;
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -24,25 +24,46 @@ pub struct KotlinDsl;
 
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
+fn extract_user_type(node: &N<'_>) -> Option<String> {
+    // Look for user_type in direct children first, then in constructor_invocation
+    if let Some(ut) = node.children().find(|c| c.kind() == "user_type") {
+        return Some(ut.text().to_string());
+    }
+    if let Some(ci) = node
+        .children()
+        .find(|c| c.kind() == "constructor_invocation")
+        && let Some(ut) = ci.children().find(|c| c.kind() == "user_type")
+    {
+        return Some(ut.text().to_string());
+    }
+    None
+}
+
+fn extract_delegation_specifier(spec: &N<'_>, result: &mut Vec<String>) {
+    let sk = spec.kind();
+    if sk == "delegation_specifier" || sk == "constructor_invocation" {
+        let text = extract_user_type(spec).unwrap_or_else(|| spec.text().to_string());
+        if !text.is_empty() && text != "," {
+            result.push(text);
+        }
+    } else if sk == "user_type" {
+        result.push(spec.text().to_string());
+    }
+}
+
 fn kotlin_super_types(node: &N<'_>) -> Vec<String> {
     let mut result = Vec::new();
     for child in node.children() {
-        if child.kind() == "delegation_specifiers" {
+        let ck = child.kind();
+        if ck == "delegation_specifiers" {
             for spec in child.children() {
-                let sk = spec.kind();
-                if sk == "delegation_specifier" || sk == "constructor_invocation" {
-                    let text = spec
-                        .children()
-                        .find(|c| c.kind() == "user_type")
-                        .map(|n| n.text().to_string())
-                        .unwrap_or_else(|| spec.text().to_string());
-                    if !text.is_empty() && text != "," {
-                        result.push(text);
-                    }
-                } else if sk == "user_type" {
-                    result.push(spec.text().to_string());
-                }
+                extract_delegation_specifier(&spec, &mut result);
             }
+        } else if ck == "delegation_specifier"
+            || ck == "constructor_invocation"
+            || ck == "user_type"
+        {
+            extract_delegation_specifier(&child, &mut result);
         }
     }
     result
@@ -87,9 +108,14 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier"))
                 .metadata(metadata().super_types(kotlin_super_types)),
-            scopes(&["object_declaration", "companion_object"], "Object")
+            scope("object_declaration", "Object")
                 .def_kind(DefKind::Class)
                 .name_from(child_of_kind("type_identifier")),
+            // Companion objects: named (companion object Foo {}) uses type_identifier,
+            // anonymous (companion object {}) defaults to "Companion".
+            scope("companion_object", "Object")
+                .def_kind(DefKind::Class)
+                .name_from_or(child_of_kind("type_identifier"), "Companion"),
             // Extension function: has receiver type before the dot
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
@@ -129,6 +155,24 @@ impl DslLanguage for KotlinDsl {
                 .receiver_via(child_of_kind("navigation_expression").first_named()),
             // Bare type references: declarations, type casts, is checks
             reference("type_identifier").name_from(text()),
+            // Operator desugaring: binary operators map to named methods.
+            // The left operand is the receiver, the method name is derived from the operator.
+            reference("additive_expression")
+                .name_from(constant("plus"))
+                .when(has_child_text("+"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("additive_expression")
+                .name_from(constant("minus"))
+                .when(has_child_text("-"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("multiplicative_expression")
+                .name_from(constant("times"))
+                .when(has_child_text("*"))
+                .receiver_via(child_of_kind("simple_identifier")),
+            reference("multiplicative_expression")
+                .name_from(constant("div"))
+                .when(has_child_text("/"))
+                .receiver_via(child_of_kind("simple_identifier")),
         ]
     }
 
@@ -137,7 +181,11 @@ impl DslLanguage for KotlinDsl {
             ident_kinds: &["simple_identifier"],
             this_kinds: &["this_expression"],
             super_kinds: &["super_expression"],
-            field_access: &[],
+            field_access: vec![FieldAccessEntry {
+                kind: "navigation_expression",
+                object: Extract::one(Child, Named),
+                member: child_of_kind("navigation_suffix").then(default_name()),
+            }],
             constructor: &[],
             qualified_type_kinds: &[],
         })
@@ -145,10 +193,10 @@ impl DslLanguage for KotlinDsl {
 
     fn imports() -> Vec<ImportRule> {
         fn kotlin_import_classify(node: &N<'_>) -> &'static str {
-            if node
-                .children()
-                .any(|c| c.kind() == "MULT" || c.text() == "*")
-            {
+            if node.children().any(|c| {
+                let k = c.kind();
+                k == "MULT" || k == "wildcard_import" || c.text() == "*"
+            }) {
                 return "WildcardImport";
             }
             if node.has(Child, Kind("import_alias")) {
@@ -160,7 +208,8 @@ impl DslLanguage for KotlinDsl {
         vec![
             import("import_header")
                 .classify(kotlin_import_classify)
-                .split_last("."),
+                .split_last(".")
+                .wildcard_child("wildcard_import"),
         ]
     }
 
@@ -176,6 +225,14 @@ impl DslLanguage for KotlinDsl {
         let kotlin_type = |rule: BindingRule| {
             rule.typed(
                 vec![
+                    // variable_declaration > user_type — extract full text so
+                    // dotted types like Parent.GrandChild are preserved. The
+                    // engine's dotted type resolution splits on separator and
+                    // resolves the first segment via imports.
+                    child_of_kind("variable_declaration")
+                        .then(child_of_kind("user_type"))
+                        .then(text()),
+                    // direct user_type child (for parameters)
                     field("user_type").inner("type_arguments", "type_identifier"),
                     field("type"),
                 ],
@@ -183,14 +240,24 @@ impl DslLanguage for KotlinDsl {
             )
         };
         vec![
+            // val/var foo = Foo()
+            // Name is in variable_declaration > simple_identifier
+            // Value is the call_expression / navigation_expression / simple_identifier child
             kotlin_type(
                 binding("property_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .value_from("value"),
+                    .name_from_extract(
+                        child_of_kind("variable_declaration")
+                            .then(child_of_kind("simple_identifier")),
+                    )
+                    .value_from_extract(
+                        text()
+                            .nth(Child, Named, -1)
+                            .try_descendant("call_expression"),
+                    ),
             ),
             kotlin_type(
                 binding("variable_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
+                    .name_from(&["simple_identifier"])
                     .no_value(),
             ),
             kotlin_type(

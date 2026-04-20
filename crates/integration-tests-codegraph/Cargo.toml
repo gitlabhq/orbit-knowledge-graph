@@ -16,6 +16,7 @@ arrow = { workspace = true }
 arrow-ipc = { workspace = true }
 
 globset = { workspace = true }
+rayon = { workspace = true }
 petgraph = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
