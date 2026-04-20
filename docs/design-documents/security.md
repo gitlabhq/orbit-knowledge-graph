@@ -77,6 +77,40 @@ This layer is primarily intended for .com customers to ensure that they can only
 
 **The `gl_user` table exception**: The User entity is global (not namespace-scoped) and has no `traversal_path` column. It is listed in `skip_security_filter_for_entities` in the ontology. Users can only appear in query results through edge table joins, and edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through user joins.
 
+```plantuml
+@startuml
+skinparam rectangleBorderColor #666
+skinparam rectangleBackgroundColor #f9f9f9
+
+rectangle "Siphon CDC Ingestion" {
+  database "PostgreSQL" as PG
+  component "Siphon" as Siphon
+  PG --> Siphon
+}
+
+rectangle "ClickHouse Storage" {
+  collections "gl_project\n(traversal_path, id, ...)" as Projects
+  collections "gl_merge_request\n(traversal_path, id, ...)" as MRs
+  collections "gl_edge\n(traversal_path, source, target, ...)" as Edges
+  collections "gl_user\n(id, username, ...)\n[no traversal_path]" as Users
+}
+
+rectangle "Query Engine" {
+  component "SecurityPass\nInjects: startsWith(traversal_path, ?)" as Security
+  component "CheckPass\nVerifies all gl_* aliases filtered" as Check
+  Security --> Check
+}
+
+Siphon --> Projects : writes with\ntraversal_path
+Siphon --> MRs
+Siphon --> Edges
+Siphon --> Users
+Check --> Projects : queries with\nstartsWith filter
+Check --> MRs
+Check --> Edges
+@enduml
+```
+
 ## Layer 2: Query-Time Filtering with Traversal IDs
 
 While Layer 1 isolates top-level namespaces, Layer 2 provides fine-grained filtering within a namespace based on the user's group memberships. We leverage the GitLab hierarchical permission model using `traversal_ids`.
