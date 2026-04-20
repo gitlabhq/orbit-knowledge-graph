@@ -8,6 +8,12 @@ use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
+use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::{Node, SupportLang};
+
+type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 const GO_PRIMITIVE_TYPES: &[&str] = &[
     "int",
@@ -30,12 +36,6 @@ const GO_PRIMITIVE_TYPES: &[&str] = &[
     "rune",
     "error",
 ];
-use treesitter_visit::Axis::*;
-use treesitter_visit::Match::*;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
-
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 #[derive(Default)]
 pub struct GoDsl;

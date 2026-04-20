@@ -8,6 +8,8 @@
 
 use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
+use petgraph::algo::tarjan_scc;
+use petgraph::graph::{DiGraph, NodeIndex};
 use rustc_hash::{FxHashMap, FxHashSet};
 use smallvec::SmallVec;
 
@@ -560,6 +562,127 @@ impl<'a> SsaEngine<'a> {
         replacement
     }
 
+    /// Remove redundant phi SCCs (Algorithm 5, Section 3.2 of Braun et al.).
+    ///
+    /// After SSA construction and trivial phi removal, some phi nodes may
+    /// form cycles where they reference only each other plus one external
+    /// value. `try_remove_trivial_phi` can't detect these because each
+    /// individual phi sees two distinct operands (itself + another phi in
+    /// the cycle). Tarjan's SCC algorithm detects the cycle and collapses it.
+    ///
+    /// Call after `seal_remaining()`.
+    pub fn remove_redundant_phi_sccs(&mut self) {
+        let phi_ids: Vec<PhiId> = (0..self.phis.len()).map(PhiId).collect();
+        self.remove_redundant_phi_sccs_inner(&phi_ids, 0);
+    }
+
+    const MAX_SCC_DEPTH: usize = 32;
+
+    fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId], depth: usize) {
+        if phi_ids.len() < 2 {
+            return;
+        }
+        if depth >= Self::MAX_SCC_DEPTH {
+            tracing::error!(
+                depth,
+                phis = phi_ids.len(),
+                "SCC phi elimination hit max recursion depth"
+            );
+            return;
+        }
+
+        // Build a DiGraph of phi-to-phi edges for SCC computation.
+        let mut phi_graph = DiGraph::<PhiId, ()>::new();
+        let mut phi_to_node: FxHashMap<PhiId, NodeIndex> = FxHashMap::default();
+
+        for &pid in phi_ids {
+            phi_to_node.insert(pid, phi_graph.add_node(pid));
+        }
+        for &pid in phi_ids {
+            for op in &self.phis[pid.0].operands {
+                if let SsaValue::Phi(target) = op
+                    && let (Some(&src), Some(&tgt)) =
+                        (phi_to_node.get(&pid), phi_to_node.get(target))
+                {
+                    phi_graph.add_edge(src, tgt, ());
+                }
+            }
+        }
+
+        // tarjan_scc returns SCCs in reverse topological order.
+        let sccs = tarjan_scc(&phi_graph);
+
+        for scc_nodes in &sccs {
+            if scc_nodes.len() <= 1 {
+                continue;
+            }
+
+            let scc: Vec<PhiId> = scc_nodes.iter().map(|&n| phi_graph[n]).collect();
+            let scc_set: FxHashSet<PhiId> = scc.iter().copied().collect();
+
+            // Collect external operands (values outside the SCC).
+            let mut outer_values: FxHashSet<SsaValue<'a>> = FxHashSet::default();
+            let mut inner_phis: Vec<PhiId> = Vec::new();
+
+            for &pid in &scc {
+                let mut has_external = false;
+                for op in &self.phis[pid.0].operands {
+                    match op {
+                        SsaValue::Phi(p) if scc_set.contains(p) => {}
+                        other => {
+                            outer_values.insert(other.clone());
+                            has_external = true;
+                        }
+                    }
+                }
+                if !has_external {
+                    inner_phis.push(pid);
+                }
+            }
+
+            if outer_values.len() == 1 {
+                // All phis in the SCC produce the same external value — collapse.
+                let replacement = outer_values.into_iter().next().unwrap();
+                self.tracer.event(TraceEvent::SsaSccCollapse {
+                    scc_size: scc.len(),
+                    replacement: replacement.trace_display(),
+                });
+                let phi_vals: Vec<SsaValue<'a>> = scc.iter().map(|&p| SsaValue::Phi(p)).collect();
+                for &pid in &scc {
+                    // Update current_def
+                    let variable = self.phis[pid.0].variable;
+                    let block = self.phis[pid.0].block;
+                    if let Some(block_defs) = self.current_def.get_mut(&variable)
+                        && block_defs.get(&block) == Some(&SsaValue::Phi(pid))
+                    {
+                        block_defs.insert(block, replacement.clone());
+                    }
+                    self.stats.phis_trivial += 1;
+                }
+                // Replace all references to SCC phis in ALL phi operands.
+                for phi in &mut self.phis {
+                    for op in &mut phi.operands {
+                        if phi_vals.contains(op) {
+                            *op = replacement.clone();
+                        }
+                    }
+                    // Invalidate witnesses that reference collapsed phis.
+                    for w in &mut phi.witnesses {
+                        if let Some(wv) = w
+                            && phi_vals.contains(wv)
+                        {
+                            *w = None;
+                        }
+                    }
+                }
+            } else if outer_values.len() > 1 && !inner_phis.is_empty() {
+                // Multiple external values — recurse on inner phis that
+                // have no external operands (they might form a sub-SCC).
+                self.remove_redundant_phi_sccs_inner(&inner_phis, depth + 1);
+            }
+        }
+    }
+
     /// Expand a value into its concrete reaching definitions.
     /// Phi nodes are recursively expanded. Cycles are handled via visited set.
     fn resolve_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
@@ -907,5 +1030,91 @@ mod tests {
 
         assert_eq!(r1.values.as_slice(), &[SsaValue::ImportRef(0)]);
         assert_eq!(r2.values.as_slice(), &[SsaValue::LocalDef(0)]);
+    }
+
+    /// Irreducible control flow: two blocks that are mutual predecessors,
+    /// each defining x via phi. Both phis reference each other + the same
+    /// external value. SCC removal should collapse both to that value.
+    ///
+    /// ```text
+    ///   entry (x = LocalDef(0))
+    ///     |         |
+    ///     v         v
+    ///   left ←→ right
+    ///     |         |
+    ///     v         v
+    ///       exit
+    /// ```
+    #[test]
+    fn scc_mutual_phi_collapse() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        let left = ssa.add_block();
+        let right = ssa.add_block();
+        let exit = ssa.add_block();
+
+        // entry → left, entry → right
+        ssa.add_predecessor(left, entry);
+        ssa.add_predecessor(right, entry);
+        // left ←→ right (irreducible)
+        ssa.add_predecessor(left, right);
+        ssa.add_predecessor(right, left);
+        // both → exit
+        ssa.add_predecessor(exit, left);
+        ssa.add_predecessor(exit, right);
+
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+
+        ssa.seal_block(entry);
+        ssa.seal_block(left);
+        ssa.seal_block(right);
+        ssa.seal_block(exit);
+
+        // Before SCC removal: reading x in exit should produce LocalDef(0)
+        // but the phis in left/right form a cycle referencing each other.
+        // trivial phi removal can't collapse them because each phi sees
+        // two operands: LocalDef(0) + Phi(other).
+        // SCC removal detects the cycle and collapses both to LocalDef(0).
+        ssa.remove_redundant_phi_sccs();
+
+        let result = ssa.read_variable_stateless("x", exit);
+        assert_eq!(result.values.as_slice(), &[SsaValue::LocalDef(0)]);
+    }
+
+    /// SCC with multiple external values — should NOT collapse.
+    #[test]
+    fn scc_no_collapse_multiple_values() {
+        let mut ssa = SsaEngine::new();
+        let entry = ssa.add_block();
+        let left = ssa.add_block();
+        let right = ssa.add_block();
+        let exit = ssa.add_block();
+
+        ssa.add_predecessor(left, entry);
+        ssa.add_predecessor(right, entry);
+        ssa.add_predecessor(left, right);
+        ssa.add_predecessor(right, left);
+        ssa.add_predecessor(exit, left);
+        ssa.add_predecessor(exit, right);
+
+        ssa.write_variable("x", entry, SsaValue::LocalDef(0));
+        // Write a different value in one of the cycle blocks
+        ssa.write_variable("x", left, SsaValue::LocalDef(1));
+
+        ssa.seal_block(entry);
+        ssa.seal_block(left);
+        ssa.seal_block(right);
+        ssa.seal_block(exit);
+
+        ssa.remove_redundant_phi_sccs();
+
+        let result = ssa.read_variable_stateless("x", exit);
+        // Should have both values — SCC not collapsed
+        assert!(
+            result.values.contains(&SsaValue::LocalDef(0))
+                && result.values.contains(&SsaValue::LocalDef(1)),
+            "SCC with multiple external values must not be collapsed: got {:?}",
+            result.values
+        );
     }
 }
