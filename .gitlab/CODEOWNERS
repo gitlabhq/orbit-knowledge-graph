@@ -1,5 +1,5 @@
 # Default: core team reviews everything
-* @michaelusa @bohdanpk @jgdoyon @michaelangeloio @dgruzd
+* @michaelusa @bohdanpk @jgdoyon1 @michaelangeloio @dgruzd
 
 # Auth and security
 /crates/gkg-server/src/auth/ @michaelangeloio @bohdanpk @dgruzd
@@ -12,4 +12,4 @@
 /crates/query-engine/ @michaelusa @michaelangeloio
 
 # Proto / API surface
-/crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon
+/crates/gkg-server/proto/ @bohdanpk @michaelangeloio @dgruzd @jgdoyon1
