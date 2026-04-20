@@ -128,7 +128,7 @@ fn print_result(label: &str, query: &str, batch: &RecordBatch) {
         let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         let mut builder = Builder::new();
         builder.push_record(col_names);
-        for row in 0..batch.num_rows().min(20) {
+        for row in 0..batch.num_rows() {
             let vals: Vec<String> = (0..batch.num_columns())
                 .map(|col| format_cell(batch.column(col).as_ref(), row))
                 .collect();
@@ -137,9 +137,6 @@ fn print_result(label: &str, query: &str, batch: &RecordBatch) {
         let table = Table::from(builder).to_string();
         for line in table.lines() {
             eprintln!("  {line}");
-        }
-        if batch.num_rows() > 20 {
-            eprintln!("  ... +{} more rows", batch.num_rows() - 20);
         }
     }
 }
