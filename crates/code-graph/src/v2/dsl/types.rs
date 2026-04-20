@@ -558,6 +558,28 @@ impl BindingRule {
         Some(current.text().to_string())
     }
 
+    /// Extract ALL names from a binding node. For nodes with multiple
+    /// name fields (e.g. Go `func Foo(a, b Repository)` where the
+    /// `parameter_declaration` has two `name` children), returns all.
+    /// Falls back to `extract_name` for single-name bindings.
+    pub fn extract_names(&self, node: &N<'_>) -> Vec<String> {
+        if self.name_extract.is_some() {
+            return self.extract_name(node).into_iter().collect();
+        }
+        // For multi-field names: if the first field has multiple children
+        // with the same field name, collect all of them.
+        if let Some(&first_field) = self.name_fields.first() {
+            let field_children: Vec<_> = node.field_children(first_field).collect();
+            if field_children.len() > 1 && self.name_fields.len() == 1 {
+                return field_children
+                    .iter()
+                    .map(|c| c.text().to_string())
+                    .collect();
+            }
+        }
+        self.extract_name(node).into_iter().collect()
+    }
+
     /// Extract a type annotation from the AST node using the configured Extract.
     pub fn extract_type_annotation(&self, node: &N<'_>) -> Option<String> {
         let te = self.type_extract.as_ref()?;

@@ -1,5 +1,4 @@
 name: "Java v1 parity — Main.main resolution"
-trace: true
 fixtures:
   - path: com/example/app/Main.java
     content: |

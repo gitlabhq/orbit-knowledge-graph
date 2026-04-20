@@ -6,8 +6,30 @@ use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
 
-use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
+use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+
+const GO_PRIMITIVE_TYPES: &[&str] = &[
+    "int",
+    "int8",
+    "int16",
+    "int32",
+    "int64",
+    "uint",
+    "uint8",
+    "uint16",
+    "uint32",
+    "uint64",
+    "float32",
+    "float64",
+    "complex64",
+    "complex128",
+    "string",
+    "bool",
+    "byte",
+    "rune",
+    "error",
+];
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::tree_sitter::StrDoc;
@@ -42,6 +64,12 @@ impl DslLanguage for GoDsl {
                         ),
                     ),
                 ),
+            // Interface method specs — nested inside the interface scope,
+            // so they get FQNs like Repository.Get.
+            scope("method_elem", "Method")
+                .def_kind(DefKind::Method)
+                .no_scope()
+                .metadata(metadata().return_type(field("result"))),
             // Unconditional fallback first — reverse iteration means conditional
             // rules (Struct, Interface) are checked before the fallback.
             scope("type_spec", "Type").def_kind(DefKind::Other),
@@ -80,21 +108,43 @@ impl DslLanguage for GoDsl {
         vec![
             binding("short_var_declaration", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right"),
+                .value_from("right")
+                .typed(
+                    vec![
+                        field("right")
+                            .then(child_of_kind("composite_literal"))
+                            .then(field("type")),
+                    ],
+                    GO_PRIMITIVE_TYPES,
+                ),
             binding("var_spec", BindingKind::Assignment)
                 .name_from(&["name"])
                 .value_from("value")
                 .typed(vec![field("type")], &[]),
             binding("assignment_statement", BindingKind::Assignment)
                 .name_from(&["left"])
-                .value_from("right"),
+                .value_from("right")
+                .typed(
+                    vec![
+                        field("right")
+                            .then(child_of_kind("composite_literal"))
+                            .then(field("type")),
+                    ],
+                    GO_PRIMITIVE_TYPES,
+                ),
+            binding("parameter_declaration", BindingKind::Assignment)
+                .name_from(&["name"])
+                .typed(
+                    vec![field("type").inner("pointer_type", "type_identifier")],
+                    GO_PRIMITIVE_TYPES,
+                ),
         ]
     }
 
     fn branches() -> Vec<BranchRule> {
         vec![
             branch("if_statement")
-                .branches(&["consequence", "alternative"])
+                .branches(&["block"])
                 .condition("condition"),
             branch("expression_switch_statement")
                 .branches(&["expression_case", "default_case"])
@@ -232,30 +282,6 @@ impl HasRules for GoRules {
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::TypeFlow {
-                type_fields: &["type"],
-                skip_types: &[
-                    "int",
-                    "int8",
-                    "int16",
-                    "int32",
-                    "int64",
-                    "uint",
-                    "uint8",
-                    "uint16",
-                    "uint32",
-                    "uint64",
-                    "float32",
-                    "float64",
-                    "complex64",
-                    "complex128",
-                    "string",
-                    "bool",
-                    "byte",
-                    "rune",
-                    "error",
-                ],
-            },
             ReceiverMode::None,
             ".",
             &[],

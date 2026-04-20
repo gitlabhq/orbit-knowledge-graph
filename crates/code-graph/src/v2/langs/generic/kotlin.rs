@@ -14,7 +14,7 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -323,13 +323,6 @@ impl HasRules for KotlinRules {
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::TypeFlow {
-                type_fields: &["user_type", "type"],
-                skip_types: &[
-                    "Int", "Long", "Short", "Byte", "Float", "Double", "Boolean", "Char", "Unit",
-                    "Nothing", "String",
-                ],
-            },
             ReceiverMode::Keyword,
             ".",
             &["this", "self"],

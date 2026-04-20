@@ -275,6 +275,22 @@ impl CodeGraph {
     /// iteration order varies across runs. This causes flaky resolution when
     /// two classes share a name (e.g. `kotlin_v1_same_class_name`).
     pub fn finalize(&mut self, tracer: &crate::v2::trace::Tracer) {
+        // Stabilize index order so lookups are deterministic regardless
+        // of par_iter file processing order. Sort by FQN since NodeIndex
+        // assignment is also insertion-order-dependent.
+        let defs = &self.defs;
+        let strings = &self.strings;
+        let graph = &self.graph;
+        let fqn_of = |idx: NodeIndex| -> String {
+            match &graph[idx] {
+                GraphNode::Definition { id, .. } => {
+                    strings.get(defs[id.0 as usize].fqn).to_string()
+                }
+                _ => String::new(),
+            }
+        };
+        self.indexes.by_name.sort_all(fqn_of);
+        self.indexes.by_fqn.sort_all(fqn_of);
         self.link_extends(tracer);
         self.build_ancestor_table(tracer);
     }
@@ -583,6 +599,12 @@ impl CodeGraph {
     #[inline]
     pub fn def_kind(&self, idx: NodeIndex) -> crate::v2::types::DefKind {
         self.def(idx).kind
+    }
+
+    /// Returns the ancestor chain for a node, if any.
+    #[inline]
+    pub fn ancestors(&self, idx: NodeIndex) -> Option<&[NodeIndex]> {
+        self.indexes.ancestors.get(&idx).map(|v| v.as_slice())
     }
 
     // ── Iterators ───────────────────────────────────────────

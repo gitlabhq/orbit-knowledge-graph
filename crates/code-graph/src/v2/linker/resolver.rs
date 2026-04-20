@@ -302,9 +302,11 @@ impl<'a> ResolveCtx<'a> {
             }
         }
 
-        // Fallback: find methods whose receiver_type matches scope_fqn.
-        // This handles Go methods (`func (s *Service) Run()`) and
-        // Kotlin extension functions (`fun String.toTitleCase()`).
+        // Fallback: find methods whose receiver_type matches scope_fqn
+        // or any of its ancestors. This handles Go methods
+        // (`func (s *Service) Run()`) and promoted methods from embedded
+        // structs (`Service` embeds `Logger`, `svc.Log()` resolves via
+        // Logger's receiver type).
         if result.is_empty() {
             self.graph.lookup_by_receiver_type(
                 scope_fqn,
@@ -312,6 +314,26 @@ impl<'a> ResolveCtx<'a> {
                 self.rules.fqn_separator,
                 &mut result,
             );
+            // Walk ancestors for receiver type lookup (struct embedding,
+            // extension functions on parent types). Collects ALL matches
+            // across the full ancestor chain — doesn't early-exit so that
+            // diamond/multiple inheritance cases surface all candidates.
+            if result.is_empty() {
+                let scope_nodes = self.graph.resolve_scope_nodes(scope_fqn);
+                for &scope_node in &scope_nodes {
+                    if let Some(ancestors) = self.graph.ancestors(scope_node) {
+                        for &ancestor in ancestors {
+                            let ancestor_fqn = self.graph.def_fqn(ancestor);
+                            self.graph.lookup_by_receiver_type(
+                                ancestor_fqn,
+                                member_name,
+                                self.rules.fqn_separator,
+                                &mut result,
+                            );
+                        }
+                    }
+                }
+            }
             if !result.is_empty() {
                 self.tracer.event(TraceEvent::ReceiverTypeLookup {
                     type_name: scope_fqn.to_string(),

@@ -121,6 +121,15 @@ yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");
 yaml_test!(go_struct_embedding, "go/struct_embedding.yaml");
+yaml_test!(go_comprehensive, "go/comprehensive.yaml");
+yaml_test!(go_interfaces, "go/interfaces.yaml");
+yaml_test!(go_multi_return, "go/multi_return.yaml");
+yaml_test!(go_nested_calls, "go/nested_calls.yaml");
+yaml_test!(go_composite_literals, "go/composite_literals.yaml");
+yaml_test!(go_scope_and_branching, "go/scope_and_branching.yaml");
+yaml_test!(go_multiple_embedding, "go/multiple_embedding.yaml");
+yaml_test!(go_higher_order, "go/higher_order.yaml");
+yaml_test!(go_var_reassignment, "go/var_reassignment.yaml");
 
 // Java v1 parity
 yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");

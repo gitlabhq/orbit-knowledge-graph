@@ -1,5 +1,4 @@
 name: "Java v1 parity — same class name in same package"
-trace: true
 fixtures:
   - path: com/example/filter/Filter.java
     content: |

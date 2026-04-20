@@ -201,6 +201,13 @@ impl<'a> SsaEngine<'a> {
     /// Record a variable definition: `variable` is defined as `value` in `block`.
     /// On-the-fly copy propagation (Section 3.1): if the value is an alias
     /// to another variable, resolve it immediately instead of deferring.
+    /// Check if a variable has been written in a specific block.
+    pub(crate) fn has_variable_in_block(&self, variable: &str, block: BlockId) -> bool {
+        self.current_def
+            .get(variable)
+            .is_some_and(|blocks| blocks.contains_key(&block))
+    }
+
     pub(crate) fn write_variable(
         &mut self,
         variable: &'a str,
