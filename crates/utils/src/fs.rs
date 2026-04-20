@@ -245,9 +245,9 @@ mod tests {
             let err = validate_symlinks(&root);
             assert!(err.is_err());
             assert!(
-                !root.join("bad1").symlink_metadata().is_ok()
-                    && !root.join("bad2").symlink_metadata().is_ok()
-                    && !root.join("bad3").symlink_metadata().is_ok(),
+                root.join("bad1").symlink_metadata().is_err()
+                    && root.join("bad2").symlink_metadata().is_err()
+                    && root.join("bad3").symlink_metadata().is_err(),
                 "all bad symlinks must be deleted, not just the first"
             );
         }
