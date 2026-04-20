@@ -32,7 +32,6 @@ impl<D: crate::v2::dsl::types::DslLanguage> HasRules for NoRules<D> {
             spec,
             vec![],
             vec![],
-            ChainMode::ValueFlow,
             ReceiverMode::None,
             D::language().fqn_separator(),
             &[],
@@ -65,20 +64,6 @@ pub enum ImportStrategy {
 }
 
 // ── Chain / receiver ────────────────────────────────────────────
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum ChainMode {
-    /// Follow value aliases: `x = y` → resolve through SSA.
-    ValueFlow,
-    /// Follow declared types: `Type x = ...` → `x.member` looks up on `Type`.
-    TypeFlow {
-        /// Tree-sitter field names holding the type annotation on a
-        /// declaration node (e.g. `["type"]` for Java, `["user_type"]` for Kotlin).
-        type_fields: &'static [&'static str],
-        /// Type names to skip (no member lookup). Primitives, builtins.
-        skip_types: &'static [&'static str],
-    },
-}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ReceiverMode {
@@ -124,7 +109,6 @@ pub struct ResolutionRules {
     // Resolution
     pub bare_stages: Vec<ResolveStage>,
     pub import_strategies: Vec<ImportStrategy>,
-    pub chain_mode: ChainMode,
     pub receiver: ReceiverMode,
     pub fqn_separator: &'static str,
 
@@ -162,7 +146,6 @@ impl ResolutionRules {
         language_spec: crate::v2::dsl::types::LanguageSpec,
         bare_stages: Vec<ResolveStage>,
         import_strategies: Vec<ImportStrategy>,
-        chain_mode: ChainMode,
         receiver: ReceiverMode,
         fqn_separator: &'static str,
         self_names: &'static [&'static str],
@@ -173,7 +156,6 @@ impl ResolutionRules {
             scopes,
             bare_stages,
             import_strategies,
-            chain_mode,
             receiver,
             fqn_separator,
             self_names,

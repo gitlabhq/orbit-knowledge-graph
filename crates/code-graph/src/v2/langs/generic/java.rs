@@ -10,7 +10,7 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
@@ -315,13 +315,6 @@ impl HasRules for JavaRules {
                 ImportStrategy::SamePackage,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::TypeFlow {
-                type_fields: &["type"],
-                skip_types: &[
-                    "int", "long", "short", "byte", "float", "double", "boolean", "char", "void",
-                    "String",
-                ],
-            },
             ReceiverMode::Keyword,
             ".",
             &["this", "self"],

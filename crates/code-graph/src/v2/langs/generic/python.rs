@@ -13,7 +13,7 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ChainMode, ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -291,7 +291,6 @@ impl HasRules for PythonRules {
                 ImportStrategy::FilePath,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::ValueFlow,
             ReceiverMode::Convention {
                 instance_decorators: &[],
                 classmethod_decorators: &["classmethod"],

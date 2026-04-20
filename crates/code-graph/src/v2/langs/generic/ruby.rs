@@ -10,7 +10,7 @@ use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
 
-use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
+use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
@@ -273,7 +273,6 @@ impl HasRules for RubyRules {
                 ResolveStage::ImportStrategies,
             ],
             vec![ImportStrategy::ScopeFqnWalk, ImportStrategy::SameFile],
-            ChainMode::ValueFlow,
             ReceiverMode::None,
             "::",
             &["self"],

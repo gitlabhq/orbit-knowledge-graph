@@ -6,7 +6,7 @@ use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
 
-use crate::v2::linker::rules::{ChainMode, ImportStrategy, ReceiverMode, ResolveStage};
+use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -232,30 +232,6 @@ impl HasRules for GoRules {
                 ImportStrategy::ExplicitImport,
                 ImportStrategy::SameFile,
             ],
-            ChainMode::TypeFlow {
-                type_fields: &["type"],
-                skip_types: &[
-                    "int",
-                    "int8",
-                    "int16",
-                    "int32",
-                    "int64",
-                    "uint",
-                    "uint8",
-                    "uint16",
-                    "uint32",
-                    "uint64",
-                    "float32",
-                    "float64",
-                    "complex64",
-                    "complex128",
-                    "string",
-                    "bool",
-                    "byte",
-                    "rune",
-                    "error",
-                ],
-            },
             ReceiverMode::None,
             ".",
             &[],
