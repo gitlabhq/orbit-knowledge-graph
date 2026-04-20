@@ -398,11 +398,11 @@ fn create_resolver(
 
 fn base_resolve_options(
     probe: &WorkspaceProbe,
-    _root_dir: &Path,
+    root_dir: &Path,
     resolution_mode: JsResolutionMode,
     alias: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
 ) -> ResolveOptions {
-    let tsconfig = Some(probe.tsconfig_discovery());
+    let tsconfig = probe.tsconfig_discovery();
     let has_tsconfig = probe.has_tsconfig();
 
     let preferred = if probe.is_bun() {
@@ -443,6 +443,15 @@ fn base_resolve_options(
         extension_alias,
         tsconfig,
         alias,
+        // Bound every resolution to the repo clone. Any module that
+        // resolves outside `root_dir` (absolute alias, tsconfig `paths`
+        // escape, symlink target) is rejected by the resolver itself
+        // before we ever see it.
+        restrictions: vec![oxc_resolver::Restriction::Path(root_dir.to_path_buf())],
+        // Do not follow symlinks when resolving. A symlinked file
+        // committed in the repo should be treated as its own path so a
+        // downstream `strip_prefix(root_dir)` check stays sound.
+        symlinks: false,
         ..ResolveOptions::default()
     }
 }

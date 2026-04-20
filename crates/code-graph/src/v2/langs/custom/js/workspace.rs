@@ -86,16 +86,24 @@ impl WorkspaceProbe {
 
     /// Resolver configuration for the tsconfig/jsconfig the repo exposes.
     ///
-    /// `TsconfigDiscovery::Auto` only searches for `tsconfig.json`;
-    /// `jsconfig.json` is functionally identical but needs explicit wiring.
-    pub fn tsconfig_discovery(&self) -> TsconfigDiscovery {
+    /// Always `Manual` and pinned to a file inside the repo, or `None`
+    /// if neither config was discovered. `Auto` walks parent directories
+    /// past `root_dir` and would pick up any ambient `tsconfig.json` from
+    /// the server's filesystem; a hostile repo cannot make us honor a
+    /// tsconfig we did not find underneath `root_dir`.
+    pub fn tsconfig_discovery(&self) -> Option<TsconfigDiscovery> {
         if let Some(jsconfig) = &self.jsconfig_path {
-            return TsconfigDiscovery::Manual(TsconfigOptions {
+            return Some(TsconfigDiscovery::Manual(TsconfigOptions {
                 config_file: jsconfig.clone(),
                 references: TsconfigReferences::Auto,
-            });
+            }));
         }
-        TsconfigDiscovery::Auto
+        self.tsconfig_path.as_ref().map(|tsconfig| {
+            TsconfigDiscovery::Manual(TsconfigOptions {
+                config_file: tsconfig.clone(),
+                references: TsconfigReferences::Auto,
+            })
+        })
     }
 
     pub fn webpack_configs(&self) -> &[PathBuf] {
