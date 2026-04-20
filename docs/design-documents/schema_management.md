@@ -40,8 +40,9 @@ ClickHouse, not just table structure:
 - **Edge type renames**: e.g. `MERGED_BY` → `MERGED`. The `gl_edge.relationship_kind` column
   stores these as string values, so old rows remain with the old name while the compiler emits
   the new name. Without a bump, affected edges are silently missing from query results.
-- **ETL mapping changes**: any change to how the indexer transforms source data into stored
-  values (e.g. changing which field populates a column).
+- **ETL mapping changes**: column renames, enum value changes, FK rewiring. The ETL pipeline
+  is fully ontology-driven (`PlanInput` is built from `&Ontology`), so these are always
+  ontology YAML changes and the CI check catches them automatically.
 
 Changes that do **not** require a bump: ontology description updates, comments, formatting,
 documentation-only fields, or query-side-only changes (new filter operators, new query types).
