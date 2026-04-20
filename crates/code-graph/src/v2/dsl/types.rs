@@ -742,6 +742,11 @@ pub struct LanguageHooks {
     /// resolved absolute path, or None to keep the raw path.
     /// Handles Python's `from .models import User` → `package.models`.
     pub resolve_import_path: Option<ImportPathResolver>,
+    /// Node kinds that represent expression-bodied function bodies
+    /// (e.g. Kotlin's `function_body` when it contains `=`).
+    /// When the engine encounters one of these nodes with a `=` child,
+    /// all refs within are treated as implicit returns.
+    pub expression_body_kinds: &'static [&'static str],
 }
 
 fn build_dispatch(rules: &[ScopeRule]) -> FxHashMap<&'static str, Vec<usize>> {

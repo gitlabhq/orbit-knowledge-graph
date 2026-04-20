@@ -1117,6 +1117,12 @@ impl LanguageSpec {
             .on_scope
             .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
 
+        // Expression-bodied functions: when a node like `function_body`
+        // contains `=`, treat all refs within as implicit returns.
+        let is_expression_body = !self.hooks.expression_body_kinds.is_empty()
+            && self.hooks.expression_body_kinds.contains(&nk)
+            && node.children().any(|c| c.kind().as_ref() == "=");
+
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
@@ -1257,6 +1263,10 @@ impl LanguageSpec {
                 } // end for name in names
             }
 
+            if is_expression_body {
+                state.in_return = true;
+            }
+
             // Track return statement context + infer return type from bare identifiers
             if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
                 state.in_return = true;
@@ -1373,7 +1383,9 @@ impl LanguageSpec {
         }
 
         // Clear return context after children
-        if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+        if (!self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk))
+            || is_expression_body
+        {
             state.in_return = false;
         }
 

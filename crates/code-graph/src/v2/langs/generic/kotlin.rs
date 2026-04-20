@@ -310,6 +310,14 @@ impl DslLanguage for KotlinDsl {
         ]
     }
 
+    fn hooks() -> types::LanguageHooks {
+        types::LanguageHooks {
+            return_kinds: &["jump_expression"],
+            expression_body_kinds: &["function_body"],
+            ..Default::default()
+        }
+    }
+
     fn ssa_config() -> types::SsaConfig {
         types::SsaConfig {
             self_names: &["this", "self"],
