@@ -659,6 +659,10 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             && let Some(ta) = meta.type_annotation
                         {
                             next_types.push(ctx.graph.str(ta).to_string());
+                        } else if let Some(meta) = &gdef.metadata
+                            && let Some(rt) = meta.return_type
+                        {
+                            next_types.push(ctx.graph.str(rt).to_string());
                         } else if gdef.kind == DefKind::EnumEntry {
                             // Enum constant: propagate the parent enum's FQN
                             let fqn = ctx.graph.str(gdef.fqn);

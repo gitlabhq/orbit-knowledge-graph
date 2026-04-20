@@ -1,20 +1,20 @@
 name: "Kotlin v1 parity — extension function resolution"
 fixture_dir: "fixtures/code/kotlin/main/kotlin"
+trace: true
 
 tests:
   # ── K12: test_kotlin_reference_to_extensions ──
 
-  - name: "callToExtensions -> printValue (local extension)"
+  - name: "callToExtensions -> printValue (local extension, direct + property chain)"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToExtensions'
         AND callee.name = 'printValue'
-      RETURN caller.fqn AS caller, callee.fqn AS callee
+      RETURN callee.fqn AS callee
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   - name: "callToImportedExtensions -> reverse (imported extension)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImportedExtensions'
@@ -24,7 +24,6 @@ tests:
       - { row_count: 1 }
 
   - name: "callToExtensions -> ExtendMeFromProperty.printValue (extension property method)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToExtensions'
@@ -34,7 +33,6 @@ tests:
       - { row_count: 1 }
 
   - name: "callToImportedExtensions -> printValue (imported extension on reversed)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImportedExtensions'
@@ -44,7 +42,6 @@ tests:
       - { row_count: 1 }
 
   - name: "callToImported -> print (imported extension)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'callToImported'

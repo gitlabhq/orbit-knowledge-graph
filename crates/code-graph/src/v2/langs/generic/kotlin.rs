@@ -116,18 +116,35 @@ impl DslLanguage for KotlinDsl {
             scope("companion_object", "Object")
                 .def_kind(DefKind::Class)
                 .name_from_or(child_of_kind("type_identifier"), "Companion"),
-            // Extension function: has receiver type before the dot
+            // Unconditional fallback first — reverse iteration means
+            // conditional rule (ExtensionFunction) is checked before fallback.
+            scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("function_declaration", "ExtensionFunction")
                 .def_kind(DefKind::Function)
                 .when(has_child(&["."]))
                 .metadata(metadata().receiver_type(child_of_kind("user_type"))),
-            scope("function_declaration", "Function").def_kind(DefKind::Function),
             scope("secondary_constructor", "Constructor")
                 .def_kind(DefKind::Constructor)
                 .name_from(no_extract()),
+            // Unconditional fallback first for property_declaration.
             scope("property_declaration", "Property")
                 .def_kind(DefKind::Property)
                 .no_scope(),
+            scope("property_declaration", "ExtensionProperty")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .when(has_child(&["."]))
+                .metadata(
+                    metadata()
+                        .receiver_type(child_of_kind("user_type"))
+                        .return_type(
+                            text()
+                                .next_sibling("getter")
+                                .then(child_of_kind("function_body"))
+                                .then(child_of_kind("call_expression"))
+                                .then(default_name()),
+                        ),
+                ),
             scope("enum_entry", "EnumEntry")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
