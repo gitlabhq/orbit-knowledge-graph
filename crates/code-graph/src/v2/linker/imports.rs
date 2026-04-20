@@ -5,7 +5,6 @@
 
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
-use smallvec::SmallVec;
 
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
