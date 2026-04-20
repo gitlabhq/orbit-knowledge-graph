@@ -15,9 +15,9 @@ use super::super::types::{
     JsImportKind, JsInvocationSupport, JsModuleInfo,
 };
 use super::cjs::{extract_cjs_exports, extract_cjs_imports};
+use super::dataflow::extract_call_edges;
 use super::invocation::{invocation_support_for_js_def_kind, invocation_support_for_symbol};
 use super::patterns::for_each_static_object_property;
-use super::ssa::extract_ssa_calls;
 
 pub(super) type NodeId = oxc::semantic::NodeId;
 
@@ -836,7 +836,7 @@ impl JsAnalyzer {
 
         let imports = extract_imports(&ctx, &parsed);
         let (local_calls, calls) =
-            extract_ssa_calls(&ctx, &parsed.program, &defs, &imports, &class_hierarchy);
+            extract_call_edges(&ctx, &parsed.program, &defs, &imports, &class_hierarchy);
 
         let cjs_exports = extract_cjs_exports(
             nodes,

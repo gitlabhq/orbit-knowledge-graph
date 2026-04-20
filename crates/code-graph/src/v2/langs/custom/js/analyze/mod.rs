@@ -1,8 +1,8 @@
 pub(super) mod analyzer;
 mod calls;
 mod cjs;
+mod dataflow;
 pub(super) mod invocation;
 mod patterns;
-mod ssa;
 
 pub use analyzer::JsAnalyzer;

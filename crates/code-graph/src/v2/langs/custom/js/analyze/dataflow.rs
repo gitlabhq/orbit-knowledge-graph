@@ -1,3 +1,12 @@
+//! JS-side control-flow + dataflow visitor that produces call edges.
+//!
+//! The underlying SSA mechanism lives in `v2::dsl::ssa`. This file
+//! builds a CFG on top of that engine by walking the OXC AST, seals
+//! blocks as it goes, reads reaching definitions when it hits an
+//! invocation, and emits `JsCallEdge` / `JsPendingLocalCall` records.
+//! Named "dataflow" rather than "ssa" because SSA is the tool; this
+//! file is the analysis.
+
 use std::collections::HashMap;
 
 use bumpalo::Bump;
@@ -23,7 +32,7 @@ use super::calls::{
     imported_call_from_member_expression,
 };
 
-pub(super) fn extract_ssa_calls<'a>(
+pub(super) fn extract_call_edges<'a>(
     ctx: &Ctx,
     program: &Program<'a>,
     defs: &[JsDef],
@@ -31,12 +40,12 @@ pub(super) fn extract_ssa_calls<'a>(
     class_hierarchy: &HashMap<String, Option<String>>,
 ) -> (Vec<JsPendingLocalCall>, Vec<JsCallEdge>) {
     let arena = Bump::new();
-    let mut extractor = JsSsaCallExtractor::new(ctx, defs, imports, class_hierarchy, &arena);
+    let mut extractor = CallExtractor::new(ctx, defs, imports, class_hierarchy, &arena);
     extractor.visit_program(program);
     extractor.finish()
 }
 
-struct JsSsaCallExtractor<'a, 'ctx> {
+struct CallExtractor<'a, 'ctx> {
     ctx: &'ctx Ctx<'a>,
     defs: &'ctx [JsDef],
     import_bindings: HashMap<SymbolId, JsImportedBinding>,
@@ -53,7 +62,7 @@ struct JsSsaCallExtractor<'a, 'ctx> {
     imported_calls: Vec<JsCallEdge>,
 }
 
-impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
+impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
     fn new(
         ctx: &'ctx Ctx<'a>,
         defs: &'ctx [JsDef],
@@ -407,7 +416,7 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
     }
 }
 
-impl<'a> Visit<'a> for JsSsaCallExtractor<'a, '_> {
+impl<'a> Visit<'a> for CallExtractor<'a, '_> {
     fn visit_function(&mut self, it: &Function<'a>, flags: oxc::syntax::scope::ScopeFlags) {
         let hinted_def = self.scope_def_hints.last().copied().flatten();
         let def_idx = self.lookup_scope_def(it.node_id()).or(hinted_def);
