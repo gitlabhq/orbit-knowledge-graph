@@ -502,6 +502,39 @@ impl CodeGraph {
         }
     }
 
+    pub fn lookup_nested_from_node_with_hierarchy(
+        &self,
+        scope_node: NodeIndex,
+        member_name: &str,
+        out: &mut Vec<NodeIndex>,
+    ) -> bool {
+        let scope_fqn = self.def_fqn(scope_node);
+        let verify_member = |idx: NodeIndex| self.def_name(idx) == member_name;
+
+        if self
+            .indexes
+            .nested
+            .lookup_into(scope_fqn, member_name, verify_member, out)
+        {
+            return true;
+        }
+
+        if let Some(chain) = self.indexes.ancestors.get(&scope_node) {
+            for &ancestor in chain {
+                let ancestor_fqn = self.def_fqn(ancestor);
+                if self
+                    .indexes
+                    .nested
+                    .lookup_into(ancestor_fqn, member_name, verify_member, out)
+                {
+                    return true;
+                }
+            }
+        }
+
+        false
+    }
+
     pub fn def_in_file(&self, def_idx: NodeIndex, file_path: &str) -> bool {
         self.graph[def_idx].path() == file_path
     }

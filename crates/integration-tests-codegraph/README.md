@@ -12,7 +12,7 @@ cargo nextest run -p integration-tests-codegraph
 
 ```yaml
 name: Test suite name
-pipeline: generic              # optional: "generic" (default) or a named pipeline like "ruby_prism"
+pipeline: generic              # optional: "generic" (default) or a named pipeline like "js" / "ruby_prism"
 fixtures:
   - path: main.py
     content: |
@@ -124,6 +124,9 @@ fixtures/
   java/                     # additional Java-specific test suites
   kotlin/                   # additional Kotlin-specific test suites
   python/                   # additional Python-specific test suites
+  javascript/               # JS-v2 custom pipeline fixtures (use pipeline: js)
+  typescript/               # TS-v2 custom pipeline fixtures (use pipeline: js when mixing .ts/.js/.vue)
+  vue/                      # Vue SFC fixtures exercised through the JS-v2 pipeline
   examples/                 # example/reference fixtures (e.g. ruby_custom_pipeline)
 ```
 

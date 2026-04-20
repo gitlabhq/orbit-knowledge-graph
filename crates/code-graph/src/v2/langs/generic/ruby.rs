@@ -5,7 +5,7 @@ use crate::v2::dsl::types::{
     LanguageHooks, LoopRule, ReferenceRule, ScopeRule, binding, branch, loop_rule, reference,
     scope, scopes,
 };
-use crate::v2::types::{BindingKind, CanonicalImport, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
@@ -243,11 +243,14 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 
     imports.push(CanonicalImport {
         import_type,
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Runtime,
         path,
         name,
         alias: None,
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
+        is_type_only: false,
         wildcard: false,
     });
 

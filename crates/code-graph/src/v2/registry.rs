@@ -6,6 +6,7 @@
 use crate::v2::config::Language;
 use crate::v2::linker::NoRules;
 
+use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::ruby::RubyPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
 use crate::v2::langs::generic::csharp::CSharpDsl;
@@ -46,6 +47,7 @@ macro_rules! register_v2_pipelines {
             config: &PipelineConfig,
             tracer: &crate::v2::trace::Tracer,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
+            #[allow(unreachable_patterns)]
             Some(match language {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, root_path, config, tracer),)*
                 _ => return None,
@@ -75,6 +77,8 @@ macro_rules! register_v2_pipelines {
 // ── Registration ────────────────────────────────────────────────
 
 register_v2_pipelines! {
+    JavaScript => [JsPipeline],
+    TypeScript => [JsPipeline],
     Python  => [GenericPipeline<PythonDsl, PythonRules>],
     Java    => [GenericPipeline<JavaDsl, JavaRules>],
     Kotlin  => [GenericPipeline<KotlinDsl, KotlinRules>],
@@ -82,5 +86,32 @@ register_v2_pipelines! {
     Go      => [GenericPipeline<GoDsl, GoRules>],
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
+    Tag("js") => [JsPipeline],
     Tag("ruby_prism") => [RubyPipeline],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn javascript_pipeline_is_registered() {
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let config = PipelineConfig::default();
+        assert!(dispatch_language(Language::JavaScript, &[], "/", &config, &tracer).is_some());
+    }
+
+    #[test]
+    fn typescript_pipeline_is_registered() {
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let config = PipelineConfig::default();
+        assert!(dispatch_language(Language::TypeScript, &[], "/", &config, &tracer).is_some());
+    }
+
+    #[test]
+    fn js_pipeline_tag_is_registered() {
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let config = PipelineConfig::default();
+        assert!(dispatch_by_tag("js", &[], "/", &config, &tracer).is_some());
+    }
 }

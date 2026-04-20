@@ -30,7 +30,7 @@
 
 use std::hash::{Hash, Hasher};
 
-use crate::v2::types::{DefKind, Range};
+use crate::v2::types::{DefKind, ImportBindingKind, ImportMode, Range};
 use bumpalo::Bump;
 use petgraph::graph::NodeIndex;
 use rust_lapper::{Interval, Lapper};
@@ -442,16 +442,20 @@ pub struct GraphDefMeta {
     pub receiver_type: Option<StrId>,
     pub decorators: SmallVec<[StrId; 2]>,
     pub companion_of: Option<StrId>,
+    pub is_exported: bool,
 }
 
 /// Pool-backed import. Stored in `CodeGraph.imports`.
 #[derive(Debug, Clone)]
 pub struct GraphImport {
     pub import_type: &'static str,
+    pub binding_kind: ImportBindingKind,
+    pub mode: ImportMode,
     pub path: StrId,
     pub name: Option<StrId>,
     pub alias: Option<StrId>,
     pub range: Range,
+    pub is_type_only: bool,
     pub wildcard: bool,
 }
 
@@ -471,6 +475,7 @@ impl GraphDef {
                 receiver_type: m.receiver_type.as_deref().map(|s| pool.alloc(s)),
                 decorators: m.decorators.iter().map(|s| pool.alloc(s)).collect(),
                 companion_of: m.companion_of.as_deref().map(|s| pool.alloc(s)),
+                is_exported: m.is_exported,
             })
         });
         Self {
@@ -491,10 +496,13 @@ impl GraphImport {
     pub fn from_canonical(imp: &crate::v2::types::CanonicalImport, pool: &mut StringPool) -> Self {
         Self {
             import_type: imp.import_type,
+            binding_kind: imp.binding_kind,
+            mode: imp.mode,
             path: pool.alloc(&imp.path),
             name: imp.name.as_deref().map(|s| pool.alloc(s)),
             alias: imp.alias.as_deref().map(|s| pool.alloc(s)),
             range: imp.range,
+            is_type_only: imp.is_type_only,
             wildcard: imp.wildcard,
         }
     }
@@ -941,6 +949,7 @@ mod tests {
                 receiver_type: None,
                 decorators: vec![],
                 companion_of: None,
+                is_exported: true,
             })),
         };
         let gdef = GraphDef::from_canonical(&cdef, &mut pool);
@@ -951,6 +960,7 @@ mod tests {
         assert!(gdef.is_top_level);
         let meta = gdef.metadata.as_ref().unwrap();
         assert_eq!(pool.get(meta.super_types[0]), "BaseService");
+        assert!(meta.is_exported);
     }
 
     #[test]
@@ -960,11 +970,14 @@ mod tests {
         let mut pool = StringPool::new();
         let cimp = CanonicalImport {
             import_type: "FromImport",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
             path: "app.services".to_string(),
             name: Some("AuthService".to_string()),
             alias: Some("Auth".to_string()),
             scope_fqn: None,
             range: Range::new(Position::new(1, 0), Position::new(1, 30), (0, 30)),
+            is_type_only: true,
             wildcard: false,
         };
         let gimp = GraphImport::from_canonical(&cimp, &mut pool);
@@ -972,6 +985,9 @@ mod tests {
         assert_eq!(pool.get(gimp.path), "app.services");
         assert_eq!(pool.get(gimp.name.unwrap()), "AuthService");
         assert_eq!(pool.get(gimp.alias.unwrap()), "Auth");
+        assert_eq!(gimp.binding_kind, ImportBindingKind::Named);
+        assert_eq!(gimp.mode, ImportMode::Declarative);
+        assert!(gimp.is_type_only);
         assert!(!gimp.wildcard);
     }
 }

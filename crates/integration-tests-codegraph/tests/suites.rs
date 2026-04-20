@@ -13,6 +13,60 @@ macro_rules! yaml_test {
 yaml_test!(structural_invariants, "structural.yaml");
 yaml_test!(containment_hierarchy, "containment.yaml");
 
+// JavaScript / TypeScript
+yaml_test!(
+    typescript_js_module_resolution,
+    "typescript/js_module_resolution.yaml"
+);
+yaml_test!(
+    javascript_commonjs_module_resolution,
+    "javascript/commonjs_module_resolution.yaml"
+);
+yaml_test!(
+    javascript_repo_boundary_enforcement,
+    "javascript/repo_boundary_enforcement.yaml"
+);
+yaml_test!(
+    javascript_extension_routing,
+    "javascript/extension_routing.yaml"
+);
+yaml_test!(
+    javascript_vue_monolith_patterns,
+    "javascript/vue_monolith_patterns.yaml"
+);
+yaml_test!(
+    javascript_gitlab_monolith_config_resolution,
+    "javascript/gitlab_monolith_config_resolution.yaml"
+);
+yaml_test!(
+    javascript_security_hardening,
+    "javascript/security_hardening.yaml"
+);
+yaml_test!(
+    typescript_gitlab_monolith_barrels,
+    "typescript/gitlab_monolith_barrels.yaml"
+);
+yaml_test!(
+    typescript_gitlab_monolith_patterns,
+    "typescript/gitlab_monolith_patterns.yaml"
+);
+yaml_test!(
+    vue_options_api_resolution,
+    "vue/options_api_resolution.yaml"
+);
+yaml_test!(
+    vue_gitlab_monolith_aliases,
+    "vue/gitlab_monolith_aliases.yaml"
+);
+yaml_test!(
+    vue_async_and_setup_patterns,
+    "vue/async_and_setup_patterns.yaml"
+);
+yaml_test!(
+    typescript_type_only_and_definitions,
+    "typescript/type_only_and_definitions.yaml"
+);
+
 // Python
 yaml_test!(python_simple_call, "python/simple_call.yaml");
 yaml_test!(python_self_method_call, "python/self_method_call.yaml");

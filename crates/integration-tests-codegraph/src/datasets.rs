@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use arrow_56::array::{Array, ArrayBuilder, Int64Builder, StringBuilder};
+use arrow_56::array::{Array, ArrayBuilder, BooleanBuilder, Int64Builder, StringBuilder};
 use arrow_56::datatypes::{DataType, Field, Schema};
 use arrow_56::record_batch::RecordBatch;
 use code_graph::v2::linker::graph::*;
@@ -161,6 +161,8 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
     let mut path_b = StringBuilder::with_capacity(n, n * 32);
     let mut name_b = StringBuilder::with_capacity(n, n * 16);
     let mut alias_b = StringBuilder::with_capacity(n, n * 16);
+    let mut type_only_b = BooleanBuilder::with_capacity(n);
+    let mut has_target_b = BooleanBuilder::with_capacity(n);
 
     for (idx, fp, imp) in &imports {
         id_b.append_value(ids[idx.index()]);
@@ -175,6 +177,13 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             Some(id) => alias_b.append_value(graph.str(id)),
             None => alias_b.append_null(),
         }
+        type_only_b.append_value(imp.is_type_only);
+        has_target_b.append_value(
+            graph
+                .graph
+                .neighbors_directed(*idx, petgraph::Direction::Outgoing)
+                .any(|neighbor| graph.graph[neighbor].def_id().is_some()),
+        );
     }
 
     make_batch(
@@ -185,6 +194,8 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             ("path", DataType::Utf8, false),
             ("name", DataType::Utf8, true),
             ("alias", DataType::Utf8, true),
+            ("is_type_only", DataType::Boolean, false),
+            ("has_target", DataType::Boolean, false),
         ],
         vec![
             Box::new(id_b),
@@ -193,6 +204,8 @@ fn build_import_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Record
             Box::new(path_b),
             Box::new(name_b),
             Box::new(alias_b),
+            Box::new(type_only_b),
+            Box::new(has_target_b),
         ],
     )
 }

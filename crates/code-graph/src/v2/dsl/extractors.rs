@@ -111,6 +111,7 @@ impl MetadataRule {
             receiver_type,
             decorators,
             companion_of,
+            is_exported: false,
         }))
     }
 }
