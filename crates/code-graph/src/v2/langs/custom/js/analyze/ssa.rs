@@ -581,23 +581,27 @@ fn invocation_target(
 }
 
 fn expression_steps_from_expression(expression: &Expression<'_>) -> Option<Vec<ExpressionStep>> {
-    match expression.get_inner_expression() {
-        Expression::Identifier(identifier) => {
-            Some(vec![ExpressionStep::Ident(identifier.name.to_string())])
+    // Member-expression nesting is attacker-controlled (`a.b.c...` deep
+    // enough to exhaust a 2 MiB thread stack). Grow instead of crashing.
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        match expression.get_inner_expression() {
+            Expression::Identifier(identifier) => {
+                Some(vec![ExpressionStep::Ident(identifier.name.to_string())])
+            }
+            Expression::ThisExpression(_) => Some(vec![ExpressionStep::This]),
+            Expression::Super(_) => Some(vec![ExpressionStep::Super]),
+            Expression::StaticMemberExpression(member) => {
+                let mut chain = expression_steps_from_expression(&member.object)?;
+                chain.push(ExpressionStep::Field(member.property.name.to_string()));
+                Some(chain)
+            }
+            Expression::CallExpression(call) => bare_invocation_steps(&call.callee),
+            Expression::NewExpression(new_expr) => new_expression_type_name(new_expr)
+                .map(ExpressionStep::New)
+                .map(|step| vec![step]),
+            _ => None,
         }
-        Expression::ThisExpression(_) => Some(vec![ExpressionStep::This]),
-        Expression::Super(_) => Some(vec![ExpressionStep::Super]),
-        Expression::StaticMemberExpression(member) => {
-            let mut chain = expression_steps_from_expression(&member.object)?;
-            chain.push(ExpressionStep::Field(member.property.name.to_string()));
-            Some(chain)
-        }
-        Expression::CallExpression(call) => bare_invocation_steps(&call.callee),
-        Expression::NewExpression(new_expr) => new_expression_type_name(new_expr)
-            .map(ExpressionStep::New)
-            .map(|step| vec![step]),
-        _ => None,
-    }
+    })
 }
 
 fn bare_invocation_steps(callee: &Expression<'_>) -> Option<Vec<ExpressionStep>> {
@@ -632,7 +636,7 @@ fn jsx_invocation_target(
 }
 
 fn jsx_member_object_steps(object: &JSXMemberExpressionObject<'_>) -> Option<Vec<ExpressionStep>> {
-    match object {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || match object {
         JSXMemberExpressionObject::IdentifierReference(identifier) => {
             Some(vec![ExpressionStep::Ident(identifier.name.to_string())])
         }
@@ -642,5 +646,5 @@ fn jsx_member_object_steps(object: &JSXMemberExpressionObject<'_>) -> Option<Vec
             Some(chain)
         }
         JSXMemberExpressionObject::ThisExpression(_) => Some(vec![ExpressionStep::This]),
-    }
+    })
 }

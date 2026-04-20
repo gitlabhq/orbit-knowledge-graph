@@ -127,6 +127,17 @@ fn evaluate_module_statement(
     state: &mut AliasEvalState,
     cache: &mut ModuleEvalCache,
 ) {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        evaluate_module_statement_inner(statement, context, state, cache)
+    })
+}
+
+fn evaluate_module_statement_inner(
+    statement: &Statement<'_>,
+    context: &AliasEvalContext<'_>,
+    state: &mut AliasEvalState,
+    cache: &mut ModuleEvalCache,
+) {
     match statement {
         Statement::BlockStatement(block) => {
             for statement in &block.body {
@@ -539,6 +550,17 @@ fn evaluate_value(
     state: &AliasEvalState,
     cache: &mut ModuleEvalCache,
 ) -> Option<EvaluatedValue> {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        evaluate_value_inner(expression, context, state, cache)
+    })
+}
+
+fn evaluate_value_inner(
+    expression: &Expression<'_>,
+    context: &AliasEvalContext<'_>,
+    state: &AliasEvalState,
+    cache: &mut ModuleEvalCache,
+) -> Option<EvaluatedValue> {
     match expression.get_inner_expression() {
         Expression::BooleanLiteral(boolean) => Some(EvaluatedValue::Bool(boolean.value)),
         Expression::StringLiteral(string) => Some(EvaluatedValue::String(string.value.to_string())),
@@ -901,7 +923,9 @@ fn is_truthy(value: &EvaluatedValue) -> bool {
 }
 
 fn json_to_evaluated(value: serde_json::Value) -> Option<EvaluatedValue> {
-    match value {
+    // `serde_json` parses without a recursion limit, so a 256 KB file of
+    // nested arrays is possible. Grow the stack before re-descending.
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || match value {
         serde_json::Value::Bool(value) => Some(EvaluatedValue::Bool(value)),
         serde_json::Value::String(value) => Some(EvaluatedValue::String(value)),
         serde_json::Value::Array(values) => Some(EvaluatedValue::Array(
@@ -915,7 +939,7 @@ fn json_to_evaluated(value: serde_json::Value) -> Option<EvaluatedValue> {
         )),
         serde_json::Value::Null => Some(EvaluatedValue::Undefined),
         serde_json::Value::Number(_) => None,
-    }
+    })
 }
 
 fn normalize_joined_path(method: &str, parts: Vec<String>) -> String {

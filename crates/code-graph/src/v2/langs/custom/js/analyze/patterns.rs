@@ -8,6 +8,26 @@ pub(super) fn walk_binding_pattern_identifiers<'a>(
     recurse_array_elements: bool,
     visit: &mut impl FnMut(&'a BindingIdentifier<'a>, Option<String>),
 ) {
+    // Hostile source can nest object/array patterns arbitrarily deep
+    // (`const {a:{a:{a:...}}} = x`). Grow the stack instead of overflowing.
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        walk_binding_pattern_identifiers_inner(
+            pattern,
+            imported_name,
+            recurse_object_properties,
+            recurse_array_elements,
+            visit,
+        )
+    })
+}
+
+fn walk_binding_pattern_identifiers_inner<'a>(
+    pattern: &'a BindingPattern<'a>,
+    imported_name: Option<String>,
+    recurse_object_properties: bool,
+    recurse_array_elements: bool,
+    visit: &mut impl FnMut(&'a BindingIdentifier<'a>, Option<String>),
+) {
     match pattern {
         BindingPattern::BindingIdentifier(binding) => visit(binding, imported_name),
         BindingPattern::AssignmentPattern(assignment) => walk_binding_pattern_identifiers(
