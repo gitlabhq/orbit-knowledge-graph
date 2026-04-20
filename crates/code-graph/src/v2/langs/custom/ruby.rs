@@ -11,6 +11,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ruby_prism::Visit;
 
+use crate::v2::PipelineConfig;
 use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
 
 pub struct RubyPipeline;
@@ -19,6 +20,7 @@ impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        _config: &PipelineConfig,
         _tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let mut defs: Vec<DefEntry> = Vec::new();

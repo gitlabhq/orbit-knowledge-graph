@@ -1,0 +1,167 @@
+name: "Rust: structural entities"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_structural_entities_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod inventory {
+          pub struct Named {
+              pub value: usize,
+          }
+
+          pub struct Pair(pub usize, pub usize);
+
+          pub enum Packet {
+              Unit,
+              Record { code: usize, retry: bool },
+              Tuple(usize, bool),
+          }
+
+          pub trait Runner {
+              const KIND: &'static str;
+              type Output;
+
+              fn run(&self);
+
+              fn build() -> Self
+              where
+                  Self: Sized;
+          }
+
+          pub struct Service;
+
+          impl Runner for Service {
+              const KIND: &'static str = "service";
+              type Output = usize;
+
+              fn run(&self) {}
+
+              fn build() -> Self {
+                  Service
+              }
+          }
+
+          impl Service {
+              pub fn inherent() -> Self {
+                  Service
+              }
+          }
+      }
+
+      use crate::inventory::{self as inventory_mod, Pair, Packet, Runner, Service};
+      use crate::inventory::Packet::{self as PacketKind, Record as RecordPacket};
+      pub use crate::inventory::*;
+      extern crate core as rust_core;
+
+      pub fn use_inventory() {
+          let _pair = inventory_mod::Pair(1, 2);
+          let _packet = Packet::Tuple(1, true);
+          let _ = PacketKind::Unit;
+          let _ = RecordPacket { code: 7, retry: false };
+          let service = Service::build();
+          service.run();
+          let _ = Pair(3, 4);
+          let _ = rust_core::mem::size_of::<usize>();
+      }
+
+tests:
+  - name: "tuple struct fields are retained"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN ['inventory::Pair::0', 'inventory::Pair::1']
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'inventory::Pair::0', type: 'Field' } }
+      - { row: { fqn: 'inventory::Pair::1', type: 'Field' } }
+
+  - name: "enum payload fields are retained for record and tuple variants"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN [
+          'inventory::Packet::Record::code',
+          'inventory::Packet::Record::retry',
+          'inventory::Packet::Tuple::0',
+          'inventory::Packet::Tuple::1'
+        ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: 'inventory::Packet::Record::code', type: 'Field' } }
+      - { row: { fqn: 'inventory::Packet::Record::retry', type: 'Field' } }
+      - { row: { fqn: 'inventory::Packet::Tuple::0', type: 'Field' } }
+      - { row: { fqn: 'inventory::Packet::Tuple::1', type: 'Field' } }
+
+  - name: "trait associated items are retained on the trait definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN [
+          'inventory::Runner::KIND',
+          'inventory::Runner::Output',
+          'inventory::Runner::run',
+          'inventory::Runner::build'
+        ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 4 }
+      - { row: { fqn: 'inventory::Runner::KIND', type: 'Constant' } }
+      - { row: { fqn: 'inventory::Runner::Output', type: 'TypeAlias' } }
+      - { row: { fqn: 'inventory::Runner::run', type: 'Method' } }
+      - { row: { fqn: 'inventory::Runner::build', type: 'AssociatedFunction' } }
+
+  - name: "impl associated items are retained on the concrete type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN [
+          'inventory::Service::KIND',
+          'inventory::Service::Output',
+          'inventory::Service::run',
+          'inventory::Service::build',
+          'inventory::Service::inherent'
+        ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 5 }
+      - { row: { fqn: 'inventory::Service::KIND', type: 'Constant' } }
+      - { row: { fqn: 'inventory::Service::Output', type: 'TypeAlias' } }
+      - { row: { fqn: 'inventory::Service::run', type: 'Method' } }
+      - { row: { fqn: 'inventory::Service::build', type: 'AssociatedFunction' } }
+      - { row: { fqn: 'inventory::Service::inherent', type: 'AssociatedFunction' } }
+
+  - name: "variant imports and aliases retain their metadata"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs'
+        AND (i.alias = 'PacketKind' OR i.alias = 'RecordPacket')
+      RETURN i.path AS path, i.alias AS alias, i.import_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { path: 'crate::inventory::Packet', alias: 'PacketKind', type: 'UseGroup' } }
+      - { row: { path: 'crate::inventory::Packet::Record', alias: 'RecordPacket', type: 'UseGroup' } }
+
+  - name: "public glob re-exports are retained as imports"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'ReExportGlob'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'crate::inventory' } }
+
+  - name: "extern crate aliases are retained as imports"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND i.import_type = 'AliasedExternCrate'
+      RETURN i.path AS path, i.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { path: 'core', alias: 'rust_core' } }

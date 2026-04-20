@@ -19,6 +19,13 @@ pub(crate) struct BlockId(pub usize);
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) struct PhiId(pub usize);
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub(crate) struct ResolvedSite<'a> {
+    pub path: &'a str,
+    pub start: u32,
+    pub end: u32,
+}
+
 /// SSA value — parser-local, no graph dependency.
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub(crate) enum SsaValue<'a> {
@@ -28,6 +35,8 @@ pub(crate) enum SsaValue<'a> {
     ImportRef(u32),
     /// A type FQN for nested member lookup (self/this, type annotations).
     Type(&'a str),
+    /// A resolved definition site, potentially outside the current file.
+    ResolvedSite(ResolvedSite<'a>),
     /// Deferred name resolution — chased at write time via copy propagation.
     Alias(&'a str),
     /// Dead end — parameter, literal, or otherwise unresolvable.
@@ -58,23 +67,19 @@ pub(crate) struct ReachingDefs<'a> {
     pub values: SmallVec<[SsaValue<'a>; 2]>,
 }
 
-impl ReachingDefs<'_> {
-    #[allow(dead_code)]
-    pub fn is_empty(&self) -> bool {
-        self.values.is_empty()
-    }
-}
-
 impl SsaValue<'_> {
     /// Convert to a ParseValue for output. Returns None for SSA-internal
     /// values (Marker, Phi) and Alias (should have been resolved).
-    pub fn to_parse_value(&self) -> Option<ParseValue> {
+    pub(crate) fn to_parse_value(&self) -> Option<ParseValue> {
         match self {
             SsaValue::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
             SsaValue::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
             SsaValue::Type(t) => Some(ParseValue::Type(t.to_string())),
             SsaValue::Opaque => Some(ParseValue::Opaque),
-            SsaValue::Alias(_) | SsaValue::Marker | SsaValue::Phi(_) => None,
+            SsaValue::ResolvedSite(_)
+            | SsaValue::Alias(_)
+            | SsaValue::Marker
+            | SsaValue::Phi(_) => None,
         }
     }
 
@@ -84,6 +89,9 @@ impl SsaValue<'_> {
             SsaValue::LocalDef(i) => format!("LocalDef({i})"),
             SsaValue::ImportRef(i) => format!("ImportRef({i})"),
             SsaValue::Type(t) => format!("Type({t})"),
+            SsaValue::ResolvedSite(site) => {
+                format!("ResolvedSite({}:{}-{})", site.path, site.start, site.end)
+            }
             SsaValue::Alias(a) => format!("Alias({a})"),
             SsaValue::Opaque => "Opaque".to_string(),
             SsaValue::Marker => "Marker".to_string(),
@@ -130,7 +138,7 @@ pub(crate) struct SsaEngine<'a> {
 }
 
 impl<'a> SsaEngine<'a> {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         Self {
             blocks: Vec::with_capacity(32),
             phis: Vec::with_capacity(8),
@@ -141,13 +149,13 @@ impl<'a> SsaEngine<'a> {
         }
     }
 
-    pub fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
+    pub(crate) fn with_tracer(mut self, tracer: &'a Tracer) -> Self {
         self.tracer = tracer;
         self
     }
 
     /// Create a new basic block. Returns its ID.
-    pub fn add_block(&mut self) -> BlockId {
+    pub(crate) fn add_block(&mut self) -> BlockId {
         let id = BlockId(self.blocks.len());
         self.blocks.push(Block {
             predecessors: SmallVec::new(),
@@ -160,7 +168,7 @@ impl<'a> SsaEngine<'a> {
     }
 
     /// Add a predecessor edge: `pred` flows into `block`.
-    pub fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
+    pub(crate) fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
         self.blocks[block.0].predecessors.push(pred);
         self.tracer.event(TraceEvent::SsaAddPredecessor {
             block_id: block.0,
@@ -170,7 +178,7 @@ impl<'a> SsaEngine<'a> {
 
     /// Seal a block — all predecessors are now known.
     /// Resolves any incomplete phi nodes that were deferred.
-    pub fn seal_block(&mut self, block: BlockId) {
+    pub(crate) fn seal_block(&mut self, block: BlockId) {
         if let Some(incomplete) = self.incomplete_phis.remove(&block) {
             for (variable, phi_id) in incomplete {
                 self.add_phi_operands(variable, phi_id);
@@ -182,7 +190,7 @@ impl<'a> SsaEngine<'a> {
     }
 
     /// Seal any blocks that haven't been sealed yet.
-    pub fn seal_remaining(&mut self) {
+    pub(crate) fn seal_remaining(&mut self) {
         for id in 0..self.blocks.len() {
             if !self.blocks[id].sealed {
                 self.seal_block(BlockId(id));
@@ -193,7 +201,12 @@ impl<'a> SsaEngine<'a> {
     /// Record a variable definition: `variable` is defined as `value` in `block`.
     /// On-the-fly copy propagation (Section 3.1): if the value is an alias
     /// to another variable, resolve it immediately instead of deferring.
-    pub fn write_variable(&mut self, variable: &'a str, block: BlockId, value: SsaValue<'a>) {
+    pub(crate) fn write_variable(
+        &mut self,
+        variable: &'a str,
+        block: BlockId,
+        value: SsaValue<'a>,
+    ) {
         let resolved = if let SsaValue::Alias(alias_name) = value {
             let alias_val = self.read_variable_internal(alias_name, block);
             if alias_val != SsaValue::Opaque {
@@ -217,7 +230,7 @@ impl<'a> SsaEngine<'a> {
     }
 
     /// Look up a variable's reaching definitions without recording the read.
-    pub fn read_variable_stateless(
+    pub(crate) fn read_variable_stateless(
         &mut self,
         variable: &'a str,
         block: BlockId,
@@ -245,6 +258,18 @@ impl<'a> SsaEngine<'a> {
             values: result.values.iter().map(|v| v.trace_display()).collect(),
         });
         result
+    }
+
+    /// Return the raw SSA value for `variable` at `block`, without expanding phis.
+    /// Use `expand_value` later to resolve once all blocks are sealed.
+    pub(crate) fn read_variable_raw(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        self.stats.reads += 1;
+        self.read_variable_internal(variable, block)
+    }
+
+    /// Expand a raw SSA value into its reaching definitions.
+    pub(crate) fn expand_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
+        self.resolve_value(value)
     }
 
     // ── Internal: Braun et al. algorithm ────────────────────────
@@ -467,6 +492,7 @@ impl<'a> SsaEngine<'a> {
             SsaValue::LocalDef(_)
             | SsaValue::ImportRef(_)
             | SsaValue::Type(_)
+            | SsaValue::ResolvedSite(_)
             | SsaValue::Alias(_) => {
                 return ReachingDefs {
                     values: smallvec::smallvec![value.clone()],
@@ -712,7 +738,7 @@ mod tests {
         ssa.seal_block(b);
 
         let result = ssa.read_variable_stateless("x", b);
-        assert!(result.is_empty());
+        assert!(result.values.is_empty());
     }
 
     #[test]
