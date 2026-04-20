@@ -63,24 +63,32 @@ pub fn validate_symlinks(root: &Path) -> io::Result<()> {
             Err(e) => return Err(e),
         };
         for entry in entries {
-            let path = entry?.path();
-            let meta = path.symlink_metadata()?;
+            let entry = match entry {
+                Ok(e) => e,
+                Err(e) => {
+                    first_err = first_err.or(Some(e));
+                    continue;
+                }
+            };
+            let path = entry.path();
+            let meta = match path.symlink_metadata() {
+                Ok(m) => m,
+                Err(e) => {
+                    first_err = first_err.or(Some(e));
+                    continue;
+                }
+            };
 
             if meta.is_symlink() {
                 if let Err(e) = check_symlink(&path, root) {
-                    if first_err.is_none() {
-                        first_err = Some(e);
-                    }
+                    first_err = first_err.or(Some(e));
                 }
             } else if meta.is_dir() {
                 stack.push(path);
             }
         }
     }
-    match first_err {
-        Some(e) => Err(e),
-        None => Ok(()),
-    }
+    first_err.map_or(Ok(()), Err)
 }
 
 fn check_symlink(path: &Path, root: &Path) -> io::Result<()> {
