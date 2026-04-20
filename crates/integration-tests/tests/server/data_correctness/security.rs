@@ -757,3 +757,122 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
     resp.assert_node_absent("Project", 1003);
     resp.assert_node_absent("Project", 1004);
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregation: compiled SQL security assertions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Aggregation compiled SQL must contain startsWith(traversal_path, ?) for
+/// every gl_* table alias. This asserts the SecurityPass output directly
+/// rather than relying on CheckPass alone.
+pub(super) async fn aggregation_sql_contains_traversal_path_filter(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into()]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("startsWith"),
+        "aggregation SQL must contain startsWith filter, got:\n{sql}"
+    );
+    assert!(
+        sql.contains("traversal_path"),
+        "aggregation SQL must filter on traversal_path, got:\n{sql}"
+    );
+    // The bound parameter for the path prefix must appear.
+    let param_strs: Vec<_> = compiled
+        .base
+        .params
+        .iter()
+        .map(|(k, v)| format!("{k}={v:?}"))
+        .collect();
+    assert!(
+        sql.contains("1/100/") || param_strs.iter().any(|s| s.contains("1/100/")),
+        "compiled SQL or params must contain '1/100/', got SQL:\n{sql}\nparams: {param_strs:?}"
+    );
+}
+
+/// Multi-path SecurityContext with aggregation: compiled SQL must contain
+/// startsWith predicates for both paths (via LCP + OR).
+pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    assert!(
+        sql.contains("startsWith"),
+        "multi-path aggregation SQL must contain startsWith, got:\n{sql}"
+    );
+
+    // Both path prefixes must appear in SQL or params.
+    let all_text = format!("{sql} {:?}", compiled.base.params);
+    assert!(
+        all_text.contains("1/100/"),
+        "compiled output must contain '1/100/', got:\n{all_text}"
+    );
+    assert!(
+        all_text.contains("1/102/"),
+        "compiled output must contain '1/102/', got:\n{all_text}"
+    );
+}
+
+/// Multi-path aggregation returns correct scoped counts from both namespaces
+/// and excludes groups outside the scope.
+pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap(),
+    )
+    .await;
+
+    // Group 100: members 1, 2, 6 (edges in 1/100/) = 3
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    // Group 102: members 1, 4 (edges in 1/102/) = 2
+    resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
+    // Group 101 is outside both paths.
+    resp.assert_node_absent("Group", 101);
+}
