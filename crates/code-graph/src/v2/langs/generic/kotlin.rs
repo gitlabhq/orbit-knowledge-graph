@@ -134,6 +134,9 @@ impl DslLanguage for KotlinDsl {
                 .def_kind(DefKind::Property)
                 .no_scope()
                 .when(has_child(&["."]))
+                .name_from(
+                    child_of_kind("variable_declaration").then(child_of_kind("simple_identifier")),
+                )
                 .metadata(
                     metadata()
                         .receiver_type(child_of_kind("user_type"))
