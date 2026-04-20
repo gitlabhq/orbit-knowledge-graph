@@ -110,11 +110,22 @@ fn alias_values_from_evaluated(
     match value {
         EvaluatedValue::String(path) => {
             if Path::new(path).is_absolute() || path.starts_with('.') {
+                // Filesystem-shaped value: must resolve to a canonical path
+                // inside the repo. Anything else is dropped silently so a
+                // hostile `webpack.config.js` cannot redirect an alias at
+                // `/etc/...`, a parent-of-repo path, or a Windows absolute.
                 contained_repo_path(root_dir, config_dir, path)
                     .map(|resolved| vec![AliasValue::Path(resolved.to_string_lossy().to_string())])
                     .unwrap_or_default()
-            } else {
+            } else if is_safe_package_specifier(path) {
+                // Bare package specifier (`lodash`, `@scope/pkg`). Safe to
+                // hand to the resolver, which searches `node_modules` only.
                 vec![AliasValue::Path(path.clone())]
+            } else {
+                // Anything else — `node:child_process`, URLs, paths that
+                // fell through the absolute/`.` filter because of platform
+                // differences — is refused.
+                vec![]
             }
         }
         EvaluatedValue::Bool(false) => vec![AliasValue::Ignore],
@@ -124,4 +135,19 @@ fn alias_values_from_evaluated(
             .collect(),
         _ => vec![],
     }
+}
+
+/// A bare package specifier: ASCII-only, no path separators, no protocol
+/// prefix. Matches `lodash`, `@scope/pkg`, `@scope/pkg/sub` and nothing
+/// that could smuggle in a node built-in (`node:fs`) or filesystem escape.
+fn is_safe_package_specifier(value: &str) -> bool {
+    if value.is_empty() || value.contains(':') || value.contains('\\') {
+        return false;
+    }
+    if value.starts_with('/') || value.starts_with('.') {
+        return false;
+    }
+    value
+        .chars()
+        .all(|c| c.is_ascii_alphanumeric() || matches!(c, '-' | '_' | '@' | '/' | '.'))
 }
