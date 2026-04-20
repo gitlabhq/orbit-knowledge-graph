@@ -672,9 +672,8 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
     )
     .await;
 
-    // All org 1 projects visible.
+    resp.assert_node_count(5);
     resp.assert_node_ids("Project", &[1000, 1001, 1002, 1003, 1004]);
-    // Org 2 project must not appear.
     resp.assert_node_absent("Project", 9000);
 }
 
@@ -697,9 +696,10 @@ pub(super) async fn cross_org_traversal_excludes_other_org(ctx: &TestContext) {
     )
     .await;
 
-    // Alice's org 1 MRs.
+    // Alice + her 2 org 1 MRs.
+    resp.assert_node_count(3);
     resp.assert_node_ids("MergeRequest", &[2000, 2001]);
-    // Org 2 MR must not appear.
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
     resp.assert_node_absent("MergeRequest", 9100);
 }
 
@@ -709,17 +709,19 @@ pub(super) async fn cross_org_aggregation_excludes_other_org(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "aggregation",
-            "source_node": {"id": "u", "entity": "User"},
-            "target_node": {"id": "g", "entity": "Group"},
-            "relationship": {"type": "MEMBER_OF", "from": "u", "to": "g"},
-            "aggregate": {"function": "count", "by": "g"}
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/".into()]).unwrap(),
     )
     .await;
 
-    // Org 2 group must not appear in aggregation results.
     resp.assert_node_absent("Group", 900);
 }
 
@@ -743,10 +745,8 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
     )
     .await;
 
-    // Only org 2 project visible.
-    resp.assert_node_ids("Project", &[9000]);
     resp.assert_node_count(1);
-    // All org 1 projects absent.
+    resp.assert_node_ids("Project", &[9000]);
     resp.assert_node_absent("Project", 1000);
     resp.assert_node_absent("Project", 1001);
     resp.assert_node_absent("Project", 1002);
