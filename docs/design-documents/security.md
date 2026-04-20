@@ -56,55 +56,59 @@ sequenceDiagram
 
 ## Layer 1: Logical Tenant Segregation by Organization
 
-The first security boundary is logical tenant segregation enforced through database schema design and query predicates. All SDLC data (issues, merge requests, pipelines, etc.) is stored in ClickHouse tables with a `organization_id` column representing the organization.
+The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). Organization isolation is implicit: a user in org 42 receives a `SecurityContext` whose traversal paths all start with `42/`, and the `startsWith(traversal_path, '42/')` filter injected by the compiler cannot match rows from org 99.
 
 This layer is primarily intended for .com customers to ensure that they can only query data within their own organization.
 
-**Component**: Knowledge Graph Query Engine (`gkg-webserver`) and indexer (`gkg-indexer`)
+**Component**: Knowledge Graph Query Engine (`gkg-webserver`)
 
 **How It's Enforced**:
 
-- **At the ClickHouse Storage Layer**: When Siphon streams data from PostgreSQL, the indexer writes each row with a `organization_id` column that identifies the top-level organization it belongs to.
-- **Query-Level Enforcement**: The query compiler automatically injects `WHERE organization_id = ?` predicates into every generated SQL query before execution. The `organization_id` value is extracted from the authenticated JWT token passed by Rails.
-- **Multi-Tenant Queries Blocked**: The query planner explicitly rejects any attempt to query across multiple organization_ids in a single request (e.g., `WHERE organization_id IN [1, 2]`). Each query is scoped to exactly one top-level organization.
-- **Parameterization**: All queries are parameterized; the organization_id is bound as a parameter, never concatenated into SQL strings.
+- **At the ClickHouse Storage Layer**: The indexer writes each row with a `traversal_path` column encoding the full namespace hierarchy, starting with the organization ID as the first path segment.
+- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The organization ID is extracted from the JWT token and validated against traversal paths at `SecurityContext` construction time.
+- **Cross-Org Queries Blocked**: `SecurityContext::new()` validates that every traversal path's first segment matches the JWT's `organization_id`. A path starting with `"2/"` is rejected when `org_id=1`. Each query is scoped to exactly one organization.
+- **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
 
 **Code Review Requirements**:
 
-- Every query generation function must call a `inject_organization_id_filter()` or similarly named method.
-- Unit tests must verify that queries without organization filters are rejected.
-- Integration tests must verify cross-organization queries are blocked.
-- Fuzz tests must verify that queries with invalid organization_ids are rejected.
+- The compiler's `SecurityPass` runs on all query types (search, traversal, aggregation, path-finding, neighbors). The `CheckPass` rejects any query where a `gl_*` table alias lacks a valid `startsWith` filter.
+- Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
+- Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
-**Detection and Monitoring**:
+**The `gl_user` table exception**: The User entity is global (not namespace-scoped) and has no `traversal_path` column. It is listed in `skip_security_filter_for_entities` in the ontology. Users can only appear in query results through edge table joins, and edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through user joins.
 
-- **Metric**: `gkg.query.organization_filter_applied` (counter) - tracks queries with organization filtering applied.
-- **Metric**: `gkg.query.multi_tenant_rejected` (counter) - increments when a multi-tenant query is blocked.
-- **Audit Logging**: All queries are logged with `organization_id`, `user_id`, and `query_hash` for security audit trails.
-- **Alert**: Trigger critical alert if cross-tenant access attempts are detected.
+```plantuml
+@startuml
+skinparam rectangleBorderColor #666
+skinparam rectangleBackgroundColor #f9f9f9
 
-```mermaid
-graph TD
-    subgraph Siphon_CDC ["Siphon CDC Ingestion"]
-        direction LR
-        PG[(PostgreSQL)] --> Siphon
-    end
+rectangle "Siphon CDC Ingestion" {
+  database "PostgreSQL" as PG
+  component "Siphon" as Siphon
+  PG --> Siphon
+}
 
-    subgraph ClickHouse_Storage ["ClickHouse Storage "]
-        direction TB
-        Issues["issues table<br/>(organization_id, id, title, ...)"]
-        MRs["merge_requests table<br/>(organization_id, id, title, ...)"]
-        Pipelines["pipelines table<br/>(organization_id, id, status, ...)"]
-    end
+rectangle "ClickHouse Storage" {
+  collections "gl_project\n(traversal_path, id, ...)" as Projects
+  collections "gl_merge_request\n(traversal_path, id, ...)" as MRs
+  collections "gl_edge\n(traversal_path, source, target, ...)" as Edges
+  collections "gl_user\n(id, username, ...)\n[no traversal_path]" as Users
+}
 
-    subgraph Query_Engine ["Knowledge Graph Query Engine"]
-        direction TB
-        QE["Query Compiler<br/>Injects: WHERE organization_id = ?"]
-    end
+rectangle "Query Engine" {
+  component "SecurityPass\nInjects: startsWith(traversal_path, ?)" as Security
+  component "CheckPass\nVerifies all gl_* aliases filtered" as Check
+  Security --> Check
+}
 
-    Siphon -->|Writes with organization_id| ClickHouse_Storage
-    QE -->|Queries with organization filter| ClickHouse_Storage
-
+Siphon --> Projects : writes with\ntraversal_path
+Siphon --> MRs
+Siphon --> Edges
+Siphon --> Users
+Check --> Projects : queries with\nstartsWith filter
+Check --> MRs
+Check --> Edges
+@enduml
 ```
 
 ## Layer 2: Query-Time Filtering with Traversal IDs
