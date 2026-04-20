@@ -71,9 +71,9 @@ impl WorkspaceProbe {
             .map(|relative| root_dir.join(relative))
             .collect();
 
-        let bun_signal_present = BUN_SIGNAL_FILES
-            .iter()
-            .any(|name| indexed_paths.iter().any(|p| p == name) || root_dir.join(name).is_file());
+        let bun_signal_present = BUN_SIGNAL_FILES.iter().any(|name| {
+            indexed_paths.iter().any(|p| p == name) || is_regular_file(&root_dir.join(name))
+        });
 
         Self {
             root_dir,
@@ -131,6 +131,15 @@ impl WorkspaceProbe {
 fn existing_file(root_dir: &Path, filename: &str) -> Option<PathBuf> {
     let path = root_dir.join(filename);
     path.is_file().then_some(path)
+}
+
+/// `Path::is_file` follows symlinks. Use `symlink_metadata` so a
+/// committed `bun.lock -> /some/other/target` cannot flip the probe's
+/// bun detection based on the target's type.
+fn is_regular_file(path: &Path) -> bool {
+    std::fs::symlink_metadata(path)
+        .map(|meta| meta.file_type().is_file())
+        .unwrap_or(false)
 }
 
 /// Read a manifest-sized file or skip it. Guards against a hostile
