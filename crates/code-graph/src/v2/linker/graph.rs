@@ -531,6 +531,12 @@ impl CodeGraph {
         self.def(idx).kind
     }
 
+    /// Returns the ancestor chain for a node, if any.
+    #[inline]
+    pub fn ancestors(&self, idx: NodeIndex) -> Option<&[NodeIndex]> {
+        self.indexes.ancestors.get(&idx).map(|v| v.as_slice())
+    }
+
     // ── Iterators ───────────────────────────────────────────
 
     pub fn directories(&self) -> impl Iterator<Item = (NodeIndex, &CanonicalDirectory)> {
