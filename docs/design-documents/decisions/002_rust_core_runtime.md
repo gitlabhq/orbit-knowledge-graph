@@ -145,7 +145,7 @@ New contributors need Rust experience, which narrows the reviewer pool within Gi
 
 ### Build infrastructure
 
-Rust's compilation model (monomorphization, LLVM codegen) produces slower builds than Go. We maintain a separate `build-images` repository (`gitlab-org/orbit/build-images`) with pre-compiled tool versions and the sccache configuration described above. This is ongoing maintenance cost that Go would not require.
+Rust's compilation model (monomorphization, LLVM codegen) produces slower builds than Go. Builder images for all Rust services at GitLab live in the shared `gitlab-org/rust/build-images` repository; GKG consumes the `orbit-knowledge-graph` image, which carries pre-compiled tool versions and the sccache configuration described above. This is ongoing maintenance cost that Go would not require.
 
 Cross-compilation for multiple architectures means managing target triples and linked C libraries (tree-sitter grammars, OpenSSL). The multi-arch Docker build pipeline handles this but it is not trivial to maintain.
 
@@ -162,7 +162,7 @@ The PREP (Production Readiness) review (MR !64) will evaluate Rust-specific oper
 ## References
 
 - [Knowledge Graph repository](https://gitlab.com/gitlab-org/orbit/knowledge-graph) - 16-crate Cargo workspace
-- [Build images repository](https://gitlab.com/gitlab-org/orbit/build-images) - CI builder images with sccache
+- [Build images repository](https://gitlab.com/gitlab-org/rust/build-images) - shared Rust CI builder images (GKG uses `orbit-knowledge-graph`) with sccache
 - [GKG Helm charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) - production Helm chart (v1.0.0)
 - [ADR 001: gRPC communication protocol](001_grpc_communication.md)
 - [ADR 003: API Design — Unified REST + GraphQL](003_api_design.md)

@@ -65,7 +65,7 @@ stages:
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
