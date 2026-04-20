@@ -75,10 +75,18 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Strin
     if relative_path.contains('\0') || relative_path.contains('\n') {
         return Err("relative path contains NUL or newline".to_string());
     }
-    let rel = Path::new(relative_path);
-    if rel.is_absolute() {
-        return Err(format!("refusing absolute path: {relative_path}"));
-    }
+    let input = Path::new(relative_path);
+    // Callers sometimes hand us absolute paths that already live under
+    // `root_path` (the v2 pipeline walker and the integration-test
+    // harness both do). Strip the root so the rest of the check sees a
+    // clean relative form; anything else is refused.
+    let rel = if input.is_absolute() {
+        input.strip_prefix(root_path).map_err(|_| {
+            format!("absolute path outside root: {relative_path} (root: {root_path})")
+        })?
+    } else {
+        input
+    };
     for component in rel.components() {
         match component {
             Component::ParentDir => {

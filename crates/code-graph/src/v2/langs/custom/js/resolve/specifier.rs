@@ -436,6 +436,15 @@ fn base_resolve_options(
         JsResolutionMode::Require => vec!["node".to_string(), "require".to_string()],
     };
 
+    // Bound every resolution to the repo clone. `Restriction::Path`
+    // in oxc_resolver is stricter than "contained": it only matches
+    // the exact restriction path or `./`. Use the function form to
+    // check containment ourselves.
+    let root_owned = root_dir.to_path_buf();
+    let restrictions = vec![oxc_resolver::Restriction::Fn(std::sync::Arc::new(
+        move |path: &Path| path.starts_with(&root_owned),
+    ))];
+
     ResolveOptions {
         extensions,
         main_fields: vec!["module".to_string(), "main".to_string()],
@@ -443,15 +452,7 @@ fn base_resolve_options(
         extension_alias,
         tsconfig,
         alias,
-        // Bound every resolution to the repo clone. Any module that
-        // resolves outside `root_dir` (absolute alias, tsconfig `paths`
-        // escape, symlink target) is rejected by the resolver itself
-        // before we ever see it.
-        restrictions: vec![oxc_resolver::Restriction::Path(root_dir.to_path_buf())],
-        // Do not follow symlinks when resolving. A symlinked file
-        // committed in the repo should be treated as its own path so a
-        // downstream `strip_prefix(root_dir)` check stays sound.
-        symlinks: false,
+        restrictions,
         ..ResolveOptions::default()
     }
 }
