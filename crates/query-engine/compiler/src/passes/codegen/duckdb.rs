@@ -178,6 +178,11 @@ impl Context {
                 let r = self.emit_expr(right);
                 if *op == Op::In {
                     format!("{l} IN {r}")
+                } else if *op == Op::Like {
+                    // DuckDB has no default LIKE escape character, so the
+                    // `\_` / `\%` produced by the compiler's escape_like would
+                    // match a literal backslash. Request `\` explicitly.
+                    format!("({l} LIKE {r} ESCAPE '\\')")
                 } else {
                     format!("({l} {op} {r})")
                 }
@@ -361,6 +366,30 @@ mod tests {
         assert!(
             !result.sql.contains("{p"),
             "should not contain CH-style params: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn like_emits_backslash_escape() {
+        // DuckDB's default LIKE has no escape character. The compiler emits
+        // `\_` / `\%` for literal matches (see escape_like); without ESCAPE
+        // '\', those collapse to literal backslash-underscore in DuckDB.
+        let q = Query {
+            select: vec![SelectExpr::new(Expr::col("n", "id"), "id")],
+            from: TableRef::scan("nodes", "n"),
+            where_clause: Some(Expr::binary(
+                Op::Like,
+                Expr::col("n", "name"),
+                Expr::lit("apply\\_%"),
+            )),
+            ..Default::default()
+        };
+
+        let result = codegen(&Node::Query(Box::new(q)), empty_ctx()).unwrap();
+        assert!(
+            result.sql.contains("LIKE") && result.sql.contains("ESCAPE '\\'"),
+            "expected LIKE ... ESCAPE '\\': {}",
             result.sql
         );
     }
