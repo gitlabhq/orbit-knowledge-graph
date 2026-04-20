@@ -54,6 +54,7 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
 /// `root` or is dangling. Deletes offending symlinks before returning
 /// the error.
 pub fn validate_symlinks(root: &Path) -> io::Result<()> {
+    let mut first_err: Option<io::Error> = None;
     let mut stack = vec![root.to_path_buf()];
     while let Some(dir) = stack.pop() {
         let entries = match std::fs::read_dir(&dir) {
@@ -66,13 +67,20 @@ pub fn validate_symlinks(root: &Path) -> io::Result<()> {
             let meta = path.symlink_metadata()?;
 
             if meta.is_symlink() {
-                check_symlink(&path, root)?;
+                if let Err(e) = check_symlink(&path, root) {
+                    if first_err.is_none() {
+                        first_err = Some(e);
+                    }
+                }
             } else if meta.is_dir() {
                 stack.push(path);
             }
         }
     }
-    Ok(())
+    match first_err {
+        Some(e) => Err(e),
+        None => Ok(()),
+    }
 }
 
 fn check_symlink(path: &Path, root: &Path) -> io::Result<()> {
@@ -198,6 +206,29 @@ mod tests {
             std::os::unix::fs::symlink("nonexistent/target", root.join("bad")).unwrap();
             let err = validate_symlinks(&root).unwrap_err();
             assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+        }
+    }
+
+    #[test]
+    fn validate_symlinks_deletes_all_bad_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let outside = tempfile::tempdir().unwrap();
+        let root = dir.path().canonicalize().unwrap();
+
+        #[cfg(unix)]
+        {
+            std::os::unix::fs::symlink(outside.path(), root.join("bad1")).unwrap();
+            std::os::unix::fs::symlink("nonexistent", root.join("bad2")).unwrap();
+            std::os::unix::fs::symlink(outside.path(), root.join("bad3")).unwrap();
+
+            let err = validate_symlinks(&root);
+            assert!(err.is_err());
+            assert!(
+                !root.join("bad1").symlink_metadata().is_ok()
+                    && !root.join("bad2").symlink_metadata().is_ok()
+                    && !root.join("bad3").symlink_metadata().is_ok(),
+                "all bad symlinks must be deleted, not just the first"
+            );
         }
     }
 }
