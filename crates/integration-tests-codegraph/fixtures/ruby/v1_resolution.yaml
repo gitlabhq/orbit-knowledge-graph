@@ -109,7 +109,7 @@ tests:
       - { row_count: 1 }
 
   - name: "User::update_profile -> User::get_profile (self method)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'User::update_profile'
@@ -121,7 +121,7 @@ tests:
 
   # ── R8: test_service_method_call_patterns ──
   - name: "NotificationService::notify -> NotificationService::build_notification"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
@@ -132,7 +132,7 @@ tests:
       - { row_count: 1 }
 
   - name: "NotificationService::notify -> NotificationService::determine_delivery_method"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
@@ -143,7 +143,7 @@ tests:
       - { row_count: 1 }
 
   - name: "NotificationService::notify -> NotificationService::log_notification"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify'
@@ -214,7 +214,7 @@ tests:
 
   # ── R17: test_ruby_block_and_iterator_calls ──
   - name: "NotificationService::send_batch_notifications -> NotificationService::notify (in block)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::send_batch_notifications'
@@ -225,7 +225,7 @@ tests:
       - { row_count: 1 }
 
   - name: "NotificationService::notify_all -> NotificationService::notify (in each block)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'NotificationService::notify_all'

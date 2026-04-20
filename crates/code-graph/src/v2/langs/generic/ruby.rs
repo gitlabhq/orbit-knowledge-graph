@@ -9,6 +9,7 @@ use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind,
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
+use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
@@ -51,10 +52,12 @@ impl DslLanguage for RubyDsl {
                 .name_from(field("method"))
                 .receiver("receiver"),
             // bare method call without parens/args — just an identifier in Ruby
-            // e.g. `validate_name` inside a method body. No parent filter —
-            // identifiers appear in body_statement, then, else, begin, rescue, etc.
-            // The early exit filter (lookup_name) rejects names not in the graph.
-            reference("identifier").name_from(text()),
+            // e.g. `validate_name` inside a method body. Exclude identifiers
+            // that are the method name or arguments of a `call` node — those
+            // are already handled by the call ref rule above.
+            reference("identifier")
+                .name_from(text())
+                .when((!parent_is("call")).and(!parent_is("argument_list"))),
         ]
     }
 
