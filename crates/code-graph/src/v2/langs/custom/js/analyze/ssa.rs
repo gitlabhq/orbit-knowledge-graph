@@ -74,11 +74,18 @@ impl<'a, 'ctx> JsSsaCallExtractor<'a, 'ctx> {
                 .enumerate()
                 .map(|(idx, def)| (def.fqn.clone(), idx as u32))
                 .collect(),
-            def_idx_by_range: defs
-                .iter()
-                .enumerate()
-                .map(|(idx, def)| (def.range.byte_offset, idx as u32))
-                .collect(),
+            // First def at a given byte range wins. `HashMap::collect`
+            // would silently keep the *last* duplicate, which let a
+            // synthetic-span def (e.g. an inner arrow whose span matches
+            // its `export default` wrapper) overwrite the real def and
+            // misattribute call-site enclosure.
+            def_idx_by_range: {
+                let mut map = HashMap::new();
+                for (idx, def) in defs.iter().enumerate() {
+                    map.entry(def.range.byte_offset).or_insert(idx as u32);
+                }
+                map
+            },
             class_hierarchy,
             ssa,
             arena,
