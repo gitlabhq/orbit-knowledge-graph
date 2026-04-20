@@ -109,6 +109,15 @@ impl<const N: usize> VerifiedMap<N> {
         }
     }
 
+    /// Sort all entry lists for deterministic lookup order.
+    /// Call once after all insertions are complete.
+    /// `key_fn` extracts a sort key from each NodeIndex (e.g. FQN string).
+    pub fn sort_all(&mut self, key_fn: impl Fn(NodeIndex) -> String) {
+        for entries in self.inner.values_mut() {
+            entries.sort_by(|a, b| key_fn(*a).cmp(&key_fn(*b)));
+        }
+    }
+
     /// Like [`lookup`] but appends to `out` instead of allocating.
     /// Returns `true` if any verified entries were found.
     pub fn lookup_into(
