@@ -7,6 +7,37 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::config::Language;
 use crate::v2::trace::{TraceEvent, Tracer};
+
+/// Resolve a bare or dotted type name to its FQN using import_map,
+/// separator-based splitting, and module_prefix fallback.
+///
+/// Resolution order:
+/// 1. Direct import_map lookup for the full name
+/// 2. Split on separator, resolve first segment via imports, append rest
+/// 3. Prepend module_prefix (same-package/module fallback)
+/// 4. Return bare name unchanged
+fn resolve_type_name(
+    name: &str,
+    import_map: &rustc_hash::FxHashMap<String, String>,
+    module_prefix: Option<&str>,
+    sep: &str,
+) -> String {
+    if let Some(fqn) = import_map.get(name) {
+        return fqn.clone();
+    }
+    if name.contains(sep) {
+        if let Some((first, rest)) = name.split_once(sep) {
+            if let Some(fqn) = import_map.get(first) {
+                return format!("{fqn}{sep}{rest}");
+            }
+        }
+    }
+    if let Some(prefix) = module_prefix {
+        return format!("{prefix}{sep}{name}");
+    }
+    name.to_string()
+}
+
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
 };
@@ -322,13 +353,7 @@ impl LanguageSpec {
                 let mut segments = current.children().filter(|c| c.is_named());
                 if let Some(first) = segments.next() {
                     let name = first.text().to_string();
-                    let resolved = if let Some(fqn) = import_map.get(&name) {
-                        fqn.clone()
-                    } else if let Some(prefix) = module_prefix {
-                        format!("{prefix}{sep}{name}")
-                    } else {
-                        name.clone()
-                    };
+                    let resolved = resolve_type_name(&name, import_map, module_prefix, sep);
                     tracer.event(TraceEvent::ChainStepMatched {
                         node_kind: kind_ref.to_string(),
                         category: "Ident(qualified)".to_string(),
@@ -358,13 +383,8 @@ impl LanguageSpec {
                             let mut segments = type_node.children().filter(|c| c.is_named());
                             if let Some(first) = segments.next() {
                                 let name = first.text().to_string();
-                                let resolved = if let Some(fqn) = import_map.get(&name) {
-                                    fqn.clone()
-                                } else if let Some(prefix) = module_prefix {
-                                    format!("{prefix}{sep}{name}")
-                                } else {
-                                    name
-                                };
+                                let resolved =
+                                    resolve_type_name(&name, import_map, module_prefix, sep);
                                 tracer.event(TraceEvent::ChainStepMatched {
                                     node_kind: kind_ref.to_string(),
                                     category: "New(qualified)".to_string(),
@@ -377,13 +397,7 @@ impl LanguageSpec {
                             }
                         } else {
                             let bare = type_node.text().to_string();
-                            let resolved = if let Some(fqn) = import_map.get(&bare) {
-                                fqn.clone()
-                            } else if let Some(prefix) = module_prefix {
-                                format!("{prefix}{sep}{bare}")
-                            } else {
-                                bare
-                            };
+                            let resolved = resolve_type_name(&bare, import_map, module_prefix, sep);
                             tracer.event(TraceEvent::ChainStepMatched {
                                 node_kind: kind_ref.to_string(),
                                 category: "New".to_string(),
@@ -1008,19 +1022,12 @@ impl LanguageSpec {
                     && let Some(meta) = &state.defs[def_index as usize].metadata
                     && let Some(super_type) = meta.super_types.first()
                 {
-                    // Resolve super type through imports, same as type annotations
-                    let resolved = if let Some(fqn) = state.import_map.get(super_type.as_str()) {
-                        fqn.clone()
-                    } else if super_type.contains(sep)
-                        && let Some((first, rest)) = super_type.split_once(sep)
-                        && let Some(fqn) = state.import_map.get(first)
-                    {
-                        format!("{fqn}{sep}{rest}")
-                    } else if let Some(prefix) = &module_prefix {
-                        format!("{prefix}{sep}{super_type}")
-                    } else {
-                        super_type.clone()
-                    };
+                    let resolved = resolve_type_name(
+                        super_type,
+                        &state.import_map,
+                        module_prefix.as_deref(),
+                        sep,
+                    );
                     let st = state.arena.alloc_str(&resolved);
                     let name = state.arena.alloc_str(super_name);
                     state.ssa.write_variable(
@@ -1147,23 +1154,12 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → resolve to FQN.
-                        // For dotted types (Outer.Inner), resolve the first segment
-                        // via imports and append the remaining segments — this is
-                        // standard qualified name resolution (first segment = imported
-                        // symbol, rest = nested member access).
-                        let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
-                            fqn.clone()
-                        } else if type_ann.contains(sep)
-                            && let Some((first, rest)) = type_ann.split_once(sep)
-                            && let Some(fqn) = state.import_map.get(first)
-                        {
-                            format!("{fqn}{sep}{rest}")
-                        } else if let Some(prefix) = &module_prefix {
-                            format!("{prefix}{sep}{type_ann}")
-                        } else {
-                            type_ann
-                        };
+                        let resolved = resolve_type_name(
+                            &type_ann,
+                            &state.import_map,
+                            module_prefix.as_deref(),
+                            sep,
+                        );
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
