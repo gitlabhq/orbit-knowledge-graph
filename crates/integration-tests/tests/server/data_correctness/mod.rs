@@ -170,6 +170,10 @@ async fn data_correctness() {
         security::cross_org_traversal_excludes_other_org,
         security::cross_org_aggregation_excludes_other_org,
         security::cross_org_inverse_isolation,
+        // security: aggregation SQL assertions
+        security::aggregation_sql_contains_traversal_path_filter,
+        security::aggregation_multi_path_sql_contains_both_filters,
+        security::aggregation_multi_path_returns_union_of_scopes,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,
