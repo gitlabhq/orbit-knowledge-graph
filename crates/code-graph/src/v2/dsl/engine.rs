@@ -802,7 +802,10 @@ impl LanguageSpec {
                     .filter_map(|v| v.to_parse_value())
                     .collect();
 
-            // Instance attr rewrite
+            // Instance attr rewrite: for chains like [This, Field("db"), Call("execute")],
+            // build compound SSA keys (e.g. "self.db") and check if they have a type.
+            // This handles languages where instance fields are dynamic assignments
+            // (Python self.x = ..., Ruby @x = ...) rather than explicit declarations.
             let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
             if let Some(chain) = chain_slice
                 && chain.len() >= 3
