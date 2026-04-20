@@ -314,12 +314,10 @@ impl<'a> ResolveCtx<'a> {
                 self.rules.fqn_separator,
                 &mut result,
             );
-            // Walk ancestors for receiver type lookup (struct embedding).
-            // Early-exits on the first ancestor that yields a hit. In
-            // diamond embedding where two ancestors define the same method,
-            // this picks the first one in the ancestor chain (which is
-            // sorted by finalize). Go would flag this as ambiguous at
-            // compile time, so in practice only unambiguous cases arise.
+            // Walk ancestors for receiver type lookup (struct embedding,
+            // extension functions on parent types). Collects ALL matches
+            // across the full ancestor chain — doesn't early-exit so that
+            // diamond/multiple inheritance cases surface all candidates.
             if result.is_empty() {
                 let scope_nodes = self.graph.resolve_scope_nodes(scope_fqn);
                 for &scope_node in &scope_nodes {
@@ -332,13 +330,7 @@ impl<'a> ResolveCtx<'a> {
                                 self.rules.fqn_separator,
                                 &mut result,
                             );
-                            if !result.is_empty() {
-                                break;
-                            }
                         }
-                    }
-                    if !result.is_empty() {
-                        break;
                     }
                 }
             }
