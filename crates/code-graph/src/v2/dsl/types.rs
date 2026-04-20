@@ -571,10 +571,9 @@ impl BindingRule {
         None
     }
 
-    /// Extract the RHS value from a binding's value field.
-    /// Returns `Alias` for call expressions and bare identifiers (SSA copy propagation),
-    /// `Type` for field access objects (the object IS the type, resolved later).
-    pub fn extract_rhs_value(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<RhsValue> {
+    /// Extract the RHS name from a binding's value field.
+    /// Returns the callee/identifier/object name for SSA alias chasing.
+    pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
         let value_node = if let Some(extract) = &self.value_extract {
             extract.navigate(node)?
         } else {
@@ -585,23 +584,22 @@ impl BindingRule {
 
         // Call expression → extract callee name via reference rules.
         if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
-            return ref_rule.extract().apply(&value_node).map(RhsValue::Alias);
+            return ref_rule.extract().apply(&value_node);
         }
 
         // Bare identifier
         if let Some(cc) = &spec.chain_config
             && cc.ident_kinds.contains(&vk_ref)
         {
-            return Some(RhsValue::Alias(value_node.text().to_string()));
+            return Some(value_node.text().to_string());
         }
 
-        // Field access (e.g. EnumClass.ENUM_VALUE_2) → the object name is a type,
-        // not an alias. The resolver will FQN-resolve bare type names via imports.
+        // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name.
         if let Some(cc) = &spec.chain_config {
             for fa in &cc.field_access {
                 if vk_ref == fa.kind {
                     if let Some(obj) = fa.object.navigate(&value_node) {
-                        return Some(RhsValue::Type(obj.text().to_string()));
+                        return Some(obj.text().to_string());
                     }
                 }
             }
@@ -609,14 +607,6 @@ impl BindingRule {
 
         None
     }
-}
-
-/// Result of extracting a binding's RHS value.
-pub enum RhsValue {
-    /// Callee name or bare identifier — SSA copy propagation via alias chasing.
-    Alias(String),
-    /// Field access object name — the object is a type, resolved by the resolver.
-    Type(String),
 }
 
 // ── Branch rules ────────────────────────────────────────────────

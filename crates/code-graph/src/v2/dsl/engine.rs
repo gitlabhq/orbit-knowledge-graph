@@ -587,48 +587,6 @@ impl LanguageSpec {
         }
     }
 
-    /// Resolve an expression chain against the graph using import_map for
-    /// the base and nested lookups for each step. Returns the FQN of the
-    /// final resolved node, if any.
-    fn resolve_chain_against_graph(
-        &self,
-        chain: &[ExpressionStep],
-        import_map: &rustc_hash::FxHashMap<String, String>,
-        graph: &crate::v2::linker::graph::CodeGraph,
-    ) -> Option<String> {
-        let base_name = match &chain[0] {
-            ExpressionStep::Ident(n) | ExpressionStep::New(n) => n,
-            ExpressionStep::This | ExpressionStep::Super => return None,
-            _ => return None,
-        };
-        let base_fqn = import_map
-            .get(base_name.as_str())
-            .cloned()
-            .unwrap_or_else(|| base_name.clone());
-        let mut scope_nodes = graph.resolve_scope_nodes(&base_fqn);
-        if scope_nodes.is_empty() {
-            return None;
-        }
-        let mut resolved_fqn = graph.def_fqn(scope_nodes[0]).to_string();
-        for step in &chain[1..] {
-            let member = match step {
-                ExpressionStep::Call(n) | ExpressionStep::Field(n) | ExpressionStep::New(n) => n,
-                _ => return None,
-            };
-            let mut next = Vec::new();
-            for &node in &scope_nodes {
-                let fqn = graph.def_fqn(node);
-                graph.lookup_nested_with_hierarchy(fqn, member, &mut next);
-            }
-            if next.is_empty() {
-                return None;
-            }
-            resolved_fqn = graph.def_fqn(next[0]).to_string();
-            scope_nodes = next.into();
-        }
-        Some(resolved_fqn)
-    }
-
     // ── parse_full_and_resolve: single walk with SSA + inline callback ──
 
     /// Parse source with SSA, then call `on_ref` for each resolved reference.
@@ -769,28 +727,49 @@ impl LanguageSpec {
                 }
             }
 
-            // For each needed name, find a ref chain that resolves it.
+            // For each needed name, find a ref that resolves it.
+            // Check both ref names (bare refs) and chain bases (chain refs
+            // where the base ident matches the needed name).
             if !needed.is_empty() {
                 for pending in &pending_refs {
-                    if !needed.contains(pending.name.as_str()) {
-                        continue;
-                    }
-                    let resolved_fqn = if let Some(chain) = &pending.chain {
-                        self.resolve_chain_against_graph(chain, &state.import_map, g)
+                    // Match by ref name (bare ref) or chain base (chain ref)
+                    let matched_name = if needed.contains(pending.name.as_str()) {
+                        Some(pending.name.as_str())
+                    } else if let Some(chain) = &pending.chain {
+                        if let ExpressionStep::Ident(base) = &chain[0] {
+                            if needed.contains(base.as_str()) {
+                                Some(base.as_str())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
                     } else {
+                        None
+                    };
+                    let Some(name) = matched_name else {
+                        continue;
+                    };
+                    // Resolve: for bare refs, look up the name directly.
+                    // For chain bases, resolve just the base (not the full chain).
+                    let resolved_fqn = {
                         let fqn = state
                             .import_map
-                            .get(pending.name.as_str())
+                            .get(name)
                             .cloned()
-                            .unwrap_or_else(|| pending.name.clone());
+                            .unwrap_or_else(|| name.to_string());
                         let nodes = g.resolve_scope_nodes(&fqn);
-                        nodes.first().map(|&n| g.def_fqn(n).to_string())
+                        nodes
+                            .first()
+                            .filter(|&&n| g.def_kind(n).is_type_container())
+                            .map(|&n| g.def_fqn(n).to_string())
                     };
                     if let Some(fqn) = resolved_fqn {
-                        let key = state.arena.alloc_str(&pending.name);
+                        let key = state.arena.alloc_str(name);
                         let val = super::ssa::SsaValue::Type(state.arena.alloc_str(&fqn));
                         state.ssa.write_variable(key, pending.block, val);
-                        needed.remove(pending.name.as_str());
+                        needed.remove(name);
                     }
                 }
             }
@@ -1183,15 +1162,8 @@ impl LanguageSpec {
                             type_ann
                         };
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
-                    } else if let Some(rhs) = rule.extract_rhs_value(node, self) {
-                        match rhs {
-                            super::types::RhsValue::Alias(name) => {
-                                super::ssa::SsaValue::Alias(state.arena.alloc_str(&name))
-                            }
-                            super::types::RhsValue::Type(name) => {
-                                super::ssa::SsaValue::Type(state.arena.alloc_str(&name))
-                            }
-                        }
+                    } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
+                        super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
                     } else {
                         super::ssa::SsaValue::Opaque
                     };

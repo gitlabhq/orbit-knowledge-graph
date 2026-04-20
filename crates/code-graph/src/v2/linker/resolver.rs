@@ -535,24 +535,7 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
     });
 
     if current_types.is_empty() {
-        if ctx.settings.chain_fallback
-            && let Some(last_name) = chain.last().and_then(|s| match s {
-                ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
-                _ => None,
-            })
-        {
-            ctx.tracer.event(TraceEvent::ResolveChainFallback {
-                name: last_name.to_string(),
-            });
-            let fallback = RefData {
-                name: last_name,
-                chain: None,
-                reaching: &[],
-                enclosing_def: r.enclosing_def,
-            };
-            return resolve_bare(ctx, &fallback);
-        }
-        return vec![];
+        return chain_fallback(ctx, r, chain);
     }
 
     for (depth, step) in chain[1..].iter().enumerate() {
@@ -644,27 +627,37 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
         current_types = next_types;
     }
 
-    // Chain resolved the base but a later step failed — fall back to bare
-    // resolution of the terminal name (same logic as the empty-base path).
-    if ctx.settings.chain_fallback
-        && let Some(last_name) = chain.last().and_then(|s| match s {
-            ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
-            _ => None,
-        })
-    {
-        ctx.tracer.event(TraceEvent::ResolveChainFallback {
-            name: last_name.to_string(),
-        });
-        let fallback = RefData {
-            name: last_name,
-            chain: None,
-            reaching: &[],
-            enclosing_def: r.enclosing_def,
-        };
-        return resolve_bare(ctx, &fallback);
-    }
+    chain_fallback(ctx, r, chain)
+}
 
-    vec![]
+/// When chain resolution fails (empty base or mid-chain step failure),
+/// fall back to bare resolution of the terminal name. Handles extension
+/// functions, static methods, and other cases where the def isn't nested
+/// under the chain's resolved type.
+fn chain_fallback(
+    ctx: &mut ResolveCtx<'_>,
+    r: &RefData<'_>,
+    chain: &[ExpressionStep],
+) -> Vec<NodeIndex> {
+    if !ctx.settings.chain_fallback {
+        return vec![];
+    }
+    let Some(last_name) = chain.last().and_then(|s| match s {
+        ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
+        _ => None,
+    }) else {
+        return vec![];
+    };
+    ctx.tracer.event(TraceEvent::ResolveChainFallback {
+        name: last_name.to_string(),
+    });
+    let fallback = RefData {
+        name: last_name,
+        chain: None,
+        reaching: &[],
+        enclosing_def: r.enclosing_def,
+    };
+    resolve_bare(ctx, &fallback)
 }
 
 fn resolve_base_type_fqns(
