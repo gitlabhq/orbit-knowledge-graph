@@ -464,7 +464,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
         }
 
         let result = if use_v2 {
-            index_repo_v2(&git, &store, &ontology).await
+            index_repo_v2(&git, &store, &ontology, &config).await
         } else {
             index_repo(&git, &config, &store, &ontology).await
         };
@@ -580,14 +580,27 @@ async fn index_repo_v2(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
+    config: &IndexingConfig,
 ) -> Result<RepositoryIndexingResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
 
     // Run v2 pipeline
-    let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig::default());
+    let mut pipeline_config = code_graph::v2::PipelineConfig::default();
+    pipeline_config.max_file_size = config.max_file_size as u64;
+    pipeline_config.respect_gitignore = config.respect_gitignore;
+    let pipeline = code_graph::v2::Pipeline::new(pipeline_config);
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    let v2_result = pipeline.run(std::path::Path::new(&root_path), &tracer);
+
+    let v2_result = if config.worker_threads > 0 {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(config.worker_threads)
+            .build()
+            .context("failed to build thread pool")?;
+        pool.install(|| pipeline.run(std::path::Path::new(&root_path), &tracer))
+    } else {
+        pipeline.run(std::path::Path::new(&root_path), &tracer)
+    };
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {
