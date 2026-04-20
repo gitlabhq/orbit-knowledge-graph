@@ -26,6 +26,9 @@ pub struct RefData<'a> {
 pub struct FileResolver<'a> {
     ctx: ResolveCtx<'a>,
     deadline: Option<std::time::Instant>,
+    /// Edges from definitions to external imported symbols. Stored
+    /// separately so they don't interfere with the failed_chains check.
+    import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
 }
 
 impl<'a> FileResolver<'a> {
@@ -50,7 +53,16 @@ impl<'a> FileResolver<'a> {
         let deadline = settings
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
-        Self { ctx, deadline }
+        Self {
+            ctx,
+            deadline,
+            import_edges: Vec::new(),
+        }
+    }
+
+    /// Drain accumulated Definition → ImportedSymbol edges.
+    pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
+        std::mem::take(&mut self.import_edges)
     }
 
     /// Dump resolver trace events to stderr. Call after all refs are resolved.
@@ -90,6 +102,9 @@ impl<'a> FileResolver<'a> {
         };
         let targets = resolve_single(&mut self.ctx, &ref_data);
         if targets.is_empty() {
+            let mut imp_edges = Vec::new();
+            self.emit_imported_symbol_edges(reaching, enclosing_def, &mut imp_edges);
+            self.import_edges.extend(imp_edges);
             return;
         }
 
@@ -121,6 +136,48 @@ impl<'a> FileResolver<'a> {
                     },
                 },
             ));
+        }
+    }
+
+    /// Emit Definition → ImportedSymbol edges for external (unresolved) refs.
+    fn emit_imported_symbol_edges(
+        &self,
+        reaching: &[ParseValue],
+        enclosing_def: Option<u32>,
+        edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    ) {
+        let Some(enc) = enclosing_def else { return };
+        let Some(&src) = self.ctx.def_nodes.get(enc as usize) else {
+            return;
+        };
+        let src_def_kind = self.ctx.graph.graph[src]
+            .def_id()
+            .map(|did| self.ctx.graph.defs[did.0 as usize].kind);
+        let rel = Relationship {
+            edge_kind: EdgeKind::Calls,
+            source_node: NodeKind::Definition,
+            target_node: NodeKind::ImportedSymbol,
+            source_def_kind: src_def_kind,
+            target_def_kind: None,
+        };
+        // (a) Explicit imports from reaching defs
+        let before = edges.len();
+        for pv in reaching {
+            if let ParseValue::ImportRef(i) = pv
+                && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
+            {
+                edges.push((src, import_node, GraphEdge { relationship: rel }));
+            }
+        }
+        // (b) Wildcard imports: when no explicit import matched, any wildcard
+        // import from this file could cover the ref name.
+        if edges.len() == before {
+            for &import_node in self.ctx.import_nodes {
+                let imp = self.ctx.graph.import(import_node);
+                if imp.wildcard {
+                    edges.push((src, import_node, GraphEdge { relationship: rel }));
+                }
+            }
         }
     }
 }

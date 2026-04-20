@@ -443,6 +443,7 @@ where
                 );
 
                 let inferred = inferred_result.unwrap_or_default();
+                edges.extend(resolver.drain_import_edges());
 
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
