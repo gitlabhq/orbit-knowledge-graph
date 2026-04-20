@@ -31,7 +31,8 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 ///   stores the string value and old rows become invisible to the new compiler
 /// - ETL mapping changes that alter what values are written to existing columns
 ///
-/// The CI `schema-version-check` job enforces this.
+/// The CI `schema-version-check` job enforces this for DDL and ontology changes;
+/// ETL mapping changes in Rust source must be caught by code review.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
     include_str!("../../../../config/SCHEMA_VERSION")
         .trim()
