@@ -579,7 +579,15 @@ impl<'a> SsaEngine<'a> {
     const MAX_SCC_DEPTH: usize = 32;
 
     fn remove_redundant_phi_sccs_inner(&mut self, phi_ids: &[PhiId], depth: usize) {
-        if phi_ids.len() < 2 || depth >= Self::MAX_SCC_DEPTH {
+        if phi_ids.len() < 2 {
+            return;
+        }
+        if depth >= Self::MAX_SCC_DEPTH {
+            tracing::error!(
+                depth,
+                phis = phi_ids.len(),
+                "SCC phi elimination hit max recursion depth"
+            );
             return;
         }
 
