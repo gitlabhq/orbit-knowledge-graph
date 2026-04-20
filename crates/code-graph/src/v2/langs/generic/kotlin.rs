@@ -249,7 +249,11 @@ impl DslLanguage for KotlinDsl {
                         child_of_kind("variable_declaration")
                             .then(child_of_kind("simple_identifier")),
                     )
-                    .value_from_extract(text().nth(Child, Named, -1)),
+                    .value_from_extract(
+                        text()
+                            .nth(Child, Named, -1)
+                            .try_descendant("call_expression"),
+                    ),
             ),
             kotlin_type(
                 binding("variable_declaration", BindingKind::Assignment)
