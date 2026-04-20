@@ -47,7 +47,7 @@ fixtures:
       }
 
 tests:
-  - name: "restricted pub(crate) use is recorded as a re-export"
+  - name: "restricted pub(crate) use is indexed as a private use"
     query: |
       MATCH (i:ImportedSymbol)
       WHERE i.file_path = 'src/lib.rs'
@@ -55,7 +55,7 @@ tests:
       RETURN i.import_type AS type
     assert:
       - { row_count: 1 }
-      - { row: { type: 'ReExport' } }
+      - { row: { type: 'Use' } }
 
   - name: "colliding trait-impl methods are disambiguated with trait name"
     query: |

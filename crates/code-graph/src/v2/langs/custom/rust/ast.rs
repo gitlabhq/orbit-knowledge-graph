@@ -657,10 +657,11 @@ impl RustStructureExtractor {
         let Some(use_tree) = use_item.use_tree() else {
             return;
         };
-        let visibility = if use_item.visibility().is_some() {
-            ImportVisibility::Public
-        } else {
-            ImportVisibility::Private
+        // Only unqualified `pub` re-exports; `pub(crate)`, `pub(super)`, `pub(in path)`
+        // are restricted and stay private from the importing module's perspective.
+        let visibility = match use_item.visibility().map(|v| v.kind()) {
+            Some(VisibilityKind::Pub) => ImportVisibility::Public,
+            _ => ImportVisibility::Private,
         };
         self.collect_use_tree(use_tree, &[], module_parts, visibility, false);
     }

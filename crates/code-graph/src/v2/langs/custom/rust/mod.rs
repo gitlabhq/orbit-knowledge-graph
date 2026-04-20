@@ -30,7 +30,7 @@ use ra_ap_syntax::{
     AstNode, Edition, SyntaxKind, SyntaxNode, SyntaxNodePtr, TextRange,
     ast::{
         self, BinaryOp, ElseBranch, HasArgList, HasLoopBody, HasModuleItem, HasName, HasVisibility,
-        StructKind,
+        StructKind, VisibilityKind,
     },
 };
 use ra_ap_vfs::{self as vfs, FileExcluded, Vfs, loader};
@@ -436,6 +436,9 @@ impl<'a> ResolvedEdgeCollector<'a> {
         record_expr: ast::RecordExpr,
         source_range: Option<TextRange>,
     ) {
+        if record_expr_is_stored_value(&record_expr) {
+            return;
+        }
         let target = record_expr.path().and_then(|path| {
             self.sema.resolve_path(&path).and_then(|resolution| {
                 path_resolution_to_definition_site(self.db, self.paths_by_file_id, resolution)
@@ -645,6 +648,28 @@ impl<'a> ResolvedEdgeCollector<'a> {
             self.edges.push(edge);
         }
     }
+}
+
+fn record_expr_is_stored_value(record_expr: &ast::RecordExpr) -> bool {
+    let mut current = record_expr.syntax().clone();
+    while let Some(parent) = current.parent() {
+        if ast::ParenExpr::can_cast(parent.kind()) {
+            current = parent;
+            continue;
+        }
+        if let Some(let_stmt) = ast::LetStmt::cast(parent.clone()) {
+            return let_stmt
+                .initializer()
+                .is_some_and(|init| init.syntax() == &current);
+        }
+        if let Some(bin_expr) = ast::BinExpr::cast(parent)
+            && matches!(bin_expr.op_kind(), Some(BinaryOp::Assignment { .. }))
+        {
+            return bin_expr.rhs().is_some_and(|rhs| rhs.syntax() == &current);
+        }
+        return false;
+    }
+    false
 }
 
 fn is_edge_relevant_node(node: &SyntaxNode) -> bool {

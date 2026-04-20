@@ -28,6 +28,11 @@ impl LocalFlowIndex {
     }
 }
 
+struct PendingCallRead<'arena> {
+    range: TextRange,
+    value: SsaValue<'arena>,
+}
+
 struct LocalFlowState<'arena, 'db> {
     sema: &'arena Semantics<'db, RootDatabase>,
     db: &'db RootDatabase,
@@ -38,6 +43,9 @@ struct LocalFlowState<'arena, 'db> {
     local_keys: HashMap<u32, &'arena str>,
     field_keys: HashMap<u32, HashMap<String, &'arena str>>,
     temp_counter: usize,
+    pending_call_reads: Vec<PendingCallRead<'arena>>,
+    field_seeds: &'arena HashMap<DefinitionSite, Vec<DefinitionSite>>,
+    locally_constructed: HashSet<u32>,
 }
 
 impl<'arena, 'db> LocalFlowState<'arena, 'db> {
@@ -46,6 +54,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         db: &'db RootDatabase,
         paths_by_file_id: &'arena HashMap<FileId, String>,
         arena: &'arena Bump,
+        field_seeds: &'arena HashMap<DefinitionSite, Vec<DefinitionSite>>,
     ) -> Self {
         let mut ssa = SsaEngine::new();
         let entry = ssa.add_block();
@@ -60,6 +69,9 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
             local_keys: HashMap::new(),
             field_keys: HashMap::new(),
             temp_counter: 0,
+            pending_call_reads: Vec::new(),
+            field_seeds,
+            locally_constructed: HashSet::new(),
         }
     }
 
@@ -164,22 +176,12 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         &mut self,
         range: TextRange,
         local: ra_ap_hir::Local,
-        index: &mut LocalFlowIndex,
+        _index: &mut LocalFlowIndex,
     ) {
         let key = self.local_key(local);
-        let reaching = self.ssa.read_variable_stateless(key, self.current_block);
-        for value in reaching.values {
-            if let SsaValue::ResolvedSite(site) = value {
-                index.record_target(
-                    range,
-                    DefinitionSite {
-                        relative_path: site.path.to_string(),
-                        start: site.start,
-                        end: site.end,
-                    },
-                );
-            }
-        }
+        let value = self.ssa.read_variable_raw(key, self.current_block);
+        self.pending_call_reads
+            .push(PendingCallRead { range, value });
     }
 
     fn record_call_targets_from_value(
@@ -198,21 +200,66 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
                 },
             ),
             SsaValue::Alias(alias) => {
-                let reaching = self.ssa.read_variable_stateless(alias, self.current_block);
-                for value in reaching.values {
-                    if let SsaValue::ResolvedSite(site) = value {
-                        index.record_target(
-                            range,
-                            DefinitionSite {
-                                relative_path: site.path.to_string(),
-                                start: site.start,
-                                end: site.end,
-                            },
-                        );
-                    }
-                }
+                let raw = self.ssa.read_variable_raw(alias, self.current_block);
+                self.pending_call_reads
+                    .push(PendingCallRead { range, value: raw });
             }
             _ => {}
+        }
+    }
+
+    fn seed_field_call_targets(
+        &mut self,
+        range: TextRange,
+        callee: &ast::Expr,
+        index: &mut LocalFlowIndex,
+    ) {
+        let Some(field_expr) = unwrap_paren_field_expr(callee) else {
+            return;
+        };
+        let Some(receiver) = field_expr.expr() else {
+            return;
+        };
+        let Some(local) = self.expr_local(&receiver) else {
+            return;
+        };
+        if self.locally_constructed.contains(&local.as_id()) {
+            return;
+        }
+        let Some((Either::Left(Either::Left(field)), _)) =
+            self.sema.resolve_field_fallback(&field_expr)
+        else {
+            return;
+        };
+        let Some(field_site) = hir_def_to_definition_site(self.db, self.paths_by_file_id, field)
+        else {
+            return;
+        };
+        let Some(seeds) = self.field_seeds.get(&field_site) else {
+            return;
+        };
+        for seed in seeds {
+            index.record_target(range, seed.clone());
+        }
+    }
+
+    fn flush_pending_reads(&mut self, index: &mut LocalFlowIndex) {
+        self.ssa.seal_remaining();
+        let pending = std::mem::take(&mut self.pending_call_reads);
+        for read in pending {
+            let reaching = self.ssa.expand_value(&read.value);
+            for value in reaching.values {
+                if let SsaValue::ResolvedSite(site) = value {
+                    index.record_target(
+                        read.range,
+                        DefinitionSite {
+                            relative_path: site.path.to_string(),
+                            start: site.start,
+                            end: site.end,
+                        },
+                    );
+                }
+            }
         }
     }
 
@@ -278,9 +325,11 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
     ) {
         match expr {
             ast::Expr::RecordExpr(record_expr) => {
+                self.locally_constructed.insert(local.as_id());
                 self.capture_record_expr_fields(local, record_expr, index)
             }
             ast::Expr::TupleExpr(tuple_expr) => {
+                self.locally_constructed.insert(local.as_id());
                 self.capture_tuple_expr_fields(local, tuple_expr, index)
             }
             ast::Expr::CallExpr(call_expr) => {
@@ -620,6 +669,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
                         &callee_value,
                         index,
                     );
+                    self.seed_field_call_targets(call_expr.syntax().text_range(), &callee, index);
                 }
                 if let Some(arg_list) = call_expr.arg_list() {
                     for arg in arg_list.args() {
@@ -752,6 +802,7 @@ pub(super) fn build_local_flow_index(
     paths_by_file_id: &HashMap<FileId, String>,
 ) -> LocalFlowIndex {
     let mut index = LocalFlowIndex::new();
+    let field_seeds = build_field_constructor_seeds(source_file, sema, db, paths_by_file_id);
 
     for function in source_file.syntax().descendants().filter_map(ast::Fn::cast) {
         let Some(body) = function.body() else {
@@ -761,12 +812,67 @@ pub(super) fn build_local_flow_index(
             continue;
         }
         let arena = Bump::new();
-        let mut state = LocalFlowState::new(sema, db, paths_by_file_id, &arena);
+        let mut state = LocalFlowState::new(sema, db, paths_by_file_id, &arena, &field_seeds);
         let _ = state.walk_block_value(&body, &mut index);
+        state.flush_pending_reads(&mut index);
     }
 
     index.dedup();
     index
+}
+
+fn build_field_constructor_seeds(
+    source_file: &ast::SourceFile,
+    sema: &Semantics<'_, RootDatabase>,
+    db: &RootDatabase,
+    paths_by_file_id: &HashMap<FileId, String>,
+) -> HashMap<DefinitionSite, Vec<DefinitionSite>> {
+    let mut seeds: HashMap<DefinitionSite, Vec<DefinitionSite>> = HashMap::new();
+    for record_expr in source_file
+        .syntax()
+        .descendants()
+        .filter_map(ast::RecordExpr::cast)
+    {
+        let Some(field_list) = record_expr.record_expr_field_list() else {
+            continue;
+        };
+        for field in field_list.fields() {
+            let Some((resolved_field, _, _, _)) =
+                sema.resolve_record_field_with_substitution(&field)
+            else {
+                continue;
+            };
+            let Some(field_site) = hir_def_to_definition_site(db, paths_by_file_id, resolved_field)
+            else {
+                continue;
+            };
+            let Some(value_expr) = field.expr() else {
+                continue;
+            };
+            let Some(value_site) = resolved_site_for_expr(sema, db, paths_by_file_id, &value_expr)
+            else {
+                continue;
+            };
+            let bucket = seeds.entry(field_site).or_default();
+            if !bucket.contains(&value_site) {
+                bucket.push(value_site);
+            }
+        }
+    }
+    seeds
+}
+
+fn unwrap_paren_field_expr(expr: &ast::Expr) -> Option<ast::FieldExpr> {
+    let mut current = expr.clone();
+    loop {
+        match current {
+            ast::Expr::ParenExpr(paren) => {
+                current = paren.expr()?;
+            }
+            ast::Expr::FieldExpr(field_expr) => return Some(field_expr),
+            _ => return None,
+        }
+    }
 }
 
 fn body_needs_local_flow_index(body: &ast::BlockExpr) -> bool {

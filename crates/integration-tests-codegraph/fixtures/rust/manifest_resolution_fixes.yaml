@@ -38,7 +38,10 @@ fixtures:
 
   - path: crates/app/src/main.rs
     content: |
+      pub fn local_sentinel() {}
+
       pub fn uses_optional() {
+          local_sentinel();
           helper::optional_helper();
       }
 
@@ -57,13 +60,11 @@ tests:
   - name: "optional dep absent from default features does not wire call edges"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.file_path = 'crates/app/src/main.rs'
-        AND caller.name = 'uses_optional'
-        AND callee.file_path = 'crates/helper/src/lib.rs'
-      RETURN count(*) AS edges
+      WHERE caller.name = 'uses_optional'
+        AND callee.name = 'optional_helper'
+      RETURN callee.name AS name
     assert:
-      - { row_count: 1 }
-      - { row: { edges: 0 } }
+      - { row_count: 0 }
 
   - name: "crate under excluded directory prefix is still indexed as its own workspace"
     query: |
@@ -77,9 +78,8 @@ tests:
   - name: "excluded vendor crate is not pulled into the outer workspace members"
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.file_path = 'crates/app/src/main.rs'
-        AND callee.file_path = 'vendor/stub/src/lib.rs'
-      RETURN count(*) AS edges
+      WHERE caller.name = 'uses_optional'
+        AND callee.name = 'vendored'
+      RETURN callee.name AS name
     assert:
-      - { row_count: 1 }
-      - { row: { edges: 0 } }
+      - { row_count: 0 }

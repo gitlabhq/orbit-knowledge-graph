@@ -105,7 +105,8 @@ repos:
   - name: orbit-knowledge-graph
     source: gitlab
     project: gitlab-org/orbit/knowledge-graph
-    version: 6f216119ed0c33a4ba00bcef67c447f30f416bf3
+    version: main
+    commit_sha: 6f216119ed0c33a4ba00bcef67c447f30f416bf3
     groups: [rust]
 
   - name: cargo

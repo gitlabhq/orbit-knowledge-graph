@@ -260,6 +260,18 @@ impl<'a> SsaEngine<'a> {
         result
     }
 
+    /// Return the raw SSA value for `variable` at `block`, without expanding phis.
+    /// Use `expand_value` later to resolve once all blocks are sealed.
+    pub(crate) fn read_variable_raw(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
+        self.stats.reads += 1;
+        self.read_variable_internal(variable, block)
+    }
+
+    /// Expand a raw SSA value into its reaching definitions.
+    pub(crate) fn expand_value(&self, value: &SsaValue<'a>) -> ReachingDefs<'a> {
+        self.resolve_value(value)
+    }
+
     // ── Internal: Braun et al. algorithm ────────────────────────
 
     fn read_variable_internal(&mut self, variable: &'a str, block: BlockId) -> SsaValue<'a> {
