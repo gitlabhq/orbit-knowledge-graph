@@ -114,6 +114,29 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Strin
     Ok(joined)
 }
 
+/// Per-file ceiling on star-reexport specifiers. Star re-export chains
+/// drive repeated resolver work inside `resolve_star_reexport_target`,
+/// so an attacker-crafted module with 100 k `export * from '...'`
+/// statements would amplify the cost of every import that touches it.
+const MAX_STAR_REEXPORTS: usize = 64;
+
+fn dedup_and_cap_star_reexports(specifiers: &[String]) -> Vec<JsStarReexport> {
+    let mut seen: FxHashSet<String> = FxHashSet::default();
+    let mut out = Vec::with_capacity(specifiers.len().min(MAX_STAR_REEXPORTS));
+    for specifier in specifiers {
+        if out.len() >= MAX_STAR_REEXPORTS {
+            break;
+        }
+        if seen.insert(specifier.clone()) {
+            out.push(JsStarReexport {
+                specifier: specifier.clone(),
+                mode: ImportMode::Declarative,
+            });
+        }
+    }
+    out
+}
+
 /// Per-file ceiling for the JS pipeline. The walker also applies a cap,
 /// but callers that bypass the walker (`WorkspaceProbe`, SFC block
 /// recombination) rely on this constant to stay bounded.
@@ -175,16 +198,7 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         definitions: canonical_definitions(&analysis),
         imports: canonical_imports(&analysis.imports),
         bindings: module_bindings(&analysis),
-        star_reexports: analysis
-            .module_info
-            .star_export_sources
-            .iter()
-            .cloned()
-            .map(|specifier| JsStarReexport {
-                specifier,
-                mode: ImportMode::Declarative,
-            })
-            .collect(),
+        star_reexports: dedup_and_cap_star_reexports(&analysis.module_info.star_export_sources),
     };
 
     Ok(AnalyzedJsFile {
