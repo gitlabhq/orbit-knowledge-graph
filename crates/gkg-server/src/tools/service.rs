@@ -2,7 +2,8 @@ use std::sync::Arc;
 
 use ontology::Ontology;
 use ontology::introspection::{
-    IntrospectionScope, SchemaDomain, SchemaEdge, SchemaResponse, build_schema_response,
+    IntrospectionScope, SchemaDomain, SchemaEdge, SchemaResponse, build_schema_edges,
+    build_schema_response,
 };
 use serde::Deserialize;
 use serde_json::{Value, json};
@@ -125,7 +126,7 @@ impl ToolService {
     }
 
     pub fn build_edges(&self) -> Vec<SchemaEdge> {
-        self.build_graph_schema_response(&[]).edges
+        build_schema_edges(&self.ontology, IntrospectionScope::All)
     }
 
     fn format_as_toon(&self, response: &SchemaResponse) -> Result<Value, ExecutorError> {

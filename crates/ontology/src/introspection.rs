@@ -75,6 +75,13 @@ pub fn build_schema_response(
     }
 }
 
+/// Build just the edges list for the given ontology and scope, skipping
+/// the domain/node construction.
+#[must_use]
+pub fn build_schema_edges(ontology: &Ontology, scope: IntrospectionScope) -> Vec<SchemaEdge> {
+    build_edges(ontology, scope)
+}
+
 fn build_domains(
     ontology: &Ontology,
     scope: IntrospectionScope,

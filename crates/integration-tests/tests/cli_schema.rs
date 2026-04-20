@@ -106,3 +106,13 @@ fn old_schema_subcommand_no_longer_emits_ddl() {
         "orbit schema must not emit DDL anymore: {stdout}"
     );
 }
+
+#[test]
+fn schema_expand_without_value_errors() {
+    let (_, stderr, ok) = run(&["schema", "--expand"]);
+    assert!(!ok, "--expand without a value should fail");
+    assert!(
+        stderr.contains("--expand") || stderr.contains("NODE"),
+        "stderr should mention the missing NODE value: {stderr}"
+    );
+}

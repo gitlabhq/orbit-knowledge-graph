@@ -188,7 +188,7 @@ enum Commands {
     Schema {
         /// Expand one or more entities to show their properties and edges.
         /// Pass `*` to expand every entity.
-        #[arg(long, short = 'e', value_name = "NODE", num_args = 0..)]
+        #[arg(long, short = 'e', value_name = "NODE", num_args = 1..)]
         expand: Vec<String>,
 
         /// Emit JSON instead of the default LLM-friendly TOON format.
