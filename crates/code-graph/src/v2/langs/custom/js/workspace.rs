@@ -56,7 +56,7 @@ impl WorkspaceProbe {
             };
         };
 
-        let manifest_raw = std::fs::read_to_string(root_dir.join("package.json")).ok();
+        let manifest_raw = read_bounded(&root_dir.join("package.json"));
 
         let tsconfig_path = existing_file(&root_dir, "tsconfig.json");
         let jsconfig_path = existing_file(&root_dir, "jsconfig.json");
@@ -131,4 +131,14 @@ impl WorkspaceProbe {
 fn existing_file(root_dir: &Path, filename: &str) -> Option<PathBuf> {
     let path = root_dir.join(filename);
     path.is_file().then_some(path)
+}
+
+/// Read a manifest-sized file or skip it. Guards against a hostile
+/// `package.json` the size of the whole repo.
+fn read_bounded(path: &Path) -> Option<String> {
+    let meta = std::fs::metadata(path).ok()?;
+    if meta.len() > super::extract::MAX_FILE_BYTES {
+        return None;
+    }
+    std::fs::read_to_string(path).ok()
 }

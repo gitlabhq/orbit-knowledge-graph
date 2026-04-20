@@ -61,6 +61,14 @@ pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts,
         if !combined.is_empty() {
             combined.push('\n');
         }
+        if combined.len().saturating_add(block.source_text.len()) as u64
+            > super::extract::MAX_FILE_BYTES
+        {
+            return Err(format!(
+                "combined script blocks exceed per-file cap ({} bytes)",
+                super::extract::MAX_FILE_BYTES
+            ));
+        }
         combined.push_str(block.source_text);
     }
     Ok(CombinedScripts {

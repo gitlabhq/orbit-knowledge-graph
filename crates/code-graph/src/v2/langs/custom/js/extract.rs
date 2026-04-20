@@ -96,8 +96,20 @@ fn safe_repo_join(root_path: &str, relative_path: &str) -> Result<PathBuf, Strin
     if !meta.file_type().is_file() {
         return Err(format!("refusing non-regular file: {}", joined.display()));
     }
+    if meta.len() > MAX_FILE_BYTES {
+        return Err(format!(
+            "refusing oversize file: {} ({} bytes, max {MAX_FILE_BYTES})",
+            joined.display(),
+            meta.len()
+        ));
+    }
     Ok(joined)
 }
+
+/// Per-file ceiling for the JS pipeline. The walker also applies a cap,
+/// but callers that bypass the walker (`WorkspaceProbe`, SFC block
+/// recombination) rely on this constant to stay bounded.
+pub const MAX_FILE_BYTES: u64 = 2 * 1024 * 1024;
 
 fn panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
     if let Some(s) = payload.downcast_ref::<&'static str>() {
