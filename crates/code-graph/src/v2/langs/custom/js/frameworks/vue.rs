@@ -251,12 +251,26 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
                 .unwrap_or("Component")
                 .to_string()
         });
+        // If a real class with this FQN already exists in the file
+        // (hostile case: `export class Foo {}` alongside a Vue default
+        // export whose component name defaults to the file stem `Foo`),
+        // namespace the virtual class so it cannot collide. The `<vue>`
+        // marker uses angle brackets which cannot appear in a valid JS
+        // identifier.
+        let collides = defs
+            .iter()
+            .any(|def| def.kind == JsDefKind::Class && def.fqn == component_name);
+        let component_fqn = if collides {
+            format!("<vue>::{component_name}")
+        } else {
+            component_name.clone()
+        };
 
-        class_hierarchy.insert(component_name.clone(), None);
+        class_hierarchy.insert(component_fqn.clone(), None);
 
         defs.push(JsDef {
             name: component_name.clone(),
-            fqn: component_name.clone(),
+            fqn: component_fqn.clone(),
             kind: JsDefKind::Class,
             range: span_to_range(obj.span),
             is_exported: true,
@@ -267,19 +281,19 @@ pub(in crate::v2::langs::custom::js) fn extract_vue_options_api(
         for option in &classified {
             match option.classification {
                 VueOption::ExecutableMap(map) => {
-                    emit_executable_map(option.property, map, &component_name, defs, &span_to_range)
+                    emit_executable_map(option.property, map, &component_fqn, defs, &span_to_range)
                 }
                 VueOption::ExecutableFn => emit_executable_fn(
                     option.property,
                     &option.key,
-                    &component_name,
+                    &component_fqn,
                     defs,
                     &span_to_range,
                 ),
                 VueOption::LifecycleHook => emit_lifecycle_hook(
                     option.property,
                     &option.key,
-                    &component_name,
+                    &component_fqn,
                     defs,
                     &span_to_range,
                 ),
