@@ -5,7 +5,10 @@
 //! edit.
 
 pub const TS_EXTENSIONS: &[&str] = &["ts", "tsx", "mts", "cts"];
-pub const SFC_EXTENSIONS: &[&str] = &["vue", "svelte", "astro"];
+/// Single-File Component extensions the pipeline actually supports.
+/// Svelte and Astro are parseable by OXC's PartialLoader but have no
+/// fixture coverage here, so they are intentionally excluded.
+pub const SFC_EXTENSIONS: &[&str] = &["vue"];
 pub const DATA_EXTENSIONS: &[&str] = &["json", "graphql", "gql"];
 pub const ASSET_EXTENSIONS: &[&str] = &["svg", "png", "jpg", "jpeg", "gif", "webp", "avif"];
 
@@ -13,23 +16,20 @@ pub const ASSET_EXTENSIONS: &[&str] = &["svg", "png", "jpg", "jpeg", "gif", "web
 /// bare specifier. The default order prefers TypeScript, matching the
 /// priority tsc/ts-node use.
 pub const RESOLVER_EXTENSIONS: &[&str] = &[
-    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "svelte", "astro", "graphql",
-    "gql", "json",
+    "ts", "tsx", "js", "jsx", "mjs", "cjs", "mts", "cts", "vue", "graphql", "gql", "json",
 ];
 
 /// Same set as `RESOLVER_EXTENSIONS`, ordered to match Bun's loader priority.
 pub const RESOLVER_EXTENSIONS_BUN: &[&str] = &[
-    "tsx", "jsx", "ts", "mts", "mjs", "js", "cjs", "cts", "vue", "svelte", "astro", "graphql",
-    "gql", "json",
+    "tsx", "jsx", "ts", "mts", "mjs", "js", "cjs", "cts", "vue", "graphql", "gql", "json",
 ];
 
 /// Extensions the webpack-config evaluator probes when resolving a bare
 /// specifier that omits its extension. Differs from `RESOLVER_EXTENSIONS`
-/// in that it prefers plain `.js` first — webpack configs are almost
-/// always JS rather than TS.
+/// in that it prefers plain `.js` first because webpack configs are
+/// almost always JS rather than TS.
 pub const EVAL_EXTENSIONS: &[&str] = &[
     "js", "jsx", "cjs", "mjs", "ts", "tsx", "mts", "cts", "json", "graphql", "gql", "vue",
-    "svelte", "astro",
 ];
 
 /// Filenames whose presence marks a project as Bun-first.

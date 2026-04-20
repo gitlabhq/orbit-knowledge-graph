@@ -81,14 +81,16 @@ define_languages! {
     },
     JavaScript => {
         support_lang: JavaScript,
+        // `.svelte` and `.astro` are intentionally absent: OXC's
+        // PartialLoader accepts them, but the pipeline has no test
+        // coverage for either, so we do not claim support. Add them
+        // back alongside the first fixture suite that exercises them.
         extensions: [
             "js",
             "jsx",
             "mjs",
             "cjs",
             "vue",
-            "svelte",
-            "astro",
             "graphql",
             "gql",
             "json"
