@@ -43,6 +43,11 @@ pub enum TraceEvent {
     },
     /// A trivial phi was collapsed to a single value.
     SsaPhiTrivial { phi_id: usize, replacement: String },
+    /// An SCC of mutually-redundant phis was collapsed.
+    SsaSccCollapse {
+        scc_size: usize,
+        replacement: String,
+    },
 
     // ── DSL engine walk ─────────────────────────────────────
     /// A scope was pushed (class, function, module, etc.)
@@ -265,6 +270,12 @@ impl fmt::Display for TraceEvent {
                 replacement,
             } => {
                 write!(f, "ssa.phi_trivial      φ{phi_id} -> {replacement}")
+            }
+            TraceEvent::SsaSccCollapse {
+                scc_size,
+                replacement,
+            } => {
+                write!(f, "ssa.scc_collapse     {scc_size} phis -> {replacement}")
             }
 
             // DSL engine
