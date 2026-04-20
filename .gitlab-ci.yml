@@ -55,10 +55,10 @@ stages:
   - benchmark
   - ai
   - build
+  - e2e
   - publish
   - release
   - review
-  - e2e
 
 # Job Templates
 
