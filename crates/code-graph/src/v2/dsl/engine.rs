@@ -7,6 +7,36 @@ use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::config::Language;
 use crate::v2::trace::{TraceEvent, Tracer};
+
+/// Resolve a bare or dotted type name to its FQN using import_map,
+/// separator-based splitting, and module_prefix fallback.
+///
+/// Resolution order:
+/// 1. Direct import_map lookup for the full name
+/// 2. Split on separator, resolve first segment via imports, append rest
+/// 3. Prepend module_prefix (same-package/module fallback)
+/// 4. Return bare name unchanged
+fn resolve_type_name(
+    name: &str,
+    import_map: &rustc_hash::FxHashMap<String, String>,
+    module_prefix: Option<&str>,
+    sep: &str,
+) -> String {
+    if let Some(fqn) = import_map.get(name) {
+        return fqn.clone();
+    }
+    if name.contains(sep)
+        && let Some((first, rest)) = name.split_once(sep)
+        && let Some(fqn) = import_map.get(first)
+    {
+        return format!("{fqn}{sep}{rest}");
+    }
+    if let Some(prefix) = module_prefix {
+        return format!("{prefix}{sep}{name}");
+    }
+    name.to_string()
+}
+
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
 };
@@ -202,7 +232,10 @@ impl LanguageSpec {
             .map(|&i| &self.scopes[i])
             .find(|r| r.condition().is_none_or(|c| c.test(node)))?;
 
-        let name = rule.extract().apply(node)?;
+        let name = rule
+            .extract()
+            .apply(node)
+            .or_else(|| rule.default_name.map(|s| s.to_string()))?;
         Some(ScopeMatch {
             name,
             label: rule.resolve_label(node),
@@ -254,7 +287,7 @@ impl LanguageSpec {
         Some((name, node_to_range(node), expression))
     }
 
-    /// Recursively walk a receiver expression, building the chain
+    /// Iteratively walk a receiver expression, building the chain
     /// from innermost (base) to outermost (final call).
     /// All node kind recognition is driven by `ChainConfig`.
     /// Type names in `New` steps are resolved via `import_map`.
@@ -269,174 +302,178 @@ impl LanguageSpec {
         sep: &str,
         tracer: &Tracer,
     ) {
-        let kind = node.kind();
-        let kind_ref = kind.as_ref();
+        // Collect deferred steps (outermost first) while walking inward to
+        // the base. Then push the base, then the deferred steps in reverse.
+        let mut deferred: Vec<ExpressionStep> = Vec::new();
+        let mut current = node.clone();
 
-        // Identifier base
-        if cc.ident_kinds.contains(&kind_ref) {
-            let text = node.text().to_string();
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Ident".to_string(),
-                text: text.clone(),
-            });
-            chain.push(ExpressionStep::Ident(text));
-            return;
-        }
+        loop {
+            let kind: String = current.kind().to_string();
+            let kind_ref: &str = &kind;
 
-        // this/self
-        if cc.this_kinds.contains(&kind_ref) {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "This".to_string(),
-                text: node.text().to_string(),
-            });
-            chain.push(ExpressionStep::This);
-            return;
-        }
+            // ── Terminal cases (base of the chain) ──
 
-        // super
-        if cc.super_kinds.contains(&kind_ref) {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Super".to_string(),
-                text: node.text().to_string(),
-            });
-            chain.push(ExpressionStep::Super);
-            return;
-        }
+            // Identifier base
+            if cc.ident_kinds.contains(&kind_ref) {
+                let text = current.text().to_string();
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "Ident".to_string(),
+                    text: text.clone(),
+                });
+                chain.push(ExpressionStep::Ident(text));
+                break;
+            }
 
-        // Constructor (new Foo() or new Outer.Inner())
-        for &(ctor_kind, type_field) in cc.constructor {
-            if kind_ref == ctor_kind {
-                if let Some(type_node) = node.field(type_field) {
-                    let tk = type_node.kind();
-                    if cc.qualified_type_kinds.contains(&tk.as_ref()) {
-                        let mut segments = type_node.children().filter(|c| c.is_named());
-                        if let Some(first) = segments.next() {
-                            let name = first.text().to_string();
-                            let resolved = if let Some(fqn) = import_map.get(&name) {
-                                fqn.clone()
-                            } else if let Some(prefix) = module_prefix {
-                                format!("{prefix}{sep}{name}")
-                            } else {
-                                name
-                            };
+            // this/self
+            if cc.this_kinds.contains(&kind_ref) {
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "This".to_string(),
+                    text: current.text().to_string(),
+                });
+                chain.push(ExpressionStep::This);
+                break;
+            }
+
+            // super
+            if cc.super_kinds.contains(&kind_ref) {
+                tracer.event(TraceEvent::ChainStepMatched {
+                    node_kind: kind_ref.to_string(),
+                    category: "Super".to_string(),
+                    text: current.text().to_string(),
+                });
+                chain.push(ExpressionStep::Super);
+                break;
+            }
+
+            // Qualified type reference (e.g. Outer.Inner as receiver in new Outer.Inner()).
+            if cc.qualified_type_kinds.contains(&kind_ref) {
+                let mut segments = current.children().filter(|c| c.is_named());
+                if let Some(first) = segments.next() {
+                    let name = first.text().to_string();
+                    let resolved = resolve_type_name(&name, import_map, module_prefix, sep);
+                    tracer.event(TraceEvent::ChainStepMatched {
+                        node_kind: kind_ref.to_string(),
+                        category: "Ident(qualified)".to_string(),
+                        text: resolved.clone(),
+                    });
+                    chain.push(ExpressionStep::Ident(resolved));
+                    for seg in segments {
+                        let seg_text = seg.text().to_string();
+                        tracer.event(TraceEvent::ChainStepMatched {
+                            node_kind: kind_ref.to_string(),
+                            category: "Field(qualified)".to_string(),
+                            text: seg_text.clone(),
+                        });
+                        chain.push(ExpressionStep::Field(seg_text));
+                    }
+                }
+                break;
+            }
+
+            // Constructor (new Foo() or new Outer.Inner())
+            let mut matched_ctor = false;
+            for &(ctor_kind, type_field) in cc.constructor {
+                if kind_ref == ctor_kind {
+                    if let Some(type_node) = current.field(type_field) {
+                        let tk = type_node.kind();
+                        if cc.qualified_type_kinds.contains(&tk.as_ref()) {
+                            let mut segments = type_node.children().filter(|c| c.is_named());
+                            if let Some(first) = segments.next() {
+                                let name = first.text().to_string();
+                                let resolved =
+                                    resolve_type_name(&name, import_map, module_prefix, sep);
+                                tracer.event(TraceEvent::ChainStepMatched {
+                                    node_kind: kind_ref.to_string(),
+                                    category: "New(qualified)".to_string(),
+                                    text: resolved.clone(),
+                                });
+                                chain.push(ExpressionStep::New(resolved));
+                                for seg in segments {
+                                    chain.push(ExpressionStep::Field(seg.text().to_string()));
+                                }
+                            }
+                        } else {
+                            let bare = type_node.text().to_string();
+                            let resolved = resolve_type_name(&bare, import_map, module_prefix, sep);
                             tracer.event(TraceEvent::ChainStepMatched {
                                 node_kind: kind_ref.to_string(),
-                                category: "New(qualified)".to_string(),
+                                category: "New".to_string(),
                                 text: resolved.clone(),
                             });
                             chain.push(ExpressionStep::New(resolved));
-                            for seg in segments {
-                                chain.push(ExpressionStep::Field(seg.text().to_string()));
-                            }
                         }
-                    } else {
-                        let bare = type_node.text().to_string();
-                        let resolved = if let Some(fqn) = import_map.get(&bare) {
-                            fqn.clone()
-                        } else if let Some(prefix) = module_prefix {
-                            format!("{prefix}{sep}{bare}")
-                        } else {
-                            bare
-                        };
+                    }
+                    matched_ctor = true;
+                    break;
+                }
+            }
+            if matched_ctor {
+                break;
+            }
+
+            // ── Recursive cases (defer step, advance inward) ──
+
+            // Field access (obj.field) — defer the Field step, advance to obj
+            let mut matched_fa = false;
+            for fa in &cc.field_access {
+                if kind_ref == fa.kind {
+                    if let Some(name) = fa.member.apply(&current) {
                         tracer.event(TraceEvent::ChainStepMatched {
                             node_kind: kind_ref.to_string(),
-                            category: "New".to_string(),
-                            text: resolved.clone(),
+                            category: "Field".to_string(),
+                            text: name.clone(),
                         });
-                        chain.push(ExpressionStep::New(resolved));
+                        deferred.push(ExpressionStep::Field(name));
                     }
+                    if let Some(obj) = fa.object.navigate(&current) {
+                        current = obj;
+                        matched_fa = true;
+                    }
+                    break;
                 }
-                return;
             }
-        }
+            if matched_fa {
+                continue;
+            }
 
-        // Field access (obj.field)
-        for &(fa_kind, obj_field, member_field) in cc.field_access {
-            if kind_ref == fa_kind {
-                let obj = node.field(obj_field);
-                let member = node
-                    .field(member_field)
-                    .or_else(|| node.child_of_kind(member_field));
-
-                if let Some(obj) = obj {
-                    self.build_expression_chain(
-                        &obj,
-                        chain,
-                        cc,
-                        import_map,
-                        module_prefix,
-                        sep,
-                        tracer,
-                    );
-                } else if let Some(ref member_node) = member {
-                    let mr = member_node.range();
-                    if let Some(obj) = node.children().find(|c| c.is_named() && c.range() != mr) {
-                        self.build_expression_chain(
-                            &obj,
-                            chain,
-                            cc,
-                            import_map,
-                            module_prefix,
-                            sep,
-                            tracer,
-                        );
-                    }
-                }
-                if let Some(field) = member {
-                    let name = treesitter_visit::extract::default_name()
-                        .apply(&field)
-                        .unwrap_or_else(|| field.text().to_string());
+            // Call expression — defer the Call step, advance to receiver
+            if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
+                let rule = &self.refs[rule_idx];
+                if let Some(name) = rule.extract().apply(&current) {
                     tracer.event(TraceEvent::ChainStepMatched {
                         node_kind: kind_ref.to_string(),
-                        category: "Field".to_string(),
+                        category: "Call".to_string(),
                         text: name.clone(),
                     });
-                    chain.push(ExpressionStep::Field(name));
+                    deferred.push(ExpressionStep::Call(name));
                 }
-                return;
+                if let Some(extract) = &rule.receiver_extract
+                    && let Some(recv) = extract.navigate(&current)
+                {
+                    current = recv;
+                    continue;
+                }
+                // No receiver — this call is the base
+                break;
             }
-        }
 
-        // Call expression with object field (method_invocation, call_expression)
-        if let Some(&rule_idx) = self.ref_dispatch.get(kind_ref).and_then(|v| v.first()) {
-            let rule = &self.refs[rule_idx];
-            if let Some(extract) = &rule.receiver_extract
-                && let Some(recv) = extract.navigate(node)
-            {
-                self.build_expression_chain(
-                    &recv,
-                    chain,
-                    cc,
-                    import_map,
-                    module_prefix,
-                    sep,
-                    tracer,
-                );
-            }
-            if let Some(name) = rule.extract().apply(node) {
+            // Fallback: treat as identifier
+            let text = current.text().to_string();
+            if !text.is_empty() {
                 tracer.event(TraceEvent::ChainStepMatched {
                     node_kind: kind_ref.to_string(),
-                    category: "Call".to_string(),
-                    text: name.clone(),
+                    category: "Fallback".to_string(),
+                    text: text.clone(),
                 });
-                chain.push(ExpressionStep::Call(name));
+                chain.push(ExpressionStep::Ident(text));
             }
-            return;
+            break;
         }
 
-        // Fallback: treat as identifier
-        let text = node.text().to_string();
-        if !text.is_empty() {
-            tracer.event(TraceEvent::ChainStepMatched {
-                node_kind: kind_ref.to_string(),
-                category: "Fallback".to_string(),
-                text: text.clone(),
-            });
-            chain.push(ExpressionStep::Ident(text));
-        }
+        // Append deferred steps in reverse (innermost was deferred last)
+        chain.extend(deferred.into_iter().rev());
     }
 
     fn evaluate_imports(
@@ -568,34 +605,18 @@ impl LanguageSpec {
     /// Parse source with SSA, then call `on_ref` for each resolved reference.
     /// No intermediate collections — each ref is dispatched as soon as its
     /// reaching defs are computed.
+    ///
+    /// When `graph` is provided, constructor chains (e.g. `Parent.Child.Foo()`)
+    /// are resolved eagerly after sealing, and the resolved types are written
+    /// back to SSA so subsequent bindings can use them.
     pub fn parse_full_and_resolve<F>(
-        &self,
-        source: &[u8],
-        file_path: &str,
-        language: Language,
-        mut on_ref: F,
-    ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
-    where
-        F: FnMut(
-            &str,                                        // name
-            Option<&[crate::v2::types::ExpressionStep]>, // chain
-            &[crate::v2::types::ssa::ParseValue],        // reaching defs
-            Option<u32>,                                 // enclosing_def index
-            &[(u32, String)],                            // inferred return types
-        ),
-    {
-        let noop = crate::v2::trace::noop_tracer();
-        self.parse_full_and_resolve_traced(source, file_path, language, &mut on_ref, &noop)
-    }
-
-    /// Like `parse_full_and_resolve` but with an explicit tracer for debugging.
-    pub fn parse_full_and_resolve_traced<F>(
         &self,
         source: &[u8],
         file_path: &str,
         language: Language,
         on_ref: &mut F,
         tracer: &Tracer,
+        graph: Option<&crate::v2::linker::graph::CodeGraph>,
     ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
     where
         F: FnMut(
@@ -688,6 +709,85 @@ impl LanguageSpec {
             }
         }
 
+        // Pass 1.5: eager intra-file resolution against the graph.
+        //
+        // After SSA is sealed, find alias targets that have no SSA value
+        // (i.e. the alias can't be chased). For each, try to resolve the
+        // target name via pending ref chains against the graph and write
+        // the resolved type to SSA so alias chasing succeeds in Pass 2.
+        if let Some(g) = graph {
+            // Collect alias targets that need resolution: names referenced
+            // by Alias() values but absent from SSA.
+            let mut needed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+            for pending in &pending_refs {
+                let reaching = state
+                    .ssa
+                    .read_variable_stateless(pending.ssa_key, pending.block);
+                for v in &reaching.values {
+                    if let super::ssa::SsaValue::Alias(target) = v {
+                        let target_vals = state.ssa.read_variable_stateless(target, pending.block);
+                        let unresolved = target_vals.values.is_empty()
+                            || target_vals.values.iter().all(|tv| {
+                                matches!(
+                                    tv,
+                                    super::ssa::SsaValue::Opaque | super::ssa::SsaValue::Alias(_)
+                                )
+                            });
+                        if unresolved {
+                            needed.insert(target);
+                        }
+                    }
+                }
+            }
+
+            // For each needed name, find a ref that resolves it.
+            // Check both ref names (bare refs) and chain bases (chain refs
+            // where the base ident matches the needed name).
+            if !needed.is_empty() {
+                for pending in &pending_refs {
+                    // Match by ref name (bare ref) or chain base (chain ref)
+                    let matched_name = if needed.contains(pending.name.as_str()) {
+                        Some(pending.name.as_str())
+                    } else if let Some(chain) = &pending.chain {
+                        if let ExpressionStep::Ident(base) = &chain[0] {
+                            if needed.contains(base.as_str()) {
+                                Some(base.as_str())
+                            } else {
+                                None
+                            }
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    };
+                    let Some(name) = matched_name else {
+                        continue;
+                    };
+                    // Resolve: for bare refs, look up the name directly.
+                    // For chain bases, resolve just the base (not the full chain).
+                    let resolved_fqn = {
+                        let fqn = state
+                            .import_map
+                            .get(name)
+                            .cloned()
+                            .unwrap_or_else(|| name.to_string());
+                        let nodes = g.resolve_scope_nodes(&fqn);
+                        nodes
+                            .first()
+                            .filter(|&&n| g.def_kind(n).is_type_container())
+                            .map(|&n| g.def_fqn(n).to_string())
+                    };
+                    if let Some(fqn) = resolved_fqn {
+                        let key = state.arena.alloc_str(name);
+                        let val = super::ssa::SsaValue::Type(state.arena.alloc_str(&fqn));
+                        state.ssa.write_variable(key, pending.block, val);
+                        needed.remove(name);
+                    }
+                }
+            }
+        }
+
         // Collect all inferred return types (from both call returns and
         // any future sources) into the sidecar for the resolver
         let inferred_returns: Vec<(u32, String)> = state
@@ -715,7 +815,10 @@ impl LanguageSpec {
                     .filter_map(|v| v.to_parse_value())
                     .collect();
 
-            // Instance attr rewrite
+            // Instance attr rewrite: for chains like [This, Field("db"), Call("execute")],
+            // build compound SSA keys (e.g. "self.db") and check if they have a type.
+            // This handles languages where instance fields are dynamic assignments
+            // (Python self.x = ..., Ruby @x = ...) rather than explicit declarations.
             let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
             if let Some(chain) = chain_slice
                 && chain.len() >= 3
@@ -918,7 +1021,13 @@ impl LanguageSpec {
                     && let Some(meta) = &state.defs[def_index as usize].metadata
                     && let Some(super_type) = meta.super_types.first()
                 {
-                    let st = state.arena.alloc_str(super_type);
+                    let resolved = resolve_type_name(
+                        super_type,
+                        &state.import_map,
+                        module_prefix.as_deref(),
+                        sep,
+                    );
+                    let st = state.arena.alloc_str(&resolved);
                     let name = state.arena.alloc_str(super_name);
                     state.ssa.write_variable(
                         name,
@@ -1044,17 +1153,14 @@ impl LanguageSpec {
                 let rule = &self.bindings[rule_idx];
                 if let Some(name) = rule.extract_name(node) {
                     let val = if let Some(type_ann) = rule.extract_type_annotation(node) {
-                        // Type annotation → resolve to FQN
-                        let resolved = if let Some(fqn) = state.import_map.get(&type_ann) {
-                            fqn.clone()
-                        } else if let Some(prefix) = &module_prefix {
-                            format!("{prefix}{sep}{type_ann}")
-                        } else {
-                            type_ann
-                        };
+                        let resolved = resolve_type_name(
+                            &type_ann,
+                            &state.import_map,
+                            module_prefix.as_deref(),
+                            sep,
+                        );
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
-                        // RHS callee name → Alias for SSA copy propagation
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
                     } else {
                         super::ssa::SsaValue::Opaque
@@ -1076,7 +1182,27 @@ impl LanguageSpec {
                         value: val.trace_display(),
                         block_id: target_block.0,
                     });
-                    state.ssa.write_variable(ssa_name, target_block, val);
+                    state
+                        .ssa
+                        .write_variable(ssa_name, target_block, val.clone());
+
+                    // Class field bindings: also write compound key (e.g. "this.myParameter")
+                    // so that chains like this.myParameter.bar() can resolve via instance
+                    // attr rewrite. Only fires when the binding is directly inside a type
+                    // container scope (not nested inside a method).
+                    if !is_instance_attr
+                        && !self.ssa_config.self_names.is_empty()
+                        && let Some(&enclosing_idx) = state.enclosing_def_stack.last()
+                        && state.defs[enclosing_idx as usize].kind.is_type_container()
+                    {
+                        for &self_name in self.ssa_config.self_names {
+                            let compound = format!("{self_name}.{name}");
+                            let compound_key = state.arena.alloc_str(&compound);
+                            state
+                                .ssa
+                                .write_variable(compound_key, target_block, val.clone());
+                        }
+                    }
                 }
             }
 
@@ -1466,13 +1592,16 @@ mod tests {
             vec![],
         );
         let mut ref_names = Vec::new();
+        let tracer = crate::v2::trace::Tracer::new(false);
         spec.parse_full_and_resolve(
             b"def foo(): pass\nfoo()",
             "test.py",
             Language::Python,
-            |name, _chain, _reaching, _enclosing, _inferred| {
+            &mut |name: &str, _chain, _reaching, _enclosing, _inferred| {
                 ref_names.push(name.to_string());
             },
+            &tracer,
+            None,
         )
         .unwrap();
 

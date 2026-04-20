@@ -3,21 +3,13 @@ use std::fmt::Write;
 
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
+use code_graph::v2::trace::Tracer;
 use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
 use super::datasets::{LanceDatasets, to_lance_datasets};
 use super::validator::run_suite;
-
-/// Resets trace flag on drop, including during unwind.
-struct TraceGuard;
-
-impl Drop for TraceGuard {
-    fn drop(&mut self) {
-        code_graph::v2::trace::set_thread_trace(false);
-    }
-}
 
 /// Convert an arrow 58 RecordBatch to arrow 56 via IPC roundtrip.
 ///
@@ -120,16 +112,29 @@ pub async fn run_yaml_suite(yaml: &str) {
 
     let root = tmp.path().to_string_lossy().to_string();
 
-    // Enable tracing if requested by the suite. Drop guard ensures cleanup
-    // even if the pipeline panics, preventing leaked trace state across tests.
     let trace_any = suite.trace || suite.tests.iter().any(|t| t.debug);
-    code_graph::v2::trace::set_thread_trace(trace_any);
-    let _trace_guard = TraceGuard;
+    let tracer = Tracer::new(trace_any);
+
+    // Single-thread rayon when tracing so trace output isn't interleaved
+    let pool = if trace_any {
+        Some(
+            rayon::ThreadPoolBuilder::new()
+                .num_threads(1)
+                .build()
+                .unwrap(),
+        )
+    } else {
+        None
+    };
 
     let datasets = match suite.pipeline.as_deref() {
         None | Some("generic") => {
             let pipeline = Pipeline::new(PipelineConfig::default());
-            let result = pipeline.run(tmp.path());
+            let result = if let Some(pool) = &pool {
+                pool.install(|| pipeline.run(tmp.path(), &tracer))
+            } else {
+                pipeline.run(tmp.path(), &tracer)
+            };
             assert!(
                 result.errors.is_empty(),
                 "Pipeline errors: {:?}",
@@ -154,16 +159,22 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let output = dispatch_by_tag(tag, &files, &root)
-                .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
-                .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
+            let run = || {
+                dispatch_by_tag(tag, &files, &root, &tracer)
+                    .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
+                    .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"))
+            };
+            let output = if let Some(pool) = &pool {
+                pool.install(run)
+            } else {
+                run()
+            };
             output_to_datasets(output)
         }
     };
 
-    // Guard handles reset (including on panic), but also reset explicitly
-    // here so the flag is off before running assertions.
-    code_graph::v2::trace::set_thread_trace(false);
+    // Dump trace once, after all execution is complete
+    tracer.dump(&suite.name);
 
     let config = make_graph_config().expect("Failed to build graph config");
 

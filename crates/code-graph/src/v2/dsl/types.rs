@@ -42,6 +42,7 @@ pub struct ScopeRule {
     def_kind: DefKind,
     condition: Option<Pred>,
     name: Extract,
+    pub(crate) default_name: Option<&'static str>,
     pub creates_scope: bool,
     pub(crate) metadata_rule: Option<MetadataRule>,
 }
@@ -73,6 +74,13 @@ impl ScopeRule {
 
     pub fn name_from(mut self, extract: Extract) -> Self {
         self.name = extract;
+        self
+    }
+
+    /// Try extract first, fall back to a constant default name.
+    pub fn name_from_or(mut self, extract: Extract, default: &'static str) -> Self {
+        self.name = extract;
+        self.default_name = Some(default);
         self
     }
 
@@ -118,6 +126,7 @@ pub fn scope(kind: &'static str, label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -131,6 +140,7 @@ pub fn scopes(kinds: &[&'static str], label: &'static str) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -149,6 +159,7 @@ pub fn scope_fn(kind: &'static str, label_fn: LabelFn) -> ScopeRule {
         def_kind: DefKind::Other,
         condition: None,
         name: default_name(),
+        default_name: None,
         creates_scope: true,
         metadata_rule: None,
     }
@@ -162,6 +173,14 @@ pub struct ReferenceRule {
     pub(crate) receiver_extract: Option<Extract>,
 }
 
+/// Describes how to decompose a field-access node into object + member
+/// using treesitter-visit `Extract` pipelines.
+pub struct FieldAccessEntry {
+    pub kind: &'static str,
+    pub object: Extract,
+    pub member: Extract,
+}
+
 /// Per-language configuration for expression chain extraction.
 /// Tells the engine how to recognize identifiers, this/super,
 /// field access, and constructors in the tree-sitter AST.
@@ -172,8 +191,8 @@ pub struct ChainConfig {
     pub this_kinds: &'static [&'static str],
     /// Node kinds that represent `super`.
     pub super_kinds: &'static [&'static str],
-    /// Field access node kinds + (object_field, member_field).
-    pub field_access: &'static [(&'static str, &'static str, &'static str)],
+    /// Field access node kinds, with Extract-based object/member decomposition.
+    pub field_access: Vec<FieldAccessEntry>,
     /// Constructor node kinds + type_field.
     pub constructor: &'static [(&'static str, &'static str)],
     /// Type node kinds inside constructors that are qualified (e.g.
@@ -461,7 +480,11 @@ pub struct BindingRule {
     pub kinds: Vec<&'static str>,
     pub binding_kind: crate::v2::types::BindingKind,
     pub name_fields: &'static [&'static str],
+    /// Alternative to name_fields: arbitrary Extract pipeline for name.
+    pub name_extract: Option<Extract>,
     pub value_field: Option<&'static str>,
+    /// Alternative to value_field: arbitrary Extract pipeline for RHS value node.
+    pub value_extract: Option<Extract>,
     pub instance_attr_prefixes: &'static [&'static str],
     /// Type extraction config (TypeFlow). Uses Extract for CST navigation.
     pub type_extract: Option<TypeExtract>,
@@ -477,7 +500,9 @@ pub fn binding(kind: &'static str, binding_kind: crate::v2::types::BindingKind) 
         kinds: vec![kind],
         binding_kind,
         name_fields: &["left"],
+        name_extract: None,
         value_field: Some("right"),
+        value_extract: None,
         instance_attr_prefixes: &[],
         type_extract: None,
     }
@@ -489,8 +514,20 @@ impl BindingRule {
         self
     }
 
+    /// Extract the name using an arbitrary Extract pipeline instead of field chain.
+    pub fn name_from_extract(mut self, extract: Extract) -> Self {
+        self.name_extract = Some(extract);
+        self
+    }
+
     pub fn value_from(mut self, field: &'static str) -> Self {
         self.value_field = Some(field);
+        self
+    }
+
+    /// Extract the RHS value using an arbitrary Extract pipeline instead of field name.
+    pub fn value_from_extract(mut self, extract: Extract) -> Self {
+        self.value_extract = Some(extract);
         self
     }
 
@@ -512,8 +549,11 @@ impl BindingRule {
         self
     }
 
-    /// Extract the binding name from an AST node by walking the field chain.
+    /// Extract the binding name from an AST node.
     pub fn extract_name(&self, node: &N<'_>) -> Option<String> {
+        if let Some(extract) = &self.name_extract {
+            return extract.apply(node);
+        }
         let current = node.field_chain(self.name_fields)?;
         Some(current.text().to_string())
     }
@@ -531,16 +571,18 @@ impl BindingRule {
         None
     }
 
-    /// Extract the RHS callee name from a binding's value field.
-    /// Unwraps call expressions: `Database()` → "Database".
+    /// Extract the RHS name from a binding's value field.
+    /// Returns the callee/identifier/object name for SSA alias chasing.
     pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
-        let value_node = node.field(self.value_field?)?;
+        let value_node = if let Some(extract) = &self.value_extract {
+            extract.navigate(node)?
+        } else {
+            node.field(self.value_field?)?
+        };
         let vk = value_node.kind();
         let vk_ref = vk.as_ref();
 
         // Call expression → extract callee name via reference rules.
-        // Use matches() not just kind() to respect conditions (e.g.
-        // Python has two `call` rules — one for method calls, one for plain calls).
         if let Some(ref_rule) = spec.refs.iter().find(|r| r.matches(&value_node, vk_ref)) {
             return ref_rule.extract().apply(&value_node);
         }
@@ -550,6 +592,17 @@ impl BindingRule {
             && cc.ident_kinds.contains(&vk_ref)
         {
             return Some(value_node.text().to_string());
+        }
+
+        // Field access (e.g. EnumClass.ENUM_VALUE_2) → extract the object name.
+        if let Some(cc) = &spec.chain_config {
+            for fa in &cc.field_access {
+                if vk_ref == fa.kind
+                    && let Some(obj) = fa.object.navigate(&value_node)
+                {
+                    return Some(obj.text().to_string());
+                }
+            }
         }
 
         None

@@ -27,5 +27,5 @@ tests:
       WHERE caller.name = 'main' AND e.edge_kind = 'Calls'
       RETURN callee.fqn AS callee
     assert:
-      - { row: { callee: "com.example.Foo.create" } }
+      - { row: { callee: "com.example.Foo.Companion.create" } }
       - { not: true, row: { callee: "com.example.Decoy.create" } }

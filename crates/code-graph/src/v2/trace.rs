@@ -5,8 +5,10 @@
 //! resolver links references across files (strategy attempts, chain steps,
 //! lookup results).
 //!
-//! Enabled per-pipeline via `PipelineConfig::trace`. In integration tests,
-//! set `trace: true` on a test suite to dump the full event log.
+//! One `Tracer` is created at the top level and passed by reference to all
+//! pipeline components. Events accumulate in a `Mutex<Vec>` and are dumped
+//! once after execution completes. In integration tests, set `trace: true`
+//! on a test suite to enable.
 
 use std::fmt;
 use std::sync::Mutex;
@@ -707,41 +709,11 @@ impl Tracer {
     }
 }
 
-/// Create a no-op tracer. Use this for production paths where tracing is disabled.
-pub fn noop_tracer() -> Tracer {
-    Tracer::new(false)
-}
-
 /// Return a `&'static Tracer` that is always disabled. One-time allocation
-/// via `OnceLock` — `get_or_init` runs the closure exactly once, all
-/// subsequent calls return the same pointer. Single 24-byte leak for the
-/// process lifetime so SSA engine can store `&'a Tracer` without lifetime
-/// gymnastics when no tracer is explicitly provided.
+/// via `OnceLock` so SSA engine can store `&'a Tracer` as a default
+/// without requiring a tracer at construction time.
 pub fn leaked_noop_tracer() -> &'static Tracer {
     use std::sync::OnceLock;
     static NOOP: OnceLock<&'static Tracer> = OnceLock::new();
     NOOP.get_or_init(|| Box::leak(Box::new(Tracer::new(false))))
-}
-
-// ── Global trace flag ───────────────────────────────────────────
-
-use std::sync::atomic::{AtomicBool, Ordering};
-
-static TRACE_ENABLED: AtomicBool = AtomicBool::new(false);
-
-/// Set the global trace flag. When true, newly created tracers in the
-/// pipeline will be enabled. Call this before running the pipeline.
-/// Safe to call from any thread — uses atomic store.
-pub fn set_thread_trace(enabled: bool) {
-    TRACE_ENABLED.store(enabled, Ordering::SeqCst);
-}
-
-/// Check whether tracing is globally enabled.
-pub fn is_thread_trace() -> bool {
-    TRACE_ENABLED.load(Ordering::Relaxed)
-}
-
-/// Create a tracer respecting the global trace flag.
-pub fn thread_tracer() -> Tracer {
-    Tracer::new(is_thread_trace())
 }

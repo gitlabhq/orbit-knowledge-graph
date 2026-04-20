@@ -586,7 +586,8 @@ async fn index_repo_v2(
 
     // Run v2 pipeline
     let pipeline = code_graph::v2::Pipeline::new(code_graph::v2::PipelineConfig::default());
-    let v2_result = pipeline.run(std::path::Path::new(&root_path));
+    let tracer = code_graph::v2::trace::Tracer::new(false);
+    let v2_result = pipeline.run(std::path::Path::new(&root_path), &tracer);
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {
