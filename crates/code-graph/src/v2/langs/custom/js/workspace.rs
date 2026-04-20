@@ -36,8 +36,25 @@ impl WorkspaceProbe {
     pub fn load(root_dir: &Path, indexed_paths: &[String]) -> Self {
         // Canonicalize once so downstream path containment checks
         // (webpack evaluator, specifier resolver) all operate in the
-        // same absolute form.
-        let root_dir = std::fs::canonicalize(root_dir).unwrap_or_else(|_| root_dir.to_path_buf());
+        // same absolute form. If canonicalization fails we fail
+        // *closed*: return a probe with no manifests so resolution
+        // silently degrades instead of comparing canonical paths
+        // against a non-canonical root and flipping a containment
+        // check on a coincidental prefix match.
+        let Ok(root_dir) = std::fs::canonicalize(root_dir) else {
+            log::warn!(
+                "[v2-js] failed to canonicalize root_dir {}; disabling workspace probe",
+                root_dir.display()
+            );
+            return Self {
+                root_dir: root_dir.to_path_buf(),
+                manifest_raw: None,
+                tsconfig_path: None,
+                jsconfig_path: None,
+                webpack_configs: Vec::new(),
+                bun_signal_present: false,
+            };
+        };
 
         let manifest_raw = std::fs::read_to_string(root_dir.join("package.json")).ok();
 
