@@ -679,9 +679,10 @@ async fn index_repo_v2(
     store: &workspace::Workspace,
     ontology: &Ontology,
     config: &IndexingConfig,
-) -> Result<RepositoryIndexingResult> {
+) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
+    let start_time = std::time::Instant::now();
 
     // Run v2 pipeline
     let mut pipeline_config = code_graph::v2::PipelineConfig::default();
@@ -695,9 +696,9 @@ async fn index_repo_v2(
             .num_threads(config.worker_threads)
             .build()
             .context("failed to build thread pool")?;
-        pool.install(|| pipeline.run(std::path::Path::new(&root_path), &tracer))
+        pool.install(|| pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer))
     } else {
-        pipeline.run(std::path::Path::new(&root_path), &tracer)
+        pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer)
     };
 
     if !v2_result.errors.is_empty() {

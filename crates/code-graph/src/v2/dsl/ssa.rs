@@ -1101,6 +1101,11 @@ mod tests {
 
         let result = ssa.read_variable_stateless("x", exit);
         // Should have both values — SCC not collapsed
-        assert!(result.values.len() >= 2 || result.values.contains(&SsaValue::LocalDef(1)));
+        assert!(
+            result.values.contains(&SsaValue::LocalDef(0))
+                && result.values.contains(&SsaValue::LocalDef(1)),
+            "SCC with multiple external values must not be collapsed: got {:?}",
+            result.values
+        );
     }
 }
