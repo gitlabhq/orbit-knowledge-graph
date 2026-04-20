@@ -1,0 +1,140 @@
+name: "JavaScript security hardening (MR 950)"
+pipeline: js
+fixtures:
+  # --- H4: node-builtin alias smuggling refused ---
+  - path: webpack.config.js
+    content: |
+      const path = require('path');
+      module.exports = {
+        resolve: {
+          alias: {
+            // A hostile webpack config could not route an import at a
+            // Node built-in. `is_safe_package_specifier` refuses any
+            // value containing `:`.
+            'fsAlias': 'node:fs',
+            'procAlias': 'node:child_process',
+            // Relative path inside the repo (safe; contained).
+            'localAlias': path.resolve(__dirname, './src/lib/safe.js'),
+          },
+        },
+      };
+
+  - path: src/lib/safe.js
+    content: |
+      export function safeOp() {
+        return 'local-safe';
+      }
+
+  - path: src/consumer.js
+    content: |
+      import { safeOp } from 'localAlias';
+      // These bare-specifier imports should NOT resolve to anything,
+      // because the corresponding aliases were refused.
+      import fsThing from 'fsAlias';
+      import procThing from 'procAlias';
+
+      export function runLocal() { return safeOp(); }
+      export function runFs() { return fsThing(); }
+      export function runProc() { return procThing(); }
+
+  # --- L2: star-reexport dedup ---
+  - path: src/lib/shared.js
+    content: |
+      export function sharedFn() { return 'shared'; }
+
+  - path: src/lib/barrel.js
+    content: |
+      // Same specifier duplicated; the cap/dedup keeps only one.
+      export * from './shared.js';
+      export * from './shared.js';
+      export * from './shared.js';
+      export * from './shared.js';
+
+  - path: src/barrel_consumer.js
+    content: |
+      import { sharedFn } from './lib/barrel.js';
+      export function runShared() { return sharedFn(); }
+
+  # --- L3: module key normalization (`./src/x.js` vs `src/x.js`) ---
+  - path: src/mod_a.js
+    content: |
+      export function fromA() { return 'a'; }
+
+  - path: src/mod_b.js
+    content: |
+      // Leading `./` in the specifier must still resolve to mod_a.
+      import { fromA } from './mod_a.js';
+      export function runFromA() { return fromA(); }
+
+  # --- L9: Vue virtual-class FQN does not collide with a real class ---
+  - path: src/Collide.vue
+    content: |
+      <script>
+      // This file holds BOTH a real class named `Collide` (matching the
+      // file stem used as the default component name) AND a Vue
+      // options-API default export. The virtual-class FQN must be
+      // namespaced so the two defs do not collide on FQN.
+      export class Collide {
+        realMethod() { return 'real'; }
+      }
+      export default {
+        methods: {
+          vueMethod() { return 'vue'; },
+        },
+      };
+      </script>
+
+tests:
+  - name: Local alias resolves inside repo
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/consumer.js'
+        AND caller.fqn = 'runLocal'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS callee_file
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runLocal", callee: "safeOp", callee_file: "src/lib/safe.js" } }
+
+  - name: node built-in alias injections do not produce cross-file call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/consumer.js'
+        AND caller.fqn IN ['runFs', 'runProc']
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Duplicate star-reexport specifiers dedup into a single resolved binding
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/barrel_consumer.js'
+        AND caller.fqn = 'runShared'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runShared", callee: "sharedFn" } }
+
+  - name: Normalized module keys allow leading-dot-slash specifiers to resolve
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/mod_b.js'
+        AND caller.fqn = 'runFromA'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runFromA", callee: "fromA" } }
+
+  - name: Vue virtual class does not collide with a real class of the same name
+    query: |
+      MATCH (def:Definition)
+      WHERE def.file_path = 'src/Collide.vue'
+        AND def.fqn IN ['Collide', '<vue>::Collide']
+      RETURN def.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "Collide" } }
+      - { row: { fqn: "<vue>::Collide" } }

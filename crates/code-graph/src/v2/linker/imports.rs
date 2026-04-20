@@ -9,6 +9,7 @@ use rustc_hash::FxHashMap;
 use super::graph::CodeGraph;
 use super::rules::ImportStrategy;
 use super::state::ScratchBuf;
+use crate::v2::types::ImportBindingKind;
 
 // ── ResolveSettings ─────────────────────────────────────────────
 
@@ -69,12 +70,16 @@ pub(crate) fn resolve_import(
     scratch: &mut ScratchBuf,
 ) -> Vec<NodeIndex> {
     let import = graph.import(import_idx);
+    if matches!(import.binding_kind, ImportBindingKind::SideEffect) || import.wildcard {
+        return vec![];
+    }
+
     let symbol_name = import
         .alias
         .or(import.name)
         .map(|id| graph.str(id))
         .unwrap_or("");
-    if symbol_name.is_empty() || import.wildcard {
+    if symbol_name.is_empty() {
         return vec![];
     }
 

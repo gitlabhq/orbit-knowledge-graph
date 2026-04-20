@@ -37,6 +37,7 @@ rust-embed = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
+serde_yaml = { workspace = true }
 ra_ap_hir = { workspace = true }
 ra_ap_cfg = { workspace = true }
 ra_ap_ide = { workspace = true }
@@ -68,6 +69,11 @@ swc_ecma_parser = "32.0.0"
 swc_ecma_ast = "19.0.0"
 swc_ecma_visit = "19.0.0"
 swc_atoms = "9.0.0"
+
+# OXC (v2 custom JavaScript/TypeScript pipeline)
+oxc = { workspace = true }
+oxc_linter = { workspace = true }
+oxc_resolver = { workspace = true }
 
 [dev-dependencies]
 gitalisk-core = { workspace = true }

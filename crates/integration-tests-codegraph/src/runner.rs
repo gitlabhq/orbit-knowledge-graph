@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::fmt::Write;
 
+use arrow_56::compute::concat_batches;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
@@ -71,6 +72,18 @@ fn copy_dir_recursive(src_dir: &std::path::Path, dst_dir: &std::path::Path) {
             }
             std::fs::copy(entry.path(), &dst)
                 .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
+        }
+    }
+}
+
+fn extend_datasets(into: &mut LanceDatasets, incoming: LanceDatasets) {
+    for (table, batch) in incoming {
+        if let Some(existing) = into.get_mut(&table) {
+            let merged = concat_batches(&existing.schema(), &[existing.clone(), batch])
+                .unwrap_or_else(|error| panic!("Failed to merge {table} batches: {error}"));
+            *existing = merged;
+        } else {
+            into.insert(table, batch);
         }
     }
 }
@@ -146,10 +159,13 @@ pub async fn run_yaml_suite(yaml: &str) {
             for graph in &result.graphs {
                 let graph_datasets =
                     to_lance_datasets(graph, &ctx).expect("Failed to convert graph to datasets");
-                datasets.extend(graph_datasets);
+                extend_datasets(&mut datasets, graph_datasets);
             }
             for (table, batch) in &result.batches {
-                datasets.insert(table.clone(), arrow58_to_arrow56(batch));
+                extend_datasets(
+                    &mut datasets,
+                    HashMap::from([(table.clone(), arrow58_to_arrow56(batch))]),
+                );
             }
             datasets
         }

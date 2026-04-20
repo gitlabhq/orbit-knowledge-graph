@@ -1,0 +1,124 @@
+name: "JavaScript repo boundary enforcement"
+pipeline: js
+fixtures:
+  - path: ../outside/index.js
+    content: |
+      export function steal() {
+        return 'secret';
+      }
+
+  - path: ../outside/env.js
+    content: |
+      export function leakedEnv() {
+        return 'env';
+      }
+
+  - path: ../outside/fs.js
+    content: |
+      export function leakedFs() {
+        return 'fs';
+      }
+
+  - path: safe/env.js
+    content: |
+      export function safeEnv() {
+        return 'safe-env';
+      }
+
+  - path: safe/fs.js
+    content: |
+      export function safeFs() {
+        return 'safe-fs';
+      }
+
+  - path: webpack.config.js
+    content: |
+      const fs = require('fs');
+      const path = require('path');
+      const alias = {
+        escaped: path.resolve(__dirname, '../outside'),
+        envEscaped: path.resolve(__dirname, './safe/env.js'),
+        fsEscaped: path.resolve(__dirname, './safe/fs.js'),
+      };
+
+      if (process.env.HOME) {
+        alias.envEscaped = path.resolve(__dirname, '../outside/env.js');
+      }
+
+      if (fs.existsSync('/etc/passwd')) {
+        alias.fsEscaped = path.resolve(__dirname, '../outside/fs.js');
+      }
+
+      module.exports = {
+        resolve: {
+          alias,
+        },
+      };
+
+  - path: app/assets/javascripts/consumer.js
+    content: |
+      import { steal } from 'escaped';
+
+      export function run() {
+        return steal();
+      }
+
+  - path: app/assets/javascripts/env_consumer.js
+    content: |
+      import { safeEnv } from 'envEscaped';
+
+      export function runEnv() {
+        return safeEnv();
+      }
+
+  - path: app/assets/javascripts/fs_consumer.js
+    content: |
+      import { safeFs } from 'fsEscaped';
+
+      export function runFs() {
+        return safeFs();
+      }
+
+tests:
+  - name: Escaping alias import is still recorded
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'app/assets/javascripts/consumer.js'
+      RETURN i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "escaped", name: "steal" } }
+
+  - name: Escaping alias does not produce call edges into outside files
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
+          'app/assets/javascripts/consumer.js',
+          'app/assets/javascripts/env_consumer.js',
+          'app/assets/javascripts/fs_consumer.js'
+        ]
+        AND callee.file_path CONTAINS 'outside/'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: process.env does not unlock escaping aliases
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/env_consumer.js'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runEnv", callee_file: "safe/env.js", callee: "safeEnv" } }
+
+  - name: fs existsSync does not unlock escaping aliases
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/fs_consumer.js'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runFs", callee_file: "safe/fs.js", callee: "safeFs" } }
