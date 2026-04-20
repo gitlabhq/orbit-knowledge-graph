@@ -39,6 +39,10 @@ yaml_test!(
     "javascript/gitlab_monolith_config_resolution.yaml"
 );
 yaml_test!(
+    javascript_security_hardening,
+    "javascript/security_hardening.yaml"
+);
+yaml_test!(
     typescript_gitlab_monolith_barrels,
     "typescript/gitlab_monolith_barrels.yaml"
 );
