@@ -121,6 +121,7 @@ yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");
 yaml_test!(go_struct_embedding, "go/struct_embedding.yaml");
+yaml_test!(go_comprehensive, "go/comprehensive.yaml");
 
 // Java v1 parity
 yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");

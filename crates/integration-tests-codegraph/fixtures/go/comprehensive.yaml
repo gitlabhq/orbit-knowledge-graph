@@ -1,0 +1,172 @@
+name: "Go: comprehensive resolution"
+fixtures:
+  - path: models.go
+    content: |
+      package main
+
+      type User struct {
+          Name string
+      }
+
+      func (u *User) Greet() string {
+          return "Hello, " + u.Name
+      }
+
+      func (u *User) Save() error {
+          return nil
+      }
+
+      type Admin struct {
+          User
+          Level int
+      }
+
+      func (a *Admin) Promote() {}
+
+  - path: service.go
+    content: |
+      package main
+
+      type UserService struct {
+          db Database
+      }
+
+      func NewUserService(db Database) *UserService {
+          return &UserService{db: db}
+      }
+
+      func (s *UserService) FindUser(id int) *User {
+          return &User{Name: "test"}
+      }
+
+      func (s *UserService) DeleteUser(id int) error {
+          user := s.FindUser(id)
+          user.Save()
+          return nil
+      }
+
+  - path: db.go
+    content: |
+      package main
+
+      type Database struct{}
+
+      func (d *Database) Query(sql string) {}
+      func (d *Database) Close() {}
+
+      func NewDatabase() Database {
+          return Database{}
+      }
+
+  - path: main.go
+    content: |
+      package main
+
+      func main() {
+          db := NewDatabase()
+          db.Query("SELECT 1")
+
+          svc := NewUserService(db)
+          user := svc.FindUser(1)
+          user.Greet()
+
+          admin := Admin{}
+          admin.Greet()
+          admin.Promote()
+      }
+
+tests:
+  # ── Simple function calls ──
+
+  - name: "main calls NewDatabase"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'NewDatabase'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  - name: "main calls NewUserService"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'NewUserService'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+
+  # ── Method calls via return type ──
+
+  - name: "main calls db.Query via NewDatabase return type"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'Query'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Query" } }
+
+  - name: "main calls svc.FindUser via NewUserService return type"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'FindUser'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.FindUser" } }
+
+  - name: "main calls Greet (directly and via embedding)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'Greet'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+
+  # ── Struct embedding (promoted methods) ──
+
+  - name: "admin.Greet resolves via User embedding"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'Promote'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Promote" } }
+
+  # ── Intra-service method calls ──
+
+  - name: "DeleteUser calls FindUser via self"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'DeleteUser' AND callee.name = 'FindUser'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.FindUser" } }
+
+  - name: "DeleteUser calls user.Save via FindUser return type"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'DeleteUser' AND callee.name = 'Save'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Save" } }
+
+  # ── Definitions exist ──
+
+  - name: "All structs defined"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type IN ['Struct', 'Interface']
+      RETURN d.name AS name
+      ORDER BY name
+    assert:
+      - { row: { name: "Admin" } }
+      - { row: { name: "Database" } }
+      - { row: { name: "User" } }
+      - { row: { name: "UserService" } }
+
+  - name: "Struct embedding produces extends edge"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'Admin' AND callee.name = 'User'
+        AND e.edge_kind = 'Extends'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
