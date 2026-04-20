@@ -439,6 +439,7 @@ where
                         }
                     },
                     &tracer,
+                    Some(&graph),
                 );
 
                 let inferred = inferred_result.unwrap_or_default();

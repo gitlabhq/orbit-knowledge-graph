@@ -587,11 +587,57 @@ impl LanguageSpec {
         }
     }
 
+    /// Resolve an expression chain against the graph using import_map for
+    /// the base and nested lookups for each step. Returns the FQN of the
+    /// final resolved node, if any.
+    fn resolve_chain_against_graph(
+        &self,
+        chain: &[ExpressionStep],
+        import_map: &rustc_hash::FxHashMap<String, String>,
+        graph: &crate::v2::linker::graph::CodeGraph,
+    ) -> Option<String> {
+        let base_name = match &chain[0] {
+            ExpressionStep::Ident(n) | ExpressionStep::New(n) => n,
+            ExpressionStep::This | ExpressionStep::Super => return None,
+            _ => return None,
+        };
+        let base_fqn = import_map
+            .get(base_name.as_str())
+            .cloned()
+            .unwrap_or_else(|| base_name.clone());
+        let mut scope_nodes = graph.resolve_scope_nodes(&base_fqn);
+        if scope_nodes.is_empty() {
+            return None;
+        }
+        let mut resolved_fqn = graph.def_fqn(scope_nodes[0]).to_string();
+        for step in &chain[1..] {
+            let member = match step {
+                ExpressionStep::Call(n) | ExpressionStep::Field(n) | ExpressionStep::New(n) => n,
+                _ => return None,
+            };
+            let mut next = Vec::new();
+            for &node in &scope_nodes {
+                let fqn = graph.def_fqn(node);
+                graph.lookup_nested_with_hierarchy(fqn, member, &mut next);
+            }
+            if next.is_empty() {
+                return None;
+            }
+            resolved_fqn = graph.def_fqn(next[0]).to_string();
+            scope_nodes = next.into();
+        }
+        Some(resolved_fqn)
+    }
+
     // ── parse_full_and_resolve: single walk with SSA + inline callback ──
 
     /// Parse source with SSA, then call `on_ref` for each resolved reference.
     /// No intermediate collections — each ref is dispatched as soon as its
     /// reaching defs are computed.
+    ///
+    /// When `graph` is provided, constructor chains (e.g. `Parent.Child.Foo()`)
+    /// are resolved eagerly after sealing, and the resolved types are written
+    /// back to SSA so subsequent bindings can use them.
     pub fn parse_full_and_resolve<F>(
         &self,
         source: &[u8],
@@ -599,6 +645,7 @@ impl LanguageSpec {
         language: Language,
         on_ref: &mut F,
         tracer: &Tracer,
+        graph: Option<&crate::v2::linker::graph::CodeGraph>,
     ) -> crate::legacy::parser::Result<Vec<(u32, String)>>
     where
         F: FnMut(
@@ -688,6 +735,64 @@ impl LanguageSpec {
                     .metadata
                     .get_or_insert_with(Box::default)
                     .return_type = Some(rt);
+            }
+        }
+
+        // Pass 1.5: eager intra-file resolution against the graph.
+        //
+        // After SSA is sealed, find alias targets that have no SSA value
+        // (i.e. the alias can't be chased). For each, try to resolve the
+        // target name via pending ref chains against the graph and write
+        // the resolved type to SSA so alias chasing succeeds in Pass 2.
+        if let Some(g) = graph {
+            // Collect alias targets that need resolution: names referenced
+            // by Alias() values but absent from SSA.
+            let mut needed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+            for pending in &pending_refs {
+                let reaching = state
+                    .ssa
+                    .read_variable_stateless(pending.ssa_key, pending.block);
+                for v in &reaching.values {
+                    if let super::ssa::SsaValue::Alias(target) = v {
+                        let target_vals = state.ssa.read_variable_stateless(target, pending.block);
+                        let unresolved = target_vals.values.is_empty()
+                            || target_vals.values.iter().all(|tv| {
+                                matches!(
+                                    tv,
+                                    super::ssa::SsaValue::Opaque | super::ssa::SsaValue::Alias(_)
+                                )
+                            });
+                        if unresolved {
+                            needed.insert(target);
+                        }
+                    }
+                }
+            }
+
+            // For each needed name, find a ref chain that resolves it.
+            if !needed.is_empty() {
+                for pending in &pending_refs {
+                    if !needed.contains(pending.name.as_str()) {
+                        continue;
+                    }
+                    let resolved_fqn = if let Some(chain) = &pending.chain {
+                        self.resolve_chain_against_graph(chain, &state.import_map, g)
+                    } else {
+                        let fqn = state
+                            .import_map
+                            .get(pending.name.as_str())
+                            .cloned()
+                            .unwrap_or_else(|| pending.name.clone());
+                        let nodes = g.resolve_scope_nodes(&fqn);
+                        nodes.first().map(|&n| g.def_fqn(n).to_string())
+                    };
+                    if let Some(fqn) = resolved_fqn {
+                        let key = state.arena.alloc_str(&pending.name);
+                        let val = super::ssa::SsaValue::Type(state.arena.alloc_str(&fqn));
+                        state.ssa.write_variable(key, pending.block, val);
+                        needed.remove(pending.name.as_str());
+                    }
+                }
             }
         }
 
@@ -1526,6 +1631,7 @@ mod tests {
                 ref_names.push(name.to_string());
             },
             &tracer,
+            None,
         )
         .unwrap();
 

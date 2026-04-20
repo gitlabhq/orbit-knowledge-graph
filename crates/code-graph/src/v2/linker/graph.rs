@@ -521,6 +521,12 @@ impl CodeGraph {
         self.strings.get(self.def(idx).fqn)
     }
 
+    /// Returns the def kind.
+    #[inline]
+    pub fn def_kind(&self, idx: NodeIndex) -> crate::v2::types::DefKind {
+        self.def(idx).kind
+    }
+
     // ── Iterators ───────────────────────────────────────────
 
     pub fn directories(&self) -> impl Iterator<Item = (NodeIndex, &CanonicalDirectory)> {
@@ -582,10 +588,12 @@ impl CodeGraph {
                 let child_fqn = self.strings.get(self.defs[id.0 as usize].fqn).to_string();
                 for &super_id in &meta.super_types {
                     let super_name = self.strings.get(super_id);
-                    let targets = self.resolve_scope_nodes(super_name);
+                    let mut targets = self.resolve_scope_nodes(super_name);
+                    targets.retain(|t| *t != idx);
+                    // Sort by FQN for deterministic edge ordering.
+                    targets.sort_by(|&a, &b| self.def_fqn(a).cmp(self.def_fqn(b)));
                     let resolved_fqns: Vec<String> = targets
                         .iter()
-                        .filter(|&&t| t != idx)
                         .filter_map(|&t| {
                             self.graph[t]
                                 .def_id()
@@ -598,9 +606,7 @@ impl CodeGraph {
                         resolved_to: resolved_fqns,
                     });
                     for &target in &targets {
-                        if target != idx {
-                            edges.push((idx, target));
-                        }
+                        edges.push((idx, target));
                     }
                 }
             }
@@ -622,7 +628,7 @@ impl CodeGraph {
     /// Resolve a type name to graph nodes. Tries FQN index first, then
     /// name index, then qualified name resolution (split on the def's own
     /// FQN separator and resolve via nested index).
-    fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
+    pub fn resolve_scope_nodes(&self, name: &str) -> SmallVec<[NodeIndex; 8]> {
         let by_fqn = self
             .indexes
             .by_fqn

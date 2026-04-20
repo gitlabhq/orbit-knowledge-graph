@@ -419,6 +419,7 @@ mod tests {
                 crate::v2::config::Language::Python,
                 |name, _, _, _, _| ref_names.push(name.to_string()),
                 &tracer,
+                None,
             )
             .unwrap();
         assert!(!ref_names.is_empty());

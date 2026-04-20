@@ -14,7 +14,6 @@ tests:
       - { row_count: 1 }
 
   - name: "main -> Parent.Child.GrandChild.greet (inferred nested type)"
-    skip: true
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'com.example.main'
