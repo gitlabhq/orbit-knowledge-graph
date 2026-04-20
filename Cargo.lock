@@ -8132,6 +8132,7 @@ dependencies = [
  "strum 0.28.0",
  "tempfile",
  "tokio",
+ "toon-format",
  "tracing",
  "tracing-subscriber",
 ]
