@@ -59,7 +59,12 @@ pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts,
             is_typescript = true;
         }
         if !combined.is_empty() {
-            combined.push('\n');
+            // `;\n` instead of `\n` so ASI-defeating tokens at the end
+            // of one block (open paren, arithmetic operator, template
+            // literal) cannot statement-merge with the start of the
+            // next block. Misleading merges silently corrupt downstream
+            // def/range data and can mask whole assignments.
+            combined.push_str(";\n");
         }
         if combined.len().saturating_add(block.source_text.len()) as u64
             > super::extract::MAX_FILE_BYTES
