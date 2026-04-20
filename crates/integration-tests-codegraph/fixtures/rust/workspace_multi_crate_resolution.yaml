@@ -1,0 +1,82 @@
+name: "Rust: workspace multi-crate resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [workspace]
+      members = ["crates/app", "crates/shared"]
+      resolver = "2"
+
+  - path: crates/shared/Cargo.toml
+    content: |
+      [package]
+      name = "shared-lib"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: crates/shared/src/lib.rs
+    content: |
+      pub mod util;
+
+      pub fn call_shared() {
+          util::helper();
+      }
+
+  - path: crates/shared/src/util.rs
+    content: |
+      pub fn helper() {}
+
+  - path: crates/app/Cargo.toml
+    content: |
+      [package]
+      name = "app-runner"
+      version = "0.1.0"
+      edition = "2021"
+
+      [dependencies]
+      shared-lib = { path = "../shared" }
+
+  - path: crates/app/src/main.rs
+    content: |
+      mod util;
+
+      use shared_lib::util::helper as shared_helper;
+
+      pub fn call_both() {
+          shared_helper();
+          util::helper();
+      }
+
+  - path: crates/app/src/util.rs
+    content: |
+      pub fn helper() {}
+
+tests:
+  - name: "workspace call graph distinguishes local and dependent helpers"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'crates/app/src/main.rs'
+        AND caller.name = 'call_both'
+        AND callee.name = 'helper'
+      RETURN callee.file_path AS file, callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { file: 'crates/app/src/util.rs', fqn: 'app_runner::util::helper' } }
+      - { row: { file: 'crates/shared/src/util.rs', fqn: 'shared_lib::util::helper' } }
+
+  - name: "shared workspace member keeps crate-qualified FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'crates/shared/src/util.rs' AND d.name = 'helper'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'shared_lib::util::helper' } }
+
+  - name: "workspace member local calls still resolve within their crate"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_shared' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'crates/shared/src/lib.rs', tgt: 'crates/shared/src/util.rs', fqn: 'shared_lib::util::helper' } }

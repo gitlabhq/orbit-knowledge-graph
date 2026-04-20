@@ -1,0 +1,102 @@
+name: "Rust: local flow SSA"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_local_flow_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn foo() {}
+
+      pub fn bar() {}
+
+      pub fn branch_join(flag: bool) {
+          let call = if flag { foo } else { bar };
+          call();
+      }
+
+      pub fn match_join(flag: bool) {
+          let call = match flag {
+              true => foo,
+              false => bar,
+          };
+          call();
+      }
+
+      pub fn rebinding(flag: bool) {
+          let mut call = foo;
+          if flag {
+              call = bar;
+          }
+          call();
+      }
+
+      pub fn block_alias() {
+          let call = {
+              let inner = foo;
+              inner
+          };
+          call();
+      }
+
+      pub fn loop_rebinding(flag: bool) {
+          let mut call = foo;
+          while flag {
+              call = bar;
+              break;
+          }
+          call();
+      }
+
+tests:
+  - name: "if-expression joins preserve both callable targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'branch_join'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }
+
+  - name: "mutable rebindings preserve prior and reassigned targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'rebinding'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }
+
+  - name: "block-expression aliases resolve through inner locals"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'block_alias'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'foo' } }
+
+  - name: "loop-carried aliases preserve both callable targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'loop_rebinding'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }
+
+  - name: "match-expression joins preserve both callable targets"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'match_join'
+      RETURN callee.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'foo' } }
+      - { row: { fqn: 'bar' } }

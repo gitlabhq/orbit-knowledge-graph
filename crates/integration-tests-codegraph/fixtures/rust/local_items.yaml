@@ -1,0 +1,94 @@
+name: "Rust: local items"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_local_items_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub fn outer() {
+          fn helper() {}
+
+          struct Local(pub usize);
+
+          enum Choice {
+              Pick(Local),
+          }
+
+          helper();
+          let _local = Local(1);
+          let _choice = Choice::Pick(Local(2));
+      }
+
+      pub struct Container;
+
+      impl Container {
+          pub fn method() {
+              fn nested() {}
+              nested();
+          }
+      }
+
+tests:
+  - name: "block-local definitions are retained under the enclosing function"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN [
+          'outer::helper',
+          'outer::Local',
+          'outer::Local::0',
+          'outer::Choice',
+          'outer::Choice::Pick',
+          'outer::Choice::Pick::0',
+          'Container::method::nested'
+        ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 7 }
+      - { row: { fqn: 'outer::helper', type: 'Function' } }
+      - { row: { fqn: 'outer::Local', type: 'Struct' } }
+      - { row: { fqn: 'outer::Local::0', type: 'Field' } }
+      - { row: { fqn: 'outer::Choice', type: 'Enum' } }
+      - { row: { fqn: 'outer::Choice::Pick', type: 'Variant' } }
+      - { row: { fqn: 'outer::Choice::Pick::0', type: 'Field' } }
+      - { row: { fqn: 'Container::method::nested', type: 'Function' } }
+
+  - name: "local helper calls resolve to local item definitions"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'helper' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'outer::helper', type: 'Function' } }
+
+  - name: "local tuple struct constructors resolve to the local struct"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'Local' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'outer::Local', type: 'Struct' } }
+
+  - name: "local enum variant constructors resolve to the local variant"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'outer' AND callee.name = 'Pick' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'outer::Choice::Pick', type: 'Variant' } }
+
+  - name: "local items inside methods are retained and callable"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Container::method' AND callee.name = 'nested' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS fqn, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'Container::method::nested', type: 'Function' } }

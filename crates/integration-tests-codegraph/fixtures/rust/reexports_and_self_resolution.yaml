@@ -1,0 +1,74 @@
+name: "Rust: re-exports and self resolution"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_reexport_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod inner;
+
+      pub use crate::inner::helper as exported_helper;
+      pub use crate::inner::Service as ExportedService;
+
+      pub fn call_reexports() {
+          exported_helper();
+          let _ = ExportedService::create();
+      }
+
+  - path: src/inner.rs
+    content: |
+      pub struct Service;
+
+      impl Service {
+          pub fn create() -> Self {
+              Self::new()
+          }
+
+          fn new() -> Self {
+              Service
+          }
+      }
+
+      pub fn helper() {}
+
+tests:
+  - name: "aliased re-exported function resolves to its original definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_reexports' AND callee.name = 'helper'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs' } }
+
+  - name: "re-exported type keeps associated function resolution"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_reexports' AND callee.name = 'create'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/lib.rs', tgt: 'src/inner.rs', type: 'AssociatedFunction' } }
+
+  - name: "Self::new inside impl resolves to the inherent constructor"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create' AND callee.name = 'new'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, callee.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { src: 'src/inner.rs', tgt: 'src/inner.rs', type: 'AssociatedFunction' } }
+
+  - name: "re-export aliases are preserved in import metadata"
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/lib.rs' AND (i.alias = 'exported_helper' OR i.alias = 'ExportedService')
+      RETURN i.alias AS alias, i.import_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { alias: 'exported_helper', type: 'ReExportAliased' } }
+      - { row: { alias: 'ExportedService', type: 'ReExportAliased' } }

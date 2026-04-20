@@ -192,17 +192,18 @@ After acquiring the lock, the service downloads the full repository archive from
 
 ##### Parser architecture
 
-The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses four parser and analysis backends:
+The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
 - **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
-- **Vue, Svelte, and Astro** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
+- **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
 - **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
 - **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules, enforces file-count, byte, statement, and recursion budgets, treats `process.env` as an empty object, and allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
-- **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
+- **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree, attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data, disables proc macros and build-script execution, and layers parser-time SSA over rust-analyzer for local callable flow such as aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`.
+- **Python, Kotlin, Java, and C#** use tree-sitter grammars.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Automatic v2 language dispatch is currently extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.svelte`, `.astro`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 

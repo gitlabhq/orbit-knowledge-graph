@@ -1,7 +1,9 @@
 use std::path::Path;
 
 use crate::v2::linker::CodeGraph;
-use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
+use crate::v2::pipeline::{
+    FileInput, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
+};
 use rustc_hash::FxHashMap;
 
 use super::extract::{ResolvedJsFile, analyze_files};
@@ -14,6 +16,7 @@ impl LanguagePipeline for JsPipeline {
     fn process_files(
         files: &[FileInput],
         root_path: &str,
+        _config: &PipelineConfig,
         tracer: &crate::v2::trace::Tracer,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         if files.is_empty() {
