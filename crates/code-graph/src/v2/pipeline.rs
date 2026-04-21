@@ -73,7 +73,6 @@ pub trait LanguagePipeline {
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
-    pub worker_threads: usize,
 }
 
 impl Default for PipelineConfig {
@@ -81,7 +80,6 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
-            worker_threads: 0,
         }
     }
 }

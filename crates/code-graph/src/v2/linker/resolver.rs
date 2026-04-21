@@ -437,6 +437,7 @@ impl<'a> ResolveCtx<'a> {
                         self.rules.fqn_separator,
                         &self.import_map,
                         &mut self.scratch,
+                        self.settings.global_name_max_results,
                     )
                 }
                 ResolveStage::ImplicitMember => {
@@ -858,7 +859,12 @@ impl<'a> ResolveCtx<'a> {
                     // Not in import_strategies to avoid O(candidates) scans
                     // on every bare identifier ref.
                     if nodes.is_empty() {
-                        nodes = super::imports::global_name(self.graph, self.file_node, name, 10);
+                        nodes = super::imports::global_name(
+                            self.graph,
+                            self.file_node,
+                            name,
+                            self.settings.global_name_max_results,
+                        );
                     }
                     for n in nodes {
                         if let Some(did) = self.graph.graph[n].def_id() {

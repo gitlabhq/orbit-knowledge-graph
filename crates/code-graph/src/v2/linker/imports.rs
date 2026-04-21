@@ -17,10 +17,12 @@ use crate::v2::types::ImportBindingKind;
 pub struct ResolveSettings {
     pub per_file_timeout: Option<std::time::Duration>,
     pub max_chain_depth: usize,
-    pub slow_ref_threshold: Option<std::time::Duration>,
     pub chain_fallback: bool,
     pub compound_key_recovery: bool,
     pub implicit_scope_on_base: bool,
+    /// Maximum number of results from `global_name` before discarding
+    /// as too ambiguous. Prevents fan-out on common names.
+    pub global_name_max_results: usize,
 }
 
 impl Default for ResolveSettings {
@@ -28,10 +30,10 @@ impl Default for ResolveSettings {
         Self {
             per_file_timeout: None,
             max_chain_depth: 10,
-            slow_ref_threshold: Some(std::time::Duration::from_millis(100)),
             chain_fallback: true,
             compound_key_recovery: true,
             implicit_scope_on_base: true,
+            global_name_max_results: 5,
         }
     }
 }
@@ -46,6 +48,7 @@ pub(crate) fn apply_import_strategies(
     sep: &str,
     import_map: &FxHashMap<String, Vec<NodeIndex>>,
     scratch: &mut ScratchBuf,
+    max_results: usize,
 ) -> Vec<NodeIndex> {
     for strategy in strategies {
         let candidates = match strategy {
@@ -59,7 +62,7 @@ pub(crate) fn apply_import_strategies(
             // which provides per-language file-tree context for path resolution
             // (Python source roots, JS tsconfig paths, Ruby require_relative).
             ImportStrategy::FilePath => vec![],
-            ImportStrategy::GlobalName => global_name(graph, file_node, name, 5),
+            ImportStrategy::GlobalName => global_name(graph, file_node, name, max_results),
         };
         if !candidates.is_empty() {
             return candidates;
