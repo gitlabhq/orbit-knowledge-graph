@@ -3,3 +3,4 @@
 pub mod arrow;
 pub mod clickhouse;
 pub mod fs;
+pub mod strings;
