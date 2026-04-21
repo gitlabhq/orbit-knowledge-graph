@@ -659,6 +659,10 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                             && let Some(ta) = meta.type_annotation
                         {
                             next_types.push(ctx.graph.str(ta).to_string());
+                        } else if let Some(meta) = &gdef.metadata
+                            && let Some(rt) = meta.return_type
+                        {
+                            next_types.push(ctx.graph.str(rt).to_string());
                         } else if gdef.kind == DefKind::EnumEntry {
                             // Enum constant: propagate the parent enum's FQN
                             let fqn = ctx.graph.str(gdef.fqn);
@@ -673,6 +677,15 @@ fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
                     }
                 }
             }
+        }
+
+        // Constructor method hook: when Call("new") (or similar) finds no
+        // nested member, the call returns an instance of the receiver type.
+        if found_nodes.is_empty()
+            && matches!(step, ExpressionStep::Call(_))
+            && ctx.rules.hooks.constructor_methods.contains(&member_name)
+        {
+            next_types.extend(current_types.iter().cloned());
         }
 
         let found_fqns: Vec<String> = found_nodes
@@ -838,7 +851,8 @@ fn resolve_base_type_fqns(
             }
             // Fallback: when reaching defs produce no types (e.g. chain base
             // is an untracked name like a same-package class), try resolving
-            // the base name via import strategies to find its FQN.
+            // the base name via import strategies to find its FQN, then
+            // global name lookup as a last resort.
             if types.is_empty()
                 && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
             {
@@ -848,7 +862,13 @@ fn resolve_base_type_fqns(
                     reaching: &[],
                     enclosing_def: None,
                 };
-                let nodes = resolve_bare(ctx, &fallback);
+                let mut nodes = resolve_bare(ctx, &fallback);
+                // GlobalName: last-resort lookup for chain bases only.
+                // Not in import_strategies to avoid O(candidates) scans
+                // on every bare identifier ref.
+                if nodes.is_empty() {
+                    nodes = super::imports::global_name(ctx.graph, ctx.file_node, name, 10);
+                }
                 for n in nodes {
                     if let Some(did) = ctx.graph.graph[n].def_id() {
                         let gdef = &ctx.graph.defs[did.0 as usize];

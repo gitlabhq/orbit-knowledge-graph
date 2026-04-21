@@ -17,7 +17,7 @@ tests:
   # ── K5: test_kotlin_type_inference_from_if_expression ──
 
   - name: "usageOfIfTypeInference -> Person.getName (if expression)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'usageOfIfTypeInference'

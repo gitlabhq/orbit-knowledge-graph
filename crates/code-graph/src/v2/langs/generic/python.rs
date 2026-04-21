@@ -266,6 +266,7 @@ impl DslLanguage for PythonDsl {
         types::SsaConfig {
             self_names: &["self"],
             super_name: Some("super"),
+            ..Default::default()
         }
     }
 }
@@ -302,6 +303,7 @@ impl HasRules for PythonRules {
         )
         .with_hooks(ResolverHooks {
             call_method: Some("__call__"),
+            ..Default::default()
         })
     }
 }

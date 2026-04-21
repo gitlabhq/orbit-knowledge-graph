@@ -1117,6 +1117,12 @@ impl LanguageSpec {
             .on_scope
             .is_some_and(|f| f(node, &mut state.defs, &state.scope_stack, sep));
 
+        // Expression-bodied functions: when a node like `function_body`
+        // contains `=`, treat all refs within as implicit returns.
+        let is_expression_body = !self.hooks.expression_body_kinds.is_empty()
+            && self.hooks.expression_body_kinds.contains(&nk)
+            && node.children().any(|c| c.kind().as_ref() == "=");
+
         if !custom_handled {
             // Branch matching → SSA fork/join (handles own children)
             if let Some(&rule_idx) = self.branch_dispatch.get(nk).and_then(|v| v.first()) {
@@ -1199,6 +1205,18 @@ impl LanguageSpec {
                             sep,
                         );
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
+                    } else if let Some(ctor_type) = rule.extract_constructor_type(
+                        node,
+                        self,
+                        self.ssa_config.constructor_methods,
+                    ) {
+                        let resolved = resolve_type_name(
+                            &ctor_type,
+                            &state.import_map,
+                            module_prefix.as_deref(),
+                            sep,
+                        );
+                        super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
                     } else {
@@ -1255,6 +1273,10 @@ impl LanguageSpec {
                         }
                     }
                 } // end for name in names
+            }
+
+            if is_expression_body {
+                state.in_return = true;
             }
 
             // Track return statement context + infer return type from bare identifiers
@@ -1373,7 +1395,9 @@ impl LanguageSpec {
         }
 
         // Clear return context after children
-        if !self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk) {
+        if (!self.hooks.return_kinds.is_empty() && self.hooks.return_kinds.contains(&nk))
+            || is_expression_body
+        {
             state.in_return = false;
         }
 

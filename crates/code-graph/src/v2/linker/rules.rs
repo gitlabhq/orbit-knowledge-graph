@@ -61,6 +61,10 @@ pub enum ImportStrategy {
     SameFile,
     ScopeFqnWalk,
     FilePath,
+    /// Match bare name against top-level definitions across all files.
+    /// Used by languages where require/include makes all symbols globally
+    /// available (Ruby) or where the source root prefix is unknown (Python).
+    GlobalName,
 }
 
 // ── Chain / receiver ────────────────────────────────────────────
@@ -96,6 +100,9 @@ pub struct ResolverHooks {
     /// When a bare call resolves to a class instance, redirect to this
     /// member method. e.g. `"__call__"` for Python, `"invoke"` for Kotlin.
     pub call_method: Option<&'static str>,
+    /// Method names that act as constructors — `Call("new")` on a class
+    /// returns an instance of that class. e.g. `&["new"]` for Ruby.
+    pub constructor_methods: &'static [&'static str],
 }
 
 // ── Top-level config ────────────────────────────────────────────

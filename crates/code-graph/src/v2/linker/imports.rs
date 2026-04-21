@@ -54,7 +54,12 @@ pub(crate) fn apply_import_strategies(
             ImportStrategy::WildcardImport => wildcard_import(graph, file_node, name, sep, scratch),
             ImportStrategy::SamePackage => same_package(graph, file_node, name, sep, scratch),
             ImportStrategy::SameFile => same_file(graph, file_node, name),
+            // Stub: resolve by matching import paths to file paths in the graph.
+            // Blocked on ImportResolver trait (.sessions/import-resolver-trait.md)
+            // which provides per-language file-tree context for path resolution
+            // (Python source roots, JS tsconfig paths, Ruby require_relative).
             ImportStrategy::FilePath => vec![],
+            ImportStrategy::GlobalName => global_name(graph, file_node, name, 5),
         };
         if !candidates.is_empty() {
             return candidates;
@@ -222,6 +227,43 @@ fn same_package(
         }
     }
     vec![]
+}
+
+/// Resolve a bare name against top-level definitions across all files.
+/// Returns empty if the name is too ambiguous (more than `max_results`
+/// matches) to avoid O(candidates) fan-out on common names like
+/// `execute`, `initialize`, `perform`.
+pub(crate) fn global_name(
+    graph: &CodeGraph,
+    _file_node: NodeIndex,
+    name: &str,
+    max_results: usize,
+) -> Vec<NodeIndex> {
+    let results = graph
+        .indexes
+        .by_name
+        .lookup(name, |idx| {
+            graph.def_name(idx) == name
+                && graph.graph[idx].def_id().is_some_and(|d| {
+                    let def = &graph.defs[d.0 as usize];
+                    if !def.is_top_level {
+                        return false;
+                    }
+                    // For methods/properties, require a scoped FQN (fqn != name)
+                    // to filter out bare RSpec helpers like `let(:value)`.
+                    // Classes/modules with bare FQNs are legitimate.
+                    if !def.kind.is_type_container() {
+                        graph.str(def.fqn) != name
+                    } else {
+                        true
+                    }
+                })
+        })
+        .to_vec();
+    if results.len() > max_results {
+        return vec![];
+    }
+    results
 }
 
 fn same_file(graph: &CodeGraph, file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
