@@ -32,7 +32,7 @@ check_file() {
         echo "❌ $file is out of date. Run: mise schema:generate:ddl"
         FAILED=1
     else
-        echo "✅ $file is up to date (v$SCHEMA_VERSION)."
+        echo "✅ $file is up to date (SCHEMA_VERSION=$SCHEMA_VERSION)."
     fi
 }
 
