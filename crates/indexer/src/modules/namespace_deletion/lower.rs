@@ -245,25 +245,23 @@ mod tests {
     }
 
     #[test]
-    fn edge_statement_selects_edge_sort_key_columns() {
+    fn edge_statements_select_sort_key_columns_for_all_tables() {
         let ontology = load_ontology();
         let statements = build_deletion_statements(&ontology);
-        let statement = find_statement(&statements, ontology.edge_table());
 
-        let expected_columns = [
-            "traversal_path",
-            "source_id",
-            "source_kind",
-            "relationship_kind",
-            "target_id",
-            "target_kind",
-        ];
-        for column in &expected_columns {
-            assert!(
-                statement.sql.contains(column),
-                "edge statement should include {column}: {}",
-                statement.sql
-            );
+        for edge_table in ontology.edge_tables() {
+            let config = ontology
+                .edge_table_config(edge_table)
+                .expect("edge table config must exist");
+
+            let statement = find_statement(&statements, edge_table);
+            for column in &config.sort_key {
+                assert!(
+                    statement.sql.contains(column.as_str()),
+                    "{edge_table} deletion should include sort key column {column}: {}",
+                    statement.sql
+                );
+            }
         }
     }
 }
