@@ -372,7 +372,7 @@ where
 
         // ── Pre-phase: bulk file read into memory ───────────────
         // Read all files once upfront. Both Phase 1 and Phase 2
-        // index into this buffer — no per-file I/O in the hot loop.
+        // index into the same buffer — no per-file I/O in the hot loop.
         let sources: Vec<Option<Vec<u8>>> = files
             .par_iter()
             .map(|path| {
