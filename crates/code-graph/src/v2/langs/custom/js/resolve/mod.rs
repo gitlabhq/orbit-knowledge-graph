@@ -94,7 +94,7 @@ fn add_local_call_edges(
 
     let rules = js_local_rules();
     let settings = js_local_settings();
-    let mut resolver = FileResolver::new(
+    let mut resolver = FileResolver::from_parts(
         graph,
         file_info.file_node,
         &file_info.local_def_nodes,

@@ -510,9 +510,7 @@ where
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
-                    &*rules,
-                    &rules.settings,
-                    tracer,
+                    &lang_ctx,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
@@ -601,9 +599,7 @@ where
                             info.file_node,
                             &info.def_nodes,
                             &info.import_nodes,
-                            &*rules,
-                            &rules.settings,
-                            tracer,
+                            &lang_ctx,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {

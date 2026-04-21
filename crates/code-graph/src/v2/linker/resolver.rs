@@ -3,11 +3,13 @@
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
+use crate::v2::pipeline::LanguageContext;
 use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
 use rustc_hash::FxHashMap;
+use std::sync::Arc;
 
 use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{self, ResolveSettings, apply_import_strategies};
@@ -37,19 +39,48 @@ impl<'a> FileResolver<'a> {
         file_node: NodeIndex,
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
+        lang_ctx: &'a Arc<LanguageContext>,
+    ) -> Self {
+        let ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, lang_ctx);
+        let deadline = lang_ctx
+            .rules
+            .settings
+            .per_file_timeout
+            .map(|d| std::time::Instant::now() + d);
+        Self {
+            ctx,
+            deadline,
+            import_edges: Vec::new(),
+        }
+    }
+
+    /// Construct without a `LanguageContext` — used by custom pipelines
+    /// (e.g. JS) that manage their own rules and settings.
+    pub fn from_parts(
+        graph: &'a CodeGraph,
+        file_node: NodeIndex,
+        def_nodes: &'a [NodeIndex],
+        import_nodes: &'a [NodeIndex],
         rules: &'a ResolutionRules,
         settings: &'a ResolveSettings,
         tracer: &'a Tracer,
     ) -> Self {
-        let ctx = ResolveCtx::new(
+        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
+        let ctx = ResolveCtx {
             graph,
             file_node,
             def_nodes,
             import_nodes,
+            import_map,
+            lang_ctx: None,
             rules,
             settings,
             tracer,
-        );
+            scratch: ScratchBuf::new(),
+            import_cache: FxHashMap::default(),
+            nested_cache: FxHashMap::default(),
+            inferred_returns: FxHashMap::default(),
+        };
         let deadline = settings
             .per_file_timeout
             .map(|d| std::time::Instant::now() + d);
@@ -190,13 +221,15 @@ struct ResolveCtx<'a> {
     def_nodes: &'a [NodeIndex],
     import_nodes: &'a [NodeIndex],
     import_map: FxHashMap<String, Vec<NodeIndex>>,
+    #[allow(dead_code)]
+    lang_ctx: Option<&'a Arc<LanguageContext>>,
     rules: &'a ResolutionRules,
     settings: &'a ResolveSettings,
+    tracer: &'a Tracer,
     scratch: ScratchBuf,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
-    tracer: &'a Tracer,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -205,10 +238,11 @@ impl<'a> ResolveCtx<'a> {
         file_node: NodeIndex,
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
-        rules: &'a ResolutionRules,
-        settings: &'a ResolveSettings,
-        tracer: &'a Tracer,
+        lang_ctx: &'a Arc<LanguageContext>,
     ) -> Self {
+        let rules = &*lang_ctx.rules;
+        let settings = &rules.settings;
+        let tracer = lang_ctx.tracer();
         let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
         Self {
             graph,
@@ -216,13 +250,14 @@ impl<'a> ResolveCtx<'a> {
             def_nodes,
             import_nodes,
             import_map,
+            lang_ctx: Some(lang_ctx),
             rules,
             settings,
+            tracer,
             scratch: ScratchBuf::new(),
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
-            tracer,
         }
     }
 
