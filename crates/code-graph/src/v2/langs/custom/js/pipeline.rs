@@ -2,7 +2,7 @@ use std::path::Path;
 
 use crate::v2::linker::CodeGraph;
 use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
+    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
 };
 use rustc_hash::FxHashMap;
 
@@ -15,10 +15,10 @@ pub struct JsPipeline;
 impl LanguagePipeline for JsPipeline {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        _config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &PipelineContext<'_>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        let root_path = ctx.root_path;
+        let tracer = ctx.tracer;
         if files.is_empty() {
             return Ok(PipelineOutput::Graph(Box::new(CodeGraph::new_with_root(
                 root_path.to_string(),

@@ -5,7 +5,7 @@ use arrow_56::compute::concat_batches;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
-use code_graph::v2::{Pipeline, PipelineConfig, PipelineOutput};
+use code_graph::v2::{Pipeline, PipelineConfig, PipelineContext, PipelineOutput};
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
@@ -175,7 +175,13 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let output = dispatch_by_tag(tag, &files, &root, &PipelineConfig::default(), &tracer)
+            let config = PipelineConfig::default();
+            let ctx = PipelineContext {
+                config: &config,
+                tracer: &tracer,
+                root_path: &root,
+            };
+            let output = dispatch_by_tag(tag, &files, &ctx)
                 .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                 .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
             output_to_datasets(output)

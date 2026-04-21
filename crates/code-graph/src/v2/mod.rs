@@ -8,6 +8,7 @@ pub mod trace;
 pub mod types;
 
 pub use pipeline::{
-    GenericPipeline, LanguagePipeline, Pipeline, PipelineConfig, PipelineOutput, PipelineResult,
+    CancellationToken, GenericPipeline, LanguagePipeline, Pipeline, PipelineConfig,
+    PipelineContext, PipelineOutput, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_language};

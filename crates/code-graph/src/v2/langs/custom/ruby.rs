@@ -11,18 +11,18 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ruby_prism::Visit;
 
-use crate::v2::PipelineConfig;
-use crate::v2::pipeline::{FileInput, LanguagePipeline, PipelineError, PipelineOutput};
+use crate::v2::pipeline::{
+    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
+};
 
 pub struct RubyPipeline;
 
 impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        _config: &PipelineConfig,
-        _tracer: &crate::v2::trace::Tracer,
+        ctx: &PipelineContext<'_>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        let root_path = ctx.root_path;
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();
         let mut edges: Vec<EdgeEntry> = Vec::new();

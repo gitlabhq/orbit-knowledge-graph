@@ -5,9 +5,33 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::CodeGraph;
+
+/// Cooperative cancellation token. Clone-cheap (`Arc`).
+/// Set `cancel()` from any thread to request pipeline shutdown.
+#[derive(Clone, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Signal cancellation. All pipeline phases will exit at their
+    /// next check point (per-file granularity).
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Check if cancellation has been requested.
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 
 /// A chain reference that failed resolution in Phase 2,
 /// stored for re-resolution in Phase 3 after return types are merged.
@@ -53,6 +77,22 @@ pub enum PipelineOutput {
     Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
 }
 
+/// Immutable context shared across the entire pipeline run.
+/// Bundles config, tracer, root path, and cancellation — everything
+/// that doesn't change per-language or per-file.
+pub struct PipelineContext<'a> {
+    pub config: &'a PipelineConfig,
+    pub tracer: &'a crate::v2::trace::Tracer,
+    pub root_path: &'a str,
+}
+
+impl PipelineContext<'_> {
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.config.cancel.is_cancelled()
+    }
+}
+
 /// Trait for language-specific graph production.
 ///
 /// Two strategies:
@@ -64,15 +104,14 @@ pub enum PipelineOutput {
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &PipelineContext<'_>,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
+    pub cancel: CancellationToken,
 }
 
 impl Default for PipelineConfig {
@@ -80,6 +119,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
+            cancel: CancellationToken::new(),
         }
     }
 }
@@ -145,6 +185,12 @@ impl Pipeline {
             lang_summary.join(", ")
         ));
 
+        let ctx = PipelineContext {
+            config: &self.config,
+            tracer,
+            root_path: &root_str,
+        };
+
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
         let mut all_batches: Vec<(String, arrow::record_batch::RecordBatch)> = Vec::new();
@@ -153,17 +199,14 @@ impl Pipeline {
         let mut files_skipped = 0usize;
 
         for (language, files) in &files_by_language {
+            if ctx.is_cancelled() {
+                break;
+            }
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(
-                *language,
-                files,
-                &root_str,
-                &self.config,
-                tracer,
-            ) {
+            match crate::v2::registry::dispatch_language(*language, files, &ctx) {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -279,14 +322,14 @@ where
 {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        _config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &PipelineContext<'_>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
         let language = P::language();
         let file_count = files.len();
+        let root_path = ctx.root_path;
+        let tracer = ctx.tracer;
         let t0 = std::time::Instant::now();
 
         eprintln!(
@@ -311,6 +354,10 @@ where
             .par_iter()
             .enumerate()
             .map(|(_, path)| {
+                if ctx.is_cancelled() {
+                    pb.inc(1);
+                    return None;
+                }
                 let abs_path = format!("{root_path}/{path}");
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
@@ -406,6 +453,10 @@ where
             .into_par_iter()
             .zip(files.par_iter())
             .map(|(info_opt, path)| -> Phase2Result {
+                if ctx.is_cancelled() {
+                    pb2.inc(1);
+                    return Default::default();
+                }
                 let Some(info) = info_opt else {
                     pb2.inc(1);
                     return Default::default();
@@ -571,15 +622,16 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let output = crate::v2::registry::dispatch_language(
-            language,
-            &[path.to_string()],
-            "/",
-            &PipelineConfig::default(),
-            crate::v2::trace::leaked_noop_tracer(),
-        )
-        .unwrap_or_else(|| panic!("Language {language} not supported"))
-        .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        let config = PipelineConfig::default();
+        let tracer = crate::v2::trace::Tracer::new(false);
+        let ctx = PipelineContext {
+            config: &config,
+            tracer: &tracer,
+            root_path: "/",
+        };
+        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx)
+            .unwrap_or_else(|| panic!("Language {language} not supported"))
+            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         match output {
             PipelineOutput::Graph(g) => *g,
             PipelineOutput::Batches(_) => panic!("expected Graph output"),
