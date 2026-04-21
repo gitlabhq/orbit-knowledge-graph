@@ -1,0 +1,126 @@
+name: "Python: chained calls, callable objects, multiple inheritance"
+fixtures:
+  - path: main.py
+    content: |
+      # D25: builder pattern chained calls
+      class Builder:
+          def step1(self):
+              return self
+          def step2(self):
+              return self
+          def build(self):
+              pass
+
+      def builder_caller():
+          b = Builder()
+          b.step1()
+          b.build()
+
+      # D26: class instantiation vs function call vs method call
+      class MyClass:
+          def method(self):
+              pass
+
+      def my_function():
+          pass
+
+      def mixed_caller():
+          obj = MyClass()
+          obj.method()
+          my_function()
+
+      # D28: callable object (__call__)
+      class Callable:
+          def __call__(self):
+              pass
+
+      def callable_caller():
+          obj = Callable()
+          obj()
+
+      # D41: multiple inheritance
+      class A:
+          def method_a(self):
+              pass
+
+      class B:
+          def method_b(self):
+              pass
+
+      class C(A, B):
+          def method_c(self):
+              self.method_a()
+              self.method_b()
+
+tests:
+  - name: "D25: builder caller calls step1"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'builder_caller' AND callee.name = 'step1'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.builder_caller", callee: "main.Builder.step1" } }
+
+  - name: "D25: builder caller calls build"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'builder_caller' AND callee.name = 'build'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.builder_caller", callee: "main.Builder.build" } }
+
+  - name: "D26: mixed_caller calls MyClass (instantiation)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'mixed_caller' AND callee.name = 'MyClass'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.mixed_caller", callee: "main.MyClass" } }
+
+  - name: "D26: mixed_caller calls method (instance method)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'mixed_caller' AND callee.name = 'method'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.mixed_caller", callee: "main.MyClass.method" } }
+
+  - name: "D26: mixed_caller calls my_function (bare function)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'mixed_caller' AND callee.name = 'my_function'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.mixed_caller", callee: "main.my_function" } }
+
+  - name: "D28: callable_caller calls Callable (instantiation)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'callable_caller' AND callee.name = 'Callable'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.callable_caller", callee: "main.Callable" } }
+
+  - name: "D41: C.method_c calls method_a (from parent A)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'method_c' AND callee.name = 'method_a'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.C.method_c", callee: "main.A.method_a" } }
+
+  - name: "D41: C.method_c calls method_b (from parent B)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'method_c' AND callee.name = 'method_b'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.C.method_c", callee: "main.B.method_b" } }

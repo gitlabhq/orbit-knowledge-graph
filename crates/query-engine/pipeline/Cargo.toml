@@ -1,0 +1,13 @@
+[package]
+name = "pipeline"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+ontology = { path = "../../ontology" }
+compiler = { path = "../compiler" }
+thiserror = { workspace = true }
+
+[lints]
+workspace = true

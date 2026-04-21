@@ -1,0 +1,138 @@
+project:
+  name: gkg
+
+repos_dir: temp
+
+repos:
+  # GitLab (Ruby + TypeScript)
+  - name: gitlab
+    source: gitlab
+    project: gitlab-org/gitlab
+    version: v18.9.1-ee
+    groups: [ruby, typescript]
+
+  - name: gitlab-shell
+    source: gitlab
+    project: gitlab-org/gitlab-shell
+    version: v14.47.0
+    groups: [ruby, go]
+
+  # Go services (GDK components)
+  - name: gitaly
+    source: gitlab
+    project: gitlab-org/gitaly
+    version: v18.10.3
+    groups: [go]
+
+  - name: gitlab-http-router
+    source: gitlab
+    project: gitlab-org/cells/http-router
+    version: main
+    groups: [go, typescript]
+
+  - name: gitlab-topology-service
+    source: gitlab
+    project: gitlab-org/cells/topology-service
+    version: main
+    groups: [go]
+
+  - name: gitlab-zoekt-indexer
+    source: gitlab
+    project: gitlab-org/gitlab-zoekt-indexer
+    version: v1.13.0
+    groups: [go]
+
+  - name: siphon
+    source: gitlab
+    project: gitlab-org/analytics-section/siphon
+    version: main
+    groups: [go]
+
+  # Java (GitHub)
+  - name: okhttp
+    source: github
+    project: square/okhttp
+    version: parent-5.0.0-alpha.14
+    commit_sha: 374def39eb276bf0ad724dc71c589241851f5b16
+    groups: [java, kotlin]
+
+  - name: elasticsearch
+    source: github
+    project: elastic/elasticsearch
+    version: v9.0.0
+    commit_sha: 112859b85d50de2a7e63f73c8fc70b99eea24291
+    groups: [java]
+
+  # TypeScript (GitHub)
+  - name: vscode
+    source: github
+    project: microsoft/vscode
+    version: "1.99.3"
+    commit_sha: 17baf841131aa23349f217ca7c570c76ee87b957
+    groups: [typescript]
+
+  - name: spring-petclinic-angular
+    source: github
+    project: spring-petclinic/spring-petclinic-angular
+    version: master
+    commit_sha: 608496a672949e6ab4ea5c4d55870fe79efbbc8d
+    groups: [typescript]
+
+  # C# (GitHub)
+  - name: nlog
+    source: github
+    project: NLog/NLog
+    version: v5.4.0
+    commit_sha: 4d45d445601312040107cbe2ac00e56c4bf4a60b
+    groups: [csharp]
+
+  # Python (GitHub)
+  - name: django
+    source: github
+    project: django/django
+    version: "5.2"
+    commit_sha: 9e7cc2b628fe8fd3895986af9b7fc9525034c1b0
+    groups: [python]
+
+  - name: flask
+    source: github
+    project: pallets/flask
+    version: "3.1.1"
+    commit_sha: 7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1
+    groups: [python]
+
+  # Rust
+  - name: orbit-knowledge-graph
+    source: gitlab
+    project: gitlab-org/orbit/knowledge-graph
+    version: main
+    commit_sha: 6f216119ed0c33a4ba00bcef67c447f30f416bf3
+    groups: [rust]
+
+  - name: cargo
+    source: github
+    project: rust-lang/cargo
+    version: 0.95.0-662-g7ecf0285e
+    commit_sha: 7ecf0285ebb408d596e4a8ac76a0980d8edb7005
+    groups: [rust]
+
+  - name: rust-analyzer
+    source: github
+    project: rust-lang/rust-analyzer
+    version: nightly
+    commit_sha: 251df518d73abb5c5d573c4d5d266a3edae9ca5a
+    groups: [rust]
+
+scenarios:
+  hyperfine:
+    - id: index
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
+      warmup: 1
+      min_runs: 3
+      max_runs: 3
+
+    - id: v2
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats --v2
+      warmup: 1
+      min_runs: 3
+      max_runs: 3

@@ -1,4 +1,4 @@
-use code_graph::analysis::types::GraphData;
+use code_graph::legacy::linker::analysis::types::GraphData;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
@@ -11,7 +11,9 @@ pub struct CodeMetrics {
     pub(super) events_processed: Counter<u64>,
     pub(super) handler_duration: Histogram<f64>,
     pub(super) repository_fetch_duration: Histogram<f64>,
-    pub(super) repository_extract_duration: Histogram<f64>,
+    pub(super) repository_resolution_strategy: Counter<u64>,
+    pub(super) repository_cleanup: Counter<u64>,
+    pub(super) repository_empty: Counter<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
@@ -20,56 +22,68 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("indexer_code");
+        let meter = global::meter("gkg_indexer_code");
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
         let events_processed = meter
-            .u64_counter("indexer.code.events.processed")
+            .u64_counter("gkg.indexer.code.events.processed")
             .with_description("Total push events processed by the code indexing handler")
             .build();
 
         let handler_duration = meter
-            .f64_histogram("indexer.code.handler.duration")
+            .f64_histogram("gkg.indexer.code.handler.duration")
             .with_unit("s")
             .with_description("End-to-end duration of processing a single push event")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let repository_fetch_duration = meter
-            .f64_histogram("indexer.code.repository.fetch.duration")
+            .f64_histogram("gkg.indexer.code.repository.fetch.duration")
             .with_unit("s")
             .with_description("Duration of downloading a repository archive")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
-        let repository_extract_duration = meter
-            .f64_histogram("indexer.code.repository.extract.duration")
-            .with_unit("s")
-            .with_description("Duration of extracting a repository archive to disk")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
+        let repository_resolution_strategy = meter
+            .u64_counter("gkg.indexer.code.repository.resolution")
+            .with_description(
+                "Repository resolution strategy used (full_download, empty_repository)",
+            )
+            .build();
+
+        let repository_cleanup = meter
+            .u64_counter("gkg.indexer.code.repository.cleanup")
+            .with_description("Repository disk cleanup outcomes (success, failure)")
+            .build();
+
+        let repository_empty = meter
+            .u64_counter("gkg.indexer.code.repository.empty")
+            .with_description(
+                "Projects short-circuited as terminal-empty at fetch time, labelled by reason (not_found, server_error)",
+            )
             .build();
 
         let indexing_duration = meter
-            .f64_histogram("indexer.code.indexing.duration")
+            .f64_histogram("gkg.indexer.code.indexing.duration")
             .with_unit("s")
             .with_description("Duration of code-graph parsing and analysis")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let files_processed = meter
-            .u64_counter("indexer.code.files.processed")
+            .u64_counter("gkg.indexer.code.files.processed")
             .with_description("Total files seen by the code-graph indexer")
             .build();
 
         let nodes_indexed = meter
-            .u64_counter("indexer.code.nodes.indexed")
+            .u64_counter("gkg.indexer.code.nodes.indexed")
             .with_description("Total graph nodes and edges indexed by the code handler")
             .build();
 
         let errors = meter
-            .u64_counter("indexer.code.errors")
+            .u64_counter("gkg.indexer.code.errors")
             .with_description("Total code indexing errors by pipeline stage")
             .build();
 
@@ -77,7 +91,9 @@ impl CodeMetrics {
             events_processed,
             handler_duration,
             repository_fetch_duration,
-            repository_extract_duration,
+            repository_resolution_strategy,
+            repository_cleanup,
+            repository_empty,
             indexing_duration,
             files_processed,
             nodes_indexed,
@@ -87,9 +103,24 @@ impl CodeMetrics {
 }
 
 impl CodeMetrics {
+    pub(super) fn record_resolution_strategy(&self, strategy: &'static str) {
+        self.repository_resolution_strategy
+            .add(1, &[KeyValue::new("strategy", strategy)]);
+    }
+
+    pub(super) fn record_cleanup(&self, outcome: &'static str) {
+        self.repository_cleanup
+            .add(1, &[KeyValue::new("outcome", outcome)]);
+    }
+
     pub(super) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed
             .add(1, &[KeyValue::new("outcome", outcome)]);
+    }
+
+    pub(super) fn record_empty_repository(&self, reason: &'static str) {
+        self.repository_empty
+            .add(1, &[KeyValue::new("reason", reason)]);
     }
 
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {

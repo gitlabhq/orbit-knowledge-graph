@@ -103,15 +103,14 @@ graph LR
 
 | Component | Description |
 |---|---|
-| `code-parser` crate | Multi-language parser: AST parsing, definition/import/reference extraction |
-| `code-graph` crate | Streaming indexing pipeline, graph data model, analysis |
+| `code-graph` crate | Single crate containing the v2 pipeline stack in `src/v2/`, the preserved legacy parser/linker stack in `src/legacy/`, and shared code-indexing utilities |
+| `treesitter-visit` crate | Tree-sitter wrapper crate kept separate for compile-time isolation and shared by the legacy and generic v2 language pipelines |
 | `indexer` crate | NATS consumer, ETL engine, Siphon task dispatcher, namespace backfill dispatcher, code indexing task handler, Arrow conversion, ClickHouse writes |
-
 | `gkg-server` | HTTP/gRPC server, runs in Indexer mode for code indexing |
 | NATS JetStream | Message broker with durable delivery between Siphon and GKG |
 | NATS KV | Distributed lock store to prevent concurrent indexing of the same project |
 | ClickHouse | Columnar OLAP database storing the datalake and the property graph |
-| Rails internal API | Proxies repository archive downloads and project info lookups |
+| Rails internal API | Proxies repository operations: project info lookups, archive downloads, and blob streaming for content resolution (length-delimited protobuf) |
 
 For background on Siphon CDC, NATS, and ClickHouse architecture, see the
 [SDLC indexing design document](sdlc_indexing.md).
@@ -183,29 +182,36 @@ The `CodeIndexingTaskHandler` runs in Indexer mode and subscribes to `CodeIndexi
 
 Example NATS KV:
 
-- Key: `/gkg-indexer/indexing/{project_id}/{branch_name}/lock`
+- Key: `project.{project_id}.{base64_encoded_branch}`
 - Value: `{ "worker_id": String, "started_at": Instant }`
-- TTL: 1 hour (estimated based on the amount of resources)
+- TTL: 60 seconds
 
-After acquiring the lock, the service downloads the repository archive from the Rails internal API.
+After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
 #### Transform (call graph construction)
 
 ##### Parser architecture
 
-The code parser supports seven languages using three parser backends:
+The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
-- **TypeScript and JavaScript** use the SWC parser. Minified files are skipped.
-- **Python, Kotlin, Java, C#, and Rust** use tree-sitter grammars.
+- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
+- **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
+- **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
+- **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules, enforces file-count, byte, statement, and recursion budgets, treats `process.env` as an empty object, and allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
+- **Rust** uses a rust-analyzer-backed custom v2 pipeline with a shell-free synthetic repo-local Cargo workspace model. The loader stays inside the checked-out tree, attaches a pinned embedded Rust `1.95.0` sysroot project plus baked server-side cfg/target data, disables proc macros and build-script execution, and layers parser-time SSA over rust-analyzer for local callable flow such as aliases, rebindings, destructuring, tuple/record field slots, and branch joins. rust-analyzer resolves callable semantics for functions, methods, macros, operators, `?`, and `await`.
+- **Python, Kotlin, Java, and C#** use tree-sitter grammars.
+- **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Language detection is extension-based (12 extensions across the seven languages). Ruby, TypeScript/JavaScript, Python, Kotlin, and Java support full reference extraction. C# and Rust currently support definitions and imports only.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 
 - **Definitions** such as classes, modules, methods, functions, constants, and interfaces. Each carries a fully qualified name (FQN), source range, and language-specific type.
 - **Imported symbols** with their import path, identifier, optional alias, and scope.
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
+
+For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity. A second OXC-driven pass records invocation sites, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
 
 ##### Streaming indexing pipeline
 
@@ -259,21 +265,22 @@ The code indexing handler subscribes to `CodeIndexingTaskRequest` messages from 
 
 1. Checks the checkpoint to skip already-indexed commits
 2. Acquires a distributed lock via NATS KV to prevent concurrent indexing of the same project and branch
-3. Downloads the repository archive from the Rails internal API and extracts it to a temp directory
-4. Runs the streaming indexing pipeline to produce the graph
-5. Converts the graph to Arrow record batches and writes them to ClickHouse
-6. Cleans up stale data from the previous indexing run
-7. Updates the checkpoint and releases the lock
+3. Downloads the full repository archive via the Rails internal API
+4. Runs the streaming indexing pipeline (parse, convert to Arrow, write to ClickHouse, clean up stale data)
+5. Deletes the downloaded repository from disk
+6. Updates the checkpoint and releases the lock
 
 ##### Storage in ClickHouse
 
-The graph is converted to Apache Arrow record batches and written to five ClickHouse tables: one each for directories, files, definitions, imported symbols, and edges (shared with SDLC data). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
+The graph is converted to Apache Arrow record batches and written to six ClickHouse tables: one each for branches, directories, files, definitions, imported symbols, and the ontology-configured edge table (defaulting to `gl_edge`). Every row carries base columns for the namespace hierarchy path (used for authorization), project ID, branch, and a version timestamp used for stale data cleanup.
 
 Record batches are serialized to Arrow IPC format and streamed to ClickHouse.
 
 #### Checkpoint tracking
 
 The `code_indexing_checkpoint` table records the last successfully indexed point per namespace, project, and branch (keyed on `traversal_path, project_id, branch`). The code indexing task handler checks it to skip already-indexed commits.
+
+Projects whose Gitaly archive endpoint returns 404 (no refs) or 5xx (no repository storage) are checkpointed with no commit and treated as terminal "indexed empty". This prevents retries and DLQ churn for projects with no content. Once the project is populated, subsequent siphon tasks arrive with a larger `task_id` than the stored checkpoint and are re-processed normally. The `gkg.indexer.code.repository.empty` counter (labelled `reason=not_found|server_error`) tracks how often this short-circuit fires.
 
 #### Flow visual representation
 
@@ -304,17 +311,17 @@ The `code_indexing_checkpoint` table records the last successfully indexed point
                            |- 2. Resolve default branch from Rails (if not provided)
                            |- 3. Check checkpoint (skip already-indexed commits)
                            |- 4. Acquire distributed lock via NATS KV
-                           |- 5. Download repository archive from Rails internal API
-                           |- 6. Extract to temp directory
-                           |- 7. Run indexing pipeline
+                           |- 5. Download full repository archive
+                           |- 6. Run indexing pipeline
                            |       |- File discovery (respects .gitignore)
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
-                           |       \- Analysis phase -> graph
-                           |- 8. Convert graph to Arrow record batches
-                           |- 9. Write to ClickHouse (5 tables)
-                           |- 10. Clean up stale data
-                           \- 11. Update checkpoint, release lock
+                           |       |- Analysis phase -> graph
+                           |       |- Convert graph to Arrow record batches
+                           |       |- Write to ClickHouse (6 tables)
+                           |       \- Clean up stale data
+                           |- 7. Delete downloaded repository from disk
+                           \- 8. Update checkpoint, release lock
 ```
 
 ### Differences from the original local tool
@@ -325,13 +332,13 @@ tool. Here are the main architectural differences in the current service:
 | Aspect | Original (local) | Current (service) |
 |---|---|---|
 | Graph database | lbug (embedded) | ClickHouse |
-| Code access | Local filesystem | Rails internal API (archive download) |
+| Code access | Local filesystem | Rails internal API (full archive download, no disk cache) |
 | Event trigger | Filesystem watcher (`watchexec`) | Siphon CDC → dispatcher → internal NATS stream |
 | Storage format | Parquet -> lbug bulk import | Arrow IPC -> ClickHouse |
 | Multi-tenancy | Single user, single repo | Namespace-scoped via `traversal_path` |
 | Authorization | None (local tool) | Rails gRPC delegation |
-| Parser crate | External `parser-core` dependency | In-tree `code-parser` (forked and evolved) |
-| Graph builder | External `indexer` crate | In-tree `code-graph` |
+| Parser crate | External `parser-core` dependency | In-tree `code-graph` crate, `src/legacy/parser/` (forked and evolved) |
+| Graph builder | External `indexer` crate | In-tree `code-graph/src/legacy/linker/` |
 | Concurrency | Streaming model (Rayon + semaphore) | Same streaming model (preserved) |
 
 ### Indexing the active branches

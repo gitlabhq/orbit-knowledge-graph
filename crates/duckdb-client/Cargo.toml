@@ -1,0 +1,25 @@
+[package]
+name = "duckdb-client"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[features]
+# Compile DuckDB from C++ source for a fully static, self-contained binary.
+# Use for Docker/release builds: cargo build --release --features duckdb-client/bundled
+bundled = ["duckdb/bundled"]
+
+[dependencies]
+duckdb = { workspace = true }
+arrow = { workspace = true }
+code-graph = { path = "../code-graph" }
+gkg-utils = { path = "../utils" }
+ontology = { path = "../ontology" }
+serde_json = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+tempfile = { workspace = true }
+
+[lints]
+workspace = true

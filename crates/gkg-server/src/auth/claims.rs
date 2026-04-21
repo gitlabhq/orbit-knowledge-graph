@@ -17,4 +17,7 @@ pub struct Claims {
     pub min_access_level: Option<u32>,
     #[serde(default)]
     pub group_traversal_ids: Vec<String>,
+    pub source_type: String,
+    #[serde(default, rename = "session_id")]
+    pub ai_session_id: Option<String>,
 }

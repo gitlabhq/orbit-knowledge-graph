@@ -1,0 +1,56 @@
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ .Release.Name }}
+spec:
+  backoffLimit: 0
+  ttlSecondsAfterFinished: {{ .Values.ttlSecondsAfterFinished }}
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+      - name: robot
+        image: {{ .Values.image }}
+        command: ["sh", "-c"]
+        args:
+        - |
+          set -e
+          apt-get update -qq && apt-get install -qq -y --no-install-recommends \
+            git ca-certificates >/dev/null
+          mkdir -p /fixtures
+          tar xzf /fixtures-archive/fixtures.tar.gz -C /fixtures
+          pip install --quiet --disable-pip-version-check --root-user-action=ignore \
+            robotframework=={{ .Values.robotframework.version }} \
+            robotframework-requests=={{ .Values.robotframework.requestsVersion }}
+          set +e
+          robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
+            --consolecolors off --exitonfailure /tests/
+          RC=$?
+          echo "---XUNIT_REPORT_START---"
+          cat /tmp/results/xunit.xml 2>/dev/null
+          echo "---XUNIT_REPORT_END---"
+          exit $RC
+        env:
+        - name: GITLAB_URL
+          value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
+        - name: GITLAB_ROOT_PASSWORD
+          valueFrom:
+            secretKeyRef:
+              name: {{ .Values.rootCredentialsSecret }}
+              key: password
+        volumeMounts:
+        - name: tests
+          mountPath: /tests
+          readOnly: true
+        - name: fixtures
+          mountPath: /fixtures-archive
+          readOnly: true
+        resources:
+          {{- toYaml .Values.resources | nindent 10 }}
+      volumes:
+      - name: tests
+        configMap:
+          name: {{ .Values.configMap }}
+      - name: fixtures
+        configMap:
+          name: {{ .Values.fixturesConfigMap }}

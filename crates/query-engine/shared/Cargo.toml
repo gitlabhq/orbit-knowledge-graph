@@ -1,0 +1,24 @@
+[package]
+name = "shared"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[dependencies]
+arrow = { workspace = true }
+async-trait = { workspace = true }
+futures = { workspace = true }
+gkg-utils = { path = "../../utils" }
+ontology = { path = "../../ontology" }
+pipeline = { path = "../pipeline" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+types = { path = "../types" }
+compiler = { path = "../compiler" }
+
+[dev-dependencies]
+ontology = { path = "../../ontology" }
+tokio = { workspace = true }
+
+[lints]
+workspace = true

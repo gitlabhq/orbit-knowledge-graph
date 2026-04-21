@@ -56,6 +56,75 @@ pub(super) async fn search_returns_correct_project_properties(ctx: &TestContext)
     });
 }
 
+pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group", "columns": ["name", "full_path"]},
+            "order_by": {"node": "g", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_node_order("Group", &[100, 101, 102, 200, 300]);
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("full_path") == Some("public-group")
+    });
+    resp.assert_node("Group", 200, |n| {
+        n.prop_str("full_path") == Some("public-group/deep-a")
+    });
+    resp.assert_node("Group", 300, |n| {
+        n.prop_str("full_path") == Some("public-group/deep-a/deep-b")
+    });
+}
+
+pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
+            "order_by": {"node": "p", "property": "id", "direction": "ASC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    resp.assert_node_order("Project", &[1000, 1001, 1002, 1003, 1004]);
+    resp.assert_node("Project", 1000, |n| {
+        n.prop_str("full_path") == Some("public-group/public-project")
+    });
+    resp.assert_node("Project", 1004, |n| {
+        n.prop_str("full_path") == Some("internal-group/shared-project")
+    });
+}
+
+pub(super) async fn search_default_columns_include_full_path(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "g", "entity": "Group"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(5);
+    let first = resp.find_node("Group", 100).unwrap();
+    assert!(
+        first.prop_str("full_path").is_some(),
+        "full_path should be in default columns"
+    );
+}
+
 pub(super) async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,
@@ -103,8 +172,8 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User", "columns": ["username"],
-                     "filters": {"username": {"op": "starts_with", "value": "a"}}},
-            "limit": 10
+                     "filters": {"username": {"op": "starts_with", "value": "ali"}}},
+             "limit": 10
         }"#,
         &allow_all(),
     )
@@ -112,7 +181,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
 
     resp.assert_node_count(1);
     resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.starts_with("a"))
+        n.prop_str("username").is_some_and(|u| u.starts_with("ali"))
     });
     resp.find_node("User", 1)
         .unwrap()
@@ -148,17 +217,17 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         r#"{
             "query_type": "search",
             "node": {"id": "u", "entity": "User", "columns": ["username"],
-                     "filters": {"username": {"op": "contains", "value": "li"}}},
-            "limit": 10
+                     "filters": {"username": {"op": "contains", "value": "lic"}}},
+             "limit": 10
         }"#,
         &allow_all(),
     )
     .await;
 
-    resp.assert_node_count(2);
-    resp.assert_node_ids("User", &[1, 3]);
+    resp.assert_node_count(1);
+    resp.assert_node_ids("User", &[1]);
     resp.assert_filter("User", "username", |n| {
-        n.prop_str("username").is_some_and(|u| u.contains("li"))
+        n.prop_str("username").is_some_and(|u| u.contains("lic"))
     });
 }
 
@@ -362,23 +431,6 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
     resp.assert_node("Note", 3002, |n| {
         n.prop_str("note").is_some_and(|s| s.len() == 10_000) && n.prop("created_at").is_none()
     });
-}
-
-pub(super) async fn search_range_returns_paginated_results(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
-        r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
-            "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-            "range": {"start": 1, "end": 3}
-        }"#,
-        &allow_all(),
-    )
-    .await;
-
-    resp.assert_node_count(2);
-    resp.assert_node_order("User", &[2, 3]);
 }
 
 pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {

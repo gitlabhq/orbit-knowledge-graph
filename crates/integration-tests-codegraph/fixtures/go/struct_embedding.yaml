@@ -1,0 +1,36 @@
+name: "Go: struct embedding (promoted methods)"
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      type Logger struct{}
+
+      func (l *Logger) Log(msg string) {}
+
+      type Service struct {
+          Logger
+          Name string
+      }
+
+      type Decoy struct{}
+
+      func (d *Decoy) Log(msg string) {}
+
+      func main() {
+          var svc Service
+          svc.Log("hello")
+      }
+
+tests:
+  # Struct embedding resolution uses the ancestor walk added to
+  # lookup_nested_cached: when receiver-type lookup fails for the direct
+  # type, it retries for each ancestor in the extends chain built by
+  # finalize().
+  - name: svc.Log() resolves via embedding
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.edge_kind = 'Calls' AND callee.name = 'Log'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Log" } }

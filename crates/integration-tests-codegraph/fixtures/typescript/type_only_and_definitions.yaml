@@ -1,0 +1,72 @@
+name: "TypeScript type-only imports and definition extraction"
+pipeline: js
+fixtures:
+  - path: types/contracts.ts
+    content: |
+      export interface User {
+        id: string;
+      }
+
+      export type UserId = string;
+
+      export enum Status {
+        Ready = 'ready',
+        Failed = 'failed',
+      }
+
+      export function makeStatus(value: Status): Status {
+        return value;
+      }
+
+  - path: types/consumer.ts
+    content: |
+      import type { User, UserId } from './contracts';
+      import { Status, makeStatus } from './contracts';
+
+      export function run(value: Status): Status {
+        const currentId: UserId = '1';
+        const currentUser: User | null = null;
+        if (currentUser && currentId.length > 1) {
+          return Status.Failed;
+        }
+        return makeStatus(value);
+      }
+
+tests:
+  - name: TypeScript type declarations are extracted as first-class definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'types/contracts.ts'
+        AND d.name IN ['User', 'UserId', 'Status', 'makeStatus']
+        AND d.fqn = d.name
+      RETURN d.name AS name, d.definition_type AS type
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "Status", type: "Enum" } }
+      - { row: { name: "User", type: "Interface" } }
+      - { row: { name: "UserId", type: "TypeAlias" } }
+      - { row: { name: "makeStatus", type: "Function" } }
+
+  - name: Type-only imports are preserved distinctly from runtime imports
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'types/consumer.ts'
+      RETURN i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { row: { name: "Status", is_type_only: false, target: "types/contracts.ts::Status" } }
+      - { row: { name: "User", is_type_only: true, target: "types/contracts.ts::User" } }
+      - { row: { name: "UserId", is_type_only: true, target: "types/contracts.ts::UserId" } }
+      - { row: { name: "makeStatus", is_type_only: false, target: "types/contracts.ts::makeStatus" } }
+
+  - name: Type-only imports do not fabricate runtime call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'types/consumer.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "run", callee: "makeStatus" } }

@@ -1,5 +1,39 @@
+variables:
+  CANONICAL_PROJECT_ID: "77960826"
+  SECURITY_PROJECT_ID: "80999258"
+  DEP_PROXY: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
+  DEV_PREFIX: "dev"
+
 workflow:
   rules:
+    # Security fork
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_TAG
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+      when: never
+    - if: $CI_PROJECT_ID == $SECURITY_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        DEP_PROXY: ""
+        DEV_PREFIX: "sec"
+    # Non-canonical (other forks)
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_TAG
+      variables:
+        DEP_PROXY: ""
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_PIPELINE_SOURCE == 'merge_request_event'
+      variables:
+        DEP_PROXY: ""
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
+      when: never
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID && $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+      variables:
+        DEP_PROXY: ""
+    # Canonical project — original behavior
     - if: $CI_COMMIT_TAG
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH && $CI_COMMIT_TITLE =~ /^chore\(release\)/
@@ -8,24 +42,30 @@ workflow:
 
 include:
   - template: Jobs/SAST.gitlab-ci.yml
+  - template: Jobs/Secret-Detection.gitlab-ci.yml
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
+  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/components/lgtm-agent/lgtm-agent@main
 
 stages:
   - lint
+  - docs
   - security
   - test
+  - benchmark
   - ai
   - build
+  - e2e
   - publish
   - release
+  - review
 
 # Job Templates
 
 .job-template:
   tags:
     - saas-linux-medium-amd64
-  image: registry.gitlab.com/gitlab-org/orbit/build-images/rust-builder:latest
+  image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
   variables:
     MISE_DISABLE_TOOLS: lefthook
   before_script:
@@ -37,6 +77,7 @@ stages:
     SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
     SCCACHE_GCS_KEY_PATH: "${SCCACHE_GCS_KEY}"
     SCCACHE_GCS_RW_MODE: "READ_WRITE"
+    DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
     - |
@@ -66,11 +107,28 @@ stages:
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
 
+.canonical-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+
+.canonical-mr-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+
+.canonical-main-only-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
 # Lint Stage
 
 agent-file-sync-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  image: ${DEP_PROXY}alpine:latest
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -81,7 +139,7 @@ agent-file-sync-check:
 
 mr-title-check:
   stage: lint
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/oven/bun:1.3-alpine
+  image: ${DEP_PROXY}oven/bun:1.3-alpine
   tags:
     - saas-linux-medium-amd64
   extends:
@@ -100,21 +158,49 @@ ontology-schema-validate:
     - .mr-and-main-rules
   needs: []
   script:
-    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 32768 || (echo "config/schemas/ontology.schema.json must stay at or below 32 KB" && exit 1)
+    - test "$(wc -c < config/schemas/ontology.schema.json)" -le 65536 || (echo "config/schemas/ontology.schema.json must stay at or below 64 KB" && exit 1)
     - find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json
 
-check-docs:
+generate-config-schema:
   stage: lint
-  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
-  tags:
-    - saas-linux-medium-amd64
   extends:
+    - .job-template
+    - .sccache-template
     - .mr-and-main-rules
   needs: []
   script:
-    - markdownlint-cli2 '**/*.md'
-    - vale --minAlertLevel error .
-    - lychee --offline --include-fragments '**/*.md'
+    - mise run schema:generate
+    - git diff --exit-code config/schemas/config.schema.json || (echo "config/schemas/config.schema.json is out of date. Run 'mise schema:generate' and commit." && exit 1)
+  artifacts:
+    paths:
+      - config/schemas/config.schema.json
+    expire_in: 24 hours
+
+schema-version-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - apk add --no-cache git bash
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - bash ./scripts/check-schema-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
+
+response-schema-version-check:
+  stage: lint
+  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  extends:
+    - .mr-only-rules
+  needs: []
+  script:
+    - apk add --no-cache git bash
+    - git fetch origin "$CI_MERGE_REQUEST_TARGET_BRANCH_NAME" --depth=1
+    - bash ./scripts/check-response-schema-version.sh "origin/$CI_MERGE_REQUEST_TARGET_BRANCH_NAME"
 
 fmt-check:
   stage: lint
@@ -131,7 +217,8 @@ lint-check:
     - .sccache-template
     - .mr-only-rules
   script:
-    - cargo clippy --all-targets --all-features -- -D warnings
+    - cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings
+    - cargo clippy -p duckdb-client --all-targets -- -D warnings
     - sccache --show-stats || true
 
 # Security Stage
@@ -161,7 +248,10 @@ cargo-geiger:
     - .mr-and-main-rules
   needs: []
   script:
-    - for pkg in $(cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name'); do cargo geiger -p "$pkg" --all-features || true; done
+    - cargo metadata --no-deps --format-version 1 | jq -r '.packages[].name' | while IFS= read -r pkg; do
+        if [ "$pkg" = "duckdb-client" ]; then cargo geiger -p "$pkg" || true;
+        else cargo geiger -p "$pkg" --all-features || true; fi;
+      done
   allow_failure: true
 
 generate-sbom:
@@ -170,6 +260,8 @@ generate-sbom:
     - .job-template
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
     - cargo cyclonedx --format json > sbom.cdx.json
@@ -190,6 +282,80 @@ semgrep-sast:
       exists:
         - "**/*.rs"
 
+# Override the default secret_detection rules so the job runs on MR pipelines.
+# The Jobs/Secret-Detection.gitlab-ci.yml template defaults to branch pipelines
+# only, which conflicts with this project's workflow (MR + main branch only).
+secret_detection:
+  stage: security
+  needs: []
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+
+# Docs stage
+
+check_docs_markdown:
+  stage: docs
+  extends:
+    - .mr-only-rules
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/lint-markdown:alpine-3.22-vale-3.13.0-markdownlint2-0.19.0-lychee-0.21.0
+  script:
+    # Lint prose
+    - vale --minAlertLevel error docs/source
+    # Lint Markdown
+    - markdownlint-cli2 'docs/source/**/*.md'
+    # Check links
+    - lychee --offline --include-fragments docs/source/**/*.md
+
+docs_hugo_build:
+  image: registry.gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/docs-gitlab-com-builder:hugo-0.150.1
+  stage: docs
+  extends:
+    - .mr-only-rules
+  variables:
+    DOCS_BRANCH: "main"
+  before_script:
+    # Check if this a release branch, which would be the case for a backport.
+    # If this is a backport MR, we need to checkout the appropriate version
+    # of the Docs website.
+    - |
+      if [[ $CI_MERGE_REQUEST_TARGET_BRANCH_NAME =~ [0-9]+-[0-9]+-stable ]]; then
+        BRANCH_NAME=$CI_MERGE_REQUEST_TARGET_BRANCH_NAME
+        echo "Detected merge request to stable branch: $BRANCH_NAME"
+      # Check if we're directly on a stable branch (direct push/commit)
+      elif [[ $CI_COMMIT_BRANCH =~ [0-9]+-[0-9]+-stable ]]; then
+        BRANCH_NAME=$CI_COMMIT_BRANCH
+        echo "Detected direct commit to stable branch: $BRANCH_NAME"
+      fi
+
+      # Extract version info if we found a stable branch
+      if [[ -n $BRANCH_NAME ]]; then
+        MAJOR=$(echo $BRANCH_NAME | cut -d '-' -f 1)
+        MINOR=$(echo $BRANCH_NAME | cut -d '-' -f 2)
+        # Convert GitLab style (17-9-stable-ee) to Docs style (17.9)
+        DOCS_BRANCH_CANDIDATE="$MAJOR.$MINOR"
+
+        # Check if the branch exists in the Docs website repo, fallback to main if not
+        if git ls-remote --heads --exit-code https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git "refs/heads/$DOCS_BRANCH_CANDIDATE" >/dev/null 2>&1; then
+          DOCS_BRANCH="$DOCS_BRANCH_CANDIDATE"
+          echo "Using docs-gitlab-com branch $DOCS_BRANCH for release branch"
+        else
+          DOCS_BRANCH="main"
+          echo "Branch $DOCS_BRANCH_CANDIDATE does not exist, falling back to main"
+        fi
+      fi
+    # Clone the Docs website project
+    - git clone --depth 1 --filter=tree:0 --branch $DOCS_BRANCH https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com.git
+    - cd docs-gitlab-com
+    - make add-latest-icons
+  script:
+    # Test that Hugo will build
+    - hugo --gc --printPathWarnings --panicOnWarning  --environment test
+    # Test for invalid index pages
+    # See https://gitlab.com/gitlab-org/technical-writing/docs-gitlab-com/-/blob/main/scripts/check-index-filenames.sh
+    - make check-index-pages SEARCH_DIR="../docs/source"
+    #- make check-index-pages SEARCH_DIR="../doc-locale/source" # Enable when translation is added
+
 # Test Stage
 
 unit-test:
@@ -199,7 +365,28 @@ unit-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo nextest run --profile ci --lib --bins
+    - ./scripts/run-unit-tests.sh --profile ci
+    - sccache --show-stats || true
+
+integration-tests-codegraph:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo nextest run --profile ci -p integration-tests-codegraph --no-fail-fast
+    - sccache --show-stats || true
+
+cli-integration-test:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - cargo build -p orbit
+    - cargo nextest run --profile ci --test cli --no-fail-fast
     - sccache --show-stats || true
 
 integration-test:
@@ -210,7 +397,7 @@ integration-test:
   tags:
     - saas-linux-large-amd64
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:dind
+    - name: ${DEP_PROXY}docker:dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -219,90 +406,191 @@ integration-test:
   needs: []
   before_script:
     - !reference [.sccache-template, before_script]
-    - echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
     - |
-      docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 &
-      docker pull ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine &
+      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "${DEP_PROXY}" ]; then
+        echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
+      fi
+    - |
+      docker pull ${DEP_PROXY}clickhouse/clickhouse-server:25.12 &
+      docker pull ${DEP_PROXY}nats:2.11-alpine &
       wait
     - |
-      docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
-      docker tag ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/nats:2.11-alpine nats:2.11-alpine
+      if [ -n "${DEP_PROXY}" ]; then
+        docker tag ${DEP_PROXY}clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
+        docker tag ${DEP_PROXY}nats:2.11-alpine nats:2.11-alpine
+      fi
   script:
-    - cargo nextest run --profile ci --all-features --test '*'
+    - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
 
-tilt-ci:
-  stage: test
+# Benchmark Stage
+#
+# Runs code indexing benchmarks when indexing crates change.
+# Repos are auto-downloaded by gitlab-xtasks from the benchmark config.
+
+.code-indexing-benchmark-rules:
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - Tiltfile
-        - .tiltignore
-        - .tilt-secrets.example
-        - Dockerfile
-        - scripts/build-dev.sh
-        - helm-dev/**/*
+        - crates/cli/**/*
+        - crates/code-graph/**/*
+        - crates/ontology/**/*
+        - crates/duckdb-client/**/*
+        - crates/utils/**/*
+        - config/ontology/**/*
+        - code-indexing-benchmark.yaml
         - .gitlab-ci.yml
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+
+code-indexing-benchmark-build:
+  stage: benchmark
+  needs: []
+  extends:
+    - .job-template
+    - .sccache-template
+    - .code-indexing-benchmark-rules
+  interruptible: true
   tags:
     - saas-linux-large-amd64
-  services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
-      alias: docker
+  script:
+    - cargo build --bin orbit --release --features duckdb-client/bundled
+  artifacts:
+    paths:
+      - target/release/orbit
+    expire_in: 1 day
+
+.code-indexing-benchmark-template:
+  stage: benchmark
+  needs:
+    - code-indexing-benchmark-build
+  extends:
+    - .code-indexing-benchmark-rules
+  interruptible: true
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    BENCHMARK_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
+      token: $VAULT_ID_TOKEN
+  cache:
+    key:
+      files:
+        - code-indexing-benchmark.yaml
+      prefix: "benchmark-repos-${GROUP}"
+    paths:
+      - temp/
   variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    KIND_VERSION: "v0.25.0"
-    TILT_VERSION: "0.36.0"
-    KUBECTL_VERSION: "v1.32.0"
-    SCCACHE_GCS_BUCKET: "gl-knowledgegraph-sccache"
-  needs: []
-  before_script:
-    - apk add --no-cache curl bash sed
-    - curl -LO "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/amd64/kubectl"
-    - chmod +x kubectl && mv kubectl /usr/local/bin/
-    - curl -Lo ./kind https://kind.sigs.k8s.io/dl/${KIND_VERSION}/kind-linux-amd64
-    - chmod +x ./kind && mv ./kind /usr/local/bin/kind
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - curl -fsSL "https://github.com/tilt-dev/tilt/releases/download/v${TILT_VERSION}/tilt.${TILT_VERSION}.linux-alpine.x86_64.tar.gz" | tar -xz -C /usr/local/bin tilt
+    SCENARIO: index
   script:
     - |
-      cat <<EOF | kind create cluster --wait 5m --config=-
-      kind: Cluster
-      apiVersion: kind.x-k8s.io/v1alpha4
-      networking:
-        apiServerAddress: "0.0.0.0"
-      kubeadmConfigPatches:
-        - |
-          kind: ClusterConfiguration
-          apiServer:
-            certSANs:
-              - "docker"
-      EOF
-    - sed -i -E 's#https://0\.0\.0\.0:#https://docker:#' ~/.kube/config
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency build helm-dev/gkg
-    - helm dependency build helm-dev/observability
-    # Create dummy secrets for CI (not real credentials)
+      OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
+      gitlab-xtasks benchmark hyperfine \
+        --config code-indexing-benchmark.yaml \
+        --architecture "$ARCH" \
+        --scenario "$SCENARIO" \
+        --group "$GROUP" \
+        --output-file "$OUTPUT_FILE"
+  artifacts:
+    paths:
+      - gkg-benchmark-*.json
+    expire_in: 3 weeks
+
+code-indexing-benchmark-linux:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+  parallel:
+    matrix:
+      - GROUP: [ruby, typescript, java, go]
+
+code-indexing-benchmark-v2-linux:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+    SCENARIO: v2
+  parallel:
+    matrix:
+      - GROUP: [python, java, kotlin, csharp, ruby, go, rust]
+
+.code-indexing-benchmark-analyze-template:
+  stage: benchmark
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-rules
+  interruptible: true
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    BENCHMARK_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
+      token: $VAULT_ID_TOKEN
+  script:
     - |
-      cat <<EOF > .tilt-secrets
-      POSTGRES_PASSWORD=ci_test_password
-      CLICKHOUSE_PASSWORD=ci_test_password
-      GKG_GITLAB__JWT__VERIFYING_KEY=ci_test_jwt_secret_at_least_32_bytes_long
-      EOF
-    - tilt ci
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
+        --output-format markdown \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file "gkg-benchmark-${SCENARIO}-results.md"
+
+      gitlab-xtasks benchmark analyze \
+        --pattern "gkg-benchmark-*-${SCENARIO}-*.json" \
+        --output-format json \
+        --pipeline-url "$CI_PIPELINE_URL" \
+        --job-url "$CI_JOB_URL" \
+        --branch "$CI_COMMIT_REF_NAME" \
+        --output-file "gkg-benchmark-${SCENARIO}-results.json"
+
+      if [[ -n "$CI_MERGE_REQUEST_IID" ]]; then
+        gitlab-xtasks comment post \
+          --type add-or-edit \
+          --unique-id "code-indexing-benchmark-${SCENARIO}-comment" \
+          --token "$BENCHMARK_GITLAB_TOKEN" \
+          --file-path "gkg-benchmark-${SCENARIO}-results.md"
+      fi
+  artifacts:
+    paths:
+      - gkg-benchmark-*-results.md
+      - gkg-benchmark-*-results.json
+      - gkg-benchmark-*.json
+    expire_in: 1 week
+
+code-indexing-benchmark-analyze:
+  extends: .code-indexing-benchmark-analyze-template
+  needs:
+    - code-indexing-benchmark-linux
+  variables:
+    SCENARIO: index
+
+code-indexing-benchmark-v2-analyze:
+  extends: .code-indexing-benchmark-analyze-template
+  needs:
+    - code-indexing-benchmark-v2-linux
+  variables:
+    SCENARIO: v2
 
 # Build Stage
 
 .docker-build:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: ${DEP_PROXY}docker:29
   needs: []
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+    - name: ${DEP_PROXY}docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -311,7 +599,10 @@ tilt-ci:
   rules:
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
   script:
-    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-${ARCH}"
+    - git fetch --tags
+    - BASE_VERSION=$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1 | sed 's/^v//')
+    - export GKG_VERSION="${BASE_VERSION:-0.0.0}-${DEV_PREFIX}+${CI_COMMIT_SHORT_SHA}"
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-${ARCH}"
 
 docker-build-amd64:
   extends: .docker-build
@@ -329,7 +620,7 @@ docker-build-arm64:
 
 docker-manifest:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: ${DEP_PROXY}docker:29
   tags:
     - saas-linux-medium-amd64
   needs:
@@ -342,59 +633,68 @@ docker-manifest:
   script:
     - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
     - docker buildx imagetools create
-        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-amd64"
-        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-arm64"
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}"
+        -t "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-amd64"
+        "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}-arm64"
 
-# Helm Charts
+docker-build-mr:
+  stage: build
+  image: ${DEP_PROXY}docker:29
+  tags:
+    - saas-linux-large-amd64
+  needs: []
+  services:
+    - name: ${DEP_PROXY}docker:29-dind
+      alias: docker
+  variables:
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+    IMAGE_NAME: gkg
+  rules:
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  script:
+    - ./scripts/docker-build.sh "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:develop-mr-${CI_MERGE_REQUEST_IID}-${CI_COMMIT_SHORT_SHA}-amd64"
 
-.helm-base:
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/google/cloud-sdk:slim
+check-go-proto:
+  needs: []
+  image: golang:1.24
   tags:
     - saas-linux-medium-amd64
-  before_script:
-    - apt-get update && apt-get install -y curl
-    - curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
-    - helm version
-    - helm repo add gitlab https://charts.gitlab.io
-    - helm repo add prometheus-community https://prometheus-community.github.io/helm-charts
-    - helm repo add grafana https://grafana.github.io/helm-charts
-    - helm repo add nats https://nats-io.github.io/k8s/helm/charts/
-    - helm dependency update helm-dev/gkg
-    - helm dependency update helm-dev/observability
-
-helm-lint:
-  extends:
-    - .helm-base
-    - .mr-and-main-rules
   stage: lint
-  needs: []
+  before_script:
+    - apt-get update -qq && apt-get install -y -qq unzip
   script:
-    - helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-    - helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-    - helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
+    - scripts/proto-go.sh check
+    - cd clients/gkgpb && go build ./...
+  rules:
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
+    - changes:
+        - crates/gkg-server/proto/**/*
+        - clients/gkgpb/**/*
 
 build-proto-gem:
   needs: []
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/ruby:3.3
+  image: ruby:3.3
   tags:
     - saas-linux-medium-amd64
   stage: build
   before_script: []
   script:
-    - BUNDLE_GEMFILE=tools/protogem/Gemfile bundle install --quiet
+    - BUNDLE_GEMFILE=clients/protogem/Gemfile bundle install --quiet
     - |
       if [ -n "$CI_COMMIT_TAG" ]; then
-        ruby tools/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
+        ruby clients/protogem/build-proto-gem --version "${CI_COMMIT_TAG#v}"
       else
-        ruby tools/protogem/build-proto-gem
+        ruby clients/protogem/build-proto-gem
       fi
   rules:
     - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/
     - changes:
         - crates/gkg-server/proto/**/*
-        - tools/protogem/**/*
+        - clients/protogem/**/*
   artifacts:
     paths:
       - _build/gitlab-gkg-proto-*.gem
@@ -403,7 +703,7 @@ build-proto-gem:
 publish-proto-gem:
   needs:
     - build-proto-gem
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/ruby:3.3
+  image: ruby:3.3
   tags:
     - saas-linux-medium-amd64
   stage: publish
@@ -411,7 +711,9 @@ publish-proto-gem:
   script:
     - gem push "_build/gitlab-gkg-proto-${CI_COMMIT_TAG#v}.gem"
   rules:
-    - if: '$CI_SERVER_HOST == "gitlab.com" && $CI_PROJECT_NAMESPACE == "gitlab-org/orbit" && $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: '$CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+/'
   environment:
     name: rubygems
     url: https://rubygems.org/gems/gitlab-gkg-proto
@@ -420,27 +722,40 @@ publish-proto-gem:
 
 semantic-release:
   stage: release
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/node:22
+  image: ${DEP_PROXY}node:22
   tags:
     - saas-linux-medium-amd64
+  id_tokens:
+    VAULT_ID_TOKEN:
+      aud: https://vault.gitlab.net
+  secrets:
+    SEMANTIC_RELEASE_GITLAB_TOKEN:
+      file: false
+      vault: access_tokens/${VAULT_SECRETS_PATH}/semantic-release/token@ci
+      token: $VAULT_ID_TOKEN
   variables:
     GIT_STRATEGY: clone
   needs:
     - job: build-proto-gem
       optional: true
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
       when: manual
   before_script:
-    - npm install -g semantic-release @semantic-release/gitlab @semantic-release/git @semantic-release/commit-analyzer @semantic-release/release-notes-generator @semantic-release/changelog conventional-changelog-conventionalcommits semantic-release-slack-bot
+    - test -n "${SEMANTIC_RELEASE_GITLAB_TOKEN}" || (echo "Missing SEMANTIC_RELEASE_GITLAB_TOKEN from Vault" && exit 1)
+    - export GITLAB_TOKEN="${SEMANTIC_RELEASE_GITLAB_TOKEN}"
+    - git remote set-url origin "https://semantic-release:${GITLAB_TOKEN}@${CI_SERVER_HOST}/${CI_PROJECT_PATH}.git"
+    - npm ci
   script:
     - npx semantic-release
 
 .docker-release:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: docker:29
   services:
-    - name: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29-dind
+    - name: docker:29-dind
       alias: docker
   variables:
     DOCKER_HOST: tcp://docker:2375
@@ -468,7 +783,7 @@ release-build-arm64:
 
 release-manifest:
   stage: build
-  image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/docker:29
+  image: docker:29
   tags:
     - saas-linux-medium-amd64
   needs:
@@ -487,6 +802,54 @@ release-manifest:
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-amd64"
         "${CI_REGISTRY_IMAGE}/${IMAGE_NAME}:${VERSION}-arm64"
 
+# Review stage
+
+.review-docs:
+  image: ruby:3.3-alpine3.23
+  extends:
+    - .canonical-mr-only-rules
+  stage: review
+  cache: {}
+  dependencies: []
+  before_script:
+  - gem install gitlab --no-doc
+  # We need to download the script rather than clone the repo since the
+  # review-docs-cleanup job will not be able to run when the branch gets
+  # deleted (when merging the MR).
+  - apk add --update openssl
+  - wget https://gitlab.com/gitlab-org/gitlab/-/raw/master/scripts/trigger-build.rb
+  - chmod 755 trigger-build.rb
+  variables:
+    GIT_STRATEGY: none
+    DOCS_GITLAB_REPO_SUFFIX: orbit
+    # By default, deploy the Review App using the `main` branch of the `gitlab-org/gitlab-docs` project
+    DOCS_BRANCH: main
+  when: manual
+
+# Trigger a docs build in docs-gitlab-com project
+# Useful to preview the docs changes live
+# https://docs.gitlab.com/development/documentation/review_apps/
+review-docs-deploy:
+  extends:
+  - .review-docs
+  environment:
+    name: review/mr-${CI_MERGE_REQUEST_IID}
+    url: https://docs.gitlab.com/upstream-review-mr-${DOCS_GITLAB_REPO_SUFFIX}-${CI_MERGE_REQUEST_IID}/${DOCS_GITLAB_REPO_SUFFIX}
+    auto_stop_in: 2 weeks
+    on_stop: review-docs-cleanup
+  script:
+  - ./trigger-build.rb docs deploy
+
+# Cleanup remote environment of docs-gitlab-com
+review-docs-cleanup:
+  extends:
+  - .review-docs
+  environment:
+    name: review/mr-${CI_MERGE_REQUEST_IID}
+    action: stop
+  script:
+  - ./trigger-build.rb docs cleanup
+
 # AI Review Stage
 #
 # Manually-triggered AI agents for MR review. Uses the shared
@@ -504,6 +867,8 @@ ai:performance:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -522,6 +887,8 @@ ai:security:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -540,6 +907,8 @@ ai:docs:
   timeout: 1 hour
   needs: []
   rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       when: manual
       allow_failure: true
@@ -550,3 +919,68 @@ ai:docs:
     AI_AGENT: docs
     AI_MODEL_OVERRIDE: "google-vertex-anthropic/claude-opus-4-6@default"
     GOOGLE_CLOUD_LOCATION: "global"
+
+# E2E Stage
+
+e2e:
+  stage: e2e
+  extends:
+    - .job-template
+    - .sccache-template
+  tags:
+    - saas-linux-large-amd64
+  timeout: 60 minutes
+  services:
+    - name: ${DEP_PROXY}docker:29-dind
+      alias: docker
+  variables:
+    KCTX: gitlab-org/orbit/gkg-e2e-harness:e2e-harness-agent
+    KUBECTL_VERSION: "1.35.2"
+    HELM_VERSION: "3.20.0"
+    HELMFILE_VERSION: "1.4.2"
+    DOCKER_HOST: tcp://docker:2375
+    DOCKER_TLS_CERTDIR: ""
+  needs:
+    - job: docker-manifest
+      optional: true
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      when: manual
+      allow_failure: true
+  before_script:
+    - !reference [.sccache-template, before_script]
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
+  script:
+    - export E2E_SHA="${CI_COMMIT_SHORT_SHA}"
+    - echo "$CI_REGISTRY_PASSWORD" | docker login -u "$CI_REGISTRY_USER" --password-stdin "$CI_REGISTRY"
+    - |
+      if [ "$CI_COMMIT_BRANCH" = "$CI_DEFAULT_BRANCH" ]; then
+        # Reuse multi-arch dev image published by docker-manifest.
+        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg"
+        export E2E_GKG_TAG="${DEV_PREFIX}-${CI_COMMIT_SHORT_SHA}"
+      else
+        # MR: build a debug image inline for faster iteration.
+        export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
+        export E2E_GKG_TAG="${CI_COMMIT_SHORT_SHA}"
+        cargo build -p gkg-server --locked
+        cp target/debug/gkg-server .
+        docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
+        docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+      fi
+    - bash e2e/scripts/setup.sh
+    - bash e2e/scripts/test.sh
+  after_script:
+    - bash e2e/scripts/install-ci-tools.sh
+    - kubectl config use-context "$KCTX"
+    - bash e2e/scripts/teardown.sh --sha="${CI_COMMIT_SHORT_SHA}" -y
+  artifacts:
+    when: always
+    paths:
+      - e2e/diagnostics/
+    reports:
+      junit: e2e/diagnostics/junit.xml
+    expire_in: 3 days

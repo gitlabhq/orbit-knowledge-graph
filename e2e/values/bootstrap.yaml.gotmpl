@@ -1,0 +1,16 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+
+namespaces:
+  nats: e2e-{{ $sha }}-nats
+  clickhouse: e2e-{{ $sha }}-clickhouse
+  gitlab: e2e-{{ $sha }}-gitlab
+  siphon: e2e-{{ $sha }}-siphon
+
+secrets:
+  jwtKey: {{ requiredEnv "E2E_JWT_KEY" | quote }}
+  rootCABase64: {{ requiredEnv "E2E_ROOT_CA_B64" }}
+  chGitlabPass: {{ requiredEnv "E2E_CH_GITLAB_PASS" | quote }}
+  chDatalakePass: {{ requiredEnv "E2E_CH_DATALAKE_PASS" | quote }}
+  chGraphPass: {{ requiredEnv "E2E_CH_GRAPH_PASS" | quote }}
+  chGraphReadPass: {{ requiredEnv "E2E_CH_GRAPH_READ_PASS" | quote }}
+  gitlabRootPass: {{ requiredEnv "E2E_GITLAB_ROOT_PASS" | quote }}

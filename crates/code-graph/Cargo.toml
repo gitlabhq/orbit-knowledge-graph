@@ -2,37 +2,78 @@
 name = "code-graph"
 version.workspace = true
 edition = "2024"
-
-[lints]
-workspace = true
-
-[lib]
-path = "src/lib.rs"
+license = "MIT"
 
 [features]
 test-utils = []
 
 [dependencies]
-parser-core = { workspace = true }
+treesitter-visit = { path = "treesitter-visit", features = ["builtin-parser"] }
+gkg-utils = { path = "../utils" }
+
+# Common
 anyhow = { workspace = true }
+arrow = { workspace = true }
+bumpalo = { workspace = true }
+cargo-platform = { workspace = true }
+cargo-util-schemas = { workspace = true }
+cargo_metadata = { workspace = true }
+chrono = { workspace = true }
+either = { workspace = true }
+futures = { workspace = true }
+globset = { workspace = true }
+ignore = { workspace = true }
+indicatif = { workspace = true }
+internment = { workspace = true, features = ["arc"] }
 log = { workspace = true }
 num_cpus = { workspace = true }
+once_cell = { workspace = true }
+pastey = { workspace = true }
+petgraph = { workspace = true }
+rayon = { workspace = true }
+regex = { workspace = true }
+rust-lapper = { workspace = true }
+rust-embed = { workspace = true }
+rustc-hash = { workspace = true }
 serde = { workspace = true }
-tracing = { workspace = true }
+serde_json = { workspace = true }
+serde_yaml = { workspace = true }
+ra_ap_hir = { workspace = true }
+ra_ap_cfg = { workspace = true }
+ra_ap_ide = { workspace = true }
+ra_ap_ide_db = { workspace = true }
+ra_ap_intern = { workspace = true }
+ra_ap_load-cargo = { workspace = true }
+ra_ap_paths = { workspace = true }
+ra_ap_project_model = { workspace = true }
+ra_ap_syntax = { workspace = true }
+ra_ap_vfs = { workspace = true }
+smallvec = { workspace = true }
+stacker = { workspace = true }
+strum = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-rayon = { workspace = true }
 tokio-stream = { workspace = true }
-futures = { workspace = true }
-chrono = { workspace = true }
-tempfile = { workspace = true }
-ignore = { workspace = true }
-serde_json = { workspace = true }
-rayon = { workspace = true }
-rustc-hash = { workspace = true }
-smallvec = { workspace = true }
-internment = { workspace = true, features = ["arc"] }
-stacker = { workspace = true }
-strum = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+triomphe = { workspace = true }
+
+# Ruby parser
+ruby-prism = "1.7.0"
+
+# SWC (TypeScript/JavaScript)
+swc_common = "18.0.1"
+swc_ecma_parser = "32.0.0"
+swc_ecma_ast = "19.0.0"
+swc_ecma_visit = "19.0.0"
+swc_atoms = "9.0.0"
+
+# OXC (v2 custom JavaScript/TypeScript pipeline)
+oxc = { workspace = true }
+oxc_linter = { workspace = true }
+oxc_resolver = { workspace = true }
 
 [dev-dependencies]
 gitalisk-core = { workspace = true }
@@ -41,3 +82,5 @@ walkdir = { workspace = true }
 criterion = { workspace = true }
 tracing-test = { workspace = true }
 
+[lints]
+workspace = true

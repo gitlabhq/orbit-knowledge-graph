@@ -1,22 +1,26 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 use std::sync::Arc;
+use std::time::Duration;
 
 use clap::Parser;
+use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
-use gkg_server::config::AppConfig;
+use gkg_server::content;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::health_check as health_check_mode;
+use gkg_server::schema_watcher::SchemaWatcher;
 use gkg_server::shutdown;
 use gkg_server::webserver::Server as HttpServer;
-use indexer::IndexerConfig;
-use indexer::checkpoint::ClickHouseCheckpointStore;
-use indexer::modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
-use indexer::modules::namespace_deletion::{
-    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
-};
-use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
-use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
+use gkg_server_config::AppConfig;
+use indexer::schema;
+use indexer::schema::version::SCHEMA_VERSION;
+use indexer::{DispatcherConfig, IndexerConfig};
+use query_engine::compiler::input::QueryType;
+use strum::VariantNames;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
@@ -26,14 +30,42 @@ async fn main() -> anyhow::Result<()> {
         .install_default()
         .expect("Failed to install rustls CryptoProvider");
 
-    labkit_rs::logging::init();
-
     let args = Args::parse();
     let config = AppConfig::load()?;
+
+    // Force-parse the output format version at boot so a malformed
+    // RAW_OUTPUT_FORMAT_VERSION fails fast instead of per-request.
+    std::sync::LazyLock::force(&query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION);
+
+    let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
+    anyhow::ensure!(
+        invalid_keys.is_empty(),
+        "unknown query type(s) in config: {invalid_keys:?} (valid: {:?})",
+        QueryType::VARIANTS,
+    );
+    gkg_server_config::query::init(config.query.clone());
+
+    let mut builder = labkit::Builder::new(args.mode.service_name())
+        .propagate_correlation(true)
+        .echo_response_header(true);
+    if let Some(level) = config
+        .metrics
+        .log_level
+        .as_deref()
+        .filter(|s| !s.is_empty())
+    {
+        builder = builder.log_level(level);
+    }
+    if config.metrics.otel.enabled && !config.metrics.otel.endpoint.is_empty() {
+        builder = builder.otel_grpc_endpoint(&config.metrics.otel.endpoint);
+    }
+    if config.metrics.prometheus.enabled {
+        builder = builder.prometheus_metrics_port(config.metrics.prometheus.port);
+    }
+    let _guard = builder.init().expect("labkit init");
+
     let ontology = Arc::new(ontology::Ontology::load_embedded().expect("ontology must load"));
     ontology::constants::validate_ontology_constants(&ontology);
-
-    let _metrics = labkit_rs::metrics::try_init_with_config(config.metrics.clone()).ok();
 
     info!(mode = ?args.mode, "starting");
 
@@ -42,60 +74,20 @@ async fn main() -> anyhow::Result<()> {
 
     let result = match args.mode {
         Mode::DispatchIndexing => {
-            let services = indexer::scheduler::connect(&config.nats).await?;
+            config.schema.validate()?;
             let graph = config.graph.build_client();
-            let datalake = config.datalake.build_client();
-            let metrics = ScheduledTaskMetrics::new();
-            let lock_service = services.lock_service.clone();
+            info!("initializing schema version table");
+            schema::version::init(&graph).await?;
 
-            let deletion_graph = Arc::new(config.graph.build_client());
-            let deletion_datalake = Arc::new(config.datalake.build_client());
-            let deletion_store: Arc<dyn NamespaceDeletionStore> =
-                Arc::new(ClickHouseNamespaceDeletionStore::new(
-                    deletion_datalake,
-                    Arc::clone(&deletion_graph),
-                    &ontology,
-                ));
-            let checkpoint_store = Arc::new(ClickHouseCheckpointStore::new(deletion_graph));
-
-            let tasks: Vec<Box<dyn ScheduledTask>> = vec![
-                Box::new(GlobalDispatcher::new(
-                    services.nats.clone(),
-                    metrics.clone(),
-                    config.schedule.tasks.global.clone(),
-                )),
-                Box::new(NamespaceDispatcher::new(
-                    services.nats.clone(),
-                    datalake,
-                    metrics.clone(),
-                    config.schedule.tasks.namespace.clone(),
-                )),
-                Box::new(SiphonCodeIndexingTaskDispatcher::new(
-                    services.nats.clone(),
-                    metrics.clone(),
-                    config.schedule.tasks.code_indexing_task.clone(),
-                )),
-                Box::new(NamespaceCodeBackfillDispatcher::new(
-                    services.nats.clone(),
-                    config.datalake.build_client(),
-                    config.graph.build_client(),
-                    metrics.clone(),
-                    config.schedule.tasks.namespace_code_backfill.clone(),
-                )),
-                Box::new(TableCleanup::new(
-                    graph,
-                    metrics.clone(),
-                    config.schedule.tasks.table_cleanup.clone(),
-                )),
-                Box::new(NamespaceDeletionScheduler::new(
-                    deletion_store,
-                    checkpoint_store,
-                    services.nats.clone(),
-                    metrics,
-                    config.schedule.tasks.namespace_deletion.clone(),
-                )),
-            ];
-            indexer::scheduler::run(&tasks, &*lock_service)
+            let dispatcher_config = DispatcherConfig {
+                nats: config.nats.clone(),
+                graph: config.graph.clone(),
+                datalake: config.datalake.clone(),
+                schedule: config.schedule.clone(),
+                schema: config.schema.clone(),
+                health_bind_address: config.dispatcher_health_bind_address,
+            };
+            indexer::run_dispatcher(&dispatcher_config, &ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
@@ -109,12 +101,31 @@ async fn main() -> anyhow::Result<()> {
                 gitlab: config.gitlab_client_config(),
                 schedule: config.schedule.clone(),
                 health_bind_address: config.indexer_health_bind_address,
+                schema: config.schema.clone(),
             };
             indexer::run(&indexer_config, ontology, shutdown)
                 .await
                 .map_err(Into::into)
         }
-        Mode::Webserver => run_webserver(&config, ontology).await,
+        Mode::Webserver => {
+            config.schema.validate()?;
+            let graph = config.graph.build_client();
+
+            let embedded = *SCHEMA_VERSION;
+            let prefix = schema::version::table_prefix(embedded);
+            info!(version = embedded, table_prefix = %prefix, "pinned to embedded schema version");
+            let ontology =
+                Arc::new(Arc::unwrap_or_clone(ontology).with_schema_version_prefix(&prefix));
+
+            let watcher = SchemaWatcher::spawn(
+                graph,
+                embedded,
+                Duration::from_secs(config.schema.version_poll_interval_secs),
+                shutdown.clone(),
+            );
+
+            run_webserver(&config, ontology, watcher, shutdown.clone()).await
+        }
     };
 
     signal_task.abort();
@@ -125,6 +136,8 @@ async fn main() -> anyhow::Result<()> {
 async fn run_webserver(
     config: &AppConfig,
     ontology: Arc<ontology::Ontology>,
+    schema_watcher: Arc<SchemaWatcher>,
+    shutdown: CancellationToken,
 ) -> anyhow::Result<()> {
     let validator = Arc::new(JwtValidator::new(
         config.jwt_secret()?,
@@ -133,21 +146,64 @@ async fn run_webserver(
 
     let cluster_health = ClusterHealthChecker::new(config.health_check_url.clone()).into_arc();
 
+    let gitlab_client_config = config.gitlab_client_config().ok_or_else(|| {
+        anyhow::anyhow!(
+            "GitLab client config is required: set gitlab.base_url and provide \
+             the JWT signing key (via config or /etc/secrets/gitlab/jwt/signing_key)"
+        )
+    })?;
+    let gitlab_client = Arc::new(
+        gitlab_client::GitlabClient::new(gitlab_client_config)
+            .map_err(|e| anyhow::anyhow!("failed to create GitlabClient: {e}"))?,
+    );
+
+    let mut resolver_registry = query_engine::shared::content::ColumnResolverRegistry::new();
+    resolver_registry.register(
+        "gitaly",
+        Arc::new(content::gitaly::GitalyContentService::new(
+            gitlab_client.clone(),
+        )),
+    );
+    info!("Content resolution enabled (GitlabClient configured)");
+
     let graph_client = config.graph.build_client();
-    let http_server = HttpServer::bind(config.bind_address, graph_client).await?;
+    let http_server = HttpServer::bind(
+        config.bind_address,
+        graph_client,
+        Some(gitlab_client),
+        schema_watcher,
+    )
+    .await?;
     info!(addr = %config.bind_address, "HTTP server bound");
 
-    let grpc_server = GrpcServer::new(
+    let tls_config = gkg_server::tls::load_tls_config(&config.tls).await?;
+
+    let mut grpc_server = GrpcServer::new(
         config.grpc_bind_address,
         validator,
         ontology,
         &config.graph,
         cluster_health,
-    );
+        tls_config,
+        config.grpc.clone(),
+    )
+    .with_resolver_registry(Arc::new(resolver_registry));
+
+    if config.query.default.graph_query_cache_enabled == Some(true) {
+        info!("initializing NATS connection for graph query cache");
+        let broker = Arc::new(
+            indexer::nats::NatsBroker::connect(&config.nats)
+                .await
+                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
+        );
+        grpc_server = grpc_server.with_cache_broker(broker);
+    }
+
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
 
     tokio::select! {
         res = http_server.run() => res.map_err(Into::into),
         res = grpc_server.run() => res.map_err(Into::into),
+        _ = shutdown.cancelled() => Ok(()),
     }
 }

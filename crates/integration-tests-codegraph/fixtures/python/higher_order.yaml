@@ -1,0 +1,69 @@
+name: "Python: higher-order functions and callables"
+fixtures:
+  - path: main.py
+    content: |
+      def make_adder(n):
+          def adder(x):
+              return x + n
+          return adder
+
+      def caller():
+          add5 = make_adder(5)
+          add5(10)
+
+      class Callable:
+          def __call__(self):
+              pass
+
+      def use_callable():
+          obj = Callable()
+          obj()
+
+      def nested_args():
+          def inner1():
+              pass
+          def inner2():
+              pass
+          def outer(a, b):
+              pass
+          outer(inner1(), inner2())
+
+tests:
+  - name: make_adder exists with nested adder
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'adder'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.make_adder.adder" } }
+
+  - name: caller calls make_adder
+    # BUG: 2 identical rows. make_adder(5) produces one edge, then
+    # add5(10) resolves add5 → make_adder via SSA alias, producing
+    # a duplicate edge. Pipeline should dedup same source→target pairs.
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'caller' AND callee.name = 'make_adder'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "main.caller", callee: "main.make_adder" } }
+
+  - name: Callable class has __call__
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Callable' AND m.name = '__call__'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.Callable.__call__" } }
+
+  - name: Nested function calls as arguments resolve
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'nested_args'
+      RETURN callee.name AS callee
+    assert:
+      - { row: { callee: "inner1" } }
+      - { row: { callee: "inner2" } }

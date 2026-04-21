@@ -92,8 +92,9 @@ Filtered by `knowledge graph` label:
 | Repository | Purpose |
 |---|---|
 | [gitlab-org/orbit/knowledge-graph](https://gitlab.com/gitlab-org/orbit/knowledge-graph) | Main GKG service -- 19 Rust crates covering parsing, indexing, query compilation, serving, testing, and infrastructure. Single `gkg-server` binary runs in 4 modes (webserver, indexer, scheduler, health-check). |
-| [gitlab-org/orbit/build-images](https://gitlab.com/gitlab-org/orbit/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline |
+| [gitlab-org/rust/build-images](https://gitlab.com/gitlab-org/rust/build-images) | CI builder images (Rust toolchain, pre-compiled tools, sccache) used by the knowledge-graph pipeline (image: `orbit-knowledge-graph`) |
 | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Official production Helm chart for GKG (v1.0.0, application chart, uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns) |
+| [gitlab-org/orbit/gkg-e2e-harness](https://gitlab.com/gitlab-org/orbit/gkg-e2e-harness) | GKE cluster bootstrap for e2e tests (cert-manager, GitLab Agent config) |
 | [gitlab-org/orbit/documentation/orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and session notes (Feb 3-5, 2026) |
 
 ### Analytics (Siphon)
@@ -131,7 +132,10 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [Internal program page](https://internal.gitlab.com/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/) | R&D PMO program landing page ([source](https://gitlab.com/gitlab-com/content-sites/internal-handbook/blob/main/content/handbook/engineering/r-and-d-pmo/programs/knowledge-graph-ga/_index.md)) |
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
-| In-repo dev/sandbox docs | [INFRASTRUCTURE.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) and [RUNBOOK.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) -- GCP sandbox environment details and operational runbook (dev/sandbox only) |
+| Server configuration | [docs/dev/runbooks/server_configuration.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) -- config loading, env vars, tuning, Helm chart mapping |
+| Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
+| Local GDK-connected development | [docs/dev/local-development.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
+| E2E testing harness | [docs/dev/e2e-testing.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/e2e-testing.md) -- full-stack e2e tests on GKE (GitLab + Siphon + GKG), runs in CI on MRs |
 | [Design Specs (Figma)](https://www.figma.com/design/GOrqDStp1E1SE0Ms7lVbXF/--588317--Orbit-GA-Designs?t=SLZ2CosGuBAzjC6r-0) | UI/UX design specs and visual references for Orbit GA features |
 
 ---
@@ -140,9 +144,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 
 | Chart | Repository | Purpose |
 |---|---|---|
-| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG (v1.0.0, application type). Uses [common-ci-tasks](https://gitlab.com/gitlab-com/gl-infra/common-ci-tasks) patterns. |
-| GKG (dev) | [`helm-dev/gkg/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/gkg) | Development/sandbox chart. Deploys full stack: GKG server (4 modes) + Siphon producer/consumer + NATS subchart + GitLab Runner. Values files for local, sandbox. |
-| Observability (dev) | [`helm-dev/observability/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/observability) | kube-prometheus-stack + Loki + Alloy + Grafana dashboards (ETL engine, GKG overview, NATS JetStream) |
+| GKG (official) | [gitlab-org/orbit/gkg-helm-charts](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts) | Production Helm chart for GKG (v1.0.0, application chart). |
 | Siphon (standalone) | [`siphon/helm/siphon/`](https://gitlab.com/gitlab-org/analytics-section/siphon/-/tree/main/helm/siphon) | Minimal standalone chart (v0.0.1). Superseded by the GKG dev chart for GKG deployments. |
 | Siphon (production) | [siphon-helm-charts](https://gitlab.com/gitlab-org/analytics-section/platform-insights/siphon-helm-charts) | v1.0.1, deployed via [gitlab-helmfiles](https://ops.gitlab.net/gitlab-com/gl-infra/k8s-workloads/gitlab-helmfiles) on ops.gitlab.net |
 
@@ -161,7 +163,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | Domain | `gitlab.gkg.dev` |
 | Secrets | GCP Secret Manager -> External Secrets Operator |
 
-See [`docs/dev/INFRASTRUCTURE.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/INFRASTRUCTURE.md) for full details.
+GCP sandbox infrastructure (GKE cluster, VMs, networking) is managed via the GCP console and Helm charts. See the [Terraform section](#terraform--iac) for IaC references and the [server configuration runbook](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) for application config.
 
 ### Staging (gitlab-helmfiles managed)
 
@@ -225,7 +227,7 @@ All Terraform lives in [config-mgmt](https://ops.gitlab.net/gitlab-com/gl-infra/
 |---|---|
 | GKG Server | [`gitlab-org/orbit/knowledge-graph/gkg`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/container_registry) |
 | Siphon | [`gitlab-org/analytics-section/siphon`](https://gitlab.com/gitlab-org/analytics-section/siphon/container_registry) |
-| Rust Builder | [`gitlab-org/orbit/build-images/rust-builder`](https://gitlab.com/gitlab-org/orbit/build-images/container_registry) |
+| Rust Builder | [`gitlab-org/rust/build-images/orbit-knowledge-graph`](https://gitlab.com/gitlab-org/rust/build-images/container_registry) |
 
 ---
 
@@ -261,14 +263,16 @@ Jerome Ng (@jeromezng, usage billing system architect).
 
 | Runbook | Location |
 |---|---|
-| Dev/sandbox runbook | [`docs/dev/RUNBOOK.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/RUNBOOK.md) |
+| SDLC indexing | [`docs/dev/runbooks/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/sdlc_indexing.md) |
+| Code indexing | [`docs/dev/runbooks/code_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/code_indexing.md) |
+| Server configuration | [`docs/dev/runbooks/server_configuration.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) |
 | Production runbook | TODO |
 
 ### Observability
 
 | Component | Status |
 |---|---|
-| Grafana dashboards (dev) | Deployed via [`helm-dev/observability/`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/helm-dev/observability) (ETL engine, GKG overview, NATS JetStream) |
+| Grafana dashboards (dev) | TODO |
 | Production Grafana dashboards | TODO |
 | Alerting rules | TODO |
 | SLIs / SLOs | TODO -- to be defined as part of [PREP](https://gitlab.com/gitlab-org/architecture/readiness/-/merge_requests/64) |

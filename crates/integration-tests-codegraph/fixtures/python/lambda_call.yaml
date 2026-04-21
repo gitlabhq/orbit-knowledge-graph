@@ -1,0 +1,27 @@
+name: "Python: lambda assignment and call"
+fixtures:
+  - path: main.py
+    content: |
+      square = lambda x: x * 2
+
+      def run():
+          square(5)
+
+tests:
+  - name: Lambda definition exists
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'square'
+      RETURN d.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
+
+  - name: square() call resolves to lambda
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'square'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "main.square" } }

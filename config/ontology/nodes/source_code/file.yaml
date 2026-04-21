@@ -27,6 +27,7 @@ properties:
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
@@ -41,6 +42,12 @@ properties:
     source: branch
     nullable: false
     description: "Git branch where this file exists."
+
+  commit_sha:
+    type: string
+    source: commit_sha
+    nullable: false
+    description: "Commit SHA at which this file was indexed."
 
   path:
     type: string
@@ -65,3 +72,30 @@ properties:
     source: language
     nullable: false
     description: "Programming language of the file (e.g., ruby, python, java)."
+
+  content:
+    type: string
+    virtual:
+      service: gitaly
+      lookup: blob_content
+      depends_on: [project_id, commit_sha, branch, path]
+    nullable: true
+    description: "Raw source text of the file. Resolved from Gitaly at query time."
+
+storage:
+  version_only_engine: true
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: branch, type: "String", codec: ["ZSTD(1)"]}
+    - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: path, type: "String", codec: ["ZSTD(3)"]}
+    - {name: name, type: "String", codec: ["ZSTD(1)"]}
+    - {name: extension, type: "LowCardinality(String)", codec: ["LZ4"]}
+    - {name: language, type: "LowCardinality(String)", codec: ["LZ4"]}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

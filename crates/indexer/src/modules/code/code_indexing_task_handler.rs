@@ -4,24 +4,16 @@ use std::time::Instant;
 use async_trait::async_trait;
 use tracing::{debug, info, warn};
 
-use serde::{Deserialize, Serialize};
-
 use super::checkpoint_store::CodeCheckpointStore;
 use super::config::CODE_LOCK_TTL;
-use super::indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
+use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
-use super::repository_service::RepositoryService;
-use crate::configuration::HandlerConfiguration;
+use super::repository::RepositoryService;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
-
-#[derive(Debug, Clone, Default, Deserialize, Serialize)]
-pub struct CodeIndexingTaskHandlerConfig {
-    #[serde(flatten)]
-    pub engine: HandlerConfiguration,
-}
+use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -125,13 +117,18 @@ impl CodeIndexingTaskHandler {
 
         let result = self.index_with_lock(context, request, &branch).await;
 
-        let outcome = if result.is_ok() { "indexed" } else { "error" };
+        let outcome = match &result {
+            Ok(Some(IndexOutcome::Indexed)) => "indexed",
+            Ok(Some(IndexOutcome::EmptyRepository)) => "empty_repository",
+            Ok(None) => "skipped_lock",
+            Err(_) => "error",
+        };
         self.metrics.record_outcome(outcome);
         self.metrics
             .handler_duration
             .record(started_at.elapsed().as_secs_f64(), &[]);
 
-        result
+        result.map(|_| ())
     }
 
     async fn index_with_lock(
@@ -139,7 +136,7 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
         branch: &str,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<Option<IndexOutcome>, HandlerError> {
         let project_id = request.project_id;
 
         if !self.try_acquire_lock(context, project_id, branch).await? {
@@ -149,8 +146,7 @@ impl CodeIndexingTaskHandler {
                 branch = %branch,
                 "lock held by another indexer, skipping"
             );
-            self.metrics.record_outcome("skipped_lock");
-            return Ok(());
+            return Ok(None);
         }
 
         let result = self
@@ -175,7 +171,7 @@ impl CodeIndexingTaskHandler {
             warn!(project_id, branch = %branch, error = %e, "failed to index code");
         }
 
-        result
+        result.map(Some)
     }
 }
 
@@ -230,7 +226,9 @@ mod tests {
     use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
     use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::metrics::CodeMetrics;
-    use crate::modules::code::repository_service::test_utils::MockRepositoryService;
+    use crate::modules::code::repository::RepositoryResolver;
+    use crate::modules::code::repository::cache::LocalRepositoryCache;
+    use crate::modules::code::repository::service::test_utils::MockRepositoryService;
     use crate::modules::code::stale_data_cleaner::test_utils::MockStaleDataCleaner;
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices};
@@ -245,12 +243,13 @@ mod tests {
         mock_nats: Arc<MockNatsServices>,
         mock_locks: Arc<MockLockService>,
         mock_checkpoints: Arc<MockCodeCheckpointStore>,
+        mock_repo: Arc<MockRepositoryService>,
+        _cache_dir: tempfile::TempDir,
     }
 
     impl TestContext {
         fn new() -> Self {
-            let mock_repo: Arc<dyn RepositoryService> =
-                MockRepositoryService::with_default_branch(123, "main");
+            let mock_repo = MockRepositoryService::with_default_branch(123, "main");
             let mock_nats = Arc::new(MockNatsServices::new());
             let mock_locks = Arc::new(MockLockService::new());
             let mock_checkpoints = Arc::new(MockCodeCheckpointStore::new());
@@ -258,6 +257,7 @@ mod tests {
             let metrics = test_metrics();
 
             let checkpoint_store: Arc<dyn CodeCheckpointStore> = mock_checkpoints.clone();
+            let repo_service: Arc<dyn RepositoryService> = mock_repo.clone();
 
             let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
             let table_names = Arc::new(
@@ -265,8 +265,14 @@ mod tests {
                     .expect("code tables must resolve"),
             );
 
+            let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
+            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
+                Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
+            let resolver =
+                RepositoryResolver::new(Arc::clone(&repo_service), cache, metrics.clone());
+
             let pipeline = Arc::new(CodeIndexingPipeline::new(
-                Arc::clone(&mock_repo),
+                resolver,
                 Arc::clone(&checkpoint_store),
                 stale_data_cleaner,
                 metrics.clone(),
@@ -275,7 +281,7 @@ mod tests {
 
             let handler = CodeIndexingTaskHandler::new(
                 pipeline,
-                mock_repo,
+                repo_service,
                 Arc::clone(&checkpoint_store),
                 metrics,
                 CodeIndexingTaskHandlerConfig::default(),
@@ -286,6 +292,8 @@ mod tests {
                 mock_nats,
                 mock_locks,
                 mock_checkpoints,
+                mock_repo,
+                _cache_dir: temp_dir,
             }
         }
 
@@ -382,6 +390,58 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
         assert!(result.is_ok());
         assert!(!ctx.lock_exists(123, "main"));
+    }
+
+    #[tokio::test]
+    async fn empty_repository_sets_checkpoint_and_acks() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(123)),
+        );
+
+        let envelope = TestContext::make_request(42, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok(), "empty repo should ack, got {result:?}");
+        let checkpoint = ctx
+            .mock_checkpoints
+            .get_checkpoint("/org/project-123", 123, "main")
+            .await
+            .unwrap()
+            .expect("checkpoint should be set for empty repo");
+        assert_eq!(checkpoint.last_task_id, 42);
+        assert!(checkpoint.last_commit.is_none());
+    }
+
+    #[tokio::test]
+    async fn server_error_sets_checkpoint_and_acks() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_download_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 500,
+            }),
+        );
+
+        let envelope = TestContext::make_request(7, 123, "main");
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(result.is_ok());
+        let checkpoint = ctx
+            .mock_checkpoints
+            .get_checkpoint("/org/project-123", 123, "main")
+            .await
+            .unwrap()
+            .expect("checkpoint should be set for missing repository");
+        assert_eq!(checkpoint.last_task_id, 7);
     }
 
     #[test]

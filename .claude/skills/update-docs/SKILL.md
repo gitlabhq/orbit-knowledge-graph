@@ -28,7 +28,7 @@ If agent teams are available, create an agent team for each major section of the
 Before editing, research what changed and what the current state looks like:
 
 ```shell
-git log --oneline --since="2 weeks ago" -- crates/query-engine/
+git log --oneline --since="2 weeks ago" -- crates/query-engine/compiler/
 glab issue list --label "knowledge graph" --state opened
 glab mr list --state merged --per-page 20
 ```
@@ -43,7 +43,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 - Security model changes not in `security.md`
 - Crate renames, splits, or new crates not reflected in `CLAUDE.md`
 - People or epic changes not in `README.md`
-- Stale IPs or secrets in `docs/dev/INFRASTRUCTURE.md`
+- Stale config references in `docs/dev/runbooks/server_configuration.md`
 
 ## Fixing
 

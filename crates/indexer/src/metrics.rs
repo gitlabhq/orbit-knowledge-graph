@@ -1,7 +1,9 @@
-//! OpenTelemetry metrics for engine observability.
+//! OpenTelemetry metrics for the indexer.
 //!
-//! [`EngineMetrics`] holds pre-built OTel instruments for tracking throughput,
-//! handler latency, worker pool utilization, and destination write performance.
+//! [`EngineMetrics`] tracks ETL engine throughput, handler latency, worker pool
+//! utilization, and destination write performance.
+//!
+//! [`MigrationMetrics`] tracks schema migration phases and outcomes.
 //!
 //! When no `MeterProvider` is configured (the default), all instruments are
 //! no-ops — zero overhead in production until you opt in via
@@ -38,74 +40,74 @@ pub struct EngineMetrics {
 
 impl EngineMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("etl_engine");
+        let meter = global::meter("gkg_etl");
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
         let messages_processed = meter
-            .u64_counter("etl.messages.processed")
+            .u64_counter("gkg.etl.messages.processed")
             .with_description("Total messages processed")
             .build();
 
         let message_duration = meter
-            .f64_histogram("etl.message.duration")
+            .f64_histogram("gkg.etl.message.duration")
             .with_unit("s")
             .with_description("End-to-end time per message through dispatch")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let handler_duration = meter
-            .f64_histogram("etl.handler.duration")
+            .f64_histogram("gkg.etl.handler.duration")
             .with_unit("s")
             .with_description("Time inside each handler's handle() call")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let permit_wait_duration = meter
-            .f64_histogram("etl.permit.wait.duration")
+            .f64_histogram("gkg.etl.permit.wait.duration")
             .with_unit("s")
             .with_description("Time waiting for a worker pool permit")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let active_permits = meter
-            .i64_up_down_counter("etl.permits.active")
+            .i64_up_down_counter("gkg.etl.permits.active")
             .with_description("Number of worker permits currently held")
             .build();
 
         let nats_fetch_duration = meter
-            .f64_histogram("etl.nats.fetch.duration")
+            .f64_histogram("gkg.etl.nats.fetch.duration")
             .with_unit("s")
             .with_description("Time to fetch a batch of messages from NATS")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let destination_write_duration = meter
-            .f64_histogram("etl.destination.write.duration")
+            .f64_histogram("gkg.etl.destination.write.duration")
             .with_unit("s")
             .with_description("Time to write a batch to ClickHouse")
             .with_boundaries(DURATION_BUCKETS.to_vec())
             .build();
 
         let destination_rows_written = meter
-            .u64_counter("etl.destination.rows.written")
+            .u64_counter("gkg.etl.destination.rows.written")
             .with_description("Total rows written to ClickHouse")
             .build();
 
         let destination_bytes_written = meter
-            .u64_counter("etl.destination.bytes.written")
+            .u64_counter("gkg.etl.destination.bytes.written")
             .with_unit("By")
             .with_description("Total bytes written to ClickHouse")
             .build();
 
         let destination_write_errors = meter
-            .u64_counter("etl.destination.write.errors")
+            .u64_counter("gkg.etl.destination.write.errors")
             .with_description("Total failed writes to ClickHouse")
             .build();
 
         let handler_errors = meter
-            .u64_counter("etl.handler.errors")
+            .u64_counter("gkg.etl.handler.errors")
             .with_description("Total handler errors at the engine dispatch level")
             .build();
 
@@ -173,6 +175,93 @@ impl EngineMetrics {
 }
 
 impl Default for EngineMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Pre-built OTel instruments for schema migration observability.
+///
+/// Metric: `gkg_schema_migration_total` with labels `phase` and `result`.
+/// - phase: `acquire_lock` | `create_tables` | `mark_migrating` | `complete`
+/// - result: `success` | `failure` | `skipped`
+#[derive(Clone)]
+pub struct MigrationMetrics {
+    pub(crate) migration_total: Counter<u64>,
+}
+
+impl MigrationMetrics {
+    pub fn new() -> Self {
+        let meter = global::meter("gkg_schema_migration");
+        let migration_total = meter
+            .u64_counter("gkg_schema_migration_total")
+            .with_description(
+                "Total schema migration phase executions, labelled by phase and result",
+            )
+            .build();
+        Self { migration_total }
+    }
+
+    pub(crate) fn record(&self, phase: &'static str, result: &'static str) {
+        self.migration_total.add(
+            1,
+            &[
+                KeyValue::new("phase", phase),
+                KeyValue::new("result", result),
+            ],
+        );
+    }
+}
+
+impl Default for MigrationMetrics {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+/// Pre-built OTel instruments for migration completion observability.
+///
+/// - `gkg_schema_migration_completed_total`: successful migration completions
+/// - `gkg_schema_cleanup_total`: table cleanup operations (labels: `version`, `result`)
+#[derive(Clone)]
+pub struct CompletionMetrics {
+    pub(crate) migration_completed: Counter<u64>,
+    pub(crate) cleanup_total: Counter<u64>,
+}
+
+impl CompletionMetrics {
+    pub fn new() -> Self {
+        let meter = global::meter("gkg_schema_migration");
+        let migration_completed = meter
+            .u64_counter("gkg_schema_migration_completed_total")
+            .with_description("Total successful schema migration completions")
+            .build();
+        let cleanup_total = meter
+            .u64_counter("gkg_schema_cleanup_total")
+            .with_description("Total schema table cleanup operations by version and result")
+            .build();
+        Self {
+            migration_completed,
+            cleanup_total,
+        }
+    }
+
+    pub(crate) fn record_migration_completed(&self) {
+        self.migration_completed.add(1, &[]);
+    }
+
+    pub(crate) fn record_cleanup(&self, version: u32, result: &'static str) {
+        self.cleanup_total.add(
+            1,
+            &[
+                KeyValue::new("version", version.to_string()),
+                KeyValue::new("result", result),
+            ],
+        );
+    }
+}
+
+impl Default for CompletionMetrics {
     fn default() -> Self {
         Self::new()
     }

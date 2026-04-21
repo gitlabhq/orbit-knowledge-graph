@@ -1,0 +1,55 @@
+name: "Java: intra-file resolution"
+fixtures:
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      public class App {
+          private void helper() {}
+
+          public void run() {
+              helper();
+          }
+
+          public void chained() {
+              new App().run();
+          }
+
+          public static void staticMethod() {}
+
+          public void callStatic() {
+              staticMethod();
+          }
+      }
+
+      class Inner {
+          void innerMethod() {}
+      }
+
+tests:
+  - name: "run() calls helper()"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run' AND callee.name = 'helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "com.example.App.run", callee: "com.example.App.helper" } }
+
+  - name: "callStatic() calls staticMethod()"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'callStatic' AND callee.name = 'staticMethod'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "com.example.App.callStatic", callee: "com.example.App.staticMethod" } }
+
+  - name: "All methods have com.example.App FQN prefix"
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'App'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { match: { field: fqn, pattern: "com.example.App.*" } }

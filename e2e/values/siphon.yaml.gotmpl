@@ -1,0 +1,170 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $producer := fromYaml (readFile "../config/cdc-producer.yaml") }}
+{{ $consumer := fromYaml (readFile "../config/cdc-consumer.yaml") }}
+{{ $reconciler := fromYaml (readFile "../config/cdc-reconciler.yaml") }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+
+namespace: e2e-{{ $sha }}-siphon
+
+image:
+  repository: {{ $v.siphon.image.repository }}
+  pullPolicy: Always
+  tag: {{ $v.siphon.image.tag }}
+
+replicas: 1
+reloader: false
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 512Mi
+  limits:
+    cpu: 2
+    memory: 2Gi
+
+appConfigDefaults:
+  prometheus:
+    port: 8080
+  primary_database:
+    host: gitlab-postgresql.e2e-{{ $sha }}-gitlab.svc.cluster.local
+    user: siphon
+    password: {{ requiredEnv "E2E_PG_SIPHON_PASS" | quote }}
+    database: gitlabhq_production
+    advisory_lock_timeout_ms: 100
+    advisory_lock_timeout_fuzziness_ms: 50
+    lock_timeout_ms: 500
+    lock_timeout_fuzziness_ms: 300
+  database:
+    host: gitlab-postgresql.e2e-{{ $sha }}-gitlab.svc.cluster.local
+    user: siphon_replicator
+    password: {{ requiredEnv "E2E_PG_SIPHON_PASS" | quote }}
+    database: gitlabhq_production
+    advisory_lock_timeout_ms: 100
+    advisory_lock_timeout_fuzziness_ms: 50
+    lock_timeout_ms: 500
+    lock_timeout_fuzziness_ms: 300
+  snapshot_database:
+    host: gitlab-postgresql.e2e-{{ $sha }}-gitlab.svc.cluster.local
+    user: siphon_snapshot
+    password: {{ requiredEnv "E2E_PG_SIPHON_PASS" | quote }}
+    database: gitlabhq_production
+    disallow_hot_standby_feedback_on: false
+    advisory_lock_timeout_ms: 100
+    advisory_lock_timeout_fuzziness_ms: 50
+    lock_timeout_ms: 500
+    lock_timeout_fuzziness_ms: 300
+  replication:
+    initial_data_snapshot_threads_per_table: 2
+    memory_buffer_size_in_bytes: 10485760
+    use_alter_publication_function: true
+    # Defaults are 3s and 2s respectively. e2e snapshots a small dataset so we
+    # tighten both polls to 1s to shave seconds off cold-start latency. Without
+    # these the snapshot/merge phase can push the per-entity 120s test budgets.
+    # Available since siphon 0.0.63-beta (gitlab-org/analytics-section/siphon!375).
+    snapshot_poll_interval_in_seconds: 1
+    merge_poll_interval_in_seconds: 1
+  queueing:
+    driver: "nats"
+    url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
+    stream_name: "e2e_siphon_event_stream"
+    oversize_bucket_name: "e2e_siphon_oversize_bucket"
+  clickhouse:
+    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+    port: 9000
+    ssl: false
+    username: siphon
+    password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}
+    database: datalake
+    insert_batch_size: 10000
+    max_open_conns: 5
+    max_idle_conns: 3
+
+deploymentProfiles:
+  producer:
+    enabled: true
+    mode: producer
+    command:
+      - /app/siphon
+      - producer
+      - --config=/etc/config/config.yaml
+      - --log-level=info
+    env:
+      - name: GOMEMLIMIT
+        value: "2000MiB"
+    appConfig:
+      prometheus: {}
+      max_column_size_in_bytes: 10485760
+      partitions_monitoring_interval_in_seconds: 300
+
+  consumer:
+    enabled: true
+    mode: consumer
+    consumerType: clickhouse
+    command:
+      - /app/siphon
+      - consumer
+      - --config=/etc/config/config.yaml
+      - --log-level=info
+    env:
+      - name: GOMEMLIMIT
+        value: "2000MiB"
+      - name: GOGC
+        value: "50"
+    appConfig:
+      prometheus: {}
+      queueing: {}
+
+  reconciler:
+    enabled: true
+    mode: reconciler
+    command:
+      - /app/siphon
+      - reconciler
+      - --config=/etc/config/config.yaml
+      - --log-level=info
+    env:
+      - name: GOMEMLIMIT
+        value: "1500MiB"
+      - name: GOGC
+        value: "50"
+    appConfig:
+      prometheus: {}
+      queueing: {}
+      clickhouse: {}
+
+deployments:
+  postgres-producer:
+    profile: producer
+    appConfig:
+      application_identifier: e2e_siphon_1
+      primary_database:
+        application_name: e2e_siphon_1_primary
+        advisory_lock_id: 1
+      database:
+        application_name: e2e_siphon_1_replication
+        advisory_lock_id: 1
+      snapshot_database:
+        application_name: e2e_siphon_1_snapshot
+        advisory_lock_id: 1
+      replication:
+        publication_name: e2e_siphon_publication
+        slot_name: e2e_siphon_slot
+      queueing:
+        temp_stream_name: temp_e2e_siphon_event_stream
+        snapshot_stream_name: snapshot_e2e_siphon_event_stream
+        lsn_store_name: e2e_siphon_lsn_store
+      table_mapping: {{ required "cdc-producer.yaml missing table_mapping (sync-cdc-tables.sh produced empty output?)" $producer.table_mapping | toYaml | nindent 8 }}
+
+  clickhouse-consumer:
+    profile: consumer
+    appConfig:
+      application_identifier: e2e_siphon_consumer_1
+      streams: {{ required "cdc-consumer.yaml missing streams" $consumer.streams | toYaml | nindent 8 }}
+      clickhouse: {{ required "cdc-consumer.yaml missing clickhouse" $consumer.clickhouse | toYaml | nindent 8 }}
+
+  reconciler:
+    profile: reconciler
+    appConfig:
+      application_identifier: e2e_siphon_reconciler_1
+      concurrency: 10
+      schedules: {{ required "cdc-reconciler.yaml missing schedules" $reconciler.schedules | toYaml | nindent 8 }}

@@ -1,0 +1,171 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+{{ $gkgImage := env "E2E_GKG_IMAGE" | default $v.gkg.image.repository }}
+{{ $gkgTag := env "E2E_GKG_TAG" | default $v.gkg.image.tag }}
+
+extraResources:
+  - apiVersion: cert-manager.io/v1
+    kind: Certificate
+    metadata:
+      name: gkg-grpc-tls
+    spec:
+      secretName: gkg-grpc-tls
+      duration: 8760h
+      issuerRef:
+        name: e2e-ca
+        kind: ClusterIssuer
+      dnsNames:
+        - gkg-webserver.e2e-{{ $sha }}-gkg.svc.cluster.local
+
+image:
+  repository: {{ $gkgImage }}
+  tag: {{ $gkgTag | quote }}
+  pullPolicy: IfNotPresent
+
+secrets:
+  existingSecret: "gkg-secrets"
+
+webserver:
+  enabled: true
+  replicas: 1
+  logLevel: "info"
+  probes:
+    enabled: true
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 1
+      memory: 1Gi
+  service:
+    type: ClusterIP
+    httpPort: 8080
+    grpcPort: 50054
+
+indexer:
+  enabled: true
+  replicas: 1
+  logLevel: "info"
+  probes:
+    enabled: true
+  tmpSizeLimit: "5Gi"
+  resources:
+    requests:
+      cpu: 500m
+      memory: 1Gi
+    limits:
+      cpu: 2
+      memory: 2Gi
+
+dispatcher:
+  enabled: true
+  logLevel: "info"
+  probes:
+    enabled: true
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+healthCheck:
+  enabled: true
+  replicas: 1
+  logLevel: "info"
+  probes:
+    enabled: true
+  targets:
+    - deployments:
+        - gkg-indexer
+        - gkg-webserver
+        - gkg-dispatcher
+    - namespace: e2e-{{ $sha }}-siphon
+      deployments:
+        - postgres-producer
+        - clickhouse-consumer
+    - namespace: e2e-{{ $sha }}-nats
+      statefulSets:
+        - nats
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 128Mi
+
+clickhouse:
+  datalake:
+    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+    httpPort: 8123
+    database: datalake
+    user: gkg_siphon_reader
+    ssl: false
+  graph:
+    host: clickhouse.e2e-{{ $sha }}-clickhouse.svc.cluster.local
+    httpPort: 8123
+    database: gkg
+    user: gkg_writer
+    readUser: gkg_reader
+    ssl: false
+
+nats:
+  url: "nats://nats.e2e-{{ $sha }}-nats.svc.cluster.local:4222"
+  consumerName: gkg-indexer
+  fetchExpiresSecs: 5
+  tls:
+    enabled: false
+
+gitlab:
+  baseUrl: "http://gitlab-webservice-default.e2e-{{ $sha }}-gitlab.svc.cluster.local:8181"
+
+tls:
+  enabled: true
+  existingSecret: "gkg-grpc-tls"
+
+metrics:
+  prometheus:
+    enabled: false
+  otel:
+    enabled: false
+
+schedule:
+  tasks:
+    global:
+      cron: "*/5 * * * * *"
+    namespace:
+      cron: "*/5 * * * * *"
+    code-indexing-task:
+      cron: "*/5 * * * * *"
+      events_stream_name: "e2e_siphon_event_stream"
+    namespace-code-backfill:
+      cron: "*/5 * * * * *"
+      events_stream_name: "e2e_siphon_event_stream"
+    table-cleanup:
+      cron: "0 0 3 * * *"
+    namespace-deletion:
+      cron: "0 0 3 * * *"
+    migration-completion:
+      cron: "*/10 * * * * *"
+
+engine:
+  max_concurrent_workers: 4
+  concurrency_groups:
+    sdlc: 3
+    code: 1
+  handlers:
+    global-handler:
+      concurrency_group: sdlc
+      max_attempts: 1
+      retry_interval_secs: 60
+    namespace-handler:
+      concurrency_group: sdlc
+      max_attempts: 1
+      retry_interval_secs: 60
+    code-indexing-task:
+      concurrency_group: code
+      max_attempts: 3
+      retry_interval_secs: 60

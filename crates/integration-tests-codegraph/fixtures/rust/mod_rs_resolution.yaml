@@ -1,0 +1,45 @@
+name: "Rust: mod.rs module trees"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "rust_mod_rs_fixture"
+      version = "0.1.0"
+      edition = "2021"
+
+  - path: src/lib.rs
+    content: |
+      pub mod net;
+
+  - path: src/net/mod.rs
+    content: |
+      pub mod inner;
+
+      pub fn outer() {
+          inner::leaf();
+      }
+
+  - path: src/net/inner.rs
+    content: |
+      pub fn leaf() {}
+
+tests:
+  - name: "mod.rs parent module resolves child module calls"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path = 'src/net/mod.rs'
+        AND caller.name = 'outer'
+        AND callee.name = 'leaf'
+      RETURN caller.fqn AS caller_fqn, callee.fqn AS callee_fqn, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { caller_fqn: 'net::outer', callee_fqn: 'net::inner::leaf', tgt: 'src/net/inner.rs' } }
+
+  - name: "definitions under mod.rs keep nested module FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/net/inner.rs' AND d.name = 'leaf'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: 'net::inner::leaf' } }

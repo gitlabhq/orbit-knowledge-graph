@@ -16,6 +16,7 @@ use crate::synth::constants::CLICKHOUSE_NATIVE_PORT;
 pub struct ClickHouseWriter {
     pub client: ArrowClickHouseClient,
     url: String,
+    password: Option<String>,
 }
 
 impl ClickHouseWriter {
@@ -23,6 +24,7 @@ impl ClickHouseWriter {
         Self {
             client: config.build_client(),
             url: config.url.clone(),
+            password: config.password.clone(),
         }
     }
 
@@ -49,14 +51,20 @@ impl ClickHouseWriter {
     pub fn load_parquet_file(&self, table_name: &str, parquet_path: &Path) -> Result<()> {
         let path_str = parquet_path.to_str().context("Invalid path encoding")?;
 
-        let output = Command::new("clickhouse")
-            .arg("client")
+        let mut cmd = Command::new("clickhouse");
+        cmd.arg("client")
             .arg("--query")
             .arg(format!("INSERT INTO {} FORMAT Parquet", table_name))
             .arg("--host")
             .arg(self.parse_host())
             .arg("--port")
-            .arg(self.parse_port())
+            .arg(self.parse_port());
+
+        if let Some(pw) = &self.password {
+            cmd.arg("--password").arg(pw);
+        }
+
+        let output = cmd
             .stdin(std::fs::File::open(parquet_path)?)
             .output()
             .context("Failed to run clickhouse client")?;

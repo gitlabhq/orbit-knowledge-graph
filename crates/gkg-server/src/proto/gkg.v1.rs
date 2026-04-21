@@ -61,9 +61,14 @@ pub struct QueryMetadata {
     /// compiled ClickHouse SQL(s) for debugging
     #[prost(string, repeated, tag = "2")]
     pub raw_query_strings: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
-    /// rows returned after redaction
+    /// rows returned after redaction (and cursor slicing if applicable)
     #[prost(int32, tag = "3")]
     pub row_count: i32,
+    /// semver string, e.g. "1.0.0"; empty for stub formatters
+    #[prost(string, tag = "4")]
+    pub format_version: ::prost::alloc::string::String,
+    #[prost(enumeration = "FormatName", tag = "5")]
+    pub format_name: i32,
 }
 /// Server-sent error when query compilation or execution fails.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -77,7 +82,7 @@ pub struct ExecuteQueryError {
 /// Request to retrieve the graph schema with optional node expansion.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetGraphSchemaRequest {
-    /// node names to include full properties/relationships; pass "*" to expand all
+    /// node names to include full properties/relationships; pass "\*" to expand all
     #[prost(string, repeated, tag = "1")]
     pub expand_nodes: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
     /// RAW: StructuredSchema; LLM: TOON text
@@ -332,6 +337,35 @@ pub struct ReplicaStatus {
     #[prost(int32, tag = "2")]
     pub desired: i32,
 }
+/// Request for graph entity counts scoped by traversal_path prefix.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetGraphStatsRequest {
+    /// traversal_path prefix to scope counts (e.g. "1/2/")
+    #[prost(string, tag = "1")]
+    pub traversal_path: ::prost::alloc::string::String,
+}
+/// Response containing entity counts grouped by domain.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GetGraphStatsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub domains: ::prost::alloc::vec::Vec<GraphStatsDomain>,
+}
+/// Entity counts for a single domain (e.g. "ci", "core", "plan").
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct GraphStatsDomain {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(message, repeated, tag = "2")]
+    pub items: ::prost::alloc::vec::Vec<GraphStatsItem>,
+}
+/// Count for a single entity type (e.g. "Project": 42).
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GraphStatsItem {
+    #[prost(string, tag = "1")]
+    pub name: ::prost::alloc::string::String,
+    #[prost(int64, tag = "2")]
+    pub count: i64,
+}
 /// Controls output serialization across all data RPCs.
 /// RAW returns structured JSON for programmatic consumers (dashboard, CLI).
 /// LLM returns compact text (GOON for queries, TOON for schema/health) optimized for token budgets.
@@ -357,6 +391,35 @@ impl ResponseFormat {
         match value {
             "RESPONSE_FORMAT_RAW" => Some(Self::Raw),
             "RESPONSE_FORMAT_LLM" => Some(Self::Llm),
+            _ => None,
+        }
+    }
+}
+/// Concrete encoding produced by the server. QueryMetadata carries this
+/// alongside format_version so consumers can route/parse without inspecting
+/// the payload body. Mirrors ResponseFormat but in response context.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum FormatName {
+    Raw = 0,
+    Goon = 1,
+}
+impl FormatName {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Raw => "FORMAT_NAME_RAW",
+            Self::Goon => "FORMAT_NAME_GOON",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "FORMAT_NAME_RAW" => Some(Self::Raw),
+            "FORMAT_NAME_GOON" => Some(Self::Goon),
             _ => None,
         }
     }
@@ -623,6 +686,34 @@ pub mod knowledge_graph_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Returns entity counts per domain, scoped by traversal_path prefix.
+        /// Used by admin dashboards to inspect graph coverage.
+        pub async fn get_graph_stats(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetGraphStatsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetGraphStats",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStats"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -681,6 +772,15 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<super::GetClusterHealthRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetClusterHealthResponse>,
+            tonic::Status,
+        >;
+        /// Returns entity counts per domain, scoped by traversal_path prefix.
+        /// Used by admin dashboards to inspect graph coverage.
+        async fn get_graph_stats(
+            &self,
+            request: tonic::Request<super::GetGraphStatsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetGraphStatsResponse>,
             tonic::Status,
         >;
     }
@@ -941,6 +1041,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetClusterHealthSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetGraphStats" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetGraphStatsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetGraphStatsRequest>
+                    for GetGraphStatsSvc<T> {
+                        type Response = super::GetGraphStatsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetGraphStatsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_graph_stats(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetGraphStatsSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

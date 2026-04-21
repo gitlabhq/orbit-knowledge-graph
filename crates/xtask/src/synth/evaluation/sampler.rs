@@ -277,8 +277,13 @@ mod tests {
 
     #[test]
     fn test_sampler_creation() {
-        let client =
-            ArrowClickHouseClient::new("http://localhost:8123", "default", "default", None);
+        let client = ArrowClickHouseClient::new(
+            "http://localhost:8123",
+            "default",
+            "default",
+            None,
+            &std::collections::HashMap::new(),
+        );
         let sampler = ParameterSampler::new(client, 100);
         assert_eq!(sampler.sample_size, 100);
         assert!(sampler.cache.is_empty());

@@ -9,18 +9,21 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::routing::get;
 use base64::Engine;
+use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClient;
+use gkg_server_config::{CodeIndexingTaskHandlerConfig, GitlabClientConfiguration};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
-    CodeIndexingTaskHandler, CodeIndexingTaskHandlerConfig, RailsRepositoryService,
-    RepositoryService, config::CodeTableNames, metrics::CodeMetrics,
+    CodeIndexingTaskHandler, LocalRepositoryCache, RailsRepositoryService, RepositoryService,
+    config::CodeTableNames, metrics::CodeMetrics, repository::RepositoryCache,
+    repository::RepositoryResolver,
 };
 use indexer::nats::ProgressNotifier;
 use indexer::testkit::{MockLockService, MockNatsServices};
-use integration_testkit::TestContext;
+use integration_testkit::{TestContext, t};
 use parking_lot::Mutex;
 use serde::Deserialize;
 use std::collections::HashMap;
@@ -32,6 +35,7 @@ pub struct CodeIndexingDeps {
     pub repository_service: Arc<dyn RepositoryService>,
     pub checkpoint_store: Arc<ClickHouseCodeCheckpointStore>,
     pub metrics: CodeMetrics,
+    cache_dir: tempfile::TempDir,
 }
 
 impl CodeIndexingDeps {
@@ -49,8 +53,14 @@ impl CodeIndexingDeps {
             Arc::new(ClickHouseStaleDataCleaner::new(graph_client, &table_names));
         let metrics = CodeMetrics::new();
 
+        let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
+        let cache: Arc<dyn RepositoryCache> =
+            Arc::new(LocalRepositoryCache::new(cache_dir.path().to_path_buf()));
+        let resolver =
+            RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+
         let pipeline = Arc::new(CodeIndexingPipeline::new(
-            Arc::clone(&repository_service),
+            resolver,
             Arc::clone(&checkpoint_store) as _,
             stale_data_cleaner,
             metrics.clone(),
@@ -62,7 +72,12 @@ impl CodeIndexingDeps {
             repository_service,
             checkpoint_store,
             metrics,
+            cache_dir,
         }
+    }
+
+    pub fn cache_dir_path(&self) -> &std::path::Path {
+        self.cache_dir.path()
     }
 
     pub fn code_indexing_task_handler(&self) -> CodeIndexingTaskHandler {
@@ -77,7 +92,7 @@ impl CodeIndexingDeps {
 }
 
 // ---------------------------------------------------------------------------
-// Mock GitLab server — serves /api/v4/internal/orbit/project/... endpoints
+// Mock GitLab server -- serves /api/v4/internal/orbit/project/... endpoints
 // ---------------------------------------------------------------------------
 
 struct MockState {
@@ -86,7 +101,10 @@ struct MockState {
 
 struct ProjectData {
     default_branch: String,
-    archive: Vec<u8>,
+    /// Raw file entries (path, content). The archive is built on-the-fly
+    /// in the handler using the ref from the request query, so the Gitaly
+    /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
+    archive_files: Vec<(String, Vec<u8>)>,
 }
 
 pub struct MockGitlabServer {
@@ -135,11 +153,15 @@ impl MockGitlabServer {
     }
 
     pub fn add_project(&self, project_id: i64, default_branch: &str, files: &[(&str, &str)]) {
+        let archive_files: Vec<(String, Vec<u8>)> = files
+            .iter()
+            .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
+            .collect();
         self.state.projects.lock().insert(
             project_id,
             ProjectData {
                 default_branch: default_branch.to_string(),
-                archive: build_tar_gz(files),
+                archive_files,
             },
         );
     }
@@ -147,7 +169,10 @@ impl MockGitlabServer {
     pub fn replace_archive(&self, project_id: i64, files: &[(&str, &str)]) {
         let mut projects = self.state.projects.lock();
         if let Some(project) = projects.get_mut(&project_id) {
-            project.archive = build_tar_gz(files);
+            project.archive_files = files
+                .iter()
+                .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
+                .collect();
         }
     }
 }
@@ -178,22 +203,38 @@ async fn handle_project_info(
 async fn handle_download_archive(
     State(state): State<Arc<MockState>>,
     Path(project_id): Path<i64>,
-    Query(_query): Query<ArchiveQuery>,
+    Query(query): Query<ArchiveQuery>,
 ) -> impl IntoResponse {
     let projects = state.projects.lock();
     match projects.get(&project_id) {
-        Some(p) => (StatusCode::OK, p.archive.clone()).into_response(),
+        Some(p) => {
+            let files: Vec<(&str, &str)> = p
+                .archive_files
+                .iter()
+                .map(|(path, content)| {
+                    (
+                        path.as_str(),
+                        std::str::from_utf8(content)
+                            .expect("test fixture content must be valid UTF-8"),
+                    )
+                })
+                .collect();
+            let archive = build_tar_gz(&files, &query.ref_name);
+            (StatusCode::OK, archive).into_response()
+        }
         None => StatusCode::NOT_FOUND.into_response(),
     }
 }
 
-fn build_tar_gz(files: &[(&str, &str)]) -> Vec<u8> {
+/// Build a gzipped tar archive with the Gitaly `<slug>-<ref>/` prefix.
+fn build_tar_gz(files: &[(&str, &str)], ref_name: &str) -> Vec<u8> {
     let mut tar_builder = tar::Builder::new(Vec::new());
 
     for (path, content) in files {
         let content_bytes = content.as_bytes();
         let mut header = tar::Header::new_gnu();
-        header.set_path(path).unwrap();
+        let archive_path = format!("project-{ref_name}/{path}");
+        header.set_path(&archive_path).unwrap();
         header.set_size(content_bytes.len() as u64);
         header.set_mode(0o644);
         header.set_cksum();
@@ -231,24 +272,23 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
     )
 }
 
-pub async fn create_project_in_graph(
-    clickhouse: &TestContext,
-    project_id: i64,
-    traversal_path: &str,
-    full_path: &str,
-) {
-    clickhouse
-        .execute(&format!(
-            "INSERT INTO gl_project (id, traversal_path, full_path, _version) \
-             VALUES ({project_id}, '{traversal_path}', '{full_path}', 1)",
+pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
+    let branches = clickhouse
+        .query(&format!(
+            "SELECT name FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false",
+            t("gl_branch")
         ))
         .await;
-}
+    assert!(
+        branches.first().is_some_and(|b| b.num_rows() > 0),
+        "no branch indexed"
+    );
 
-pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
     let files = clickhouse
         .query(&format!(
-            "SELECT path FROM gl_file WHERE project_id = {project_id}"
+            "SELECT path FROM {} WHERE project_id = {project_id}",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -258,7 +298,8 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
 
     let definitions = clickhouse
         .query(&format!(
-            "SELECT name FROM gl_definition WHERE project_id = {project_id}"
+            "SELECT name FROM {} WHERE project_id = {project_id}",
+            t("gl_definition")
         ))
         .await;
     assert!(
@@ -267,11 +308,12 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
     );
 
     let defines_edges = clickhouse
-        .query(
-            "SELECT source_id FROM gl_edge \
+        .query(&format!(
+            "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-        )
+            t("gl_edge")
+        ))
         .await;
     assert!(
         defines_edges.first().is_some_and(|b| b.num_rows() > 0),

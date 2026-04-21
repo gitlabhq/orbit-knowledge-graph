@@ -1,0 +1,285 @@
+name: "Java v1 parity — Main.main resolution"
+fixtures:
+  - path: com/example/app/Main.java
+    content: |
+      package com.example.app;
+      import com.example.util.Outer;
+      import com.example.helpers.*;
+      import java.util.ArrayList;
+      import java.util.List;
+      public class Main extends Application {
+          Foo myParameter;
+          public Main() { myParameter = new Foo(); }
+          @Traceable
+          public void main() {
+              if (this.myParameter.bar() instanceof Bar bar) { bar.baz(); }
+              myParameter.executor.execute(Executor::executeFn);
+              await(() -> super.run());
+              Outer o = Outer.make();
+              o.outerMethod();
+              Outer.Inner inner = new Outer.Inner();
+              inner.innerMethod();
+              Outer.Inner.innerStatic();
+              Helpers.doHelp();
+              EnumClass.ENUM_VALUE_1.enumMethod1();
+              var enumValue = EnumClass.ENUM_VALUE_2;
+              enumValue.enumMethod2();
+              var list = new ArrayList<String>();
+              var list2 = List.of("a", "b", "c");
+          }
+          public void await(Runnable fn) { fn.run(); }
+      }
+  - path: com/example/app/Foo.java
+    content: |
+      package com.example.app;
+      public class Foo {
+          public Executor executor = new Executor();
+          public Bar bar() { return new Bar(); }
+      }
+  - path: com/example/app/Bar.java
+    content: |
+      package com.example.app;
+      public class Bar { public void baz() {} }
+  - path: com/example/app/Application.java
+    content: |
+      package com.example.app;
+      public class Application { public void run() {} }
+  - path: com/example/app/Executor.java
+    content: |
+      package com.example.app;
+      public class Executor {
+          public static void executeFn() {}
+          public void execute(Runnable runnable) { runnable.run(); }
+      }
+  - path: com/example/app/Traceable.java
+    content: |
+      package com.example.app;
+      import java.lang.annotation.*;
+      @Retention(RetentionPolicy.RUNTIME)
+      @Target({ElementType.METHOD, ElementType.TYPE})
+      public @interface Traceable {}
+  - path: com/example/app/EnumClass.java
+    content: |
+      package com.example.app;
+      public enum EnumClass {
+          ENUM_VALUE_1, ENUM_VALUE_2, ENUM_VALUE_3;
+          public void enumMethod1() {}
+          public void enumMethod2() {}
+      }
+  - path: com/example/util/Outer.java
+    content: |
+      package com.example.util;
+      public class Outer {
+          public static class Inner {
+              public void innerMethod() {}
+              public static void innerStatic() {}
+          }
+          public void outerMethod() {}
+          public static Outer make() { return new Outer(); }
+      }
+  - path: com/example/helpers/Helpers.java
+    content: |
+      package com.example.helpers;
+      public class Helpers {
+          public static void doHelp() {}
+          abstract class InnerHelpers { public void innerDoHelp() {} }
+          class InnerInnerHelpers extends InnerHelpers {
+              public void innerInnerDoHelp() { super.innerDoHelp(); }
+          }
+      }
+
+tests:
+  # ── J1: test_java_reference_resolution_main (14 assertions) ──
+
+  - name: "All expected definitions exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'com.example.app.Main', 'com.example.app.Main.Main', 'com.example.app.Main.main', 'com.example.app.Main.await',
+        'com.example.app.Foo', 'com.example.app.Foo.bar',
+        'com.example.app.Bar', 'com.example.app.Bar.baz',
+        'com.example.app.Application', 'com.example.app.Application.run',
+        'com.example.app.Executor', 'com.example.app.Executor.executeFn', 'com.example.app.Executor.execute',
+        'com.example.app.Traceable',
+        'com.example.app.EnumClass', 'com.example.app.EnumClass.enumMethod1', 'com.example.app.EnumClass.enumMethod2',
+        'com.example.app.EnumClass.ENUM_VALUE_1', 'com.example.app.EnumClass.ENUM_VALUE_2', 'com.example.app.EnumClass.ENUM_VALUE_3',
+        'com.example.util.Outer', 'com.example.util.Outer.Inner', 'com.example.util.Outer.Inner.innerMethod',
+        'com.example.util.Outer.Inner.innerStatic', 'com.example.util.Outer.outerMethod', 'com.example.util.Outer.make',
+        'com.example.helpers.Helpers', 'com.example.helpers.Helpers.doHelp'
+      ]
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 28 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+
+  - name: "Main extends Application"
+    query: |
+      MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+      WHERE child.fqn = 'com.example.app.Main'
+        AND parent.fqn = 'com.example.app.Application'
+        AND e.edge_kind = 'Extends'
+      RETURN child.fqn AS child, parent.fqn AS parent, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Extends } }
+
+  - name: "Main.main -> Traceable annotation"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Traceable'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Traceable, kind: Calls } }
+
+  - name: "Main constructor -> new Foo()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.Main'
+        AND callee.fqn = 'com.example.app.Foo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Main.main -> Foo.bar (this.myParameter.bar())"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Foo.bar'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Foo.bar, kind: Calls } }
+
+  - name: "Main.main -> Bar.baz (pattern variable instanceof)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Bar.baz'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Bar.baz, kind: Calls } }
+
+  - name: "Main.main -> Bar (instanceof type ref)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Bar'
+      RETURN callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Main.main -> Executor.execute (method reference)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Executor.execute'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Main.main -> Main.await (same-class call)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Main.await'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Main.await, kind: Calls } }
+
+  - name: "Main.main -> Application.run (super call)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.Application.run'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.app.Application.run, kind: Calls } }
+
+  - name: "Main.main -> Outer.make (cross-package import)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.util.Outer.make'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.make, kind: Calls } }
+
+  - name: "Main.main -> Outer.outerMethod (resolved variable type)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.util.Outer.outerMethod'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.outerMethod, kind: Calls } }
+
+  - name: "Main.main -> Outer.Inner (nested class constructor)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.util.Outer.Inner'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.Inner, kind: Calls } }
+
+  - name: "Main.main -> Outer.Inner.innerMethod (nested class instance method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.util.Outer.Inner.innerMethod'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.Inner.innerMethod, kind: Calls } }
+
+  - name: "Main.main -> Outer.Inner.innerStatic (nested class static method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.util.Outer.Inner.innerStatic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: com.example.app.Main.main, callee: com.example.util.Outer.Inner.innerStatic, kind: Calls } }
+
+  - name: "InnerInnerHelpers.innerInnerDoHelp -> InnerHelpers.innerDoHelp (super call)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.helpers.Helpers.InnerInnerHelpers.innerInnerDoHelp'
+        AND callee.fqn = 'com.example.helpers.Helpers.InnerHelpers.innerDoHelp'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Main.main -> EnumClass.enumMethod1 (enum constant method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.EnumClass.enumMethod1'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }
+
+  - name: "Main.main -> EnumClass.enumMethod2 (enum var method)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.app.Main.main'
+        AND callee.fqn = 'com.example.app.EnumClass.enumMethod2'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { kind: Calls } }

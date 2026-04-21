@@ -5,7 +5,8 @@ domain: source_code
 description: A Git branch in a repository
 label: name
 destination_table: gl_branch
-default_columns: [id, name, protected, is_default]
+sort_key: [traversal_path, project_id, id]
+default_columns: [id, name, is_default]
 
 style:
   size: 28
@@ -21,7 +22,7 @@ properties:
     type: int64
     source: id
     nullable: false
-    description: "TODO: Derived identifier for the branch (needs to be computed from project_id + branch_name hash or similar)."
+    description: "Derived identifier for the branch (hash of project_id + branch name)."
 
   project_id:
     type: int64
@@ -35,26 +36,28 @@ properties:
     nullable: false
     description: "Name of the branch (e.g., main, feature/new-login)."
 
-  protected:
-    type: boolean
-    source: protected
-    nullable: true
-    description: "Whether the branch is protected."
-
   is_default:
     type: boolean
     source: is_default
-    nullable: true
+    nullable: false
     description: "Whether this is the default branch of the project."
 
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
-# edges:
-#   - type: IN_PROJECT
-#     source_id: project_id
-#     target_kind: Project
-
+storage:
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: name, type: "String", codec: ["ZSTD(1)"]}
+    - {name: is_default, type: "Bool", default: "true"}
+  indexes:
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

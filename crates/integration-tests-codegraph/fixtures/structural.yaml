@@ -1,0 +1,119 @@
+name: Structural invariants
+fixtures:
+  - path: service.py
+    content: |
+      class UserService:
+          def get_user(self, id):
+              return id
+          def create_user(self, name):
+              user = self.get_user(name)
+              return user
+  - path: main.py
+    content: |
+      from service import UserService
+      svc = UserService()
+      svc.create_user("alice")
+
+tests:
+  # ── Original targeted queries, hardened ──────────────────────
+
+  - name: No self-referencing call edges
+    query: |
+      MATCH (d:Definition)-[:DefinitionToDefinition]->(d2:Definition)
+      WHERE d.id = d2.id
+      RETURN d.fqn AS self_caller
+    assert:
+      - { empty: true }
+
+  - name: Graph has expected file count
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 2 } }
+
+  - name: Graph has expected definition count
+    query: |
+      MATCH (d:Definition)
+      RETURN count(d) AS n
+    assert:
+      - { count_equals: { field: n, value: 3 } }
+
+  - name: Directory to file edges exist
+    query: |
+      MATCH (d:Directory)-[:DirectoryToFile]->(f:File)
+      RETURN d.path AS dir, f.path AS file
+    assert:
+      - { row_count: 2 }
+      - { column_values: { field: file, values: ["service.py", "main.py"] } }
+
+  - name: File to definition edges exist
+    query: |
+      MATCH (f:File)-[:FileToDefinition]->(d:Definition)
+      RETURN f.path AS file, d.name AS def
+    assert:
+      - { row_count: 5 }
+      - { row: { file: "service.py", def: "UserService" } }
+      - { row: { file: "service.py", def: "get_user" } }
+      - { row: { file: "service.py", def: "create_user" } }
+      - { row: { file: "main.py", def: "UserService" } }
+      - { row: { file: "main.py", def: "create_user" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Files have correct metadata
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.extension AS ext, f.language AS lang
+    assert:
+      - { row_count: 2 }
+      - { unique: path }
+      - { match: { field: ext, pattern: "py" } }
+      - { match: { field: lang, pattern: "python" } }
+
+  - name: All definitions belong to service.py with exact FQNs
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { match: { field: file, pattern: "service.py" } }
+      - { row: { name: "UserService", fqn: "service.UserService", type: "Class" } }
+      - { row: { name: "get_user", fqn: "service.UserService.get_user", type: "Method" } }
+      - { row: { name: "create_user", fqn: "service.UserService.create_user", type: "Method" } }
+      - { not: true, row: { file: "main.py" } }
+
+  - name: FileToDefinition edges split by edge_kind
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      RETURN f.path AS file, d.name AS def, e.edge_kind AS kind
+    assert:
+      - { where: { kind: "Defines" }, row_count: 3 }
+      - { where: { kind: "Defines" }, match: { field: file, pattern: "service.py" } }
+      - { where: { kind: "Defines" }, not: true, match: { field: file, pattern: "main.py" } }
+      - { where: { kind: "Defines" }, column_values: { field: def, values: ["UserService", "get_user", "create_user"] } }
+      - { where: { kind: "Calls" }, row_count: 2 }
+      - { where: { kind: "Calls" }, match: { field: file, pattern: "main.py" } }
+      - { where: { kind: "Calls" }, row: { file: "main.py", def: "UserService" } }
+      - { where: { kind: "Calls" }, row: { file: "main.py", def: "create_user" } }
+
+  - name: Import edge
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.file_path AS file, i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "main.py", path: "service", name: "UserService" } }
+
+  - name: Definition containment and call edges
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { where: { kind: "Defines" }, row_count: 2 }
+      - { where: { kind: "Defines" }, row: { parent: "service.UserService", child: "service.UserService.get_user" } }
+      - { where: { kind: "Defines" }, row: { parent: "service.UserService", child: "service.UserService.create_user" } }
+      - { where: { kind: "Calls" }, row_count: 1 }
+      - { where: { kind: "Calls" }, row: { parent: "service.UserService.create_user", child: "service.UserService.get_user" } }

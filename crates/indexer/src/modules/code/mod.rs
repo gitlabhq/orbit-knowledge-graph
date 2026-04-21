@@ -4,7 +4,7 @@
 //! fetches repository code from Gitaly, runs the code-graph, and
 //! writes the resulting graph data to ClickHouse.
 
-mod archive;
+pub(crate) mod archive;
 mod arrow_converter;
 mod checkpoint_store;
 mod code_indexing_task_handler;
@@ -13,7 +13,7 @@ pub mod indexing_pipeline;
 pub mod locking;
 pub mod metrics;
 mod namespace_backfill_dispatcher;
-mod repository_service;
+pub mod repository;
 mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
 mod stale_data_cleaner;
@@ -23,23 +23,21 @@ mod test_helpers;
 use std::sync::Arc;
 
 use crate::IndexerConfig;
+use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 pub use code_indexing_task_handler::CodeIndexingTaskHandler;
-pub use code_indexing_task_handler::CodeIndexingTaskHandlerConfig;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-pub use namespace_backfill_dispatcher::{
-    NamespaceCodeBackfillDispatcher, NamespaceCodeBackfillDispatcherConfig,
-};
-pub use siphon_code_indexing_task_dispatcher::{
-    SiphonCodeIndexingTaskDispatcher, SiphonCodeIndexingTaskDispatcherConfig,
-};
+pub use namespace_backfill_dispatcher::NamespaceCodeBackfillDispatcher;
+use repository::RepositoryResolver;
+pub use siphon_code_indexing_task_dispatcher::SiphonCodeIndexingTaskDispatcher;
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
-pub use repository_service::{
-    CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
+pub use repository::{
+    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
+    RepositoryService, RepositoryServiceError,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 
@@ -71,8 +69,12 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+
+    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
-        Arc::clone(&repository_service),
+        resolver,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,
         metrics.clone(),

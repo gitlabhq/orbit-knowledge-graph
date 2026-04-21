@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Graph unlocks querying capabilities across an entire GitLab namespace. To ensure data is never exposed to unauthorized users, the architecture implements a multi-layered security model that is enforced on every query. This document outlines the three layers of defense that work together to protect user data:
+The Knowledge Graph allows querying across an entire GitLab namespace. To prevent unauthorized data exposure, every query passes through three security layers:
 
 - Logical tenant segregation at the storage layer via indexed columns.
 - Query-time filtering using traversal IDs.
@@ -21,84 +21,94 @@ For the initial release, the Knowledge Graph enforces a simplified permission mo
 
 ### Request Flow
 
-The following diagram illustrates the end-to-end flow of a secure query, from the initial tool call to the final, redacted response.
+With [Workhorse query acceleration](decisions/008_workhorse_query_acceleration.md), the gRPC stream runs in Workhorse rather than on a Puma thread.
 
 ```mermaid
 sequenceDiagram
     participant Client as AI Agent/Client
+    participant Workhorse as Workhorse (Go)
     participant Rails as GitLab Rails
     participant AuthZ as Rails Permission Model<br/>(Declarative Policy)
     participant GKG as Knowledge Graph Service
 
-    Client->>+Rails: 1. Execute MCP tool call (e.g., query)
-    Rails->>+AuthZ: 2. Check: User has Reporter+ on group(s)?
+    Client->>+Workhorse: 1. POST /api/v4/orbit/query
+    Workhorse->>+Rails: 2. Proxy to Puma
+    Rails->>+AuthZ: 3. Check: User has Reporter+ on group(s)?
     AuthZ-->>-Rails: Yes + Get user's accessible traversal IDs
     Note over Rails: Trie-optimized: [[100], [200, 300], ...]
+    Rails-->>-Workhorse: 4. SendData header (JWT, GKG address, query)
 
-    Rails->>+GKG: 3. Forward query + traversal_ids + user context<br/>(via JWT + MTLS)
-    Note over GKG: 4. Layer 1: Inject organization_id filter<br/>Layer 2: Inject traversal_ids prefix filters
-    GKG->>GKG: 5. Execute filtered SQL query on ClickHouse
+    Workhorse->>+GKG: 5. gRPC ExecuteQuery (bidi stream)<br/>with JWT + traversal_ids
+    Note over GKG: 6. Layer 1: Inject organization_id filter<br/>Layer 2: Inject traversal_ids prefix filters
+    GKG->>GKG: 7. Execute filtered SQL query on ClickHouse
 
-    GKG->>+Rails: 6. For each result: Ability.allowed?<br/>(user, :read_issue, issue)
-    Note over GKG, Rails: Layer 3: Batch permission checks<br/>for confidential items, etc.
-    Rails-->>-GKG: ALLOW/DENY per resource
+    GKG-->>Workhorse: 8. RedactionRequired (resource IDs)
+    Workhorse->>+Rails: 9. POST /internal/orbit/redaction
+    Rails->>Rails: Ability.allowed? per resource
+    Note over Workhorse, Rails: Layer 3: Batch permission checks<br/>for confidential items, etc.
+    Rails-->>-Workhorse: ALLOW/DENY per resource
+    Workhorse-->>GKG: 10. RedactionResponse
 
-    GKG->>GKG: 7. Remove denied resources
-    GKG-->>-Rails: 8. Return sanitized results
-    Rails-->>-Client: 9. Return final, redacted data
+    GKG->>GKG: 11. Remove denied resources
+    GKG-->>-Workhorse: 12. ExecuteQueryResult
+    Workhorse-->>-Client: 13. Return final, redacted data
 ```
 
 ## Layer 1: Logical Tenant Segregation by Organization
 
-The first security boundary is logical tenant segregation enforced through database schema design and query predicates. All SDLC data (issues, merge requests, pipelines, etc.) is stored in ClickHouse tables with a `organization_id` column representing the organization.
+The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). Organization isolation is implicit: a user in org 42 receives a `SecurityContext` whose traversal paths all start with `42/`, and the `startsWith(traversal_path, '42/')` filter injected by the compiler cannot match rows from org 99.
 
 This layer is primarily intended for .com customers to ensure that they can only query data within their own organization.
 
-**Component**: Knowledge Graph Query Engine (`gkg-webserver`) and indexer (`gkg-indexer`)
+**Component**: Knowledge Graph Query Engine (`gkg-webserver`)
 
 **How It's Enforced**:
 
-- **At the ClickHouse Storage Layer**: When Siphon streams data from PostgreSQL, the indexer writes each row with a `organization_id` column that identifies the top-level organization it belongs to.
-- **Query-Level Enforcement**: The query compiler automatically injects `WHERE organization_id = ?` predicates into every generated SQL query before execution. The `organization_id` value is extracted from the authenticated JWT token passed by Rails.
-- **Multi-Tenant Queries Blocked**: The query planner explicitly rejects any attempt to query across multiple organization_ids in a single request (e.g., `WHERE organization_id IN [1, 2]`). Each query is scoped to exactly one top-level organization.
-- **Parameterization**: All queries are parameterized; the organization_id is bound as a parameter, never concatenated into SQL strings.
+- **At the ClickHouse Storage Layer**: The indexer writes each row with a `traversal_path` column encoding the full namespace hierarchy, starting with the organization ID as the first path segment.
+- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The organization ID is extracted from the JWT token and validated against traversal paths at `SecurityContext` construction time.
+- **Cross-Org Queries Blocked**: `SecurityContext::new()` validates that every traversal path's first segment matches the JWT's `organization_id`. A path starting with `"2/"` is rejected when `org_id=1`. Each query is scoped to exactly one organization.
+- **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
 
 **Code Review Requirements**:
 
-- Every query generation function must call a `inject_organization_id_filter()` or similarly named method.
-- Unit tests must verify that queries without organization filters are rejected.
-- Integration tests must verify cross-organization queries are blocked.
-- Fuzz tests must verify that queries with invalid organization_ids are rejected.
+- The compiler's `SecurityPass` runs on all query types (search, traversal, aggregation, path-finding, neighbors). The `CheckPass` rejects any query where a `gl_*` table alias lacks a valid `startsWith` filter.
+- Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
+- Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
-**Detection and Monitoring**:
+**The `gl_user` table exception**: The User entity is global (not namespace-scoped) and has no `traversal_path` column. It is listed in `skip_security_filter_for_entities` in the ontology. Users can only appear in query results through edge table joins, and edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through user joins.
 
-- **Metric**: `gkg.query.organization_filter_applied` (counter) - tracks queries with organization filtering applied.
-- **Metric**: `gkg.query.multi_tenant_rejected` (counter) - increments when a multi-tenant query is blocked.
-- **Audit Logging**: All queries are logged with `organization_id`, `user_id`, and `query_hash` for security audit trails.
-- **Alert**: Trigger critical alert if cross-tenant access attempts are detected.
+```plantuml
+@startuml
+skinparam rectangleBorderColor #666
+skinparam rectangleBackgroundColor #f9f9f9
 
-```mermaid
-graph TD
-    subgraph Siphon_CDC ["Siphon CDC Ingestion"]
-        direction LR
-        PG[(PostgreSQL)] --> Siphon
-    end
+rectangle "Siphon CDC Ingestion" {
+  database "PostgreSQL" as PG
+  component "Siphon" as Siphon
+  PG --> Siphon
+}
 
-    subgraph ClickHouse_Storage ["ClickHouse Storage "]
-        direction TB
-        Issues["issues table<br/>(organization_id, id, title, ...)"]
-        MRs["merge_requests table<br/>(organization_id, id, title, ...)"]
-        Pipelines["pipelines table<br/>(organization_id, id, status, ...)"]
-    end
+rectangle "ClickHouse Storage" {
+  collections "gl_project\n(traversal_path, id, ...)" as Projects
+  collections "gl_merge_request\n(traversal_path, id, ...)" as MRs
+  collections "gl_edge\n(traversal_path, source, target, ...)" as Edges
+  collections "gl_user\n(id, username, ...)\n[no traversal_path]" as Users
+}
 
-    subgraph Query_Engine ["Knowledge Graph Query Engine"]
-        direction TB
-        QE["Query Compiler<br/>Injects: WHERE organization_id = ?"]
-    end
+rectangle "Query Engine" {
+  component "SecurityPass\nInjects: startsWith(traversal_path, ?)" as Security
+  component "CheckPass\nVerifies all gl_* aliases filtered" as Check
+  Security --> Check
+}
 
-    Siphon -->|Writes with organization_id| ClickHouse_Storage
-    QE -->|Queries with organization filter| ClickHouse_Storage
-
+Siphon --> Projects : writes with\ntraversal_path
+Siphon --> MRs
+Siphon --> Edges
+Siphon --> Users
+Check --> Projects : queries with\nstartsWith filter
+Check --> MRs
+Check --> Edges
+@enduml
 ```
 
 ## Layer 2: Query-Time Filtering with Traversal IDs
@@ -172,7 +182,7 @@ graph TD
     Q -.-> C
 ```
 
-While this serves as an efficient first pass of authorization and reduces the result set, it does not account for resource-specific permissions like confidential issues, which is why a final redaction layer is required.
+This is an efficient first pass that reduces the result set, but it does not account for resource-specific permissions like confidential issues. That is why Layer 3 exists.
 
 ### Additional Query Safeguards
 
@@ -190,10 +200,10 @@ In addition to authorization filtering, the query engine implements further safe
 
 **Detection and Monitoring**:
 
-- **Metric**: `qe.threat.depth_exceeded` (counter) — queries rejected for exceeding traversal depth or hop cap.
-- **Metric**: `qe.threat.limit_exceeded` (counter) — queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
-- **Metric**: `qe.threat.timeout` (counter) — queries that timed out.
-- **Metric**: `qe.threat.rate_limited` (counter) — queries rejected due to rate limiting.
+- **Metric**: `qe.threat.depth_exceeded` (counter) -queries rejected for exceeding traversal depth or hop cap.
+- **Metric**: `qe.threat.limit_exceeded` (counter) -queries rejected for exceeding array cardinality caps (node_ids, IN filter values).
+- **Metric**: `qe.threat.timeout` (counter) -queries that timed out.
+- **Metric**: `qe.threat.rate_limited` (counter) -queries rejected due to rate limiting.
 - **Alert**: Trigger warning if timeout rate exceeds 5% of total queries.
 
 ## Layer 3: Final Redaction Layer via Rails Authorization
@@ -229,18 +239,20 @@ end
 
 The `Ability.allowed?` method is the single source of truth for resource-level permissions in GitLab. It evaluates all declarative policies, custom roles, and special cases including runtime checks (such as SAML group links or IP restrictions).
 
-**Component**: Knowledge Graph Service (`gkg-webserver`) + GitLab Rails via gRPC bidirectional streaming
+**Component**: Knowledge Graph Service (`gkg-webserver`) + Workhorse (gRPC client) + GitLab Rails (redaction callback)
 
-See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for full protocol details.
+See [ADR 001](decisions/001_grpc_communication.md) for the protocol design and [ADR 008](decisions/008_workhorse_query_acceleration.md) for the Workhorse acceleration architecture.
 
-Rather than a separate authorization endpoint, the redaction exchange occurs inside the same gRPC bidirectional stream that carries the query. The flow is:
+The redaction exchange occurs inside a bidirectional gRPC stream between Workhorse and the GKG server. Workhorse calls back to Rails for authorization checks via an internal HTTP endpoint. The flow is:
 
-1. Rails sends the query to GKG over a gRPC bidirectional stream.
-2. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
-3. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
-4. Rails calls `Ability.allowed?` for each resource and responds with `ResourceAuthorization[]` on the same stream.
-5. GKG applies those authorizations -- the query pipeline marks unauthorized rows and drops them from the result set.
-6. GKG returns the redacted results to Rails as an `ExecuteQueryResult`.
+1. Rails authenticates the user, builds a JWT, and returns a SendData header to Workhorse.
+2. Workhorse opens a bidirectional `ExecuteQuery` gRPC stream to GKG.
+3. GKG runs the query on ClickHouse and identifies redactable columns from the ontology.
+4. GKG sends a `RedactionExchange.required` message back through the stream with `ResourceToAuthorize[]` entries, grouped by entity type and ability (e.g., all issues that need `read_issue` checks).
+5. Workhorse calls `POST /api/v4/internal/orbit/redaction` with the resource IDs and the user's forwarded auth headers. Rails calls `Ability.allowed?` for each resource and returns the authorization map.
+6. Workhorse sends the `RedactionResponse` back on the gRPC stream.
+7. GKG applies those authorizations, marks unauthorized rows, and drops them from the result set.
+8. GKG returns the redacted results to Workhorse as an `ExecuteQueryResult`.
 
 **Code Review Requirements**:
 
@@ -261,13 +273,17 @@ Rather than a separate authorization endpoint, the redaction exchange occurs ins
 ```mermaid
 sequenceDiagram
     actor Client
+    participant Workhorse
     participant Rails
     participant WebServer as GKG Web Server
     participant AuthEngine as Query Pipeline
 
-    Client->>Rails: Send Request
-    Rails->>WebServer: Query Knowledge Graph (gRPC bidi stream)
+    Client->>Workhorse: Send Request
+    Workhorse->>Rails: Proxy to Puma
+    Rails->>Rails: Authenticate, build JWT
+    Rails-->>Workhorse: SendData header (orbit-query:...)
 
+    Workhorse->>WebServer: gRPC ExecuteQuery (bidi stream)
     activate WebServer
     WebServer->>WebServer: Compile Graph Query & Execute on ClickHouse
     WebServer->>AuthEngine: Pass result set
@@ -276,18 +292,19 @@ sequenceDiagram
     AuthEngine->>AuthEngine: Identify redactable columns from ontology
     AuthEngine->>AuthEngine: Group rows by entity type + permission + resource IDs
 
-    Note over AuthEngine, Rails: gRPC Bidirectional Streaming RedactionExchange
-    AuthEngine->>Rails: RedactionExchange.required (ResourceToAuthorize[])
+    AuthEngine->>Workhorse: RedactionExchange.required (ResourceToAuthorize[])
+    Workhorse->>Rails: POST /internal/orbit/redaction
     Rails->>Rails: Ability.allowed? per resource
-    Rails-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
+    Rails-->>Workhorse: authorization map
+    Workhorse-->>AuthEngine: RedactionExchange.response (ResourceAuthorization[])
 
     AuthEngine->>AuthEngine: apply_authorizations() - mark unauthorized rows
     AuthEngine->>WebServer: Redacted result set
     deactivate AuthEngine
     deactivate WebServer
 
-    WebServer-->>Rails: ExecuteQueryResult with redacted payload
-    Rails-->>Client: Final redacted data
+    WebServer-->>Workhorse: ExecuteQueryResult with redacted payload
+    Workhorse-->>Client: Final redacted data
 ```
 
 This final check guarantees that:
@@ -299,9 +316,13 @@ This final check guarantees that:
 
 ### Thread and connection model
 
-The redaction exchange runs on the same Puma thread that initiated the request. The bidi stream blocks this thread for the full round-trip: query execution, redaction exchange (including `Ability.allowed?` DB lookups), and result delivery. This is one thread per query -- an improvement over the REST callback alternative, which would have consumed two threads (one blocked waiting, one handling the callback).
+With Workhorse query acceleration ([ADR 008](decisions/008_workhorse_query_acceleration.md)), the bidirectional gRPC stream runs in Workhorse (Go) rather than on a Puma thread. Puma handles two short calls: authentication and JWT construction (~10ms), and the redaction callback (~50ms). The gRPC stream, ClickHouse execution, and result hydration happen entirely in Workhorse goroutines.
 
-Explicit gRPC deadlines must be configured on both the Rails client and the GKG server before production rollout to prevent indefinite thread blocking on stalled streams. See [ADR: gRPC Communication Protocol](decisions/001_grpc_communication.md) for details on known gaps.
+Workhorse forwards the original client's auth headers (`Authorization`, `Private-Token`, `Cookie`) to the internal redaction endpoint at `POST /api/v4/internal/orbit/redaction`. This endpoint requires both Workhorse API signing and a valid user session, so Rails still authenticates the user for every redaction check.
+
+The Go gRPC client enforces a configurable timeout (default 30s, max 120s) and a maximum of 10 stream messages per query. Connection health is monitored via keepalive (60s interval, 20s timeout), and stale connections in `Shutdown` or `TransientFailure` state are replaced automatically.
+
+See [ADR 001](decisions/001_grpc_communication.md) for the original protocol design and [ADR 008](decisions/008_workhorse_query_acceleration.md) for the Workhorse acceleration architecture.
 
 ## Service-to-Service Authentication and Authorization
 

@@ -1,8 +1,0 @@
-# config/ontology/edges/merged_by.yaml
-
-description: User who merged the merge request
-
-variants:
-  - from_node: { type: MergeRequest, id: id }
-    to_node: { type: User, id: id }
-    description: "Merge request was merged by user."

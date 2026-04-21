@@ -3,21 +3,16 @@ name = "query-engine"
 version.workspace = true
 edition = "2024"
 
-[dependencies]
-gkg-utils = { path = "../utils" }
-ontology = { path = "../ontology" }
-once_cell = { workspace = true }
-opentelemetry = { workspace = true }
-regex = { workspace = true }
-serde = { workspace = true }
-serde_json = { workspace = true }
-strum = { workspace = true }
-thiserror = { workspace = true }
-jsonschema = { workspace = true }
-const_format = { workspace = true }
+[features]
+default = []
+testutils = ["formatters/testutils"]
 
-[dev-dependencies]
-pretty_assertions = "1.4"
+[dependencies]
+compiler = { path = "compiler" }
+types = { path = "types" }
+pipeline = { path = "pipeline" }
+formatters = { path = "formatters" }
+shared = { path = "shared" }
 
 [lints]
 workspace = true

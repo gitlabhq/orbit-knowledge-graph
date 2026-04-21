@@ -46,7 +46,7 @@ Focus on problems that would actually hurt in production. Skip anything the comp
 
 ### ClickHouse query performance
 
-When the MR changes SQL generation or schema, reconstruct the generated SQL, and cross-reference `~/refs/clickhouse-docs` for how ClickHouse handles it. SQL generation starts in `crates/query-engine/src/` and indexer in `crates/indexer/src/`. Cite the ClickHouse docs in your analysis.
+When the MR changes SQL generation or schema, reconstruct the generated SQL, and cross-reference `~/refs/clickhouse-docs` for how ClickHouse handles it. SQL generation starts in `crates/query-engine/compiler/src/` and indexer in `crates/indexer/src/`. Cite the ClickHouse docs in your analysis.
 
 The kinds of things that go wrong (not exhaustive, use your judgment):
 

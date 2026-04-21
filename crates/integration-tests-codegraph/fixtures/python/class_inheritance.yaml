@@ -1,0 +1,42 @@
+name: "Python: class inheritance metadata"
+fixtures:
+  - path: main.py
+    content: |
+      class Animal:
+          def speak(self):
+              pass
+
+      class Dog(Animal):
+          def fetch(self):
+              pass
+
+      class GuideDog(Dog, Animal):
+          def guide(self):
+              pass
+
+tests:
+  - name: All classes exist
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN count(d) AS n
+    assert:
+      - { count_equals: { field: n, value: 3 } }
+
+  - name: Dog has fetch method
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'Dog' AND m.name = 'fetch'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.Dog.fetch" } }
+
+  - name: GuideDog has guide method
+    query: |
+      MATCH (cls:Definition)-[:DefinitionToDefinition]->(m:Definition)
+      WHERE cls.name = 'GuideDog' AND m.name = 'guide'
+      RETURN m.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.GuideDog.guide" } }

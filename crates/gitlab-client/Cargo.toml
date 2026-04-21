@@ -6,6 +6,10 @@ license = "LicenseRef-EE"
 
 [dependencies]
 base64 = { workspace = true }
+bytes = { workspace = true }
+chrono = { workspace = true }
+futures = { workspace = true }
+gkg-server-config = { path = "../gkg-server-config" }
 jsonwebtoken = { workspace = true }
 reqwest = { workspace = true }
 rustls = { workspace = true }
@@ -13,4 +17,3 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 thiserror = { workspace = true }
 tracing = { workspace = true }
-chrono = { workspace = true }

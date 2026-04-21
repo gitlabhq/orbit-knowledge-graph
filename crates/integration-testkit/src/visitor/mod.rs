@@ -23,10 +23,11 @@ mod enforcement;
 use enforcement::AssertionTracker;
 pub use enforcement::{QueryRequirements, Requirement};
 
+use std::cell::RefCell;
 use std::collections::HashSet;
 
-use gkg_server::query_pipeline::{GraphEdge, GraphNode, GraphResponse};
-use query_engine::input::{Input, QueryType};
+use query_engine::compiler::input::{Input, QueryType};
+use query_engine::formatters::{GraphEdge, GraphNode, GraphResponse};
 use serde_json::Value;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -107,6 +108,13 @@ impl<T> Drop for MustInspect<T> {
 pub struct ResponseView {
     pub response: GraphResponse,
     tracker: AssertionTracker,
+    /// Edge types that have been positively asserted by the test.
+    ///
+    /// Populated by methods that satisfy [`Requirement::Relationship`] or
+    /// [`Requirement::Neighbors`]. Used by [`assert_all_edge_types_covered`]
+    /// to verify that the test has acknowledged every edge type present in
+    /// the response.
+    asserted_edge_types: RefCell<HashSet<String>>,
 }
 
 impl ResponseView {
@@ -119,6 +127,7 @@ impl ResponseView {
         Self {
             response,
             tracker: AssertionTracker::empty(),
+            asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }
 
@@ -151,6 +160,7 @@ impl ResponseView {
         Self {
             response,
             tracker: AssertionTracker::new(input.requirements()),
+            asserted_edge_types: RefCell::new(HashSet::new()),
         }
     }
 
@@ -175,14 +185,14 @@ impl ResponseView {
         self.response.nodes.len()
     }
 
-    /// Assert exact node count. Satisfies [`Requirement::Range`] and
-    /// [`Requirement::NodeCount`].
+    /// Assert exact node count. Satisfies [`Requirement::NodeCount`] and
+    /// [`Requirement::Cursor`].
     ///
     /// Does NOT satisfy [`Requirement::NodeIds`] — use [`node_ids`](Self::node_ids)
     /// or [`assert_node_order`](Self::assert_node_order) to verify which IDs were returned.
     pub fn assert_node_count(&self, expected: usize) {
-        self.tracker.satisfy(Requirement::Range);
         self.tracker.satisfy(Requirement::NodeCount);
+        self.tracker.satisfy(Requirement::Cursor);
         assert_eq!(
             self.response.nodes.len(),
             expected,
@@ -284,6 +294,13 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        // Edge type is tracked eagerly here (before MustInspect is returned).
+        // If the caller discards the MustInspect, both panics fire — MustInspect
+        // first (discard), then edge_type is already tracked. In practice this is
+        // fine: MustInspect prevents the discard pattern entirely.
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let edges = self
             .response
             .edges
@@ -309,18 +326,20 @@ impl ResponseView {
             .collect()
     }
 
-    /// Return the set of distinct path_ids present in edges.
+    /// Return the distinct path_ids present in edges, in first-seen order.
     ///
     /// Tests should use this to discover which paths exist, then call
     /// [`path`] for each one explicitly.
     /// Satisfies [`Requirement::PathFinding`].
-    pub fn path_ids(&self) -> MustInspect<HashSet<usize>> {
+    pub fn path_ids(&self) -> MustInspect<Vec<usize>> {
         self.tracker.satisfy(Requirement::PathFinding);
+        let mut seen = HashSet::new();
         let ids = self
             .response
             .edges
             .iter()
             .filter_map(|e| e.path_id)
+            .filter(|id| seen.insert(*id))
             .collect();
         MustInspect::new(ids, "path_ids()")
     }
@@ -377,6 +396,33 @@ impl ResponseView {
         );
     }
 
+    /// Assert the integer value of a column on an ungrouped aggregation response.
+    ///
+    /// Ungrouped aggregations expose their value via `response.columns[*].value`
+    /// rather than on graph nodes. Satisfies [`Requirement::Aggregation`].
+    pub fn assert_aggregation_value_i64(&self, alias: &str, expected: i64) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        let cols = self.response.columns.as_ref().unwrap_or_else(|| {
+            panic!("ungrouped aggregation response has no columns (looking for '{alias}')")
+        });
+        let col = cols
+            .iter()
+            .find(|c| c.name == alias)
+            .unwrap_or_else(|| panic!("column '{alias}' not found in {cols:?}"));
+        let actual = col
+            .value
+            .as_ref()
+            .and_then(|v| {
+                v.as_i64()
+                    .or_else(|| v.as_str().and_then(|s| s.parse::<i64>().ok()))
+            })
+            .unwrap_or_else(|| panic!("column '{alias}' has no integer value: {:?}", col.value));
+        assert_eq!(
+            actual, expected,
+            "column '{alias}': expected {expected}, got {actual}"
+        );
+    }
+
     /// Satisfies [`Requirement::Relationship`] for the given edge type, and [`Requirement::Neighbors`].
     pub fn assert_edge_exists(
         &self,
@@ -390,6 +436,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         assert!(
             self.find_edge(from, from_id, to, to_id, edge_type)
                 .is_some(),
@@ -497,6 +546,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual: HashSet<(i64, i64)> = self
             .response
             .edges
@@ -515,6 +567,9 @@ impl ResponseView {
             edge_type: edge_type.to_string(),
         });
         self.tracker.satisfy(Requirement::Neighbors);
+        self.asserted_edge_types
+            .borrow_mut()
+            .insert(edge_type.to_string());
         let actual = self
             .response
             .edges
@@ -552,6 +607,49 @@ impl ResponseView {
                 all.contains(&to),
                 "edge references non-existent target node {to:?}"
             );
+        }
+    }
+    /// Assert that every edge type present in the response has been verified
+    /// by at least one edge assertion method.
+    ///
+    /// Call at the end of a neighbors test (or any test with edges) to ensure
+    /// the test has not silently ignored entire edge types. This closes the
+    /// coverage gap where asserting a single edge type satisfies the generic
+    /// [`Requirement::Neighbors`] but leaves other edge types unchecked.
+    ///
+    /// # Panics
+    ///
+    /// Panics with a prescriptive message listing the uncovered edge types
+    /// and which assertion methods to use:
+    ///
+    /// ```text
+    /// Uncovered edge types in response:
+    ///   - ASSIGNED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
+    ///   - AUTHORED (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)
+    /// ```
+    pub fn assert_all_edge_types_covered(&self) {
+        let response_types: HashSet<String> = self
+            .response
+            .edges
+            .iter()
+            .map(|e| e.edge_type.clone())
+            .collect();
+        let asserted = self.asserted_edge_types.borrow();
+        let uncovered: Vec<&String> = {
+            let mut v: Vec<&String> = response_types.difference(&*asserted).collect();
+            v.sort();
+            v
+        };
+        if !uncovered.is_empty() {
+            let list: Vec<String> = uncovered
+                .iter()
+                .map(|t| {
+                    format!(
+                        "  - {t} (call assert_edge_exists, edges_of_type, assert_edge_set, or assert_edge_count)"
+                    )
+                })
+                .collect();
+            panic!("Uncovered edge types in response:\n{}", list.join("\n"));
         }
     }
 }
@@ -713,6 +811,7 @@ pub(crate) mod tests {
 
     pub(crate) fn sample_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "traversal".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -725,33 +824,42 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
                 make_edge("User", 2, "Group", 100, "MEMBER_OF"),
             ],
+            columns: None,
+            pagination: None,
         }
     }
 
     pub(crate) fn sample_search_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "search".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            columns: None,
+            pagination: None,
         }
     }
 
     pub(crate) fn sample_aggregation_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "aggregation".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
                 make_node("User", 2, &[("username", json!("bob"))]),
             ],
             edges: vec![],
+            columns: None,
+            pagination: None,
         }
     }
 
     pub(crate) fn sample_neighbors_response() -> GraphResponse {
         GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "neighbors".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
@@ -762,6 +870,8 @@ pub(crate) mod tests {
                 make_edge("User", 1, "Group", 100, "MEMBER_OF"),
                 make_edge("User", 1, "Group", 101, "MEMBER_OF"),
             ],
+            columns: None,
+            pagination: None,
         }
     }
 
@@ -900,6 +1010,7 @@ pub(crate) mod tests {
     #[test]
     fn path_ids_returns_distinct_ids() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),
@@ -912,14 +1023,17 @@ pub(crate) mod tests {
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 2, 0),
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 2, 1),
             ],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
-        assert_eq!(view.path_ids(), HashSet::from([0, 2]));
+        assert_eq!(*view.path_ids(), vec![0, 2]);
     }
 
     #[test]
     fn path_returns_edges_sorted_by_step() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "path_finding".to_string(),
             nodes: vec![
                 make_node("User", 1, &[]),
@@ -930,6 +1044,8 @@ pub(crate) mod tests {
                 make_path_edge("Group", 100, "Project", 1000, "CONTAINS", 0, 1),
                 make_path_edge("User", 1, "Group", 100, "MEMBER_OF", 0, 0),
             ],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         let path = view.path(0);
@@ -1050,9 +1166,12 @@ pub(crate) mod tests {
     #[should_panic(expected = "non-existent target node")]
     fn assert_referential_integrity_panics_for_dangling_edge() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "traversal".to_string(),
             nodes: vec![make_node("User", 1, &[])],
             edges: vec![make_edge("User", 1, "Group", 999, "MEMBER_OF")],
+            columns: None,
+            pagination: None,
         };
         ResponseView::new(resp).assert_referential_integrity();
     }
@@ -1158,9 +1277,12 @@ pub(crate) mod tests {
     #[test]
     fn empty_response_returns_zero_counts_and_empty_collections() {
         let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
             query_type: "search".to_string(),
             nodes: vec![],
             edges: vec![],
+            columns: None,
+            pagination: None,
         };
         let view = ResponseView::new(resp);
         assert_eq!(view.node_count(), 0);
@@ -1169,5 +1291,134 @@ pub(crate) mod tests {
         assert!(view.edges_of_type("MEMBER_OF").is_empty());
         assert!(view.path_ids().is_empty());
         view.assert_referential_integrity();
+    }
+}
+
+#[cfg(test)]
+mod edge_coverage_tests {
+    use super::tests::{make_edge, make_node};
+    use super::*;
+    use query_engine::formatters::GraphResponse;
+
+    fn response_with_two_edge_types() -> GraphResponse {
+        GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
+            query_type: "neighbors".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("MergeRequest", 2000, &[]),
+            ],
+            edges: vec![
+                make_edge("User", 1, "Group", 100, "MEMBER_OF"),
+                make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
+            ],
+            columns: None,
+            pagination: None,
+        }
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_passes_when_all_asserted() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    #[should_panic(expected = "Uncovered edge types")]
+    fn assert_all_edge_types_covered_panics_on_missing_type() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        // Only assert MEMBER_OF, skip AUTHORED
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    #[should_panic(expected = "AUTHORED")]
+    fn assert_all_edge_types_covered_names_missing_type_in_panic() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edges_of_type() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        assert!(!view.edges_of_type("MEMBER_OF").is_empty());
+        assert!(!view.edges_of_type("AUTHORED").is_empty());
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edge_set() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_set("MEMBER_OF", &[(1, 100)]);
+        view.assert_edge_set("AUTHORED", &[(1, 2000)]);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_with_edge_count() {
+        let view = ResponseView::new(response_with_two_edge_types());
+        view.assert_edge_count("MEMBER_OF", 1);
+        view.assert_edge_count("AUTHORED", 1);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_empty_response_passes() {
+        let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
+            query_type: "search".to_string(),
+            nodes: vec![],
+            edges: vec![],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_single_type_passes() {
+        let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
+            query_type: "traversal".to_string(),
+            nodes: vec![make_node("User", 1, &[]), make_node("Group", 100, &[])],
+            edges: vec![make_edge("User", 1, "Group", 100, "MEMBER_OF")],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        view.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+        view.assert_all_edge_types_covered();
+    }
+
+    #[test]
+    fn assert_all_edge_types_covered_mixed_assertion_methods() {
+        let resp = GraphResponse {
+            format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
+            query_type: "neighbors".to_string(),
+            nodes: vec![
+                make_node("User", 1, &[]),
+                make_node("Group", 100, &[]),
+                make_node("Group", 102, &[]),
+                make_node("MergeRequest", 2000, &[]),
+            ],
+            edges: vec![
+                make_edge("User", 1, "Group", 100, "MEMBER_OF"),
+                make_edge("User", 1, "Group", 102, "MEMBER_OF"),
+                make_edge("User", 1, "MergeRequest", 2000, "AUTHORED"),
+            ],
+            columns: None,
+            pagination: None,
+        };
+        let view = ResponseView::new(resp);
+        // Use different assertion methods for different edge types
+        view.assert_edge_set("MEMBER_OF", &[(1, 100), (1, 102)]);
+        view.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+        view.assert_all_edge_types_covered();
     }
 }

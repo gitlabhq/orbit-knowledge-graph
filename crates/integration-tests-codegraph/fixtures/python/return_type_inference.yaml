@@ -1,0 +1,65 @@
+name: "Python: return type inference (same-file)"
+fixtures:
+  - path: main.py
+    content: |
+      class Database:
+          def query(self):
+              pass
+
+      class Logger:
+          def log(self):
+              pass
+
+      class Decoy:
+          def query(self):
+              pass
+          def log(self):
+              pass
+
+      def make_db():
+          return Database()
+
+      def make_logger():
+          return Logger()
+
+      def make_db_indirect():
+          db = Database()
+          return db
+
+      def use_factory():
+          db = make_db()
+          db.query()
+          log = make_logger()
+          log.log()
+
+      def use_indirect():
+          db = make_db_indirect()
+          db.query()
+
+tests:
+  - name: make_db().query() resolves to Database.query not Decoy.query
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_factory' AND callee.name = 'query' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.use_factory", callee: "main.Database.query" } }
+
+  - name: make_logger().log() resolves to Logger.log not Decoy.log
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_factory' AND callee.name = 'log' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.use_factory", callee: "main.Logger.log" } }
+
+  - name: Indirect return (return x where x = Database()) resolves
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_indirect' AND callee.name = 'query' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.use_indirect", callee: "main.Database.query" } }

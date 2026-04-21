@@ -12,18 +12,23 @@ pub(super) async fn neighbors_outgoing_returns_correct_targets(ctx: &TestContext
     )
     .await;
 
-    resp.assert_node_count(6);
+    resp.assert_node_count(9);
     resp.assert_referential_integrity();
 
     resp.assert_node_ids("User", &[1]);
     resp.assert_node_ids("Group", &[100, 102]);
-    resp.assert_node_ids("MergeRequest", &[2000, 2001]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
     resp.assert_node_ids("Note", &[3000]);
+    resp.assert_node_ids("WorkItem", &[4000, 4002]);
 
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "MergeRequest", 2002, "APPROVED");
     resp.assert_edge_exists("User", 1, "Note", 3000, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "WorkItem", 4000, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "WorkItem", 4002, "AUTHORED");
+    resp.assert_edge_exists("User", 1, "WorkItem", 4000, "ASSIGNED");
 
     resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
     resp.assert_node("Group", 102, |n| {
@@ -82,14 +87,17 @@ pub(super) async fn neighbors_both_direction_returns_all_connected(ctx: &TestCon
     )
     .await;
 
-    resp.assert_node_count(7);
+    resp.assert_node_count(9);
     resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_node_ids("Project", &[1000, 1002]);
+    resp.assert_node_ids("WorkItem", &[4000, 4001]);
 
     resp.assert_referential_integrity();
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");
+    resp.assert_edge_exists("WorkItem", 4000, "Group", 100, "IN_GROUP");
+    resp.assert_edge_exists("WorkItem", 4001, "Group", 100, "IN_GROUP");
 }
 
 pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
@@ -104,15 +112,20 @@ pub(super) async fn neighbors_mixed_entity_types(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(5);
+    resp.assert_node_count(9);
     resp.assert_referential_integrity();
-    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("User", &[1, 2, 3]);
     resp.assert_node_ids("Note", &[3000, 3002, 3003]);
+    resp.assert_node_ids("MergeRequestDiff", &[5000, 5001]);
 
     resp.assert_edge_exists("User", 1, "MergeRequest", 2000, "AUTHORED");
+    resp.assert_edge_exists("User", 2, "MergeRequest", 2000, "APPROVED");
+    resp.assert_edge_exists("User", 3, "MergeRequest", 2000, "APPROVED");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3000, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3002, "HAS_NOTE");
     resp.assert_edge_exists("MergeRequest", 2000, "Note", 3003, "HAS_NOTE");
+    resp.assert_edge_exists("MergeRequest", 2000, "MergeRequestDiff", 5000, "HAS_DIFF");
+    resp.assert_edge_exists("MergeRequest", 2000, "MergeRequestDiff", 5001, "HAS_DIFF");
 }
 
 pub(super) async fn neighbors_redaction_removes_unauthorized_targets(ctx: &TestContext) {
@@ -166,6 +179,40 @@ pub(super) async fn neighbors_dynamic_columns_all_returns_properties(ctx: &TestC
     });
 }
 
+pub(super) async fn neighbors_center_node_properties_hydrated(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name", "state"]},
+            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("Group", &[100, 102]);
+    resp.assert_referential_integrity();
+
+    // Center node must have its requested columns hydrated.
+    resp.assert_node("User", 1, |n| {
+        n.prop_str("username") == Some("alice")
+            && n.prop_str("name") == Some("Alice Admin")
+            && n.prop_str("state") == Some("active")
+    });
+
+    // Neighbor nodes should also be hydrated with default columns.
+    resp.assert_node("Group", 100, |n| n.prop_str("name") == Some("Public Group"));
+    resp.assert_node("Group", 102, |n| {
+        n.prop_str("name") == Some("Internal Group")
+    });
+
+    resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
+    resp.assert_edge_exists("User", 1, "Group", 102, "MEMBER_OF");
+}
+
 pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &TestContext) {
     // Group 100 has incoming MEMBER_OF from users and outgoing CONTAINS to
     // projects/subgroups. With direction: "both", edges should preserve their
@@ -181,16 +228,21 @@ pub(super) async fn neighbors_both_direction_preserves_edge_direction(ctx: &Test
     )
     .await;
 
-    resp.assert_node_count(7);
+    resp.assert_node_count(9);
     resp.assert_node_ids("Group", &[100, 200]);
     resp.assert_node_ids("User", &[1, 2, 6]);
     resp.assert_node_ids("Project", &[1000, 1002]);
+    resp.assert_node_ids("WorkItem", &[4000, 4001]);
     resp.assert_referential_integrity();
 
     // Incoming MEMBER_OF: User→Group (not reversed)
     resp.assert_edge_exists("User", 1, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 2, "Group", 100, "MEMBER_OF");
     resp.assert_edge_exists("User", 6, "Group", 100, "MEMBER_OF");
+
+    // Incoming IN_GROUP: WorkItem→Group (not reversed)
+    resp.assert_edge_exists("WorkItem", 4000, "Group", 100, "IN_GROUP");
+    resp.assert_edge_exists("WorkItem", 4001, "Group", 100, "IN_GROUP");
 
     // Outgoing CONTAINS: Group→target (not reversed)
     resp.assert_edge_exists("Group", 100, "Group", 200, "CONTAINS");

@@ -1,0 +1,45 @@
+name: "Java v1 parity — deep initializer chain stack safety"
+fixtures:
+  - path: com/example/edgecases/DeepInitializerChain.java
+    content: |
+      package com.example.edgecases;
+      public class DeepInitializerChain {
+          public void method() {
+              var result = new StringBuilder()
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .append("a").append("a").append("a").append("a").append("a")
+                  .toString();
+              System.out.println(result);
+          }
+      }
+
+tests:
+  # ── J7: test_java_deep_initializer_chain_does_not_stack_overflow ──
+
+  - name: "DeepInitializerChain indexes without stack overflow"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path ENDS WITH 'DeepInitializerChain.java'
+      RETURN d.name AS name
+    assert:
+      - { row_count: 2 }
+      - { row: { name: "DeepInitializerChain" } }
+      - { row: { name: "method" } }

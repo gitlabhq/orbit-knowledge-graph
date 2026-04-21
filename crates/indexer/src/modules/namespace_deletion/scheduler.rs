@@ -3,40 +3,19 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Duration, Utc};
-use serde::{Deserialize, Serialize};
 use tracing::{debug, info};
 
 use super::NamespaceDeletionStore;
 use crate::checkpoint::CheckpointStore;
 use crate::clickhouse::TIMESTAMP_FORMAT;
-use crate::configuration::ScheduleConfiguration;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::topic::NamespaceDeletionRequest;
 use crate::types::Envelope;
+use gkg_server_config::{NamespaceDeletionSchedulerConfig, ScheduleConfiguration};
 
 const CHECKPOINT_KEY: &str = "namespace_deletion_scheduler";
 const GRACE_PERIOD_DAYS: i64 = 30;
-
-fn default_interval_secs() -> Option<u64> {
-    Some(86400) // 24 hours
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct NamespaceDeletionSchedulerConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-}
-
-impl Default for NamespaceDeletionSchedulerConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration {
-                interval_secs: default_interval_secs(),
-            },
-        }
-    }
-}
 
 pub struct NamespaceDeletionScheduler {
     store: Arc<dyn NamespaceDeletionStore>,

@@ -23,7 +23,7 @@ pub(in crate::modules::sdlc) fn lower(
             EtlScope::Namespaced => namespaced_batch_size,
         };
         let scope = node.scope;
-        let plan = lower_node_plan(node, &inputs.edge_table, batch_size);
+        let plan = lower_node_plan(node, batch_size);
         match scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
@@ -46,7 +46,7 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
-fn lower_node_plan(input: NodePlan, edge_table: &str, batch_size: u64) -> PipelinePlan {
+fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
     let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
 
@@ -56,7 +56,7 @@ fn lower_node_plan(input: NodePlan, edge_table: &str, batch_size: u64) -> Pipeli
     }];
 
     for fk_edge in &input.edges {
-        transforms.push(lower_fk_edge_transform(fk_edge, edge_table));
+        transforms.push(lower_fk_edge_transform(fk_edge));
     }
 
     PipelinePlan {
@@ -66,7 +66,7 @@ fn lower_node_plan(input: NodePlan, edge_table: &str, batch_size: u64) -> Pipeli
     }
 }
 
-fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, edge_table: &str) -> Transformation {
+fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
     let transform_query = Query {
         select: lower_edge_select(
             lower_edge_id(&fk_edge.source_id),
@@ -84,7 +84,7 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, edge_table: &str) -> Trans
 
     Transformation {
         query: transform_query,
-        destination_table: edge_table.to_string(),
+        destination_table: fk_edge.destination_table.clone(),
     }
 }
 
@@ -176,6 +176,7 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
         EdgeId::ArrayElement { column, field } => {
             Expr::struct_field(Expr::func("unnest", vec![Expr::col("", column)]), field)
         }
+        EdgeId::ArrayUnnest { column } => Expr::func("unnest", vec![Expr::col("", column)]),
     }
 }
 
@@ -334,6 +335,7 @@ fn watermark_where(watermark: &str) -> Expr {
 mod tests {
     use super::super::input;
     use super::*;
+    use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
     use std::collections::BTreeMap;
 
     fn emit(query: &Query) -> String {
@@ -373,10 +375,13 @@ mod tests {
             note_plan.transforms.len() >= 2,
             "Note should have node transform + FK edge transforms"
         );
-        assert_eq!(note_plan.transforms[0].destination_table, "gl_note");
+        assert_eq!(
+            note_plan.transforms[0].destination_table,
+            prefixed_table_name("gl_note", *SCHEMA_VERSION),
+        );
         assert_eq!(
             note_plan.transforms[1].destination_table,
-            ontology.edge_table().to_string(),
+            prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
         );
     }
 
@@ -387,7 +392,7 @@ mod tests {
 
         let all_plans: Vec<_> = plans.global.iter().chain(plans.namespaced.iter()).collect();
 
-        let edge_table = ontology.edge_table().to_string();
+        let edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
         let standalone_edge_plans: Vec<_> = all_plans
             .iter()
             .filter(|p| p.transforms.len() == 1 && p.transforms[0].destination_table == edge_table)
@@ -446,9 +451,10 @@ mod tests {
             target_kind: EdgeKind::Literal("User".to_string()),
             filters: vec![EdgeFilter::IsNotNull("owner_id".to_string())],
             namespaced: true,
+            destination_table: "gl_edge".to_string(),
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let transform = lower_fk_edge_transform(&fk_edge);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("id AS source_id"));
@@ -467,9 +473,10 @@ mod tests {
             target_kind: EdgeKind::Literal("Note".to_string()),
             filters: vec![EdgeFilter::IsNotNull("author_id".to_string())],
             namespaced: true,
+            destination_table: "gl_edge".to_string(),
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let transform = lower_fk_edge_transform(&fk_edge);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("author_id AS source_id"));
@@ -494,9 +501,10 @@ mod tests {
                 EdgeFilter::NotEmpty("assignee_ids".to_string()),
             ],
             namespaced: true,
+            destination_table: "gl_edge".to_string(),
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let transform = lower_fk_edge_transform(&fk_edge);
         let sql = emit(&transform.query);
 
         assert!(
@@ -521,9 +529,10 @@ mod tests {
             target_kind: EdgeKind::Literal("MergeRequest".to_string()),
             filters: vec![EdgeFilter::ArrayNotEmpty("assignees".to_string())],
             namespaced: true,
+            destination_table: "gl_edge".to_string(),
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge, "gl_edge");
+        let transform = lower_fk_edge_transform(&fk_edge);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");

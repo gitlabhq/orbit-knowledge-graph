@@ -1,11 +1,17 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v1",
   "title": "GKG unified query response",
   "description": "JSON payload returned by the query pipeline. All five query types (search, traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
-  "required": ["query_type", "nodes", "edges"],
+  "required": ["format_version", "query_type", "nodes", "edges"],
   "additionalProperties": false,
   "properties": {
+    "format_version": {
+      "type": "string",
+      "description": "Semantic version of this response format (e.g. '1.0.0'). Major = breaking shape change, minor = new optional fields, patch = formatting bug fixes. Loaded from config/RAW_OUTPUT_FORMAT_VERSION.",
+      "pattern": "^[0-9]+\\.[0-9]+\\.[0-9]+$"
+    },
     "query_type": {
       "type": "string",
       "description": "Which query type produced this result. The frontend uses this to pick a default view (table for search/aggregation, graph for traversal/path_finding/neighbors).",
@@ -20,6 +26,15 @@
       "description": "Instance-level relationships between nodes. Each edge connects two specific nodes by their type and ID. Empty for search and aggregation queries.",
       "type": "array",
       "items": { "$ref": "#/$defs/edge" }
+    },
+    "columns": {
+      "description": "Present for aggregation queries. Describes each computed column: its output name, the aggregation function used, the target node alias, and the property being aggregated. Lets the consumer distinguish aggregate values from entity properties without inspecting the ontology.",
+      "type": "array",
+      "items": { "$ref": "#/$defs/column" }
+    },
+    "pagination": {
+      "description": "Present when the query included a cursor. Tells the agent whether more pages exist and how many total authorized rows are available.",
+      "$ref": "#/$defs/pagination"
     }
   },
   "$defs": {
@@ -32,8 +47,8 @@
           "description": "Entity type name matching the ontology (e.g. User, MergeRequest, Project). Look up in the cached ontology for label_field, domain, and style."
         },
         "id": {
-          "type": "integer",
-          "description": "Entity primary key. Together with type, forms the composite identity (e.g. User:42). Always included even if not selected."
+          "type": "string",
+          "description": "Entity primary key, serialized as a string to avoid JavaScript precision loss for Int64 values exceeding 2^53-1. Together with type, forms the composite identity (e.g. User:42). Always included even if not selected."
         }
       },
       "additionalProperties": {
@@ -50,16 +65,16 @@
           "description": "Source node entity type."
         },
         "from_id": {
-          "type": "integer",
-          "description": "Source node entity ID."
+          "type": "string",
+          "description": "Source node entity ID, serialized as a string."
         },
         "to": {
           "type": "string",
           "description": "Target node entity type."
         },
         "to_id": {
-          "type": "integer",
-          "description": "Target node entity ID."
+          "type": "string",
+          "description": "Target node entity ID, serialized as a string."
         },
         "type": {
           "type": "string",
@@ -82,6 +97,50 @@
         }
       },
       "additionalProperties": false
+    },
+    "column": {
+      "type": "object",
+      "required": ["name", "function"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "description": "Output column name. Matches the key on the node where the aggregate value appears. Either the user-supplied alias or the function name (e.g. 'count')."
+        },
+        "function": {
+          "type": "string",
+          "description": "Aggregation function applied (count, sum, avg, min, max, collect).",
+          "enum": ["count", "sum", "avg", "min", "max", "collect"]
+        },
+        "target": {
+          "type": "string",
+          "description": "Node alias being aggregated over (e.g. 'u' for User). Absent when the function has no explicit target."
+        },
+        "property": {
+          "type": "string",
+          "description": "Property being aggregated (e.g. 'id'). Absent for count without a property."
+        },
+        "value": {
+          "description": "Computed value for ungrouped (scalar) aggregations. Absent for grouped aggregations where values live on entity nodes.",
+          "type": ["string", "integer", "number", "boolean", "null"]
+        }
+      }
+    },
+    "pagination": {
+      "type": "object",
+      "required": ["has_more", "total_rows"],
+      "additionalProperties": false,
+      "properties": {
+        "has_more": {
+          "type": "boolean",
+          "description": "True if more authorized rows exist beyond the current page."
+        },
+        "total_rows": {
+          "type": "integer",
+          "description": "Total authorized rows before cursor slicing.",
+          "minimum": 0
+        }
+      }
     }
   }
 }

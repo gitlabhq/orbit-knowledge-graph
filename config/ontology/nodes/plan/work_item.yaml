@@ -26,7 +26,7 @@ properties:
   iid:
     type: int64
     source: iid
-    nullable: true
+    nullable: false
     description: "Project or group-scoped work item number."
 
   title:
@@ -113,23 +113,14 @@ properties:
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
 etl:
-  type: query
+  type: table
   scope: namespaced
-  select: >-
-    wi.traversal_path, wi.id, wi.title, si.description,
-    wi.author_id, wi.iid, wi.state_id, wi.work_item_type_id,
-    wi.confidential, wi.due_date, wi.start_date, wi.weight,
-    wi.milestone_id, wi.namespace_id, wi.created_at, wi.updated_at,
-    wi.closed_at, wi.assignee_ids, wi.label_ids
-  from: "hierarchy_work_items wi LEFT JOIN siphon_issues si ON wi.id = si.id"
-  traversal_path_filter: "startsWith(wi.traversal_path, {traversal_path:String})"
-  watermark: wi.version
-  deleted: wi.deleted
-  order_by: [traversal_path, work_item_type_id, id]
+  source: work_items
   edges:
     author_id:
       to: User
@@ -143,13 +134,47 @@ etl:
       to: Group
       as: IN_GROUP
       direction: outgoing
-    assignee_ids:
+    assignees:
       to: User
       as: ASSIGNED
       direction: incoming
-      delimiter: "/"
+      array: true
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    closed_by_id:
+      to: User
+      as: CLOSED
+      direction: incoming
     label_ids:
       to: Label
       as: HAS_LABEL
       direction: outgoing
-      delimiter: "/"
+      array_field: label_id
+
+storage:
+  primary_key: [traversal_path, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: work_item_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: confidential, type: "Bool", default: "false"}
+    - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: weight, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_state, column: state, type: "set(10)", granularity: 2}
+    - {name: idx_work_item_type, column: work_item_type, type: "set(10)", granularity: 2}
+    - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

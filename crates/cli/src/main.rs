@@ -1,17 +1,42 @@
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
+mod content;
+mod local_pipeline;
 mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
+use code_graph::legacy::linker::analysis::types::GraphData;
+use code_graph::legacy::linker::indexer::{
+    ErroredFile as LegacyErroredFile, IndexingConfig, RepositoryIndexer,
+    SkippedFile as LegacySkippedFile,
+};
+use code_graph::legacy::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
-use query_engine::SecurityContext;
+use query_engine::compiler::SecurityContext;
+use query_engine::formatters::{self, ResultFormatter};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::time::Duration;
 use tracing::{Level, info};
 use tracing_subscriber::fmt::format::FmtSpan;
+
+/// Generate the full DuckDB DDL (graph tables + manifest) from the ontology.
+fn generate_local_ddl(ontology: &Ontology) -> String {
+    let tables = query_engine::compiler::generate_local_tables(ontology);
+    let mut ddl = tables
+        .iter()
+        .map(|t| format!("{};\n", query_engine::compiler::emit_duckdb_create_table(t)))
+        .collect::<Vec<_>>()
+        .join("\n");
+    ddl.push('\n');
+    ddl.push_str(duckdb_client::MANIFEST_DDL);
+    ddl
+}
 
 #[derive(Debug, Clone, Copy, Default, clap::ValueEnum)]
 enum OutputFormat {
@@ -27,6 +52,8 @@ struct IndexOutput {
     time_seconds: f64,
     graph: GraphStats,
     processing: ProcessingStats,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    database_path: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     detailed: Option<DetailedStats>,
 }
@@ -44,6 +71,26 @@ struct GraphStats {
 struct ProcessingStats {
     skipped_files: usize,
     errored_files: usize,
+}
+
+#[derive(Debug, Clone, Default)]
+struct IndexGraphStats {
+    directories: usize,
+    files: usize,
+    definitions: usize,
+    imported_symbols: usize,
+    relationships: usize,
+    relationship_types: HashMap<String, usize>,
+    definition_types: HashMap<String, usize>,
+}
+
+struct IndexRunResult {
+    total_processing_time: Duration,
+    skipped_files: Vec<LegacySkippedFile>,
+    errored_files: Vec<LegacyErroredFile>,
+    graph_data: Option<GraphData>,
+    graph_stats: Option<IndexGraphStats>,
+    database_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -95,23 +142,33 @@ enum Commands {
         /// Verbose logging to stderr
         #[arg(short, long)]
         verbose: bool,
-    },
-    /// Execute query engine on JSON payloads and output SQL
-    ///
-    /// Takes a JSON object where each key is a query description and each value
-    /// is a query payload for the query engine. Outputs the label, input JSON,
-    /// and generated SQL for each query.
-    Query {
-        /// Path to JSON file containing queries, or use --json for inline JSON
-        #[arg(value_name = "FILE")]
-        file: Option<PathBuf>,
 
-        /// Inline JSON payload (alternative to file path)
-        #[arg(long, conflicts_with = "file")]
-        json: Option<String>,
+        /// Use v2 code-graph pipeline (Python, Java, Kotlin, C#)
+        #[arg(long)]
+        v2: bool,
+    },
+    /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
+    Query {
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
+
+        /// Path to ontology directory (default: config/ontology)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Output raw JSON graph (default is LLM-friendly text)
+        #[arg(long)]
+        raw: bool,
+    },
+    /// Compile a query to SQL without executing it
+    Compile {
+        /// JSON query payload
+        #[arg(value_name = "JSON")]
+        json: String,
 
         /// Traversal paths for security context (e.g., "1/2/3/"). Org ID is parsed from the first segment.
-        #[arg(long, short, required = true, num_args = 1..)]
+        #[arg(long, short, num_args = 1..)]
         traversal_paths: Vec<String>,
 
         /// Path to ontology directory (default: config/ontology)
@@ -121,6 +178,54 @@ enum Commands {
         /// Output format: pretty (default) or json
         #[arg(long, default_value = "pretty")]
         format: OutputFormat,
+
+        /// Compile for local DuckDB instead of ClickHouse
+        #[arg(long)]
+        local: bool,
+    },
+    /// Describe the graph schema (entities, edges, properties) visible to the
+    /// local DuckDB index. Use --all to include server-only entities.
+    Schema {
+        /// Expand one or more entities to show their properties and edges.
+        /// Pass `*` to expand every entity.
+        #[arg(long, short = 'e', value_name = "NODE", num_args = 1..)]
+        expand: Vec<String>,
+
+        /// Emit JSON instead of the default LLM-friendly TOON format.
+        #[arg(long)]
+        raw: bool,
+
+        /// Include the full server ontology (debugging aid). Default is
+        /// restricted to entities present in the local DuckDB.
+        #[arg(long)]
+        all: bool,
+
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+    },
+    /// Maintainer-only tools (DDL generation, etc.)
+    Debug {
+        #[command(subcommand)]
+        command: DebugCommands,
+    },
+}
+
+#[derive(Subcommand)]
+enum DebugCommands {
+    /// Generate ClickHouse DDL from the ontology
+    Ddl {
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+
+        /// Table prefix (e.g., "v1_" for schema version 1)
+        #[arg(long, short, default_value = "")]
+        prefix: String,
+
+        /// Diff generated DDL against an existing .sql file
+        #[arg(long, short)]
+        diff: Option<PathBuf>,
     },
 }
 
@@ -134,8 +239,9 @@ async fn main() -> Result<()> {
             threads,
             stats,
             verbose,
+            v2,
         } => {
-            let level = if verbose { Level::DEBUG } else { Level::INFO };
+            let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
                 .with_max_level(level)
                 .with_target(verbose)
@@ -152,25 +258,258 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats).await
+            run_index(path, threads, stats, v2).await
         }
         Commands::Query {
-            file,
+            json,
+            ontology,
+            raw,
+        } => {
+            let output = run_local_query(json, ontology)?;
+            if raw {
+                let formatted = formatters::GraphFormatter.format(&output);
+                println!("{}", serde_json::to_string(&formatted)?);
+            } else {
+                let formatted = formatters::GoonFormatter.format(&output);
+                println!("{}", serde_json::to_string_pretty(&formatted)?);
+            }
+            Ok(())
+        }
+        Commands::Compile {
             json,
             traversal_paths,
             ontology,
             format,
-        } => run_query(file, json, traversal_paths, ontology, format),
+            local,
+        } => run_compile(json, traversal_paths, ontology, format, local),
+        Commands::Schema {
+            expand,
+            raw,
+            all,
+            ontology,
+        } => run_schema_introspect(expand, raw, all, ontology),
+        Commands::Debug { command } => match command {
+            DebugCommands::Ddl {
+                ontology,
+                prefix,
+                diff,
+            } => run_ddl(ontology, prefix, diff),
+        },
     }
 }
 
-async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
-    let store = workspace::IndexStore::open_default()?;
-    let repos = store.resolve_repos(&path).await?;
+fn run_schema_introspect(
+    expand: Vec<String>,
+    raw: bool,
+    all: bool,
+    ontology_path: Option<PathBuf>,
+) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let scope = if all {
+        ontology::introspection::IntrospectionScope::All
+    } else {
+        ontology::introspection::IntrospectionScope::Local
+    };
+
+    let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
+
+    if raw {
+        println!("{}", serde_json::to_string_pretty(&response)?);
+    } else {
+        let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
+            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
+        println!("{toon}");
+    }
+    Ok(())
+}
+
+fn run_ddl(ontology_path: Option<PathBuf>, prefix: String, diff: Option<PathBuf>) -> Result<()> {
+    let ont = match ontology_path {
+        Some(path) => Ontology::load_from_dir(&path).context("failed to load ontology")?,
+        None => Ontology::load_embedded().context("failed to load embedded ontology")?,
+    };
+
+    let tables = query_engine::compiler::generate_graph_tables(&ont);
+    let generated: Vec<String> = tables
+        .iter()
+        .map(|t| {
+            let t = if prefix.is_empty() {
+                t.clone()
+            } else {
+                t.clone().with_prefix(&prefix)
+            };
+            format!("{};\n", query_engine::compiler::emit_create_table(&t))
+        })
+        .collect();
+
+    match diff {
+        Some(path) => run_schema_diff(&generated, &path),
+        None => {
+            for stmt in &generated {
+                println!("{stmt}");
+            }
+            Ok(())
+        }
+    }
+}
+
+/// Extracts `CREATE TABLE IF NOT EXISTS` statements from SQL, keyed by table name.
+/// Splits on top-level semicolons and extracts the table name from each statement.
+fn extract_tables_from_sql(sql: &str) -> std::collections::BTreeMap<String, String> {
+    let mut tables = std::collections::BTreeMap::new();
+    let mut depth = 0i32;
+    let mut in_string = false;
+    let mut start = 0;
+
+    for (i, c) in sql.char_indices() {
+        match c {
+            '\'' if !in_string || (i > 0 && sql.as_bytes()[i - 1] != b'\\') => {
+                in_string = !in_string;
+            }
+            '(' if !in_string => depth += 1,
+            ')' if !in_string => depth -= 1,
+            ';' if !in_string && depth == 0 => {
+                let stmt = sql[start..=i].trim();
+                if let Some(name) = extract_create_table_name(stmt) {
+                    tables.insert(name, strip_leading_comments(stmt).to_string());
+                }
+                start = i + 1;
+            }
+            _ => {}
+        }
+    }
+
+    tables
+}
+
+/// Strips leading SQL comments and blank lines from a statement.
+fn strip_leading_comments(stmt: &str) -> &str {
+    let mut start = 0;
+    for line in stmt.lines() {
+        let trimmed = line.trim();
+        if trimmed.is_empty() || trimmed.starts_with("--") {
+            start += line.len() + 1; // +1 for newline
+        } else {
+            break;
+        }
+    }
+    if start >= stmt.len() {
+        stmt
+    } else {
+        &stmt[start..]
+    }
+}
+
+/// Extracts the table name from a `CREATE TABLE IF NOT EXISTS <name>` statement.
+fn extract_create_table_name(stmt: &str) -> Option<String> {
+    let upper = stmt.to_uppercase();
+    let marker = "CREATE TABLE IF NOT EXISTS ";
+    let pos = upper.find(marker)?;
+    let after = &stmt[pos + marker.len()..];
+    let name = after
+        .split(|c: char| c.is_whitespace() || c == '(')
+        .next()?;
+    if name.is_empty() {
+        None
+    } else {
+        Some(name.to_string())
+    }
+}
+
+fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()> {
+    let existing_sql = std::fs::read_to_string(sql_path)
+        .with_context(|| format!("failed to read {}", sql_path.display()))?;
+
+    let existing = extract_tables_from_sql(&existing_sql);
+    let generated_sql = generated_stmts.join("\n");
+    let generated = extract_tables_from_sql(&generated_sql);
+
+    let all_names: std::collections::BTreeSet<&str> = existing
+        .keys()
+        .chain(generated.keys())
+        .map(|s| s.as_str())
+        .collect();
+
+    let mut ok = 0u32;
+    let mut diffs = 0u32;
+    let mut missing = 0u32;
+    let mut extra = 0u32;
+
+    for name in &all_names {
+        // Skip control tables that aren't generated from ontology
+        if *name == "gkg_schema_version" {
+            continue;
+        }
+
+        match (existing.get(*name), generated.get(*name)) {
+            (Some(_), None) => {
+                eprintln!("MISSING from generated: {name}");
+                missing += 1;
+            }
+            (None, Some(_)) => {
+                eprintln!("EXTRA in generated: {name}");
+                extra += 1;
+            }
+            (Some(exp), Some(got)) => {
+                if exp.trim() == got.trim() {
+                    ok += 1;
+                } else {
+                    diffs += 1;
+                    eprintln!("DIFF: {name}");
+                    let exp_lines: Vec<&str> = exp.lines().collect();
+                    let got_lines: Vec<&str> = got.lines().collect();
+                    let max = exp_lines.len().max(got_lines.len());
+                    for i in 0..max {
+                        let e = exp_lines.get(i).map(|s| s.trim()).unwrap_or("<missing>");
+                        let g = got_lines.get(i).map(|s| s.trim()).unwrap_or("<missing>");
+                        if e != g {
+                            eprintln!("  L{i}: exp: {e}");
+                            eprintln!("  L{i}: got: {g}");
+                        }
+                    }
+                }
+            }
+            (None, None) => unreachable!(),
+        }
+    }
+
+    eprintln!();
+    eprintln!("{ok} OK, {diffs} DIFF, {missing} MISSING, {extra} EXTRA");
+
+    if diffs > 0 || missing > 0 || extra > 0 {
+        anyhow::bail!("DDL mismatch: {diffs} tables differ, {missing} missing, {extra} extra");
+    }
+
+    eprintln!("All tables match.");
+    Ok(())
+}
+
+async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool) -> Result<()> {
+    let store = workspace::Workspace::open_default()?;
+    let repos = store.resolve_repos(&path)?;
 
     if repos.is_empty() {
         info!("No git repositories found in {}", path.display());
         return Ok(());
+    }
+
+    let ontology_dir = std::path::PathBuf::from(env!("ONTOLOGY_DIR"));
+    let ontology = Ontology::load_from_dir(&ontology_dir).context("failed to load ontology")?;
+
+    // Ensure schema exists, then drop the connection so we don't hold
+    // the write lock during parsing.
+    {
+        let db_path = store.db_path();
+        let client =
+            duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+        let ddl = generate_local_ddl(&ontology);
+        client
+            .initialize_schema(&ddl)
+            .context("failed to create schema")?;
     }
 
     let config = IndexingConfig {
@@ -179,88 +518,352 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
         respect_gitignore: true,
     };
 
+    let mut failed = 0usize;
+
     for repo_path in &repos {
-        let key = repo_path.to_string_lossy().to_string();
-        store
-            .set_status(&key, workspace::Status::Indexing, None)
-            .await?;
-
-        info!("Indexing repository at: {}", key);
-
-        let repo_name = repo_path
-            .file_name()
-            .map(|n| n.to_string_lossy().to_string())
-            .unwrap_or_else(|| "repository".to_string());
-
-        let file_source = DirectoryFileSource::new(key.clone());
-        let indexer = RepositoryIndexer::new(repo_name.clone(), key.clone());
-
-        let result = match indexer.index_files(file_source, &config).await {
-            Ok(r) => {
-                store
-                    .set_status(&key, workspace::Status::Indexed, None)
-                    .await?;
-                r
-            }
+        let git = match workspace::git_info(repo_path) {
+            Ok(g) => g,
             Err(e) => {
-                store
-                    .set_status(&key, workspace::Status::Error, Some(e.to_string()))
-                    .await?;
-                anyhow::bail!("{e}");
+                tracing::error!("skipping {}: {e:#}", repo_path.display());
+                failed += 1;
+                continue;
             }
         };
+        let key = git.repo_path.to_string_lossy().to_string();
+        let db_path = store.db_path();
 
-        let output = build_index_output(&repo_name, &key, &result, show_stats);
-        info!("{}", serde_json::to_string_pretty(&output)?);
+        info!(
+            "Indexing repository at: {} (branch: {}, commit: {})",
+            key,
+            git.branch,
+            git.commit_sha.get(..8).unwrap_or(&git.commit_sha)
+        );
+
+        // Mark as indexing before we start parsing.
+        {
+            let client =
+                duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB")?;
+            workspace::set_status(
+                &client,
+                &key,
+                git.project_id,
+                workspace::RepoStatus::Indexing,
+                None,
+                Some(&git),
+            )?;
+        }
+
+        let result = if use_v2 {
+            index_repo_v2(&git, &store, &ontology, &config).await
+        } else {
+            index_repo(&git, &config, &store, &ontology).await
+        };
+        match result {
+            Ok(result) => {
+                let repo_name = git
+                    .repo_path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().to_string())
+                    .unwrap_or_else(|| "repository".to_string());
+                let mut output = build_index_output(&repo_name, &key, &result, show_stats);
+                output.database_path = Some(db_path.display().to_string());
+                println!("{}", serde_json::to_string_pretty(&output)?);
+            }
+            Err(e) => {
+                tracing::error!("failed to index {key}: {e:#}");
+                failed += 1;
+                if let Ok(client) = duckdb_client::DuckDbClient::open(&db_path)
+                    && let Err(manifest_err) = workspace::set_status(
+                        &client,
+                        &key,
+                        git.project_id,
+                        workspace::RepoStatus::Error,
+                        Some(&e.to_string()),
+                        None,
+                    )
+                {
+                    tracing::warn!("failed to record error status in manifest: {manifest_err}");
+                }
+            }
+        }
     }
 
+    if failed > 0 {
+        anyhow::bail!("{failed} of {} repositories failed to index", repos.len());
+    }
     Ok(())
+}
+
+async fn index_repo(
+    git: &workspace::GitInfo,
+    config: &IndexingConfig,
+    store: &workspace::Workspace,
+    ontology: &Ontology,
+) -> Result<IndexRunResult> {
+    // v1 pipeline — unchanged
+    let key = git.repo_path.to_string_lossy().to_string();
+    let repo_name = git
+        .repo_path
+        .file_name()
+        .map(|n| n.to_string_lossy().to_string())
+        .unwrap_or_else(|| "repository".to_string());
+
+    let file_source = DirectoryFileSource::new(key.clone());
+    let indexer = RepositoryIndexer::new(repo_name, key.clone());
+
+    let mut result = indexer
+        .index_files(file_source, config)
+        .await
+        .context("indexing failed")?;
+
+    if let Some(ref mut graph_data) = result.graph_data {
+        graph_data.assign_node_ids(git.project_id, &git.branch);
+
+        let local_data = duckdb_client::convert_graph_data(
+            graph_data,
+            git.project_id,
+            &git.branch,
+            &git.commit_sha,
+            ontology,
+        )
+        .context("failed to convert graph data to Arrow")?;
+
+        let db_path = store.db_path();
+        let client = duckdb_client::DuckDbClient::open(&db_path)
+            .context("failed to open DuckDB for writing")?;
+
+        let node_tables: Vec<String> = ontology
+            .local_entity_names()
+            .iter()
+            .map(|name| {
+                ontology
+                    .get_node(name)
+                    .expect("local entity must exist")
+                    .destination_table
+                    .clone()
+            })
+            .collect();
+        let edge_table = ontology
+            .local_edge_table_name()
+            .context("local_db.edge_table.name must be configured")?;
+
+        client
+            .delete_project(git.project_id, &node_tables, edge_table)
+            .context("failed to clear existing project data")?;
+        client
+            .insert_graph(local_data)
+            .context("failed to insert graph data")?;
+        workspace::set_status(
+            &client,
+            &key,
+            git.project_id,
+            workspace::RepoStatus::Indexed,
+            None,
+            Some(git),
+        )?;
+        result.database_path = Some(db_path.display().to_string());
+    }
+
+    Ok(IndexRunResult {
+        total_processing_time: result.total_processing_time,
+        skipped_files: result.skipped_files,
+        errored_files: result.errored_files,
+        graph_data: result.graph_data,
+        graph_stats: None,
+        database_path: result.database_path,
+    })
+}
+
+async fn index_repo_v2(
+    git: &workspace::GitInfo,
+    store: &workspace::Workspace,
+    ontology: &Ontology,
+    config: &IndexingConfig,
+) -> Result<IndexRunResult> {
+    let key = git.repo_path.to_string_lossy().to_string();
+    let root_path = key.clone();
+    let start_time = std::time::Instant::now();
+
+    // Run v2 pipeline
+    let pipeline_config = code_graph::v2::PipelineConfig {
+        max_file_size: config.max_file_size as u64,
+        respect_gitignore: config.respect_gitignore,
+        ..Default::default()
+    };
+    let pipeline = code_graph::v2::Pipeline::new(pipeline_config);
+    let tracer = code_graph::v2::trace::Tracer::new(false);
+
+    let v2_result = if config.worker_threads > 0 {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(config.worker_threads)
+            .build()
+            .context("failed to build thread pool")?;
+        pool.install(|| pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer))
+    } else {
+        pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer)
+    };
+
+    if !v2_result.errors.is_empty() {
+        for err in &v2_result.errors {
+            tracing::warn!("v2 pipeline error: {} ({})", err.error, err.file_path);
+        }
+    }
+
+    let graphs = v2_result.graphs;
+    let graph_stats = summarize_v2_graphs(&graphs);
+    let db_path = store.db_path();
+    let client =
+        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
+
+    let node_tables: Vec<String> = ontology
+        .local_entity_names()
+        .iter()
+        .map(|name| {
+            ontology
+                .get_node(name)
+                .expect("local entity must exist")
+                .destination_table
+                .clone()
+        })
+        .collect();
+    let edge_table = ontology
+        .local_edge_table_name()
+        .context("local_db.edge_table.name must be configured")?;
+
+    client
+        .delete_project(git.project_id, &node_tables, edge_table)
+        .context("failed to clear existing project data")?;
+
+    // Convert to Arrow and write to DuckDB
+    for graph in &graphs {
+        let local_data = duckdb_client::convert_v2_graph(
+            graph,
+            git.project_id,
+            &git.branch,
+            &git.commit_sha,
+            ontology,
+        )
+        .context("failed to convert v2 graph data to Arrow")?;
+        client
+            .insert_graph(local_data)
+            .context("failed to insert graph data")?;
+    }
+    workspace::set_status(
+        &client,
+        &key,
+        git.project_id,
+        workspace::RepoStatus::Indexed,
+        None,
+        Some(git),
+    )?;
+
+    // Return a minimal v1-compatible result for stats output
+    Ok(IndexRunResult {
+        total_processing_time: start_time.elapsed(),
+        skipped_files: vec![],
+        errored_files: vec![],
+        graph_data: None,
+        graph_stats: Some(graph_stats),
+        database_path: Some(db_path.display().to_string()),
+    })
+}
+
+fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> IndexGraphStats {
+    let mut relationship_types = HashMap::new();
+    let mut definition_types = HashMap::new();
+    let mut directories = 0;
+    let mut files = 0;
+    let mut definitions = 0;
+    let mut imported_symbols = 0;
+    let mut relationships = 0;
+
+    for graph in graphs {
+        directories += graph.directories().count();
+        files += graph.files().count();
+        imported_symbols += graph.imports_iter().count();
+        relationships += graph.edge_count();
+
+        for (_, _, def) in graph.definitions() {
+            definitions += 1;
+            *definition_types
+                .entry(format!("{:?}", def.kind))
+                .or_insert(0) += 1;
+        }
+
+        for (_, _, edge) in graph.edges() {
+            *relationship_types
+                .entry(edge.relationship.label())
+                .or_insert(0) += 1;
+        }
+    }
+
+    IndexGraphStats {
+        directories,
+        files,
+        definitions,
+        imported_symbols,
+        relationships,
+        relationship_types,
+        definition_types,
+    }
 }
 
 fn build_index_output(
     repo_name: &str,
     path: &str,
-    result: &code_graph::indexer::RepositoryIndexingResult,
+    result: &IndexRunResult,
     show_stats: bool,
 ) -> IndexOutput {
-    let (graph, rel_counts, def_counts) = match result.graph_data {
-        Some(ref gd) => {
-            let mut rel_counts: HashMap<String, usize> = HashMap::new();
-            for rel in &gd.relationships {
-                *rel_counts
-                    .entry(format!("{:?}", rel.relationship_type))
-                    .or_default() += 1;
+    let (graph, rel_counts, def_counts) =
+        match (result.graph_data.as_ref(), result.graph_stats.as_ref()) {
+            (Some(gd), _) => {
+                let mut rel_counts: HashMap<String, usize> = HashMap::new();
+                for rel in &gd.relationships {
+                    *rel_counts
+                        .entry(format!("{:?}", rel.relationship_type))
+                        .or_default() += 1;
+                }
+                let mut def_counts: HashMap<String, usize> = HashMap::new();
+                for def in &gd.definition_nodes {
+                    *def_counts
+                        .entry(format!("{:?}", def.definition_type))
+                        .or_default() += 1;
+                }
+                (
+                    GraphStats {
+                        directories: gd.directory_nodes.len(),
+                        files: gd.file_nodes.len(),
+                        definitions: gd.definition_nodes.len(),
+                        imported_symbols: gd.imported_symbol_nodes.len(),
+                        relationships: gd.relationships.len(),
+                    },
+                    rel_counts,
+                    def_counts,
+                )
             }
-            let mut def_counts: HashMap<String, usize> = HashMap::new();
-            for def in &gd.definition_nodes {
-                *def_counts
-                    .entry(format!("{:?}", def.definition_type))
-                    .or_default() += 1;
-            }
-            (
+            (None, Some(stats)) => (
                 GraphStats {
-                    directories: gd.directory_nodes.len(),
-                    files: gd.file_nodes.len(),
-                    definitions: gd.definition_nodes.len(),
-                    imported_symbols: gd.imported_symbol_nodes.len(),
-                    relationships: gd.relationships.len(),
+                    directories: stats.directories,
+                    files: stats.files,
+                    definitions: stats.definitions,
+                    imported_symbols: stats.imported_symbols,
+                    relationships: stats.relationships,
                 },
-                rel_counts,
-                def_counts,
-            )
-        }
-        None => (
-            GraphStats {
-                directories: 0,
-                files: 0,
-                definitions: 0,
-                imported_symbols: 0,
-                relationships: 0,
-            },
-            HashMap::new(),
-            HashMap::new(),
-        ),
-    };
+                stats.relationship_types.clone(),
+                stats.definition_types.clone(),
+            ),
+            (None, None) => (
+                GraphStats {
+                    directories: 0,
+                    files: 0,
+                    definitions: 0,
+                    imported_symbols: 0,
+                    relationships: 0,
+                },
+                HashMap::new(),
+                HashMap::new(),
+            ),
+        };
 
     let detailed = show_stats.then(|| DetailedStats {
         skipped_files: result
@@ -292,135 +895,123 @@ fn build_index_output(
             skipped_files: result.skipped_files.len(),
             errored_files: result.errored_files.len(),
         },
+        database_path: result.database_path.clone(),
         detailed,
     }
 }
 
 #[derive(Serialize)]
-struct QueryResult {
-    label: String,
+struct CompileResult {
     input: Value,
     sql: String,
     params: HashMap<String, Value>,
+    rendered_sql: String,
 }
 
-#[derive(Serialize)]
-struct QueryError {
-    label: String,
-    input: Value,
-    error: String,
-}
-
-#[derive(Serialize)]
-#[serde(untagged)]
-enum QueryOutput {
-    Success(QueryResult),
-    Error(QueryError),
-}
-
-fn run_query(
-    file: Option<PathBuf>,
-    json_input: Option<String>,
-    traversal_paths: Vec<String>,
+/// Parse a single query JSON and load the ontology.
+fn parse_query_input(
+    json_input: &str,
     ontology_path: Option<PathBuf>,
-    format: OutputFormat,
-) -> Result<()> {
-    let json_str = match (file, json_input) {
-        (Some(path), None) => std::fs::read_to_string(&path)
-            .with_context(|| format!("failed to read file: {}", path.display()))?,
-        (None, Some(json)) => json,
-        (None, None) => anyhow::bail!("either FILE or --json must be provided"),
-        (Some(_), Some(_)) => unreachable!("clap prevents this"),
-    };
-
-    // Parse org_id from first segment of first traversal path
-    let first_path = traversal_paths
-        .first()
-        .context("at least one traversal path is required")?;
-    let org_id: i64 = first_path
-        .split('/')
-        .next()
-        .context("traversal path is empty")?
-        .parse()
-        .context("first segment of traversal path must be a valid org ID")?;
-
-    let security_ctx = SecurityContext::new(org_id, traversal_paths)
-        .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?;
-
-    let queries: HashMap<String, Value> = serde_json::from_str(&json_str)
-        .context("failed to parse JSON as object with string keys")?;
-
+) -> Result<(Value, Ontology)> {
     let ontology_dir = ontology_path.unwrap_or_else(|| PathBuf::from(env!("ONTOLOGY_DIR")));
-
     let ontology = Ontology::load_from_dir(&ontology_dir)
         .with_context(|| format!("failed to load ontology from {}", ontology_dir.display()))?;
 
-    let mut results: Vec<QueryOutput> = Vec::with_capacity(queries.len());
-
-    let mut sorted_queries: Vec<_> = queries.into_iter().collect();
-    sorted_queries.sort_by(|a, b| a.0.cmp(&b.0));
-
-    for (label, input) in sorted_queries {
-        let input_json = serde_json::to_string(&input).context("failed to serialize input")?;
-
-        match query_engine::compile(&input_json, &ontology, &security_ctx) {
-            Ok(result) => {
-                results.push(QueryOutput::Success(QueryResult {
-                    label,
-                    input,
-                    sql: result.base.sql,
-                    params: result
-                        .base
-                        .params
-                        .into_iter()
-                        .map(|(k, v)| (k, v.value))
-                        .collect(),
-                }));
-            }
-            Err(e) => {
-                results.push(QueryOutput::Error(QueryError {
-                    label,
-                    input,
-                    error: e.to_string(),
-                }));
-            }
-        }
+    let value: Value = serde_json::from_str(json_input).context("failed to parse JSON input")?;
+    if value.get("query_type").is_none() {
+        anyhow::bail!("JSON must contain a \"query_type\" field");
     }
 
-    match format {
-        OutputFormat::Json => {
-            println!("{}", serde_json::to_string_pretty(&results)?);
-        }
-        OutputFormat::Pretty => {
-            for (i, result) in results.iter().enumerate() {
-                if i > 0 {
-                    println!("\n{}", "=".repeat(80));
+    Ok((value, ontology))
+}
+
+fn run_local_query(
+    json_input: String,
+    ontology_path: Option<PathBuf>,
+) -> Result<query_engine::shared::PipelineOutput> {
+    let (_, ontology) = parse_query_input(&json_input, ontology_path)?;
+    let ontology = Arc::new(ontology);
+
+    let store = workspace::Workspace::open_default()?;
+    let db_path = store.db_path();
+    if !db_path.exists() {
+        anyhow::bail!(
+            "no local graph found at {}. Run `orbit index` first.",
+            db_path.display()
+        );
+    }
+
+    let project_roots = store.project_roots()?;
+
+    local_pipeline::run(&json_input, ontology, &db_path, project_roots).context("query failed")
+}
+
+fn run_compile(
+    json_input: String,
+    traversal_paths: Vec<String>,
+    ontology_path: Option<PathBuf>,
+    format: OutputFormat,
+    local: bool,
+) -> Result<()> {
+    let (input, ontology) = parse_query_input(&json_input, ontology_path)?;
+
+    let security_ctx = if local {
+        None
+    } else {
+        let first_path = traversal_paths
+            .first()
+            .context("--traversal-paths required for server compilation")?;
+        let org_id: i64 = first_path
+            .split('/')
+            .next()
+            .context("traversal path is empty")?
+            .parse()
+            .context("first segment of traversal path must be a valid org ID")?;
+        Some(
+            SecurityContext::new(org_id, traversal_paths)
+                .map_err(|e| anyhow::anyhow!("invalid security context: {}", e))?,
+        )
+    };
+
+    let compile_result = if local {
+        query_engine::compiler::compile_local(&json_input, &ontology)
+    } else {
+        query_engine::compiler::compile(&json_input, &ontology, security_ctx.as_ref().unwrap())
+    };
+
+    match compile_result {
+        Ok(result) => {
+            let rendered_sql = result.base.render();
+            let output = CompileResult {
+                input,
+                sql: result.base.sql,
+                params: result
+                    .base
+                    .params
+                    .into_iter()
+                    .map(|(k, v)| (k, v.value))
+                    .collect(),
+                rendered_sql,
+            };
+
+            match format {
+                OutputFormat::Json => {
+                    println!("{}", serde_json::to_string_pretty(&output)?);
                 }
-                match result {
-                    QueryOutput::Success(r) => {
-                        println!("\n### {}\n", r.label);
+                OutputFormat::Pretty => {
+                    println!("**SQL:**\n```sql\n{}\n```\n", output.sql);
+                    if !output.params.is_empty() {
                         println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&r.input)?
+                            "**Params:**\n```json\n{}\n```\n",
+                            serde_json::to_string_pretty(&output.params)?
                         );
-                        println!("**SQL:**\n```sql\n{}\n```\n", r.sql);
-                        if !r.params.is_empty() {
-                            println!(
-                                "**Params:**\n```json\n{}\n```",
-                                serde_json::to_string_pretty(&r.params)?
-                            );
-                        }
                     }
-                    QueryOutput::Error(e) => {
-                        println!("\n### {} [ERROR]\n", e.label);
-                        println!(
-                            "**Input:**\n```json\n{}\n```\n",
-                            serde_json::to_string_pretty(&e.input)?
-                        );
-                        println!("**Error:** {}", e.error);
-                    }
+                    println!("**Rendered SQL:**\n```sql\n{}\n```", output.rendered_sql);
                 }
             }
+        }
+        Err(e) => {
+            anyhow::bail!("compilation failed: {e}");
         }
     }
 

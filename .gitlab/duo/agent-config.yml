@@ -1,0 +1,18 @@
+image: registry.gitlab.com/gitlab-org/rust/build-images/orbit-knowledge-graph:latest
+
+setup_script:
+  - apt-get update && apt-get install -y --no-install-recommends npm
+  - mise trust
+  - mise install
+
+cache:
+  key:
+    files:
+      - Cargo.lock
+    prefix: duo-agent
+  paths:
+    - target/
+
+network_policy:
+  include_recommended_allowed: true
+  allow_all_unix_sockets: true

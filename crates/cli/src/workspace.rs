@@ -1,139 +1,181 @@
-use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
-use fs4::tokio::AsyncFileExt;
-use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
-use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use typed_path::Utf8TypedPath;
 
-const INDEXES_DIR: &str = "indexes";
-const MANIFEST_FILE: &str = "manifest.json";
-const LOCK_FILE: &str = ".lock";
+use anyhow::{Context, Result};
+use duckdb_client::DuckDbClient;
+use gitalisk_core::repository::gitalisk_repository::CoreGitaliskRepository;
+use gitalisk_core::workspace_folder::gitalisk_workspace::CoreGitaliskWorkspaceFolder;
+use serde_json::json;
+use strum::{AsRefStr, Display};
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
-#[serde(rename_all = "lowercase")]
-pub enum Status {
-    Indexed,
+/// Repo indexing status, stored as a DuckDB `repo_status` enum.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Display, AsRefStr)]
+#[strum(serialize_all = "lowercase")]
+pub enum RepoStatus {
     Indexing,
+    Indexed,
     Error,
-    Pending,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ProjectEntry {
-    pub dir_name: String,
-    pub status: Status,
-    pub last_indexed_at: Option<DateTime<Utc>>,
-    pub error_message: Option<String>,
+/// Manages the `~/.orbit/` workspace — graph database, repo discovery,
+/// and manifest.
+pub struct Workspace {
+    root: PathBuf,
 }
 
-/// Manifest keyed by canonical repo path.
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct Manifest {
-    pub projects: HashMap<String, ProjectEntry>,
-}
-
-/// Manages `~/.orbit/` — indexes directory, manifest, and advisory lock.
-pub struct IndexStore {
-    indexes_dir: PathBuf,
-    manifest_path: PathBuf,
-    lock_path: PathBuf,
-}
-
-impl IndexStore {
+impl Workspace {
     pub fn open_default() -> Result<Self> {
-        let home = dirs::home_dir().context("Could not determine home directory")?;
-        Self::open(home.join(".orbit"))
+        let root = if let Some(dir) = std::env::var("ORBIT_DATA_DIR")
+            .ok()
+            .filter(|s| !s.is_empty())
+        {
+            PathBuf::from(dir)
+        } else {
+            let home = dirs::home_dir().context("Could not determine home directory")?;
+            home.join(".orbit")
+        };
+        Self::open(root)
     }
 
     pub fn open(root: PathBuf) -> Result<Self> {
-        let indexes_dir = root.join(INDEXES_DIR);
-        std::fs::create_dir_all(&indexes_dir)?;
-        Ok(Self {
-            manifest_path: root.join(MANIFEST_FILE),
-            lock_path: root.join(LOCK_FILE),
-            indexes_dir,
-        })
+        std::fs::create_dir_all(&root)?;
+        Ok(Self { root })
     }
 
-    async fn lock(&self) -> Result<tokio::fs::File> {
-        let file = tokio::fs::OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(false)
-            .open(&self.lock_path)
-            .await
-            .context("Failed to open lock file")?;
-        file.lock_exclusive()
-            .map_err(|e| anyhow::anyhow!("Failed to lock {}: {e}", self.lock_path.display()))?;
-        Ok(file)
+    pub fn db_path(&self) -> PathBuf {
+        self.root.join("graph.duckdb")
     }
 
-    async fn load_manifest(&self) -> Result<Manifest> {
-        match tokio::fs::read_to_string(&self.manifest_path).await {
-            Ok(data) => serde_json::from_str(&data).context("Failed to parse manifest"),
-            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(Manifest::default()),
-            Err(e) => Err(e).context("Failed to read manifest"),
-        }
-    }
-
-    async fn save_manifest(&self, manifest: &Manifest) -> Result<()> {
-        let data = serde_json::to_string_pretty(manifest)?;
-        tokio::fs::write(&self.manifest_path, data).await?;
-        Ok(())
-    }
-
-    /// Discover git repos in a directory, register each, and return the
-    /// canonical paths. If the path itself is a git repo, returns just that.
-    pub async fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
+    /// Discover git repos in a directory, including nested repos when
+    /// the path itself is a git repo. Returns canonical paths.
+    pub fn resolve_repos(&self, path: &Path) -> Result<Vec<PathBuf>> {
         let canonical = dunce::canonicalize(path)?;
 
-        let repo_paths = if is_git_repo(&canonical) {
-            vec![canonical]
+        let discovered = discover_repos(&canonical);
+        if discovered.is_empty() && is_git_repo(&canonical) {
+            Ok(vec![canonical])
         } else {
-            discover_repos(&canonical)
-        };
-
-        let _lock = self.lock().await?;
-        let mut manifest = self.load_manifest().await?;
-
-        for repo in &repo_paths {
-            let key = repo.to_string_lossy().to_string();
-            if let std::collections::hash_map::Entry::Vacant(e) = manifest.projects.entry(key) {
-                let dir_name = path_to_dir_name(repo);
-                std::fs::create_dir_all(self.indexes_dir.join(&dir_name))?;
-                e.insert(ProjectEntry {
-                    dir_name,
-                    status: Status::Pending,
-                    last_indexed_at: None,
-                    error_message: None,
-                });
-            }
+            Ok(discovered)
         }
-
-        self.save_manifest(&manifest).await?;
-        Ok(repo_paths)
     }
 
-    pub async fn set_status(
-        &self,
-        repo_path: &str,
-        status: Status,
-        error: Option<String>,
-    ) -> Result<()> {
-        let _lock = self.lock().await?;
-        let mut manifest = self.load_manifest().await?;
-        if let Some(entry) = manifest.projects.get_mut(repo_path) {
-            entry.error_message = error;
-            if status == Status::Indexed {
-                entry.last_indexed_at = Some(Utc::now());
+    /// Return `project_id -> repo_path` mapping for all indexed repos.
+    pub fn project_roots(&self) -> Result<HashMap<i64, PathBuf>> {
+        let client = DuckDbClient::open_read_only(&self.db_path())
+            .context("failed to open DuckDB for manifest read")?;
+        let batches = client
+            .query_arrow(
+                "SELECT project_id, repo_path FROM _orbit_manifest WHERE status = 'indexed'",
+            )
+            .context("failed to query project roots")?;
+
+        use arrow::datatypes::Int64Type;
+        use gkg_utils::arrow::ArrowUtils;
+
+        let mut map = HashMap::new();
+        for batch in &batches {
+            for row in 0..batch.num_rows() {
+                if let (Some(pid), Some(path)) = (
+                    ArrowUtils::get_column::<Int64Type>(batch, "project_id", row),
+                    ArrowUtils::get_column_string(batch, "repo_path", row),
+                ) {
+                    map.insert(pid, PathBuf::from(path));
+                }
             }
-            entry.status = status;
         }
-        self.save_manifest(&manifest).await
+        Ok(map)
     }
 }
+
+/// Update manifest status on the given client connection.
+pub fn set_status(
+    client: &DuckDbClient,
+    repo_path: &str,
+    project_id: i64,
+    status: RepoStatus,
+    error_message: Option<&str>,
+    git: Option<&GitInfo>,
+) -> Result<()> {
+    let parent = git.map(|g| g.parent_repo_path.to_string_lossy().to_string());
+    let branch = git.map(|g| g.branch.as_str());
+    let commit = git.map(|g| g.commit_sha.as_str());
+
+    client
+        .execute(
+            "INSERT INTO _orbit_manifest (repo_path, project_id, parent_repo_path, branch, commit_sha, status, error_message, last_indexed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6::repo_status, ?7, CASE WHEN ?6 = 'indexed' THEN now() ELSE NULL END)
+             ON CONFLICT (repo_path) DO UPDATE SET
+                 parent_repo_path = COALESCE(?3, parent_repo_path),
+                 branch = COALESCE(?4, branch),
+                 commit_sha = COALESCE(?5, commit_sha),
+                 status = ?6::repo_status,
+                 error_message = ?7,
+                 last_indexed_at = CASE WHEN ?6 = 'indexed' THEN now() ELSE last_indexed_at END",
+            &[
+                json!(repo_path),
+                json!(project_id),
+                parent.map_or(serde_json::Value::Null, |s| json!(s)),
+                branch.map_or(serde_json::Value::Null, |s| json!(s)),
+                commit.map_or(serde_json::Value::Null, |s| json!(s)),
+                json!(status.as_ref()),
+                error_message.map_or(serde_json::Value::Null, |s| json!(s)),
+            ],
+        )
+        .context("failed to upsert manifest")?;
+    Ok(())
+}
+
+/// Git metadata for an indexed repository.
+pub struct GitInfo {
+    /// Canonical repo path.
+    pub repo_path: PathBuf,
+    /// Deterministic project ID derived from `repo_path`.
+    pub project_id: i64,
+    pub branch: String,
+    pub commit_sha: String,
+    /// For worktrees, the parent repo's canonical path. For regular
+    /// repos, same as `repo_path`.
+    pub parent_repo_path: PathBuf,
+}
+
+/// Resolve git metadata (branch, commit, parent repo) for a repo path.
+pub fn git_info(repo_path: &Path) -> Result<GitInfo> {
+    let canonical = dunce::canonicalize(repo_path)
+        .with_context(|| format!("failed to canonicalize {}", repo_path.display()))?;
+    let path_str = canonical.to_string_lossy().to_string();
+    let project_id = project_id_from_path(&path_str);
+
+    let repo = CoreGitaliskRepository::new(path_str.clone(), path_str);
+
+    let branch = repo
+        .get_current_branch()
+        .context("failed to get current branch")?;
+    let commit_sha = repo
+        .get_current_commit_hash()
+        .context("failed to get current commit hash")?;
+    let parent_repo_path = repo
+        .parent_repo_path()
+        .context("failed to resolve parent repo path")?;
+
+    Ok(GitInfo {
+        repo_path: canonical,
+        project_id,
+        branch,
+        commit_sha,
+        parent_repo_path,
+    })
+}
+
+/// Deterministic project ID from canonical path. Mask clears the sign bit
+/// so the result is always a positive i64.
+pub fn project_id_from_path(path: &str) -> i64 {
+    use std::hash::{Hash, Hasher};
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    path.hash(&mut hasher);
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
+}
+
+// ── Helpers ─────────────────────────────────────────────────────────────────
 
 fn is_git_repo(path: &Path) -> bool {
     let git = path.join(".git");
@@ -151,39 +193,6 @@ fn discover_repos(workspace_path: &Path) -> Vec<PathBuf> {
         .collect()
 }
 
-/// Splits a path into components via `typed_path` (auto-detects Unix/Windows),
-/// percent-encodes each component, then joins with `-`.
-///
-/// `/Users/alice/my-repo`    → `Users-alice-my%2Drepo`
-/// `/Users/alice/my project` → `Users-alice-my%20project`
-/// `C:\Users\alice\src`      → `C-Users-alice-src`
-fn path_to_dir_name(path: &Path) -> String {
-    let s = path.to_string_lossy();
-    Utf8TypedPath::derive(&s)
-        .components()
-        .filter(|c| !c.is_root() && !c.is_current() && !c.is_parent())
-        .map(|c| encode_component(c.as_str().trim_end_matches(':')))
-        .collect::<Vec<_>>()
-        .join("-")
-}
-
-fn encode_component(s: &str) -> String {
-    let mut out = String::with_capacity(s.len());
-    for byte in s.bytes() {
-        match byte {
-            b'a'..=b'z' | b'A'..=b'Z' | b'0'..=b'9' | b'_' | b'.' => out.push(byte as char),
-            _ => {
-                out.push('%');
-                out.push(char::from(HEX[byte as usize >> 4]));
-                out.push(char::from(HEX[byte as usize & 0xf]));
-            }
-        }
-    }
-    out
-}
-
-const HEX: &[u8; 16] = b"0123456789ABCDEF";
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -199,107 +208,63 @@ mod tests {
     }
 
     #[test]
-    fn test_path_to_dir_name() {
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/src/frontend")),
-            "Users-alice-src-frontend"
-        );
-        // dashes in components are encoded so /a-b and /a/b don't collide
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/my-repo")),
-            "Users-alice-my%2Drepo"
-        );
-        assert_eq!(
-            path_to_dir_name(Path::new("/Users/alice/my project")),
-            "Users-alice-my%20project"
-        );
-        assert_eq!(
-            path_to_dir_name(Path::new("C:\\Users\\alice\\src")),
-            "C-Users-alice-src"
-        );
-        assert_eq!(path_to_dir_name(Path::new("/tmp/a@b#c")), "tmp-a%40b%23c");
-        assert_eq!(
-            path_to_dir_name(Path::new("/tmp/100%done")),
-            "tmp-100%25done"
-        );
+    fn test_project_id_deterministic() {
+        let a = project_id_from_path("/Users/alice/repo");
+        let b = project_id_from_path("/Users/alice/repo");
+        assert_eq!(a, b);
+        assert!(a > 0);
     }
 
-    #[tokio::test]
-    async fn test_resolve_single_repo() {
+    #[test]
+    fn test_project_id_different_paths() {
+        let a = project_id_from_path("/Users/alice/repo-a");
+        let b = project_id_from_path("/Users/alice/repo-b");
+        assert_ne!(a, b);
+    }
+
+    #[test]
+    fn test_resolve_single_repo() {
         let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
 
         let repo = temp.path().join("my-repo");
         init_repo(&repo);
 
-        let repos = store.resolve_repos(&repo).await.unwrap();
+        let repos = store.resolve_repos(&repo).unwrap();
         assert_eq!(repos.len(), 1);
     }
 
-    #[tokio::test]
-    async fn test_resolve_workspace() {
+    #[test]
+    fn test_resolve_workspace() {
         let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
 
         let workspace = temp.path().join("workspace");
         init_repo(&workspace.join("repo-a"));
         init_repo(&workspace.join("repo-b"));
         std::fs::create_dir_all(workspace.join("not-a-repo")).unwrap();
 
-        let repos = store.resolve_repos(&workspace).await.unwrap();
+        let repos = store.resolve_repos(&workspace).unwrap();
         assert_eq!(repos.len(), 2);
     }
 
-    #[tokio::test]
-    async fn test_resolve_idempotent() {
+    #[test]
+    fn test_resolve_workspace_that_is_also_a_git_repo() {
         let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
+        let store = Workspace::open(temp.path().join("orbit")).unwrap();
 
-        let repo = temp.path().join("repo");
-        init_repo(&repo);
+        let workspace = temp.path().join("workspace");
+        init_repo(&workspace);
+        init_repo(&workspace.join("nested-a"));
+        init_repo(&workspace.join("nested-b"));
 
-        store.resolve_repos(&repo).await.unwrap();
-        store.resolve_repos(&repo).await.unwrap();
-
-        let manifest = store.load_manifest().await.unwrap();
-        assert_eq!(manifest.projects.len(), 1);
-    }
-
-    #[tokio::test]
-    async fn test_set_status() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
-
-        let repo = temp.path().join("repo");
-        init_repo(&repo);
-
-        let repos = store.resolve_repos(&repo).await.unwrap();
-        let key = repos[0].to_string_lossy().to_string();
-
-        store.set_status(&key, Status::Indexed, None).await.unwrap();
-
-        let manifest = store.load_manifest().await.unwrap();
-        let entry = manifest.projects.get(&key).unwrap();
-        assert_eq!(entry.status, Status::Indexed);
-        assert!(entry.last_indexed_at.is_some());
-    }
-
-    #[tokio::test]
-    async fn test_lock_released_between_calls() {
-        let temp = tempfile::TempDir::new().unwrap();
-        let store = IndexStore::open(temp.path().join("orbit")).unwrap();
-
-        let repo = temp.path().join("repo");
-        init_repo(&repo);
-
-        store.resolve_repos(&repo).await.unwrap();
-        store
-            .set_status(
-                &repo.canonicalize().unwrap().to_string_lossy(),
-                Status::Indexing,
-                None,
-            )
-            .await
-            .unwrap();
+        let repos = store.resolve_repos(&workspace).unwrap();
+        // Should find the root repo AND both nested repos.
+        assert!(
+            repos.len() >= 3,
+            "expected at least 3 repos, got {}: {:?}",
+            repos.len(),
+            repos
+        );
     }
 }

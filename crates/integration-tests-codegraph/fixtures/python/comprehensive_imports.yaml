@@ -1,0 +1,46 @@
+name: "Python: comprehensive import extraction"
+fixtures:
+  - path: main.py
+    content: |
+      import os
+      import sys
+      import os.path
+      import numpy as np
+      from pathlib import Path
+      from collections import defaultdict, OrderedDict
+      from typing import List as ListType, Dict as DictType
+      from os.path import join, exists
+
+tests:
+  - name: Has multiple imports
+    query: |
+      MATCH (f:File)-[:FileToImportedSymbol]->(i:ImportedSymbol)
+      RETURN count(i) AS n
+    assert:
+      - { count_gte: { field: n, value: 10 } }
+
+  - name: os import exists
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.path = 'os'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "os" } }
+
+  - name: From import exists (Path)
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.name = 'Path'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "pathlib" } }
+
+  - name: Aliased import exists (numpy as np)
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.alias = 'np'
+      RETURN i.path AS path
+    assert:
+      - { row_count: 1 }

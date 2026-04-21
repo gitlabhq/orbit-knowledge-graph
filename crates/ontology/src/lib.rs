@@ -19,6 +19,7 @@
 pub mod constants;
 mod entities;
 pub mod etl;
+pub mod introspection;
 mod json_schema;
 mod loading;
 
@@ -27,8 +28,10 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    DataType, DomainInfo, EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity,
-    EdgeSourceEtlConfig, EnumType, Field, NodeEntity, NodeStyle, RedactionConfig,
+    AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
+    EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
+    StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -79,19 +82,27 @@ impl fmt::Display for OntologyError {
     }
 }
 
+/// Configuration for a single edge table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeTableConfig {
+    pub sort_key: Vec<String>,
+    pub columns: Vec<EdgeColumn>,
+    /// ClickHouse-specific storage metadata for DDL generation.
+    pub storage: EdgeTableStorage,
+}
+
 /// A loaded ontology containing all node and edge entities.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Ontology {
     schema_version: String,
     /// Prefix for all ClickHouse graph table names (e.g., `"gl_"`).
     pub(crate) table_prefix: String,
-    /// ClickHouse table name for all graph edges (e.g., `"gl_edge"`).
-    pub(crate) edge_table: String,
+    /// Default edge table name (e.g., `"gl_edge"`).
+    pub(crate) default_edge_table: String,
     /// Default ORDER BY columns for node tables (dedup key for ReplacingMergeTree).
     pub(crate) default_entity_sort_key: Vec<String>,
-    /// ORDER BY columns for the edge table (dedup key for ReplacingMergeTree).
-    pub(crate) edge_sort_key: Vec<String>,
-    pub(crate) edge_columns: Vec<EdgeColumn>,
+    /// Edge table configurations keyed by table name.
+    pub(crate) edge_table_configs: BTreeMap<String, EdgeTableConfig>,
     pub(crate) domains: BTreeMap<String, DomainInfo>,
     pub(crate) nodes: BTreeMap<String, NodeEntity>,
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
@@ -99,6 +110,17 @@ pub struct Ontology {
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
     pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
     pub(crate) etl_settings: EtlSettings,
+    pub(crate) internal_column_prefix: String,
+    pub(crate) skip_security_filter_for_tables: Vec<String>,
+    /// Local entity configs keyed by entity name. Each entry lists
+    /// properties to exclude from the local DuckDB table.
+    pub(crate) local_entities: BTreeMap<String, Vec<String>>,
+    /// Local edge table name, if declared.
+    pub(crate) local_edge_table_name: Option<String>,
+    /// Local edge table columns, if declared.
+    pub(crate) local_edge_columns: Vec<EdgeColumn>,
+    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
+    pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
 }
 
 impl Default for Ontology {
@@ -111,19 +133,24 @@ impl Ontology {
     /// Create an empty ontology.
     #[must_use]
     pub fn new() -> Self {
+        let default_sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        let default_config = EdgeTableConfig {
+            sort_key: default_sort_key,
+            columns: Vec::new(),
+            storage: EdgeTableStorage::default(),
+        };
         Self {
             schema_version: String::new(),
             table_prefix: GL_TABLE_PREFIX.to_string(),
-            edge_table: EDGE_TABLE.to_string(),
+            default_edge_table: EDGE_TABLE.to_string(),
             default_entity_sort_key: vec![
                 TRAVERSAL_PATH_COLUMN.to_string(),
                 DEFAULT_PRIMARY_KEY.to_string(),
             ],
-            edge_sort_key: EDGE_RESERVED_COLUMNS
-                .iter()
-                .map(|s| (*s).to_string())
-                .collect(),
-            edge_columns: Vec::new(),
+            edge_table_configs: BTreeMap::from([(EDGE_TABLE.to_string(), default_config)]),
             domains: BTreeMap::new(),
             nodes: BTreeMap::new(),
             edges: BTreeMap::new(),
@@ -137,6 +164,12 @@ impl Ontology {
                     DEFAULT_PRIMARY_KEY.to_string(),
                 ],
             },
+            internal_column_prefix: "_gkg_".to_string(),
+            skip_security_filter_for_tables: Vec::new(),
+            local_entities: BTreeMap::new(),
+            local_edge_table_name: None,
+            local_edge_columns: Vec::new(),
+            auxiliary_tables: Vec::new(),
         }
     }
 
@@ -173,26 +206,88 @@ impl Ontology {
         mut self,
         columns: impl IntoIterator<Item = (impl Into<String>, DataType)>,
     ) -> Self {
-        self.edge_columns = columns
+        let cols: Vec<EdgeColumn> = columns
             .into_iter()
             .map(|(name, data_type)| EdgeColumn {
                 name: name.into(),
                 data_type,
             })
             .collect();
+        if let Some(config) = self.edge_table_configs.get_mut(&self.default_edge_table) {
+            config.columns = cols;
+        }
         self
     }
 
-    /// Columns of the unified edge table, in schema order.
+    /// Builder: declare an additional edge table (for testing multi-table routing).
+    #[must_use]
+    pub fn with_edge_table(mut self, name: impl Into<String>) -> Self {
+        let name = name.into();
+        let sort_key: Vec<String> = EDGE_RESERVED_COLUMNS
+            .iter()
+            .map(|s| (*s).to_string())
+            .collect();
+        self.edge_table_configs.insert(
+            name,
+            EdgeTableConfig {
+                sort_key,
+                columns: Vec::new(),
+                storage: EdgeTableStorage::default(),
+            },
+        );
+        self
+    }
+
+    /// Builder: assign specific edge types to a named edge table.
+    ///
+    /// The edge must already be added via `with_edges()` and the table
+    /// via `with_edge_table()`. This sets `destination_table` on all
+    /// variants of the named edge.
+    #[must_use]
+    pub fn with_edge_for_table(
+        mut self,
+        edge_name: impl Into<String>,
+        table: impl Into<String>,
+    ) -> Self {
+        let edge_name = edge_name.into();
+        let table = table.into();
+        if let Some(variants) = self.edges.get_mut(&edge_name) {
+            for v in variants.iter_mut() {
+                v.destination_table = table.clone();
+            }
+            // If the edge has no variants (common in builder-constructed
+            // ontologies), insert a placeholder so edge_table_for_relationship
+            // can look it up.
+            if variants.is_empty() {
+                variants.push(EdgeEntity {
+                    relationship_kind: edge_name,
+                    destination_table: table,
+                    ..Default::default()
+                });
+            }
+        }
+        self
+    }
+
+    /// Columns of the default edge table, in schema order.
     #[must_use]
     pub fn edge_columns(&self) -> &[EdgeColumn] {
-        &self.edge_columns
+        self.edge_table_configs
+            .get(&self.default_edge_table)
+            .map(|c| c.columns.as_slice())
+            .unwrap_or(&[])
+    }
+
+    /// Get the configuration for a specific edge table.
+    #[must_use]
+    pub fn edge_table_config(&self, table: &str) -> Option<&EdgeTableConfig> {
+        self.edge_table_configs.get(table)
     }
 
     /// Look up the `DataType` of an edge table column by name.
     #[must_use]
     pub fn get_edge_column_type(&self, name: &str) -> Option<DataType> {
-        self.edge_columns
+        self.edge_columns()
             .iter()
             .find(|c| c.name == name)
             .map(|c| c.data_type)
@@ -213,16 +308,21 @@ impl Ontology {
         })?;
         for (field_name, data_type, nullable) in fields {
             let field_name_string: String = field_name.into();
+            if field_name_string.starts_with(&self.internal_column_prefix) {
+                return Err(OntologyError::Validation(format!(
+                    "field \"{field_name_string}\" on node \"{node_name}\" uses reserved prefix '{}'",
+                    self.internal_column_prefix
+                )));
+            }
             if field_name_string == constants::TRAVERSAL_PATH_COLUMN {
                 node.has_traversal_path = true;
             }
             node.fields.push(Field {
                 name: field_name_string.clone(),
-                source: field_name_string,
+                source: FieldSource::DatabaseColumn(field_name_string),
                 data_type,
                 nullable,
-                enum_values: None,
-                enum_type: EnumType::default(),
+                ..Default::default()
             });
         }
         Ok(self)
@@ -272,6 +372,60 @@ impl Ontology {
         self
     }
 
+    /// Mutate a field on a node.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if the node or field doesn't exist.
+    pub fn modify_field(
+        mut self,
+        node_name: &str,
+        field_name: &str,
+        f: impl FnOnce(&mut Field),
+    ) -> Result<Self, OntologyError> {
+        let field = self.get_field_mut(node_name, field_name)?;
+        f(field);
+        Ok(self)
+    }
+
+    fn get_field_mut(
+        &mut self,
+        node_name: &str,
+        field_name: &str,
+    ) -> Result<&mut Field, OntologyError> {
+        let node = self.nodes.get_mut(node_name).ok_or_else(|| {
+            OntologyError::Validation(format!("node \"{node_name}\" does not exist"))
+        })?;
+        node.fields
+            .iter_mut()
+            .find(|f| f.name == field_name)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "field \"{field_name}\" not found on \"{node_name}\""
+                ))
+            })
+    }
+
+    /// Builder: set redaction config for a node (for testing).
+    #[must_use]
+    pub fn with_redaction(
+        mut self,
+        node_name: &str,
+        resource_type: impl Into<String>,
+        id_column: impl Into<String>,
+    ) -> Self {
+        let node = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"));
+        node.redaction = Some(RedactionConfig {
+            resource_type: resource_type.into(),
+            id_column: id_column.into(),
+            ability: "read".to_string(),
+        });
+        self
+    }
+
     /// Load ontology from a directory containing schema.yaml and referenced files.
     ///
     /// # Errors
@@ -299,6 +453,53 @@ impl Ontology {
     #[must_use = "this returns the loaded ontology, which should not be discarded"]
     pub fn load_embedded() -> Result<Self, OntologyError> {
         loading::load_embedded()
+    }
+
+    /// Returns a clone with all physical table names prefixed for the given
+    /// schema version.
+    ///
+    /// This prepends `prefix` to every `destination_table` on nodes and edges,
+    /// the default edge table, edge table config keys, auxiliary table names,
+    /// and `skip_security_filter_for_tables`. Local (DuckDB) table names are
+    /// not affected.
+    ///
+    /// An empty prefix returns a clone with table names unchanged (v0 backward
+    /// compatibility).
+    #[must_use]
+    pub fn with_schema_version_prefix(mut self, prefix: &str) -> Self {
+        if prefix.is_empty() {
+            return self;
+        }
+
+        self.default_edge_table = format!("{prefix}{}", self.default_edge_table);
+
+        self.edge_table_configs = self
+            .edge_table_configs
+            .into_iter()
+            .map(|(k, v)| (format!("{prefix}{k}"), v))
+            .collect();
+
+        for node in self.nodes.values_mut() {
+            node.destination_table = format!("{prefix}{}", node.destination_table);
+        }
+
+        for edge_list in self.edges.values_mut() {
+            for edge in edge_list {
+                edge.destination_table = format!("{prefix}{}", edge.destination_table);
+            }
+        }
+
+        self.skip_security_filter_for_tables = self
+            .skip_security_filter_for_tables
+            .into_iter()
+            .map(|t| format!("{prefix}{t}"))
+            .collect();
+
+        for aux in &mut self.auxiliary_tables {
+            aux.name = format!("{prefix}{}", aux.name);
+        }
+
+        self
     }
 
     /// Get a node by name.
@@ -398,6 +599,26 @@ impl Ontology {
         self.get_redaction_config(entity_name).is_some()
     }
 
+    /// Iterator over names of `admin_only` fields on the given entity.
+    /// Returns an empty iterator if the entity does not exist.
+    pub fn admin_only_properties(&self, entity_name: &str) -> impl Iterator<Item = &str> {
+        self.get_node(entity_name).into_iter().flat_map(|node| {
+            node.fields
+                .iter()
+                .filter(|f| f.admin_only)
+                .map(|f| f.name.as_str())
+        })
+    }
+
+    /// Whether `field_name` on `entity_name` is marked `admin_only`.
+    /// Returns false if either the entity or the field does not exist.
+    #[must_use]
+    pub fn is_admin_only(&self, entity_name: &str, field_name: &str) -> bool {
+        self.get_node(entity_name)
+            .and_then(|node| node.fields.iter().find(|f| f.name == field_name))
+            .is_some_and(|f| f.admin_only)
+    }
+
     /// Iterator over all nodes.
     pub fn nodes(&self) -> impl Iterator<Item = &NodeEntity> {
         self.nodes.values()
@@ -441,10 +662,103 @@ impl Ontology {
         &self.table_prefix
     }
 
-    /// ClickHouse table name for all graph edges.
+    /// Default ClickHouse table name for graph edges.
     #[must_use]
     pub fn edge_table(&self) -> &str {
-        &self.edge_table
+        &self.default_edge_table
+    }
+
+    /// All edge table names defined in settings.
+    #[must_use]
+    pub fn edge_tables(&self) -> Vec<&str> {
+        self.edge_table_configs.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Check if a table name is an edge table.
+    #[must_use]
+    pub fn is_edge_table(&self, table: &str) -> bool {
+        self.edge_table_configs.contains_key(table)
+    }
+
+    /// Returns the destination table for a given relationship kind.
+    ///
+    /// Uses the first variant's `destination_table`. This is correct because
+    /// `EdgeYaml::to_entities()` assigns the same table to all variants of a
+    /// relationship kind — per-variant table routing is not supported.
+    ///
+    /// Falls back to the default edge table if the relationship kind is
+    /// unknown (e.g. wildcard queries).
+    #[must_use]
+    pub fn edge_table_for_relationship(&self, relationship_kind: &str) -> &str {
+        self.edges
+            .get(relationship_kind)
+            .and_then(|variants| variants.first())
+            .map(|e| e.destination_table.as_str())
+            .unwrap_or(&self.default_edge_table)
+    }
+
+    /// Prefix for internal columns injected by the compiler.
+    #[must_use]
+    pub fn internal_column_prefix(&self) -> &str {
+        &self.internal_column_prefix
+    }
+
+    /// Tables excluded from traversal-path security filters.
+    #[must_use]
+    pub fn skip_security_filter_tables(&self) -> &[String] {
+        &self.skip_security_filter_for_tables
+    }
+
+    /// Entity names that participate in the local DuckDB graph.
+    #[must_use]
+    pub fn local_entity_names(&self) -> Vec<&str> {
+        self.local_entities.keys().map(|s| s.as_str()).collect()
+    }
+
+    /// Returns the exclude list for a local entity.
+    ///
+    /// Returns `None` if the entity is not in `local_entities`.
+    #[must_use]
+    pub fn local_entity_excludes(&self, entity_name: &str) -> Option<&[String]> {
+        self.local_entities.get(entity_name).map(|v| v.as_slice())
+    }
+
+    /// Returns the fields for a local entity, filtered to exclude virtual
+    /// fields and properties listed in the entity's `exclude_properties`.
+    ///
+    /// Returns `None` if the entity is not in `local_entities`.
+    #[must_use]
+    pub fn local_entity_fields(&self, entity_name: &str) -> Option<Vec<&Field>> {
+        let exclude = self.local_entities.get(entity_name)?;
+        let node = self
+            .nodes
+            .get(entity_name)
+            .expect("local entity must exist in nodes");
+        Some(
+            node.fields
+                .iter()
+                .filter(|f| !matches!(f.source, FieldSource::Virtual(_)))
+                .filter(|f| !exclude.iter().any(|p| p == &f.name))
+                .collect(),
+        )
+    }
+
+    /// Name of the local edge table, if declared.
+    #[must_use]
+    pub fn local_edge_table_name(&self) -> Option<&str> {
+        self.local_edge_table_name.as_deref()
+    }
+
+    /// Column definitions for the local edge table, if declared.
+    #[must_use]
+    pub fn local_edge_columns(&self) -> &[EdgeColumn] {
+        &self.local_edge_columns
+    }
+
+    /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
+    #[must_use]
+    pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
+        &self.auxiliary_tables
     }
 
     /// Default ORDER BY / dedup key columns for node tables.
@@ -453,20 +767,23 @@ impl Ontology {
         &self.default_entity_sort_key
     }
 
-    /// ORDER BY / dedup key columns for the edge table.
+    /// ORDER BY / dedup key columns for the default edge table.
     #[must_use]
     pub fn edge_sort_key(&self) -> &[String] {
-        &self.edge_sort_key
+        self.edge_table_configs
+            .get(&self.default_edge_table)
+            .map(|c| c.sort_key.as_slice())
+            .unwrap_or(&[])
     }
 
     /// Look up the dedup key (ORDER BY columns) for a ClickHouse table name.
     ///
-    /// Returns the node's `sort_key` for node tables, the `edge_sort_key` for
-    /// the edge table, or `None` if the table is unknown.
+    /// Returns the node's `sort_key` for node tables, the edge table's
+    /// `sort_key` for edge tables, or `None` if the table is unknown.
     #[must_use]
     pub fn sort_key_for_table(&self, table: &str) -> Option<&[String]> {
-        if table == self.edge_table {
-            return Some(&self.edge_sort_key);
+        if let Some(config) = self.edge_table_configs.get(table) {
+            return Some(&config.sort_key);
         }
         self.nodes
             .values()
@@ -569,6 +886,30 @@ impl Ontology {
             .iter()
             .find(|f| f.name == field_name)
             .map(|f| f.data_type)
+    }
+
+    /// Check a boolean property on a node field.
+    ///
+    /// Returns `true` for reserved columns (e.g. `id`). Returns `false` for
+    /// unknown fields (fail-closed). Unknown nodes return `true` since edge
+    /// filters pass entity names like `"relationship[0]"`.
+    #[must_use]
+    pub fn check_field_flag(
+        &self,
+        node_name: &str,
+        field_name: &str,
+        flag: impl Fn(&Field) -> bool,
+    ) -> bool {
+        if NODE_RESERVED_COLUMNS.contains(&field_name) {
+            return true;
+        }
+        let Some(node) = self.nodes.get(node_name) else {
+            return true;
+        };
+        node.fields
+            .iter()
+            .find(|f| f.name == field_name)
+            .is_some_and(&flag)
     }
 
     /// Validate that a type is a valid node label or edge type.
@@ -690,20 +1031,17 @@ mod tests {
 
         let field = Field {
             name: "email".into(),
-            source: "email".into(),
+            source: FieldSource::DatabaseColumn("email".into()),
             data_type: DataType::String,
             nullable: true,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "email: String?");
         let field = Field {
             name: "id".into(),
-            source: "id".into(),
+            source: FieldSource::DatabaseColumn("id".into()),
             data_type: DataType::Int,
-            nullable: false,
-            enum_values: None,
-            enum_type: EnumType::default(),
+            ..Default::default()
         };
         assert_eq!(format!("{field}"), "id: Int");
     }
@@ -889,11 +1227,12 @@ mod tests {
             label: "username".to_string(),
             fields: vec![Field {
                 name: "status".to_string(),
-                source: "status".to_string(),
+                source: FieldSource::DatabaseColumn("status".to_string()),
                 data_type: DataType::Enum,
                 nullable: false,
                 enum_values: Some(enum_values),
                 enum_type: EnumType::Int,
+                ..Default::default()
             }],
             destination_table: "gl_user".to_string(),
             ..Default::default()
@@ -1144,6 +1483,38 @@ mod tests {
         assert_eq!(ontology.sort_key_for_table("nonexistent_table"), None);
     }
 
+    // ── edge_tables tests ────────────────────────────────────────────
+
+    #[test]
+    fn edge_tables_includes_default_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let tables = ontology.edge_tables();
+        assert!(
+            tables.contains(&ontology.edge_table()),
+            "edge_tables should include the default edge table"
+        );
+    }
+
+    #[test]
+    fn is_edge_table_matches_default() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert!(ontology.is_edge_table(ontology.edge_table()));
+        assert!(!ontology.is_edge_table("gl_user"));
+        assert!(!ontology.is_edge_table("nonexistent"));
+    }
+
+    #[test]
+    fn edge_entity_has_destination_table() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity in ontology.edges() {
+            assert!(
+                !entity.destination_table.is_empty(),
+                "edge '{}' should have a destination_table",
+                entity.relationship_kind
+            );
+        }
+    }
+
     #[test]
     fn sort_key_with_nodes_builder_inherits_default() {
         let ontology = Ontology::new().with_nodes(["Foo", "Bar"]);
@@ -1189,7 +1560,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, vec!["project_id", "branch", "id"]);
     }
@@ -1222,7 +1598,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert_eq!(entity.sort_key, default_sort_key);
     }
@@ -1248,16 +1629,19 @@ properties:
 schema_version: "1.0"
 settings:
   table_prefix: "kg_"
-  edge_table: "kg_edge"
+  default_edge_table: kg_edge
+  internal_column_prefix: "_gkg_"
   default_entity_sort_key: [traversal_path, id]
-  edge_sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
-  edge_columns:
-    - {name: traversal_path, type: string}
-    - {name: relationship_kind, type: string}
-    - {name: source_id, type: int64}
-    - {name: source_kind, type: string}
-    - {name: target_id, type: int64}
-    - {name: target_kind, type: string}
+  edge_tables:
+    kg_edge:
+      sort_key: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
   etl:
     default_watermark: _siphon_replicated_at
     default_deleted: _siphon_deleted
@@ -1429,7 +1813,12 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let err = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .unwrap_err();
         assert!(
             err.to_string().contains("nonexistent_field"),
@@ -1469,9 +1858,279 @@ properties:
             order_by: vec!["traversal_path".to_string(), "id".to_string()],
         };
         let entity = node_def
-            .into_entity("TestNode".to_string(), &default_sort_key, &etl_settings)
+            .into_entity(
+                "TestNode".to_string(),
+                &default_sort_key,
+                &etl_settings,
+                "_gkg_",
+            )
             .expect("should succeed");
         assert!(entity.default_columns.is_empty());
         assert_eq!(entity.sort_key, default_sort_key);
+    }
+
+    // ── check_field_flag / modify_field ────────────────────────────
+
+    fn field_flags_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [("username", DataType::String), ("email", DataType::String)],
+            )
+            .modify_field("User", "email", |f| {
+                f.like_allowed = false;
+                f.filterable = false;
+            })
+            .unwrap()
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_reserved_columns() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "id", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "id", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_allowed_field() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("User", "username", |f| f.like_allowed));
+        assert!(ont.check_field_flag("User", "username", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_false_for_disallowed_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "email", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "email", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_fails_closed_for_unknown_field() {
+        let ont = field_flags_ontology();
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.like_allowed));
+        assert!(!ont.check_field_flag("User", "nonexistent", |f| f.filterable));
+    }
+
+    #[test]
+    fn check_field_flag_returns_true_for_unknown_node() {
+        let ont = field_flags_ontology();
+        assert!(ont.check_field_flag("Unknown", "whatever", |f| f.like_allowed));
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_node() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .modify_field("Bogus", "field", |_| {});
+        assert!(result.is_err());
+    }
+
+    // ── admin_only_properties / is_admin_only ──────────────────────
+
+    fn admin_only_ontology() -> Ontology {
+        Ontology::new()
+            .with_nodes(["User"])
+            .with_fields(
+                "User",
+                [
+                    ("username", DataType::String),
+                    ("is_admin", DataType::Bool),
+                    ("is_auditor", DataType::Bool),
+                ],
+            )
+            .modify_field("User", "is_admin", |f| f.admin_only = true)
+            .unwrap()
+            .modify_field("User", "is_auditor", |f| f.admin_only = true)
+            .unwrap()
+    }
+
+    #[test]
+    fn admin_only_properties_yields_only_admin_only_fields() {
+        let ont = admin_only_ontology();
+        let mut got: Vec<&str> = ont.admin_only_properties("User").collect();
+        got.sort_unstable();
+        assert_eq!(got, vec!["is_admin", "is_auditor"]);
+    }
+
+    #[test]
+    fn admin_only_properties_empty_for_unknown_entity() {
+        let ont = admin_only_ontology();
+        assert_eq!(ont.admin_only_properties("Bogus").count(), 0);
+    }
+
+    #[test]
+    fn admin_only_properties_empty_when_no_admin_only_fields() {
+        let ont = Ontology::new()
+            .with_nodes(["Project"])
+            .with_fields("Project", [("name", DataType::String)]);
+        assert_eq!(ont.admin_only_properties("Project").count(), 0);
+    }
+
+    #[test]
+    fn is_admin_only_matches_flag() {
+        let ont = admin_only_ontology();
+        assert!(ont.is_admin_only("User", "is_admin"));
+        assert!(ont.is_admin_only("User", "is_auditor"));
+        assert!(!ont.is_admin_only("User", "username"));
+    }
+
+    #[test]
+    fn is_admin_only_fails_closed_for_unknowns() {
+        let ont = admin_only_ontology();
+        assert!(!ont.is_admin_only("User", "bogus_field"));
+        assert!(!ont.is_admin_only("Bogus", "is_admin"));
+    }
+
+    #[test]
+    fn modify_field_errors_for_unknown_field() {
+        let result = Ontology::new()
+            .with_nodes(["User"])
+            .with_fields("User", [("name", DataType::String)])
+            .modify_field("User", "bogus", |_| {});
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn local_entities_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let local = ontology.local_entity_names();
+        assert!(local.contains(&"Directory"));
+        assert!(local.contains(&"File"));
+        assert!(local.contains(&"Definition"));
+        assert!(local.contains(&"ImportedSymbol"));
+        assert!(!local.contains(&"User"));
+    }
+
+    #[test]
+    fn local_entity_fields_excludes_per_entity_properties() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let fields = ontology
+            .local_entity_fields("Directory")
+            .expect("Directory is a local entity");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+
+        // Included: regular fields and envelope fields (not excluded in YAML)
+        assert!(names.contains(&"id"));
+        assert!(names.contains(&"project_id"));
+        assert!(names.contains(&"branch"));
+        assert!(names.contains(&"path"));
+        assert!(names.contains(&"name"));
+        // Excluded: listed in exclude_properties for this entity
+        assert!(!names.contains(&"traversal_path"));
+        // commit_sha is now included in local schema
+        assert!(names.contains(&"commit_sha"));
+    }
+
+    #[test]
+    fn local_entity_fields_excludes_virtual_fields() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        let fields = ontology
+            .local_entity_fields("Definition")
+            .expect("Definition is a local entity");
+        let names: Vec<&str> = fields.iter().map(|f| f.name.as_str()).collect();
+
+        assert!(names.contains(&"fqn"));
+        assert!(!names.contains(&"content"), "virtual field");
+    }
+
+    #[test]
+    fn local_entity_fields_returns_none_for_non_local() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert!(ontology.local_entity_fields("User").is_none());
+    }
+
+    #[test]
+    fn local_edge_table_loaded_from_ontology() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        assert_eq!(ontology.local_edge_table_name(), Some("gl_edge"));
+        let cols = ontology.local_edge_columns();
+        assert!(!cols.is_empty());
+        let names: Vec<&str> = cols.iter().map(|c| c.name.as_str()).collect();
+        assert_eq!(
+            names,
+            vec![
+                "source_id",
+                "source_kind",
+                "relationship_kind",
+                "target_id",
+                "target_kind"
+            ]
+        );
+    }
+
+    #[test]
+    fn local_exclude_properties_validated_against_fields() {
+        // Verify the real ontology passes validation (all exclude_properties
+        // reference actual fields). If someone adds a typo, this catches it.
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+        for entity_name in ontology.local_entity_names() {
+            let fields = ontology
+                .local_entity_fields(entity_name)
+                .expect("local entity should have fields");
+            assert!(
+                !fields.is_empty(),
+                "local entity '{entity_name}' should have at least one field after exclusions"
+            );
+        }
+    }
+
+    #[test]
+    fn with_schema_version_prefix_empty_is_identity() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let original_edge = ontology.edge_table().to_string();
+        let original_user = ontology.table_name("User").unwrap().to_string();
+
+        let prefixed = ontology.with_schema_version_prefix("");
+
+        assert_eq!(prefixed.edge_table(), original_edge);
+        assert_eq!(prefixed.table_name("User").unwrap(), original_user);
+    }
+
+    #[test]
+    fn with_schema_version_prefix_applies_to_all_tables() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let prefixed = ontology.with_schema_version_prefix("v1_");
+
+        assert_eq!(prefixed.edge_table(), "v1_gl_edge");
+        assert!(prefixed.table_name("User").unwrap().starts_with("v1_"));
+
+        for node in prefixed.nodes() {
+            assert!(
+                node.destination_table.starts_with("v1_"),
+                "node table '{}' should be prefixed",
+                node.destination_table
+            );
+        }
+
+        for edge_table in prefixed.edge_tables() {
+            assert!(
+                edge_table.starts_with("v1_"),
+                "edge table '{edge_table}' should be prefixed",
+            );
+        }
+
+        for aux in prefixed.auxiliary_tables() {
+            assert!(
+                aux.name.starts_with("v1_"),
+                "auxiliary table '{}' should be prefixed",
+                aux.name
+            );
+        }
+    }
+
+    #[test]
+    fn with_schema_version_prefix_does_not_affect_local_tables() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let local_edge_before = ontology.local_edge_table_name().map(String::from);
+
+        let prefixed = ontology.with_schema_version_prefix("v2_");
+
+        assert_eq!(
+            prefixed.local_edge_table_name().map(String::from),
+            local_edge_before,
+            "local edge table should not be prefixed"
+        );
     }
 }

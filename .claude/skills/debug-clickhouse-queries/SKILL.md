@@ -169,10 +169,10 @@ AUTHORED:
   "User -> MergeRequest": 1
 
 # Per-source: For each MR, maybe link a User  
-MERGED_BY:
-  "MergeRequest -> User":
+MERGED:
+  "User -> MergeRequest":
     ratio: 0.3
-    per: source
+    per: target
 ```
 
 **Why this matters**: With 1000 Users and 100k MRs:
@@ -186,17 +186,17 @@ If queries return empty for User-related edges, check:
 
 ### Edge direction in ontology vs queries
 
-Queries specify edge direction: `{"type": "MERGED_BY", "from": "mr", "to": "user"}`
+Queries specify edge direction: `{"type": "MERGED", "from": "merger", "to": "mr"}`
 
-This translates to: `mr.id = edge.source AND edge.target = user.id`
+This translates to: `merger.id = edge.source_id AND edge.target_id = mr.id`
 
-The ontology must match. If ontology says `User -> MergeRequest` but query expects `MergeRequest -> User`, they're incompatible.
+All person-action edges use person-is-source convention (User is always source_id). Queries starting from the entity must use `"direction": "incoming"` or swap from/to.
 
 ### Path compatibility for edges
 
 Association edges must be queryable given the security filter rules. The generator uses `edge_is_queryable()`:
 
-This matches the query engine's behavior (`crates/query-engine/src/security.rs`):
+This matches the query engine's behavior (`crates/query-engine/compiler/src/security.rs`):
 - **User** (exempt): Only filtered by relationships, not path. Edges just need same org.
 - **Other entities**: Must be at or below the source's path level.
 
@@ -215,7 +215,7 @@ SELECT id, traversal_path FROM gl_user WHERE id = <sampled_user_id>
 ## Places to investigate
 
 Column name definitions:
-- `crates/query-engine/src/security.rs` - security filter column name
+- `crates/query-engine/compiler/src/security.rs` - security filter column name
 - `crates/xtask/src/synth/arrow_schema.rs` - data generation schema
 
 Enum value sources:

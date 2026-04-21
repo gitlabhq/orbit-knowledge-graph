@@ -1,6 +1,7 @@
 //! NATS JetStream message broker.
 
 use std::collections::HashMap;
+use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
@@ -30,10 +31,10 @@ use crate::types::{Envelope, MessageId, Subscription};
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
-use super::configuration::NatsConfiguration;
 use super::error::{NatsError, map_connect_error, map_subscribe_error};
 use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
+use gkg_server_config::NatsConfiguration;
 
 /// NATS JetStream message broker.
 ///
@@ -52,9 +53,13 @@ pub struct NatsBroker {
 
 impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
+        config
+            .validate_tls_config()
+            .map_err(NatsError::Connection)?;
+
         let connect_options = Self::build_connect_options(config);
 
-        let url = format!("nats://{}", config.url);
+        let url = config.connection_url();
         let client = async_nats::connect_with_options(&url, connect_options)
             .await
             .map_err(map_connect_error)?;
@@ -85,6 +90,7 @@ impl NatsBroker {
         &self.client
     }
 
+    /// Builds connect options. Must be called after `validate_tls_config()`.
     fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {
         let mut options = async_nats::ConnectOptions::new()
             .connection_timeout(config.connection_timeout())
@@ -92,6 +98,18 @@ impl NatsBroker {
 
         if let (Some(user), Some(pass)) = (&config.username, &config.password) {
             options = options.user_and_password(user.clone(), pass.clone());
+        }
+
+        if config.tls_enabled() {
+            options = options.require_tls(true);
+        }
+
+        if let Some(ca_path) = &config.tls_ca_cert_path {
+            options = options.add_root_certificates(PathBuf::from(ca_path));
+        }
+
+        if let (Some(cert), Some(key)) = (&config.tls_cert_path, &config.tls_key_path) {
+            options = options.add_client_certificate(PathBuf::from(cert), PathBuf::from(key));
         }
 
         options
@@ -465,7 +483,7 @@ impl NatsBroker {
         let batch = consumer
             .fetch()
             .max_messages(batch_size)
-            .expires(Duration::from_secs(1))
+            .expires(self.config.fetch_expires())
             .messages()
             .await
             .map_err(map_subscribe_error)?;

@@ -13,6 +13,10 @@ yanked = "warn"
 ignore = [
     # Transitive dev dependencies from testcontainers - no safe upgrade available
     "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
+    # atomic-polyfill is pulled in transitively by rust-analyzer's postcard/proc-macro stack.
+    # We disable the proc-macro server in the Rust v2 indexing path, and there is no safe
+    # upgrade available until upstream refreshes that dependency chain.
+    "RUSTSEC-2023-0089",
     # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). The Marvin Attack
     # timing vulnerability affects RSA operations which we do not use. DO NOT use RSA
     # algorithms (RS256, RS384, RS512, PS256, PS384, PS512) until jsonwebtoken updates
@@ -20,6 +24,9 @@ ignore = [
     "RUSTSEC-2023-0071",
     # paste unmaintained - transitive dep from clickhouse crate
     "RUSTSEC-2024-0436",
+    # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
+    # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
+    "RUSTSEC-2026-0049",
 ]
 
 [licenses]
@@ -40,6 +47,8 @@ allow = [
     "LicenseRef-EE",
     "OpenSSL", # aws-lc-sys via testcontainers (dev dependency)
     "bzip2-1.0.6", # libbz2-rs-sys via datafusion -> async-compression
+    "0BSD", # mock_instant via lance-graph
+    "BSL-1.0", # xxhash-rust via lance-graph
 ]
 confidence-threshold = 0.8
 
@@ -83,6 +92,16 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "compiler-pipeline-macros"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "compiler"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "health-check"
 expression = "LicenseRef-EE"
 license-files = []
@@ -93,15 +112,24 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
+name = "integration-tests-codegraph"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
+name = "gkg-server-config"
+expression = "LicenseRef-EE"
+license-files = []
+
+[[licenses.clarify]]
 name = "gkg-utils"
 expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "labkit-rs"
-expression = "MIT"
+name = "duckdb-client"
+expression = "LicenseRef-EE"
 license-files = []
-
 
 [[licenses.exceptions]]
 name = "ruby-prism"
@@ -122,4 +150,7 @@ external-default-features = "allow"
 unknown-registry = "deny"
 unknown-git = "warn"
 allow-registry = ["https://github.com/rust-lang/crates.io-index"]
-allow-git = ["https://gitlab.com/gitlab-org/rust/gitalisk.git"]
+allow-git = [
+    "https://gitlab.com/gitlab-org/rust/gitalisk.git",
+    "https://gitlab.com/gitlab-org/rust/labkit-rs.git",
+]

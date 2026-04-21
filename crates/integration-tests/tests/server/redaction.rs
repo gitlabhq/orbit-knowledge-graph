@@ -11,14 +11,24 @@ use crate::common::{
     load_ontology, run_redaction, test_security_context,
 };
 use gkg_server::redaction::QueryResult;
-use integration_testkit::{run_subtests, run_subtests_shared};
-use query_engine::{build_entity_auth, compile};
+use integration_testkit::{run_subtests, run_subtests_shared, t};
+use query_engine::compiler::{build_entity_auth, compile};
 
-const TABLE_USERS: &str = "gl_user";
-const TABLE_GROUPS: &str = "gl_group";
-const TABLE_PROJECTS: &str = "gl_project";
-const TABLE_MERGE_REQUESTS: &str = "gl_merge_request";
-const TABLE_EDGES: &str = "gl_edge";
+fn table_users() -> String {
+    t("gl_user")
+}
+fn table_groups() -> String {
+    t("gl_group")
+}
+fn table_projects() -> String {
+    t("gl_project")
+}
+fn table_merge_requests() -> String {
+    t("gl_merge_request")
+}
+fn table_edges() -> String {
+    t("gl_edge")
+}
 
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
 const ALL_GROUP_IDS: &[i64] = &[100, 101, 102];
@@ -28,46 +38,50 @@ const ALL_MR_IDS: &[i64] = &[2000, 2001, 2002, 2003];
 async fn setup_test_data(ctx: &TestContext) {
     // User.state is string-based enum (enum_type: string), User.user_type is int-based enum
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_USERS} (id, username, name, state, user_type) VALUES
+        "INSERT INTO {} (id, username, name, state, user_type) VALUES
          (1, 'alice', 'Alice Admin', 'active', 'human'),
          (2, 'bob', 'Bob Builder', 'active', 'human'),
          (3, 'charlie', 'Charlie Private', 'active', 'human'),
          (4, 'diana', 'Diana Developer', 'active', 'project_bot'),
-         (5, 'eve', 'Eve External', 'blocked', 'service_account')"
+         (5, 'eve', 'Eve External', 'blocked', 'service_account')",
+        table_users()
     ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_GROUPS} (id, name, visibility_level, traversal_path) VALUES
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (100, 'Public Group', 'public', '1/100/'),
          (101, 'Private Group', 'private', '1/101/'),
-         (102, 'Internal Group', 'internal', '1/102/')"
+         (102, 'Internal Group', 'internal', '1/102/')",
+        table_groups()
     ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_PROJECTS} (id, name, visibility_level, traversal_path) VALUES
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) VALUES
          (1000, 'Public Project', 'public', '1/100/1000/'),
          (1001, 'Private Project', 'private', '1/101/1001/'),
          (1002, 'Internal Project', 'internal', '1/100/1002/'),
          (1003, 'Secret Project', 'private', '1/101/1003/'),
-         (1004, 'Shared Project', 'public', '1/102/1004/')"
+         (1004, 'Shared Project', 'public', '1/102/1004/')",
+        table_projects()
     ))
     .await;
 
     // MergeRequest.state is int-based enum (no enum_type in ontology)
     // Values: 1=opened, 2=closed, 3=merged, 4=locked
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_MERGE_REQUESTS} (id, title, state, source_branch, target_branch, traversal_path) VALUES
+        "INSERT INTO {} (id, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 'Fix bug B', 'opened', 'fix-b', 'main', '1/100/1000/'),
          (2002, 'Refactor C', 'merged', 'refactor-c', 'main', '1/101/1001/'),
-         (2003, 'Update D', 'closed', 'update-d', 'main', '1/102/1004/')"
+         (2003, 'Update D', 'closed', 'update-d', 'main', '1/102/1004/')",
+        table_merge_requests()
     ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
          ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group'),
          ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group'),
@@ -79,7 +93,8 @@ async fn setup_test_data(ctx: &TestContext) {
          ('1/100/1002/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
          ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
          ('1/101/1003/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
-         ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project')"
+         ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project')",
+        table_edges()
     ))
     .await;
 
@@ -836,7 +851,7 @@ fn fail_closed_null_id_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
     use arrow::datatypes::{Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::ResultContext;
+    use query_engine::compiler::ResultContext;
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -1598,15 +1613,13 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // Search for groups under the root namespace using traversal_path prefix
+    // Search for all groups by ID range (traversal_path is not user-filterable)
     let json = r#"{
         "query_type": "search",
         "node": {
             "id": "g",
             "entity": "Group",
-            "filters": {
-                "traversal_path": {"op": "starts_with", "value": "1/"}
-            }
+            "node_ids": [100, 101, 102]
         },
         "limit": 100
     }"#;
@@ -1836,7 +1849,7 @@ fn fail_closed_null_type_denies_row() {
     use arrow::array::{Array, Int64Array, StringArray};
     use arrow::datatypes::{Field, Schema};
     use arrow::record_batch::RecordBatch;
-    use query_engine::ResultContext;
+    use query_engine::compiler::ResultContext;
     use std::sync::Arc;
 
     fn make_batch(columns: Vec<(&str, Arc<dyn Array>)>) -> RecordBatch {
@@ -2398,19 +2411,21 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
     setup_test_data(ctx).await;
 
     // Insert some additional data for aggregation
-    ctx.execute(
-        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
          (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
          (10003, 3, 'MR 3', 'open', '1/100/1000/')",
-    )
+        table_merge_requests()
+    ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
          ('1/100/1000/', 1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
-         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')",
+        table_edges()
     ))
     .await;
 
@@ -2496,19 +2511,21 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
     // Insert MRs for aggregation
-    ctx.execute(
-        "INSERT INTO gl_merge_request (id, iid, title, state, traversal_path) VALUES
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, traversal_path) VALUES
          (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
          (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
          (10003, 3, 'MR 3', 'open', '1/100/1000/')",
-    )
+        table_merge_requests()
+    ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 1, 'User', 'AUTHORED', 10001, 'MergeRequest'),
          ('1/100/1000/', 1, 'User', 'AUTHORED', 10002, 'MergeRequest'),
-         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')"
+         ('1/100/1000/', 2, 'User', 'AUTHORED', 10003, 'MergeRequest')",
+        table_edges()
     ))
     .await;
 
@@ -2551,9 +2568,12 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
         query.base.sql
     );
 
-    // All user columns should be in GROUP BY (required by ClickHouse)
-    let group_by_count = query.base.sql.matches("GROUP BY").count();
-    assert_eq!(group_by_count, 1, "should have exactly one GROUP BY clause");
+    // The aggregation query should contain a GROUP BY clause.
+    // Dedup subqueries also add GROUP BY, so just verify presence.
+    assert!(
+        query.base.sql.contains("GROUP BY"),
+        "aggregation query must have a GROUP BY clause"
+    );
 
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
@@ -2994,49 +3014,58 @@ async fn neighbors_query_incoming_with_redaction(ctx: &TestContext) {
 // its owning MergeRequest). The auth ID must be resolved from the owner entity
 // in the same row, not from the entity's own ID.
 
-const TABLE_FILES: &str = "gl_file";
-const TABLE_DEFINITIONS: &str = "gl_definition";
+fn table_files() -> String {
+    t("gl_file")
+}
+fn table_definitions() -> String {
+    t("gl_definition")
+}
 
 /// Insert code entities (File, Definition) with edges to an existing Project.
 /// Requires setup_test_data() to have been called first.
 async fn setup_indirect_auth_data(ctx: &TestContext) {
     // Files belonging to Project 1000 (Public Project, traversal_path '1/100/1000/')
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_FILES} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+        "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
          (3000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib.rs', 'rs', 'Rust'),
-         (3001, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main.rs', 'rs', 'Rust')"
+         (3001, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main.rs', 'rs', 'Rust')",
+        table_files()
     ))
     .await;
 
     // Definitions in those files, also belonging to Project 1000
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_DEFINITIONS} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
          (5000, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::MyStruct', 'MyStruct', 'class', 10, 50, 100, 500),
          (5001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'crate::my_func', 'my_func', 'function', 60, 80, 600, 900),
-         (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'crate::main', 'main', 'function', 1, 20, 0, 200)"
+         (5002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'crate::main', 'main', 'function', 1, 20, 0, 200)",
+        table_definitions()
     ))
     .await;
 
     // File belonging to Project 1001 (Private Project, traversal_path '1/101/1001/')
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_FILES} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
-         (3002, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'secret.rs', 'rs', 'Rust')"
+        "INSERT INTO {} (id, traversal_path, project_id, branch, path, name, extension, language) VALUES
+         (3002, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'secret.rs', 'rs', 'Rust')",
+        table_files()
     ))
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_DEFINITIONS} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
-         (5003, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'crate::Secret', 'Secret', 'class', 1, 30, 0, 300)"
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
+         (5003, '1/101/1001/', 1001, 'main', 'src/secret.rs', 'crate::Secret', 'Secret', 'class', 1, 30, 0, 300)",
+        table_definitions()
     ))
     .await;
 
     // Edges: File --DEFINES--> Definition
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5001, 'Definition'),
          ('1/100/1000/', 3001, 'File', 'DEFINES', 5002, 'Definition'),
-         ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')"
+         ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')",
+        table_edges()
     ))
     .await;
 }
@@ -3626,8 +3655,9 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     // This simulates a Group with ID=1 having an edge, which should NOT
     // appear when querying User 1's neighbors.
     ctx.execute(&format!(
-        "INSERT INTO {TABLE_EDGES} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/', 1, 'Group', 'CONTAINS', 9999, 'Project')"
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+         ('1/', 1, 'Group', 'CONTAINS', 9999, 'Project')",
+        table_edges()
     ))
     .await;
 
@@ -3905,280 +3935,186 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Range Pagination Subtests
+// Cursor Pagination Subtests
 // ─────────────────────────────────────────────────────────────────────────────
 
-async fn range_pagination_comprehensive(ctx: &TestContext) {
+async fn cursor_pagination_basic(ctx: &TestContext) {
     let ontology = load_ontology();
     let security_ctx = test_security_context();
 
-    // ── 1. First page: range {0, 2} returns exactly 2 users ─────────
+    // 5 users total. cursor: offset=0, page_size=2 → first 2 users
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 2}
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     assert!(
-        query.base.sql.contains("LIMIT 2"),
-        "range 0..2 should produce LIMIT 2: {}",
-        query.base.sql
-    );
-    assert!(
-        query.base.sql.contains("OFFSET 0"),
-        "range 0..2 should produce OFFSET 0: {}",
+        query.base.sql.contains("LIMIT 100"),
+        "SQL LIMIT should come from limit field, not cursor: {}",
         query.base.sql
     );
 
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    assert_eq!(result.len(), 2, "first page should return exactly 2 rows");
-    let page1_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
+    // All 5 users returned from ClickHouse
+    assert_eq!(result.len(), 5, "ClickHouse should return all 5 users");
+
+    // Apply cursor: slice to [0..2]
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page1_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
     assert_eq!(page1_ids, vec![1, 2], "first page should be user IDs 1, 2");
 
-    // ── 2. Second page: range {2, 5} returns remaining 3 users ──────
+    // cursor: offset=2, page_size=2 → users 3, 4
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let page2_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(page2_ids, vec![3, 4], "second page should be user IDs 3, 4");
+
+    // cursor: offset=4, page_size=2 → user 5, has_more=false
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(4, 2);
+    assert!(!has_more, "last page should not have more");
+    assert_eq!(result.authorized_count(), 1);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let last_ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(last_ids, vec![5], "last page should be user ID 5");
+}
+
+async fn cursor_pagination_with_redaction(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 5 users, but redaction will deny 2 of them
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 2, "end": 5}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "range 2..5 should produce LIMIT 3: {}",
-        query.base.sql
-    );
-    assert!(
-        query.base.sql.contains("OFFSET 2"),
-        "range 2..5 should produce OFFSET 2: {}",
-        query.base.sql
-    );
-
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(result.len(), 3, "second page should return exactly 3 rows");
-    let page2_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        page2_ids,
-        vec![3, 4, 5],
-        "second page should be user IDs 3, 4, 5"
-    );
-
-    // ── 3. Pages don't overlap ──────────────────────────────────────
-    let page1_set: HashSet<i64> = page1_ids.iter().copied().collect();
-    let page2_set: HashSet<i64> = page2_ids.iter().copied().collect();
-    assert!(page1_set.is_disjoint(&page2_set), "pages must not overlap");
-    let mut all_ids: HashSet<i64> = page1_set;
-    all_ids.extend(page2_set);
-    assert_eq!(
-        all_ids,
-        ALL_USER_IDS.iter().copied().collect::<HashSet<_>>(),
-        "union of pages must cover all users"
-    );
-
-    // ── 4. Offset beyond data returns empty ─────────────────────────
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 100, "end": 110}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    assert_eq!(
-        result.len(),
-        0,
-        "offset beyond data set should return 0 rows"
-    );
-
-    // ── 5. Range with filters ───────────────────────────────────────
-    // 4 active users (IDs 1-4), 1 blocked (ID 5). Page through active only.
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 2}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(result.len(), 2, "filtered first page should have 2 rows");
-    let filtered_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        filtered_ids,
-        vec![1, 2],
-        "filtered range should return first 2 active users"
-    );
-
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 2, "end": 10}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
-
-    assert_eq!(
-        result.len(),
-        2,
-        "filtered second page should have 2 remaining active users"
-    );
-    let filtered_ids: Vec<i64> = result.iter().filter_map(|r| r.get_id(&u)).collect();
-    assert_eq!(
-        filtered_ids,
-        vec![3, 4],
-        "filtered range should return last 2 active users (not blocked user 5)"
-    );
-
-    // ── 6. Range on traversal query ─────────────────────────────────
-    // Group→Project CONTAINS edges: 100→1000, 100→1002, 101→1001, 101→1003, 102→1004 = 5 rows
-    let json = r#"{
-        "query_type": "traversal",
-        "nodes": [
-            {"id": "g", "entity": "Group"},
-            {"id": "p", "entity": "Project"}
-        ],
-        "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
-        "range": {"start": 0, "end": 3}
-    }"#;
-
-    let query = compile(json, &ontology, &security_ctx).unwrap();
-    let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-
-    assert_eq!(
-        result.len(),
-        3,
-        "traversal with range 0..3 should return exactly 3 rows"
-    );
-
-    // ── 7. Redaction still works with range ──────────────────────────
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "range": {"start": 0, "end": 5}
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
     let batches = ctx.query_parameterized(&query.base).await;
     let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
-    let u = result.ctx().get("u").unwrap().clone();
+
+    // Redact users 2 and 4 → 3 authorized (1, 3, 5)
+    let mut mock_service = MockRedactionService::new();
+    mock_service.allow("user", &[1, 3, 5]);
+    mock_service.deny("user", &[2, 4]);
+    run_redaction(&mut result, &mock_service);
 
     assert_eq!(
-        result.len(),
-        5,
-        "all 5 users should be present before redaction"
+        result.authorized_count(),
+        3,
+        "3 users should survive redaction"
     );
 
-    let mut mock_service = MockRedactionService::new();
-    mock_service.allow("user", &[1, 3]);
-    mock_service.deny("user", &[2, 4, 5]);
-
-    let redacted = run_redaction(&mut result, &mock_service);
-
-    assert_eq!(redacted, 3, "3 denied users should be redacted");
+    // Apply cursor on the authorized set: offset=0, page_size=2 → users 1, 3
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
     assert_eq!(result.authorized_count(), 2);
 
-    let authorized_ids: HashSet<i64> = result
+    let u = result.ctx().get("u").unwrap().clone();
+    let page_ids: Vec<i64> = result
         .authorized_rows()
         .filter_map(|r| r.get_id(&u))
         .collect();
     assert_eq!(
-        authorized_ids,
-        HashSet::from([1, 3]),
-        "only allowed users should survive redaction with range"
+        page_ids,
+        vec![1, 3],
+        "cursor should slice the authorized (post-redaction) set, not the raw set"
     );
+}
 
-    // ── 8. limit (no range) still works unchanged ───────────────────
+async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
     let json = r#"{
         "query_type": "search",
         "node": {"id": "u", "entity": "User"},
-        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
-        "limit": 3
+        "limit": 1000,
+        "cursor": {"offset": 100, "page_size": 10}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
-    assert!(
-        query.base.sql.contains("LIMIT 3"),
-        "limit should still produce LIMIT clause: {}",
-        query.base.sql
-    );
-    assert!(
-        !query.base.sql.contains("OFFSET"),
-        "limit alone should not produce OFFSET: {}",
-        query.base.sql
-    );
-
     let batches = ctx.query_parameterized(&query.base).await;
-    let result = QueryResult::from_batches(&batches, &query.base.result_context);
-    assert_eq!(result.len(), 3, "limit: 3 should return exactly 3 rows");
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // ── 9. Mutual exclusion: limit + range rejected at schema level ─
+    let has_more = result.apply_cursor(100, 10);
+    assert!(!has_more);
+    assert_eq!(
+        result.authorized_count(),
+        0,
+        "offset beyond data should return 0 rows"
+    );
+}
+
+async fn cursor_pagination_with_filters(ctx: &TestContext) {
+    let ontology = load_ontology();
+    let security_ctx = test_security_context();
+
+    // 4 active users (IDs 1-4), 1 blocked (ID 5)
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "limit": 10,
-        "range": {"start": 0, "end": 5}
+        "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
+        "order_by": {"node": "u", "property": "id", "direction": "ASC"},
+        "limit": 100,
+        "cursor": {"offset": 0, "page_size": 2}
     }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        matches!(err, query_engine::QueryError::Validation(_)),
-        "limit + range together should be a validation error, got: {err}"
-    );
 
-    // ── 10. Invalid ranges rejected ─────────────────────────────────
-    // end <= start
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 5, "end": 5}
-    }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        err.to_string().contains("must be greater than"),
-        "end == start should fail: {err}"
-    );
+    let query = compile(json, &ontology, &security_ctx).unwrap();
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
 
-    // window > 1000
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1001}
-    }"#;
-    let err = compile(json, &ontology, &security_ctx).unwrap_err();
-    assert!(
-        err.to_string().contains("must not exceed 1000"),
-        "window > 1000 should fail: {err}"
-    );
+    let has_more = result.apply_cursor(0, 2);
+    assert!(has_more);
+    assert_eq!(result.authorized_count(), 2);
 
-    // end == 1000, start == 0 → window = 1000 → should succeed
-    let json = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User"},
-        "range": {"start": 0, "end": 1000}
-    }"#;
-    assert!(
-        compile(json, &ontology, &security_ctx).is_ok(),
-        "window == 1000 should be accepted"
-    );
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(ids, vec![1, 2], "first page of filtered results");
+
+    // Second page
+    let batches = ctx.query_parameterized(&query.base).await;
+    let mut result = QueryResult::from_batches(&batches, &query.base.result_context);
+    let has_more = result.apply_cursor(2, 2);
+    assert!(!has_more);
+
+    let u = result.ctx().get("u").unwrap().clone();
+    let ids: Vec<i64> = result
+        .authorized_rows()
+        .filter_map(|r| r.get_id(&u))
+        .collect();
+    assert_eq!(ids, vec![3, 4], "second page of filtered results");
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -4331,15 +4267,17 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
     setup_test_data(ctx).await;
 
     // Insert a Group with ID=1 (same numeric ID as User 1)
-    ctx.execute(
-        "INSERT INTO gl_group (id, name, visibility_level, traversal_path) \
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, name, visibility_level, traversal_path) \
          VALUES (1, 'Collision Group', 'public', '1/1/')",
-    )
+        table_groups()
+    ))
     .await;
-    ctx.execute(
-        "INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) \
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) \
          VALUES ('1/1/', 1, 'User', 'MEMBER_OF', 1, 'Group')",
-    )
+        table_edges()
+    ))
     .await;
 
     let (_, mut result) = compile_and_execute(
@@ -4397,7 +4335,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
 
 #[tokio::test]
 async fn redaction_integration() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     setup_test_data(&ctx).await;
 
     // Read-only subtests share one database (seed once, query many).
@@ -4461,8 +4399,11 @@ async fn redaction_integration() {
         traversal_edge_columns_preserved_through_redaction,
         multi_hop_edge_columns_survive_redaction,
         enum_filter_normalization_int_vs_string_enums,
-        // range pagination
-        range_pagination_comprehensive,
+        // cursor pagination
+        cursor_pagination_basic,
+        cursor_pagination_with_redaction,
+        cursor_pagination_offset_beyond_data,
+        cursor_pagination_with_filters,
         // merge request redaction
         search_merge_requests_with_redaction,
         // order preservation

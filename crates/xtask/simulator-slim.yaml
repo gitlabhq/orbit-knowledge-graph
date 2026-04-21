@@ -21,24 +21,34 @@ clickhouse:
     engine: MergeTree
     index_granularity: 8192
 
-    node_primary_key: [traversal_path, id]
-    node_order_by: [traversal_path, id]
+    # Use per-node sort_key from ontology YAML (matches graph.sql).
+    use_ontology_sort_keys: true
 
-    edge_primary_key: [traversal_path, source_id, source_kind, target_id, target_kind]
-    edge_order_by: [traversal_path, source_id, source_kind, target_id, target_kind]
+    # Edge table schema matches graph.sql exactly.
+    edge_primary_key: [traversal_path, relationship_kind]
+    edge_order_by: [traversal_path, relationship_kind, source_id, source_kind, target_id, target_kind]
 
     indexes:
+      - name: idx_id
+        table: "*"
+        expression: id
+        type: bloom_filter(0.01)
+        granularity: 1
       - name: idx_relationship
         table: edges
         expression: relationship_kind
-        type: bloom_filter
-        granularity: 4
+        type: "set(50)"
+        granularity: 2
 
     projections:
       - name: by_target
         table: edges
-        columns: [source_kind, source_id, relationship_kind, target_kind, target_id]
-        order_by: [target_id, target_kind, relationship_kind]
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [target_id, relationship_kind]
+      - name: by_source
+        table: edges
+        columns: [traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind]
+        order_by: [source_id, relationship_kind]
 
 generation:
   ontology_path: config/ontology
@@ -109,9 +119,9 @@ generation:
       "User -> WorkItem": 1
 
     REVIEWER:
-      "MergeRequest -> User":
+      "User -> MergeRequest":
         ratio: 1
-        per: source
+        per: target
 
     TRIGGERED:
       "User -> Pipeline": 1
@@ -122,10 +132,10 @@ generation:
     OWNER:
       "User -> Group": 1
 
-    MERGED_BY:
-      "MergeRequest -> User":
+    MERGED:
+      "User -> MergeRequest":
         ratio: 1
-        per: source
+        per: target
 
     CLOSES:
       "MergeRequest -> WorkItem": 0.5

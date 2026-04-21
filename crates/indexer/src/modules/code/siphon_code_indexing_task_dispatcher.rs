@@ -3,50 +3,19 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use serde::{Deserialize, Serialize};
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
 use super::config::subjects;
 use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
-use crate::configuration::ScheduleConfiguration;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
+use gkg_server_config::{ScheduleConfiguration, SiphonCodeIndexingTaskDispatcherConfig};
 
 type ProjectBranch = (i64, String);
-
-fn default_events_stream_name() -> String {
-    "siphon_stream_main_db".to_string()
-}
-
-fn default_batch_size() -> usize {
-    100
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct SiphonCodeIndexingTaskDispatcherConfig {
-    #[serde(flatten)]
-    pub schedule: ScheduleConfiguration,
-
-    #[serde(default = "default_events_stream_name")]
-    pub events_stream_name: String,
-
-    #[serde(default = "default_batch_size")]
-    pub batch_size: usize,
-}
-
-impl Default for SiphonCodeIndexingTaskDispatcherConfig {
-    fn default() -> Self {
-        Self {
-            schedule: ScheduleConfiguration::default(),
-            events_stream_name: default_events_stream_name(),
-            batch_size: default_batch_size(),
-        }
-    }
-}
 
 pub struct SiphonCodeIndexingTaskDispatcher {
     nats: Arc<dyn NatsServices>,

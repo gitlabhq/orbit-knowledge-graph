@@ -40,7 +40,7 @@ The handler follows these steps:
 
 2. **Check if the namespace is still deleted.** Between scheduling and execution, an operator may have re-enabled the namespace. The handler queries the datalake to check the current state. If the namespace was re-enabled, the handler clears the schedule entry without touching any data and returns early.
 
-3. **Soft-delete graph data.** For every namespaced node table and the shared edge table, the handler runs an `INSERT INTO ... SELECT` that copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup, so adding a new entity type to the ontology automatically includes it in namespace deletion. If any table fails, the handler stops and returns an error without proceeding to the next steps.
+3. **Soft-delete graph data.** For every namespaced node table and all configured edge tables, the handler runs an `INSERT INTO ... SELECT` that copies matching rows with `_deleted = true` and a fresh `_version` timestamp. The list of tables comes from the ontology at startup, so adding a new entity type or edge table to the ontology automatically includes it in namespace deletion. If any table fails, the handler stops and returns an error without proceeding to the next steps.
 
 4. **Soft-delete checkpoints.** Once all graph data has been marked deleted, the handler removes the SDLC checkpoints (keyed by namespace position, e.g. `ns.42.Project`) and the code indexing checkpoints (keyed by traversal path prefix). This prevents stale checkpoints from interfering if the namespace is later re-enabled and re-indexed from scratch.
 

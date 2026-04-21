@@ -1,51 +1,19 @@
-use serde::{Deserialize, Serialize};
+use gkg_server_config::ClickHouseConfiguration;
 
 use crate::arrow_client::ArrowClickHouseClient;
-use crate::error::ConfigurationError;
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
-pub struct ClickHouseConfiguration {
-    pub database: String,
-    pub url: String,
-    pub username: String,
-    #[serde(default)]
-    pub password: Option<String>,
+pub trait ClickHouseConfigurationExt {
+    fn build_client(&self) -> ArrowClickHouseClient;
 }
 
-impl Default for ClickHouseConfiguration {
-    fn default() -> Self {
-        Self {
-            database: "default".to_string(),
-            url: "http://127.0.0.1:8123".to_string(),
-            username: "default".to_string(),
-            password: None,
-        }
-    }
-}
-
-impl ClickHouseConfiguration {
-    pub fn validate(&self) -> Result<(), ConfigurationError> {
-        if self.database.is_empty() {
-            return Err(ConfigurationError::EmptyDatabase);
-        }
-
-        if self.url.is_empty() {
-            return Err(ConfigurationError::EmptyUrl);
-        }
-
-        if self.username.is_empty() {
-            return Err(ConfigurationError::EmptyUsername);
-        }
-
-        Ok(())
-    }
-
-    pub fn build_client(&self) -> ArrowClickHouseClient {
+impl ClickHouseConfigurationExt for ClickHouseConfiguration {
+    fn build_client(&self) -> ArrowClickHouseClient {
         ArrowClickHouseClient::new(
             &self.url,
             &self.database,
             &self.username,
             self.password.as_deref(),
+            &self.query_settings,
         )
     }
 }
@@ -53,6 +21,7 @@ impl ClickHouseConfiguration {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gkg_server_config::ConfigurationError;
 
     #[test]
     fn test_optional_password() {
@@ -86,6 +55,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         assert!(config.validate().is_ok());
@@ -98,6 +69,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -111,6 +84,8 @@ mod tests {
             url: "".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -124,6 +99,8 @@ mod tests {
             url: "http://127.0.0.1:8123".to_string(),
             username: "".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let result = config.validate();
@@ -147,6 +124,8 @@ mod tests {
             url: "https://localhost:1".to_string(),
             username: "default".to_string(),
             password: None,
+            query_settings: std::collections::HashMap::new(),
+            profiling: Default::default(),
         };
 
         let client = config.build_client();

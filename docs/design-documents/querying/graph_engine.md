@@ -26,6 +26,31 @@ The storage model aims to replicate the CSR (Compressed Sparse Row) adjacency li
 
 - Multi‑tenancy and authorization are enforced in every query by prefix filtering on `organization_id` and `traversal_id` to keep scans local and permission-scoped.
 
+### Edge table schema
+
+Edge tables are declared in `settings.edge_tables` in `schema.yaml` (default: `gl_edge`). Each edge YAML can set `table:` to route that relationship type to a specific table. All edge tables share the same column schema and use an adjacency-optimized primary key:
+
+```sql
+PRIMARY KEY (source_id, relationship_kind, target_id)
+ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)
+PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, target_kind, source_id, traversal_path))
+```
+
+The primary key serves as a forward adjacency index, giving O(log N) lookup for all
+outgoing edges from a node. The `by_target` projection serves as the reverse adjacency
+index for incoming edge lookups.
+
+Sort key column order matters: `(id, relationship_kind, ...)` ensures ClickHouse can use
+prefix-based primary index pruning for both the base table and projections. Placing
+`source_kind`/`target_kind` before `relationship_kind` breaks prefix matching since
+queries rarely filter on entity kind alone.
+
+Bloom filter indexes on `source_id`/`target_id` are intentionally omitted. They compete
+with projections in ClickHouse's cost optimizer: the optimizer counts granules and picks
+the "cheaper" path, but bloom-filtered base table granules appear cheaper than projection
+granules even though projection data is contiguous and bloom data is scattered. Removing
+bloom filters lets projections be correctly selected.
+
 ## Query Engine Design
 
 There will be two ways to interact with the graph engine:
@@ -39,12 +64,33 @@ The planner emits ClickHouse SQL similar to these patterns:
 - Multi‑hop fixed depth (2–3): chained JOINs/CTEs with DISTINCT frontiers between hops to avoid blow‑ups.
 - Variable‑length paths: `WITH RECURSIVE` over the edge table(s) with a depth limit and optional accumulation of `nodes(path)` and `relationships(path)` as arrays.
 - Reverse hops: use the destination‑ordered projection or a reversed view produced on the fly.
-- Alternate relationship types: `UNION ALL` of the participating edge tables inside a single `edges_all` CTE, then join once per hop.
+- Alternate relationship types: when a query's relationship types span multiple physical edge tables (or use a wildcard), the compiler emits a `UNION ALL` across the relevant tables. Each arm selects the standard edge columns so downstream passes see a uniform schema.
 - Aggregations: push filters early; perform groupings on the smallest necessary sets; avoid post‑filtering of large results.
 - HAVING filters: `GROUP BY ... HAVING aggregate_expr > threshold` for post‑aggregation filtering.
 - Derived‑table subqueries: `(SELECT ... GROUP BY ... HAVING ...) AS alias` in FROM/JOIN positions for deduplication patterns (e.g., `argMax(_deleted, _version)`).
+- Row deduplication: `ReplacingMergeTree` does not guarantee merge-time dedup between queries, so the compiler injects query-time dedup (see [Row deduplication](#row-deduplication) below).
 
 These choices preserve factorization: each hop operates on a compact frontier and prunes the next edge scan via semi‑joins, mirroring Kùzu’s accumulate → semijoin → probe execution.
+
+### Row deduplication
+
+Node and edge tables use `ReplacingMergeTree(_version, _deleted)`. Between background merges, queries can see stale row versions and soft-deleted rows. The compiler's `DeduplicatePass` (`crates/query-engine/compiler/src/passes/deduplicate.rs`) ensures query-time correctness:
+
+| Scan type | Strategy | Rationale |
+|---|---|---|
+| Search (single-node) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Preserves LIMIT pushdown; filters verified against latest version in HAVING |
+| `_nf_*` CTEs (node filters) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | ID-only output; hash aggregate cheaper than sort |
+| Hydration (UNION ALL arms) | `argMaxIfOrNull` + `GROUP BY` + `HAVING` | Excludes deleted rows and stale properties |
+| Main query node scans | `ORDER BY _version DESC LIMIT 1 BY id` subquery | Multi-column output where argMax wrapping is impractical |
+| Edge scans | `_deleted = false` in WHERE | Full-tuple ORDER BY makes RMT merge effective; only soft-delete filtering needed |
+
+Filter placement rules for `LIMIT 1 BY` subqueries:
+
+- **Structural filters** (`traversal_path`, `id`, `project_id`, `branch`) are pushed inside the subquery for primary key index pruning. These columns are invariant across row versions.
+- **Mutable filters** (`state`, `status`, `draft`) stay outside the subquery and evaluate against the deduplicated latest-version row, preventing stale version matches.
+- **`_deleted = false`** always stays outside (or is encoded in the `argMaxIfOrNull` condition for argMax strategies).
+
+Edge-only traversals do not join node tables for non-group-by nodes, so they cannot filter out deleted nodes at the query layer. In production this is handled by the SDLC indexer, which soft-deletes FK edge rows in the same ETL batch as their parent node (`crates/indexer/src/modules/sdlc/pipeline.rs`). Cross-entity FK cleanup relies on PostgreSQL's referential integrity propagating through Siphon CDC.
 
 ## Request Flow (Deployed)
 
@@ -55,7 +101,7 @@ These choices preserve factorization: each hop operates on a compact frontier an
 
 ### Unified Response Format
 
-After ClickHouse returns rows, the formatting stage transforms the raw `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ query_type, nodes, edges }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
+After ClickHouse returns rows and redaction completes, the server applies agent-driven cursor pagination (`{ offset, page_size }`) to slice the authorized result set. A query result cache (moka, 60s TTL) stores the full authorized result so subsequent pages skip ClickHouse, authorization, and redaction. The formatting stage then transforms the sliced `QueryResult` into the output payload. [ADR 004](../decisions/004_unified_response_schema.md) defines the format: a unified `{ format_version, query_type, nodes, edges, columns?, pagination? }` shape for all five query types (search, traversal, aggregation, path_finding, neighbors) with deduplicated nodes and instance-level edges. `format_version` (semver) lets consumers detect breaking changes. Aggregation queries include `columns` to describe computed values. A `GraphFormatter` handles the transformation, and a JSON Schema defines the response contract between server and frontend.
 
 Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](../indexing/sdlc_indexing.md). The indexer publishes a small state record (namespace → active state). The web tier caches namespace metadata and injects appropriate filters into queries; no file swapping is required.
 
@@ -69,9 +115,10 @@ Namespace graph updates arrive via an ETL worker, described in [SDLC Indexing](.
 
 ## Observability
 
-- Per‑phase timings (parse/plan/render/execute) and row counts.
+- Per-phase timings (parse/plan/render/execute) and row counts.
 - Emitted SQL and parameter map for debugging.
-- ClickHouse query metrics (system.query_log) correlated by request ID.
+- Per-query ClickHouse resource stats (`read_rows`, `read_bytes`, `memory_usage`) extracted from the `X-ClickHouse-Summary` response header on every query. When profiling is enabled, these are enriched from `system.query_log`.
+- Query result cache metrics: lookups (hit/miss/error), stores (success/error/too_large), evictions (per_user_limit).
 
 ## Integration with Indexing
 

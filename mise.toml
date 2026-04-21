@@ -6,16 +6,20 @@ postinstall = "if [ -z \"$CI\" ]; then lefthook install --force; fi"
 
 [env]
 # GDK root directory. Override with an absolute path, e.g: export GDK_ROOT=$HOME/workspace/gdk
+# GDK_DIR is also accepted as an alias for GDK_ROOT.
 # Do not use ~ (tilde is not expanded in variable values).
-GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}"
+GDK_ROOT_RESOLVED = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}"
 
 
 # Path to Siphon repository for proto compilation (siphon-proto crate)
 # Clone from: https://gitlab.com/gitlab-org/analytics-section/siphon
-SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/siphon"
+SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.GDK_DIR | default(value=env.HOME ~ '/gitlab/gdk'))}}/siphon"
+
+# Auto-download prebuilt DuckDB shared library on first build (cached in target/).
+DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 
 [tools]
-"rust" = { version = "1.93.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
+"rust" = { version = "1.95.0", components = "rustfmt,clippy", targets = "aarch64-unknown-linux-gnu,x86_64-unknown-linux-gnu" }
 "cargo:cargo-nextest" = "0.9.123"
 "cargo:cargo-edit" = "0.13.8"
 "cargo:cargo-audit" = "0.22.0"
@@ -23,36 +27,110 @@ SIPHON_PROTO_ROOT = "{{env.GDK_ROOT | default(value=env.HOME ~ '/gitlab/gdk')}}/
 "cargo:cargo-geiger" = "0.13.0"
 "cargo:cargo-cyclonedx" = "0.5.7"
 "cargo:cargo-zigbuild" = "0.21.5"
+"cargo:ast-grep" = "0.42.0"
+"cargo:https://gitlab.com/gitlab-org/rust/gitlab-xtasks" = "tag:v1.5.0"
+"cargo:cargo-bolero" = "0.13.4"
 "sccache" = "0.13.0"
-"tilt" = "0.36.1"
 "zig" = "0.15.2"
 clickhouse = "25.12"
+duckdb = "1.5.1"
 uv = "0.9.28"
 node = "24"
 vale = "3.13.0"
 lychee = "0.21.0"
 lefthook = "2.1.3"
+protoc = "34.1"
+jq = "1.7"
+yq = "4.52.5"
+hyperfine = "1.20.0"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
 description = "Install git hooks (lefthook + worktree support)"
+
+[tasks."fuzz:compile"]
+run = "cargo +nightly bolero test fuzz_compile -p gkg-fuzz"
+description = "Fuzz the query compiler (compile JSON → SQL pipeline)"
+
+[tasks."fuzz:compile-structured"]
+run = "cargo +nightly bolero test fuzz_compile_structured -p gkg-fuzz"
+description = "Fuzz the query compiler with structured JSON query generation"
+
+[tasks."fuzz:ruby"]
+run = "cargo +nightly bolero test fuzz_ruby -p gkg-fuzz"
+description = "Fuzz the Ruby code parser"
+
+[tasks."fuzz:python"]
+run = "cargo +nightly bolero test fuzz_python -p gkg-fuzz"
+description = "Fuzz the Python code parser"
+
+[tasks."fuzz:typescript"]
+run = "cargo +nightly bolero test fuzz_typescript -p gkg-fuzz"
+description = "Fuzz the TypeScript/JavaScript code parser"
+
+[tasks."fuzz:java"]
+run = "cargo +nightly bolero test fuzz_java -p gkg-fuzz"
+description = "Fuzz the Java code parser"
+
+[tasks."fuzz:kotlin"]
+run = "cargo +nightly bolero test fuzz_kotlin -p gkg-fuzz"
+description = "Fuzz the Kotlin code parser"
+
+[tasks."fuzz:csharp"]
+run = "cargo +nightly bolero test fuzz_csharp -p gkg-fuzz"
+description = "Fuzz the C# code parser"
+
+[tasks."fuzz:rust-parser"]
+run = "cargo +nightly bolero test fuzz_rust_parser -p gkg-fuzz"
+description = "Fuzz the Rust code parser"
+
+[tasks."fuzz:indexer-messages"]
+run = "cargo +nightly bolero test fuzz_indexer_messages -p gkg-fuzz"
+description = "Fuzz indexer message deserialization"
 
 [tasks.build]
 run = "cargo build --release"
 description = "Build the crates"
 
 [tasks.test]
-run = "cargo nextest run --lib --bins"
-description = "Run unit tests with full debug symbols"
+run = "./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
 
 [tasks."test:fast"]
-run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked cargo nextest run --lib --bins"
-description = "Run unit tests with reduced debug info for faster builds"
+run = "CARGO_PROFILE_TEST_DEBUG=0 CARGO_PROFILE_TEST_SPLIT_DEBUGINFO=unpacked ./scripts/run-unit-tests.sh"
+description = "Run unit + non-Docker integration tests with reduced debug info"
+
+[tasks."test:local"]
+run = "cargo nextest run --test local"
+description = "Run local integration tests — compiler + querying pipeline (no Docker)"
+
+[tasks."test:integration:codegraph"]
+run = "cargo nextest run -p integration-tests-codegraph --no-capture"
+description = "Run code-graph v2 validator tests — YAML Cypher suites (no Docker)"
+
+[tasks."test:cli"]
+run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"
+description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:integration"]
-run = "cargo nextest run --all-features --test '*'"
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run integration tests (requires Docker and `mise colima:start`)"
+
+[tasks."test:integration:server"]
+run = "cargo nextest run --all-features --test containers -j 4 --no-fail-fast --retries 0 -E 'test(data_correctness) | test(hydration_integration) | test(redaction_integration) | test(graph_formatter)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run server integration tests (data correctness, hydration, redaction, graph formatter)"
+
+[tasks."test:integration:data"]
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 --no-capture -E 'test(data_correctness)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run data correctness integration tests"
+
+[tasks."test:integration:indexer"]
+run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
@@ -63,13 +141,17 @@ run = "cargo fmt --all -- --check"
 description = "Check Rust formatting"
 
 [tasks."lint:code"]
-run = "cargo clippy --all-targets --all-features -- -D warnings"
+run = [
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets -- -D warnings",
+]
 description = "Run clippy lint checks"
 
 [tasks."lint:code:fix"]
 run = [
   "cargo fmt",
-  "cargo clippy --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy --workspace --exclude duckdb-client --all-targets --all-features --fix --allow-dirty -- -D warnings",
+  "cargo clippy -p duckdb-client --all-targets --fix --allow-dirty -- -D warnings",
   "cargo fmt",
 ]
 description = "Run clippy lint checks and fix applicable issues"
@@ -89,6 +171,14 @@ description = "Diff current branch against an origin branch (default: main)"
 usage = 'arg "[base]" default="main" help="Branch on origin to diff against"'
 
 
+[tasks."query:profile"]
+run = 'cargo run -p query-profiler -- "$@"'
+description = "Profile a GKG query against ClickHouse (use -- to pass args)"
+
+[tasks."query:diff"]
+run = 'python3 scripts/devtools/diff-profiler-results.py "$@"'
+description = "Compare query-profiler result files (use -- to pass args)"
+
 [tasks."perf:gtime"]
 run = "./scripts/devtools/gtime.sh"
 
@@ -99,6 +189,43 @@ usage = '''
 arg "<repo_path>"
 arg "[interval]" default="0.025" help="Sampling interval in seconds"
 '''
+
+[tasks."bench:download-repos"]
+run = "gitlab-xtasks benchmark download-repos --config code-indexing-benchmark.yaml"
+description = "Download benchmark repositories"
+
+[tasks."bench:run"]
+depends = ["bench:download-repos"]
+run = "cargo build --bin orbit --release --features duckdb-client/bundled && gitlab-xtasks benchmark hyperfine --config code-indexing-benchmark.yaml --architecture local"
+description = "Run code indexing benchmark"
+
+[tasks."bench:v2"]
+depends = ["bench:download-repos"]
+run = """
+cargo build --bin orbit --release --features duckdb-client/bundled
+for repo in output/repos/*/; do
+  name=$(basename "$repo")
+  echo "=== Indexing $name with v2 ==="
+  ./target/release/orbit index "$repo" --v2 --stats 2>&1 || echo "FAILED: $name"
+done
+"""
+description = "Run v2 pipeline against all downloaded benchmark repos"
+
+[tasks."bench:list-repos"]
+run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
+description = "List benchmark repositories"
+
+[tasks."bench:list-groups"]
+run = "gitlab-xtasks benchmark list-groups --config code-indexing-benchmark.yaml"
+description = "List benchmark repo groups"
+
+[tasks."proto:go"]
+run = "scripts/proto-go.sh generate"
+description = "Generate Go protobuf/gRPC stubs for Workhorse integration"
+
+[tasks."proto:go:check"]
+run = "scripts/proto-go.sh check"
+description = "Verify Go proto stubs are up to date"
 
 [tasks."proto:ruby"]
 run = '''
@@ -128,45 +255,69 @@ description = "Publish gitlab-gkg-proto gem to RubyGems.org"
 run = 'GKG_GITLAB__JWT__VERIFYING_KEY=${GKG_GITLAB__JWT__VERIFYING_KEY:-$(cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_knowledge_graph_secret 2>/dev/null || cat $GDK_ROOT_RESOLVED/gitlab/.gitlab_shell_secret 2>/dev/null || echo "development-secret-at-least-32-bytes")} cargo run -p gkg-server'
 description = "Start the GKG server (webserver mode)"
 
+[tasks."server:dispatch"]
+run = './scripts/run-dispatcher.sh'
+description = "Start the GKG server (dispatch-indexing mode)"
+
+[tasks.dev]
+run = [
+  "mise run dev:check",
+  "mise run dev:web ::: dev:indexer ::: dev:dispatcher",
+]
+description = "Start a local GKG environment (webserver + indexer + dispatcher) connected to GDK services"
+
+[tasks.gdk]
+run = "mise run dev"
+description = "Alias for the local GKG environment connected to GDK services"
+
+[tasks."dev:check"]
+run = "./scripts/gkg-native-dev.sh check"
+description = "Verify GDK-connected local development prerequisites"
+
+[tasks."dev:status"]
+run = "./scripts/gkg-native-dev.sh env"
+description = "Show the derived GDK-backed environment for local development"
+
+[tasks."dev:restart"]
+run = "mise run dev"
+description = "Restart the local GKG environment"
+
+[tasks."dev:stop"]
+run = "echo 'Use Ctrl+C in the running mise session to stop all dev processes'"
+description = "Explain how to stop the local GKG environment"
+
+[tasks."dev:setup"]
+run = "./scripts/gkg-native-dev.sh setup"
+description = "Create the graph database and apply config/graph.sql to ClickHouse"
+
+[tasks."dev:web"]
+run = "GKG_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_PORT:-8090} GKG_GRPC_BIND_ADDRESS=127.0.0.1:${GKG_SERVER_GRPC_PORT:-50054} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_METRICS_PORT:-9100} ./scripts/gkg-native-dev.sh webserver"
+description = "Start a local GKG webserver connected to GDK services"
+
+[tasks."dev:indexer"]
+run = "GKG_INDEXER_HEALTH_BIND_ADDRESS=127.0.0.1:${GKG_INDEXER_PORT:-4202} GKG_NATS__CONSUMER_NAME=${GKG_INDEXER_CONSUMER:-gkg-indexer-dev} GKG_METRICS__PROMETHEUS__ENABLED=${GKG_ENABLE_METRICS:-false} GKG_METRICS__PROMETHEUS__PORT=${GKG_INDEXER_METRICS_PORT:-9200} ./scripts/gkg-native-dev.sh indexer"
+description = "Start a local GKG indexer connected to GDK services"
+
+[tasks."dev:dispatcher"]
+run = "./scripts/gkg-native-dev.sh dispatcher"
+description = "Start a local GKG dispatch-indexing process connected to GDK services"
+
+[tasks."dev:healthcheck"]
+run = "./scripts/gkg-native-dev.sh healthcheck"
+description = "Start the local GKG health-check process"
+
+[tasks."dev:env"]
+run = "./scripts/gkg-native-dev.sh env"
+description = "Print the derived local GKG environment"
+
+
 [tasks."ontology:validate"]
 run = "find config/ontology -name '*.yaml' ! -name 'reference.yaml' | xargs uvx check-jsonschema --verbose --schemafile config/schemas/ontology.schema.json"
 description = "Validate ontology YAML files against JSON schema"
 
-[tasks."e2e:setup"]
-run = "cargo xtask e2e setup"
-description = "Set up the full E2E environment (cluster, GitLab, GKG stack)"
-
-[tasks."e2e:teardown"]
-run = "cargo xtask e2e teardown"
-description = "Tear down the full E2E environment (cluster, GitLab, GKG stack)"
-
-[tasks."e2e:test"]
-run = "cargo xtask e2e test"
-description = "Run E2E redaction tests (assumes environment is up)"
-
-[tasks."e2e:rebuild:gkg"]
-run = "cargo xtask e2e rebuild --gkg"
-description = "Rebuild GKG image and restart GKG pods"
-
-[tasks."e2e:rebuild:rails"]
-run = "cargo xtask e2e rebuild --rails"
-description = "Rebuild Rails CNG images and helm upgrade GitLab"
-
-[tasks."e2e:rebuild:all"]
-run = "cargo xtask e2e rebuild --gkg --rails"
-description = "Rebuild both Rails CNG and GKG images"
-
-[tasks."colima:start"]
-run = "colima start gkg --memory 12"
-description = "Start gkg Colima instance for integration tests"
-
-[tasks."colima:stop"]
-run = "colima stop gkg"
-description = "Stop gkg Colima instance"
-
-[tasks."colima:status"]
-run = "colima list"
-description = "Show status of all Colima instances"
+[tasks."schema:generate"]
+run = "cargo xtask schema -o config/schemas/config.schema.json"
+description = "Generate JSON Schema for the server configuration"
 
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
@@ -177,11 +328,10 @@ run = "vale --minAlertLevel error ."
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
-run = "lychee --offline --include-fragments --exclude-path output '**/*.md'"
+run = "lychee --offline --include-fragments --exclude-path output --exclude-path .claude --exclude-path .opencode '**/*.md'"
 description = "Check for broken links in markdown files"
 
 [tasks."lint:docs"]
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
-

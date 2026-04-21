@@ -1,0 +1,148 @@
+name: "JavaScript generic extension routing"
+pipeline: generic
+fixtures:
+  - path: jsx/component.jsx
+    content: |
+      export function renderBadge() {
+        return 'badge';
+      }
+  - path: jsx/consumer.js
+    content: |
+      import { renderBadge } from './component.jsx';
+
+      export function runBadge() {
+        return renderBadge();
+      }
+
+  - path: tsx/component.tsx
+    content: |
+      export function renderPanel(): string {
+        return 'panel';
+      }
+  - path: tsx/consumer.ts
+    content: |
+      import { renderPanel } from './component.tsx';
+
+      export function runPanel(): string {
+        return renderPanel();
+      }
+
+  - path: esm/component.mjs
+    content: |
+      export function normalizeMjs(value) {
+        return value.trim();
+      }
+  - path: esm/consumer.js
+    content: |
+      import { normalizeMjs } from './component.mjs';
+
+      export function runMjs(value) {
+        return normalizeMjs(value);
+      }
+
+  - path: cjs/component.cjs
+    content: |
+      exports.runCjs = function runCjs() {
+        return 'ok';
+      };
+  - path: cjs/consumer.js
+    content: |
+      const { runCjs } = require('./component.cjs');
+
+      export function bootCjs() {
+        return runCjs();
+      }
+
+  - path: mts/component.mts
+    content: |
+      export function formatMts(value: string): string {
+        return value.trim();
+      }
+  - path: mts/consumer.ts
+    content: |
+      import { formatMts } from './component.mts';
+
+      export function runMts(value: string): string {
+        return formatMts(value);
+      }
+
+  - path: cts/component.cts
+    content: |
+      export function formatCts(value: string): string {
+        return value.toLowerCase();
+      }
+  - path: cts/consumer.ts
+    content: |
+      import { formatCts } from './component.cts';
+
+      export function runCts(value: string): string {
+        return formatCts(value);
+      }
+
+tests:
+  - name: Generic pipeline indexes module definitions for JS-family extensions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'jsx/component.jsx',
+        'tsx/component.tsx',
+        'esm/component.mjs',
+        'cjs/component.cjs',
+        'mts/component.mts',
+        'cts/component.cts'
+      ]
+      RETURN d.fqn AS fqn
+      ORDER BY fqn
+    assert:
+      - { row_count: 6 }
+      - { row: { fqn: "cjs/component.cjs" } }
+      - { row: { fqn: "cts/component.cts" } }
+      - { row: { fqn: "esm/component.mjs" } }
+      - { row: { fqn: "jsx/component.jsx" } }
+      - { row: { fqn: "mts/component.mts" } }
+      - { row: { fqn: "tsx/component.tsx" } }
+
+  - name: Generic pipeline resolves imports across JS-family extensions
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN [
+        'jsx/consumer.js',
+        'tsx/consumer.ts',
+        'esm/consumer.js',
+        'cjs/consumer.js',
+        'mts/consumer.ts',
+        'cts/consumer.ts'
+      ]
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.import_type AS import_type, d.fqn AS target
+      ORDER BY file_path
+    assert:
+      - { row_count: 6 }
+      - { row: { file_path: "cjs/consumer.js", path: "./component.cjs", name: "runCjs", import_type: "CjsRequire", target: "cjs/component.cjs::runCjs" } }
+      - { row: { file_path: "cts/consumer.ts", path: "./component.cts", name: "formatCts", import_type: "NamedImport", target: "cts/component.cts::formatCts" } }
+      - { row: { file_path: "esm/consumer.js", path: "./component.mjs", name: "normalizeMjs", import_type: "NamedImport", target: "esm/component.mjs::normalizeMjs" } }
+      - { row: { file_path: "jsx/consumer.js", path: "./component.jsx", name: "renderBadge", import_type: "NamedImport", target: "jsx/component.jsx::renderBadge" } }
+      - { row: { file_path: "mts/consumer.ts", path: "./component.mts", name: "formatMts", import_type: "NamedImport", target: "mts/component.mts::formatMts" } }
+      - { row: { file_path: "tsx/consumer.ts", path: "./component.tsx", name: "renderPanel", import_type: "NamedImport", target: "tsx/component.tsx::renderPanel" } }
+
+  - name: Generic pipeline resolves cross-file calls for JS-family extensions
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
+          'jsx/consumer.js',
+          'tsx/consumer.ts',
+          'esm/consumer.js',
+          'cjs/consumer.js',
+          'mts/consumer.ts',
+          'cts/consumer.ts'
+        ]
+      RETURN caller.file_path AS caller_file, caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller_file
+    assert:
+      - { row_count: 6 }
+      - { row: { caller_file: "cjs/consumer.js", caller: "bootCjs", callee_file: "cjs/component.cjs", callee: "runCjs" } }
+      - { row: { caller_file: "cts/consumer.ts", caller: "runCts", callee_file: "cts/component.cts", callee: "formatCts" } }
+      - { row: { caller_file: "esm/consumer.js", caller: "runMjs", callee_file: "esm/component.mjs", callee: "normalizeMjs" } }
+      - { row: { caller_file: "jsx/consumer.js", caller: "runBadge", callee_file: "jsx/component.jsx", callee: "renderBadge" } }
+      - { row: { caller_file: "mts/consumer.ts", caller: "runMts", callee_file: "mts/component.mts", callee: "formatMts" } }
+      - { row: { caller_file: "tsx/consumer.ts", caller: "runPanel", callee_file: "tsx/component.tsx", callee: "renderPanel" } }

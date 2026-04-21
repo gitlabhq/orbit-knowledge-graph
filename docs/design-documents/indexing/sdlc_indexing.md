@@ -107,11 +107,11 @@ We are going to transform the data from ClickHouse to a graph-like format by des
   - Core attributes relevant to that entity type
   - Metadata fields (created_at, updated_at, deleted_at for soft deletes)
 
-- **Edges**: We will define a table schema for each edge type. For example, `namespaces_projects`, `projects_issues`, `issues_merge_requests`, `merge_requests_pipelines`, `pipelines_runners`, `vulnerabilities_projects`, etc. Each edge table will contain:
-  - The tenant ID
-  - Source node identifier
-  - Target node identifier
-  - Edge type or relationship metadata
+- **Edges**: Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`). Each edge YAML can set a `table:` field to route that relationship type to a dedicated table; `settings.edge_tables` in `schema.yaml` defines the available tables and their storage layout. Each edge table contains:
+  - Traversal path (namespace scoping)
+  - Source node identifier and kind
+  - Relationship kind
+  - Target node identifier and kind
 
 #### Transformation and Loading Logic
 
@@ -178,12 +178,12 @@ The `gkg-indexer` will be responsible for getting the namespace data for the Kno
 
 It is important to differentiate between initial and incremental indexing when publishing the jobs. We want to have workers with different priorities for each type of indexing. This will prevent resource starvation by big initial indexing jobs and ensure that the indexing process remains efficient.
 
-Example NATS JetStream stream: `GKG_INDEXING_JOBS`
+Example NATS JetStream stream: `GKG_INDEXER`
 
 Example NATS JetStream subjects:
 
-- `gkg.indexing.jobs.initial`
-- `gkg.indexing.jobs.incremental`
+- `sdlc.global.indexing.requested`
+- `sdlc.namespace.indexing.requested.<org>.<ns>`
 
 **Dispatch deduplication**
 
@@ -268,7 +268,7 @@ ETL plans come from the ontology YAML in `config/ontology/nodes/` and `config/on
 
 Each handler invocation runs its plans through a shared `Pipeline` struct. The loop for a single plan works like this:
 
-1. Load the last checkpoint from `sdlc_checkpoint` to get the watermark and cursor position.
+1. Load the last checkpoint from `checkpoint` to get the watermark and cursor position.
 2. Build a parameterized extraction query against the datalake, filtered by watermark range and (for namespaced entities) traversal path.
 3. Page through results with keyset pagination. Each page is bounded by `LIMIT` and ordered by composite sort keys (e.g., `ORDER BY traversal_path, id`). The cursor from the last row becomes the filter for the next page via a DNF predicate: `(c1 > v1) OR (c1 = v1 AND c2 > v2)`.
 4. Transform each batch in-memory with DataFusion SQL, mapping source columns to graph columns, resolving FK edges, and applying type discriminators.
@@ -300,10 +300,10 @@ LIMIT 1000000
 
 **Checkpoint store**
 
-A single `sdlc_checkpoint` table replaces the old per-entity watermark tables. Each row has a position key, a watermark, and optional cursor values:
+A single `checkpoint` table replaces the old per-entity watermark tables. Each row has a position key, a watermark, and optional cursor values:
 
 ```sql
-CREATE TABLE IF NOT EXISTS sdlc_checkpoint (
+CREATE TABLE IF NOT EXISTS checkpoint (
     key String,
     watermark DateTime64(6, 'UTC'),
     cursor_values String DEFAULT '',

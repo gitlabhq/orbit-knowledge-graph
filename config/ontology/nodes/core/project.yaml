@@ -25,7 +25,7 @@ properties:
 
   full_path:
     type: string
-    source: path
+    source: full_path
     nullable: true
     description: "Full path for the project (e.g. gitlab-org/gitlab)."
 
@@ -84,6 +84,7 @@ properties:
   traversal_path:
     type: string
     source: traversal_path
+    filterable: false
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
@@ -92,7 +93,8 @@ etl:
   scope: namespaced
   select: >-
     project.id AS id, project.name AS name, project.description AS description,
-    project.visibility_level AS visibility_level, project.path AS path,
+    project.visibility_level AS visibility_level,
+    if(isNotNull(route.source_id), route.path, project.path) AS full_path,
     project.namespace_id AS namespace_id, project.creator_id AS creator_id,
     project.created_at AS created_at, project.updated_at AS updated_at,
     project.archived AS archived, project.star_count AS star_count,
@@ -100,9 +102,20 @@ etl:
     traversal_paths.traversal_path AS traversal_path
   from: >-
     siphon_projects project
-    INNER JOIN project_namespace_traversal_paths traversal_paths
+    INNER JOIN (
+      SELECT id, traversal_path
+      FROM project_namespace_traversal_paths
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) traversal_paths
     ON project.id = traversal_paths.id
-  traversal_path_filter: "project.id IN (SELECT id FROM project_namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
+    LEFT JOIN (
+      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
+      FROM siphon_routes
+      WHERE startsWith(traversal_path, {traversal_path:String})
+        AND source_type = 'Project' AND NOT _siphon_deleted
+      GROUP BY source_id
+    ) route ON project.id = route.source_id
+  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
   deleted: project._siphon_deleted
   edges:
@@ -114,3 +127,24 @@ etl:
       to: Group
       as: CONTAINS
       direction: incoming
+
+storage:
+  primary_key: [traversal_path, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: visibility_level, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: full_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: archived, type: "Nullable(Bool)"}
+    - {name: star_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: last_activity_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

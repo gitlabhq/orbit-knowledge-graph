@@ -1,0 +1,148 @@
+name: "Python: intra-file resolution"
+fixtures:
+  - path: main.py
+    content: |
+      # ── Simple call ────────────────────────
+      def target_a():
+          pass
+
+      def caller_a():
+          target_a()
+
+      # ── Reassignment (latest wins) ────────
+      def option1():
+          pass
+
+      def option2():
+          pass
+
+      def reassignment_caller():
+          x = option1
+          x = option2
+          x()
+
+      # ── self.method() ─────────────────────
+      class Calculator:
+          def add(self, a, b):
+              return a + b
+
+          def compute(self):
+              self.add(1, 2)
+
+      # ── Recursive ─────────────────────────
+      def factorial(n):
+          if n <= 1:
+              return 1
+          return n * factorial(n - 1)
+
+      # ── Lambda ────────────────────────────
+      square = lambda x: x * x
+
+      def use_lambda():
+          square(5)
+
+      # ── Decorated ─────────────────────────
+      def my_decorator(f):
+          return f
+
+      @my_decorator
+      def decorated_fn():
+          pass
+
+      def call_decorated():
+          decorated_fn()
+
+      # ── Class instantiation ───────────────
+      class Service:
+          def run(self):
+              pass
+
+      def create_service():
+          svc = Service()
+
+tests:
+  - name: "Simple call: caller_a → target_a"
+    description: "A bare function call resolves to exactly one target"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'caller_a' AND callee.name = 'target_a'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.caller_a", callee: "main.target_a" } }
+
+  - name: "Reassignment: x = option1; x = option2; x() resolves to option2"
+    description: "Latest assignment wins — x() should NOT resolve to option1"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'reassignment_caller' AND callee.name = 'option2'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+          - { row: { caller: "main.reassignment_caller", callee: "main.option2" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'reassignment_caller' AND callee.name = 'option1'
+          RETURN callee.name AS wrong_target
+        assert:
+          - { empty: true }
+
+  - name: "Self method: compute calls add via self"
+    description: "self.add(1, 2) inside Calculator.compute resolves to Calculator.add"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'compute' AND callee.name = 'add'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.Calculator.compute", callee: "main.Calculator.add" } }
+
+  - name: "Recursive: factorial calls itself"
+    description: "factorial(n-1) inside factorial resolves to factorial — a self-edge"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'factorial' AND callee.name = 'factorial'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.factorial", callee: "main.factorial" } }
+
+  - name: "Lambda: use_lambda calls square"
+    description: "square(5) resolves to the lambda definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_lambda' AND callee.name = 'square'
+      RETURN callee.definition_type AS dt
+    assert:
+      - { row_count: 1 }
+      - { row: { dt: "Lambda" } }
+
+  - name: "Decorated: call_decorated calls decorated_fn"
+    description: "@my_decorator should not prevent resolution of the decorated function"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'call_decorated' AND callee.name = 'decorated_fn'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.call_decorated", callee: "main.decorated_fn" } }
+
+  - name: "Instantiation: create_service calls Service"
+    description: "Service() class instantiation produces a call edge to the class definition"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'create_service' AND callee.name = 'Service'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.create_service", callee: "main.Service" } }
+
+  - name: "Total call edges from all callers"
+    description: "7 callers, each producing exactly 1 call edge = 7 total def-to-def call edges"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn <> callee.fqn OR caller.name = 'factorial'
+      RETURN count(*) AS n
+    assert:
+      - { count_gte: { field: n, value: 7 } }

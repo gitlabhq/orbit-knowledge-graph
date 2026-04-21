@@ -48,35 +48,104 @@
       "default": "int"
     },
 
-    "propertyDefinition": {
+    "virtualSourceDefinition": {
       "type": "object",
-      "description": "Definition of a node property/field.",
+      "description": "Configuration for a field resolved from a remote service at query time.",
       "properties": {
-        "type": { "$ref": "#/definitions/propertyType" },
-        "source": {
+        "service": {
           "type": "string",
-          "description": "Source column name in the database table."
+          "description": "Logical service name (e.g. 'gitaly')."
         },
-        "nullable": {
+        "lookup": {
+          "type": "string",
+          "description": "Logical operation name (e.g. 'blob_content')."
+        },
+        "disabled": {
           "type": "boolean",
-          "description": "Whether this field can be null.",
+          "description": "When true, the virtual field is declared but not resolvable. Queries requesting it will receive null.",
           "default": false
         },
-        "description": {
-          "type": "string",
-          "description": "Human-readable description of the property."
-        },
-        "values": {
-          "$ref": "#/definitions/enumValues",
-          "description": "For enum types, maps integer values to string labels."
-        },
-        "enum_type": {
-          "$ref": "#/definitions/enumType",
-          "description": "For enum types, specifies how the enum is stored in the source database."
+        "depends_on": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "Column-backed properties this virtual field needs in the property map for resolution. The compiler ensures these are fetched during hydration even if the user didn't request them.",
+          "default": []
         }
       },
-      "required": ["type", "source"],
+      "required": ["service", "lookup"],
       "additionalProperties": false
+    },
+
+    "propertyDefinition": {
+      "description": "Definition of a node property/field. Exactly one of 'source' (column-backed) or 'virtual' (remote-resolved) must be present.",
+      "oneOf": [
+        {
+          "type": "object",
+          "description": "Column-backed property read from ClickHouse.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "source": {
+              "type": "string",
+              "description": "Source column name in the database table."
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            },
+            "values": {
+              "$ref": "#/definitions/enumValues",
+              "description": "For enum types, maps integer values to string labels."
+            },
+            "enum_type": {
+              "$ref": "#/definitions/enumType",
+              "description": "For enum types, specifies how the enum is stored in the source database."
+            },
+            "like_allowed": {
+              "type": "boolean",
+              "description": "Whether LIKE-based operators (contains, starts_with, ends_with) are permitted on this field. Defaults to true. Set to false for sensitive columns to prevent probing.",
+              "default": true
+            },
+            "filterable": {
+              "type": "boolean",
+              "description": "Whether users can filter on this field. Defaults to true. Set to false for internal columns (e.g. traversal_path) that should only be system-controlled.",
+              "default": true
+            },
+            "admin_only": {
+              "type": "boolean",
+              "description": "Whether this field is only visible to instance administrators. Defaults to false. When true, non-admin users cannot select or filter on this field.",
+              "default": false
+            }
+          },
+          "required": ["type", "source"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "description": "Virtual property resolved from a remote service at query time.",
+          "properties": {
+            "type": { "$ref": "#/definitions/propertyType" },
+            "virtual": {
+              "$ref": "#/definitions/virtualSourceDefinition"
+            },
+            "nullable": {
+              "type": "boolean",
+              "description": "Whether this field can be null.",
+              "default": false
+            },
+            "description": {
+              "type": "string",
+              "description": "Human-readable description of the property."
+            }
+          },
+          "required": ["type", "virtual"],
+          "additionalProperties": false
+        }
+      ]
     },
 
     "edgeMappingDefinition": {
@@ -106,6 +175,11 @@
         "array_field": {
           "type": "string",
           "description": "When a datalake column is typed Array(Tuple(...)), names the tuple element holding the foreign key ID (e.g. 'user_id'). The indexer will ARRAY JOIN the column and extract one edge per element."
+        },
+        "array": {
+          "type": "boolean",
+          "default": false,
+          "description": "When true, indicates the column is a flat array (e.g. Array(UInt64)). The indexer will unnest the array and create one edge per element."
         }
       },
       "required": ["as"],
@@ -246,10 +320,10 @@
           "pattern": "^[a-z_]+$",
           "description": "Prefix applied to all ClickHouse graph table names (e.g., 'gl_')."
         },
-        "edge_table": {
+        "default_edge_table": {
           "type": "string",
           "pattern": "^[a-z_]+$",
-          "description": "ClickHouse table name for all graph edges (e.g., 'gl_edge')."
+          "description": "Default ClickHouse edge table name. Must be a key in edge_tables."
         },
         "default_entity_sort_key": {
           "type": "array",
@@ -258,33 +332,159 @@
           "minItems": 1,
           "uniqueItems": true
         },
-        "edge_sort_key": {
-          "type": "array",
-          "description": "ClickHouse ORDER BY columns for the edge table. Used as the deduplication key for ReplacingMergeTree.",
-          "items": { "type": "string" },
-          "minItems": 1,
-          "uniqueItems": true
+        "edge_tables": {
+          "type": "object",
+          "description": "Edge table definitions keyed by table name. Each defines sort_key and columns.",
+          "propertyNames": { "pattern": "^[a-z_]+$" },
+          "additionalProperties": {
+            "type": "object",
+            "properties": {
+              "sort_key": {
+                "type": "array",
+                "description": "ClickHouse ORDER BY columns for this edge table.",
+                "items": { "type": "string" },
+                "minItems": 1,
+                "uniqueItems": true
+              },
+              "columns": {
+                "type": "array",
+                "description": "Column definitions for this edge table, in schema order.",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": {"type": "string", "description": "Column name."},
+                    "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                },
+                "minItems": 1
+              },
+              "storage": {
+                "type": "object",
+                "description": "ClickHouse DDL storage metadata for the edge table.",
+                "properties": {
+                  "index_granularity": { "type": "integer", "minimum": 1 },
+                  "primary_key": { "type": "array", "items": { "type": "string" } },
+                  "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
+                  "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                },
+                "additionalProperties": false
+              }
+            },
+            "required": ["sort_key", "columns"],
+            "additionalProperties": false
+          },
+          "minProperties": 1
         },
-        "edge_columns": {
+        "internal_column_prefix": {
+          "type": "string",
+          "pattern": "^_[a-z_]+$",
+          "minLength": 5,
+          "description": "Prefix for internal columns injected by the compiler (e.g. '_gkg_'). Ontology field names starting with this prefix are rejected at load time."
+        },
+        "skip_security_filter_for_entities": {
           "type": "array",
-          "description": "Column definitions for the unified edge table, in schema order.",
+          "items": { "type": "string" },
+          "description": "Entity names (e.g. 'User') excluded from traversal-path security filters. Resolved to physical table names at load time. These are entities whose visibility is determined through relationships rather than direct path hierarchy."
+        },
+        "local_db": {
+          "type": "object",
+          "description": "Configuration for entities that participate in the local DuckDB graph (CLI indexing).",
+          "properties": {
+            "entities": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name"],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "description": "Entity name (must reference a declared node)."
+                  },
+                  "exclude_properties": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Property names excluded from the local table for this entity (e.g. server-only columns like 'traversal_path')."
+                  }
+                },
+                "additionalProperties": false
+              },
+              "description": "Entities indexed locally, with per-entity property exclusions."
+            },
+            "edge_table": {
+              "type": "object",
+              "description": "Edge table schema for the local DuckDB graph.",
+              "required": ["name", "columns"],
+              "properties": {
+                "name": {
+                  "type": "string",
+                  "description": "Table name for the local edge table."
+                },
+                "columns": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["name", "type"],
+                    "properties": {
+                      "name": {
+                        "type": "string",
+                        "description": "Column name."
+                      },
+                      "type": {
+                        "type": "string",
+                        "enum": ["string", "int64", "float64", "boolean", "date", "datetime"],
+                        "description": "Column data type."
+                      }
+                    },
+                    "additionalProperties": false
+                  },
+                  "description": "Columns in the local edge table, in order."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        },
+        "auxiliary_tables": {
+          "type": "array",
+          "description": "Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).",
           "items": {
             "type": "object",
             "properties": {
-              "name": {"type": "string", "description": "Column name."},
-              "type": {"$ref": "#/definitions/propertyType", "description": "Column data type."}
+              "name": { "type": "string" },
+              "columns": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "name": { "type": "string" },
+                    "type": { "$ref": "#/definitions/propertyType" },
+                    "nullable": { "type": "boolean" },
+                    "codec": { "type": "array", "items": { "type": "string" } },
+                    "default": { "type": "string" }
+                  },
+                  "required": ["name", "type"],
+                  "additionalProperties": false
+                }
+              },
+              "order_by": { "type": "array", "items": { "type": "string" } },
+              "version_only_engine": { "type": "boolean" },
+              "version_type": { "type": "string" },
+              "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
             },
-            "required": ["name", "type"],
+            "required": ["name", "columns", "order_by"],
             "additionalProperties": false
-          },
-          "minItems": 1
+          }
         },
         "etl": {
           "$ref": "#/definitions/etlSettingsDefinition",
           "description": "Default ETL settings for watermark, deleted, and edge order_by columns."
         }
       },
-      "required": ["table_prefix", "edge_table", "default_entity_sort_key", "edge_sort_key", "edge_columns", "etl"],
+      "required": ["table_prefix", "default_edge_table", "default_entity_sort_key", "edge_tables", "internal_column_prefix", "etl"],
       "additionalProperties": false
     },
 
@@ -413,6 +613,10 @@
             { "$ref": "#/definitions/redactionConfig" }
           ],
           "description": "Redaction configuration for access control. Set to null if not yet configured."
+        },
+        "storage": {
+          "$ref": "#/definitions/nodeStorage",
+          "description": "ClickHouse DDL storage metadata. Columns, indexes, projections, and engine settings for DDL generation."
         }
       },
       "required": ["node_type", "domain", "description", "label", "destination_table", "default_columns", "style", "properties", "redaction"],
@@ -515,6 +719,11 @@
           "type": "string",
           "description": "Human-readable description of the relationship."
         },
+        "table": {
+          "type": "string",
+          "pattern": "^[a-z_]+$",
+          "description": "Optional ClickHouse table for this edge type. Must be a key in settings.edge_tables. Defaults to settings.default_edge_table."
+        },
         "properties": {
           "type": "object",
           "description": "Property definitions for this edge (for edges with additional data).",
@@ -529,6 +738,138 @@
         "etl": { "$ref": "#/definitions/edgeEtlConfig" }
       },
       "required": ["description", "variants"],
+      "additionalProperties": false
+    },
+
+    "nodeStorage": {
+      "type": "object",
+      "description": "ClickHouse DDL storage metadata for a node table.",
+      "properties": {
+        "version_only_engine": {
+          "type": "boolean",
+          "description": "When true, engine is ReplacingMergeTree(_version) without _deleted.",
+          "default": false
+        },
+        "primary_key": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "PRIMARY KEY columns. When absent, ClickHouse defaults to ORDER BY."
+        },
+        "columns": {
+          "type": "array",
+          "description": "Columns in exact DDL order (excluding _version and _deleted).",
+          "items": { "$ref": "#/definitions/storageColumn" }
+        },
+        "indexes": {
+          "type": "array",
+          "description": "Skip indexes.",
+          "items": { "$ref": "#/definitions/storageIndex" }
+        },
+        "projections": {
+          "type": "array",
+          "description": "Materialized projections.",
+          "items": { "$ref": "#/definitions/storageProjection" }
+        }
+      },
+      "additionalProperties": false
+    },
+
+    "storageColumn": {
+      "type": "object",
+      "description": "A column as it appears in CREATE TABLE DDL.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^`?[a-z_][a-z0-9_]*`?$",
+          "description": "Column name. Lowercase with underscores. Backtick-quoted for reserved words."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(Int64|UInt64|Bool|String|Date32|DateTime64\\(|Nullable\\(|LowCardinality\\().*$",
+          "description": "Exact ClickHouse type. Must start with a known type name."
+        },
+        "default": {
+          "type": "string",
+          "pattern": "^[a-zA-Z0-9_()',./_ ]+$",
+          "description": "DEFAULT expression. Only literals, function calls, and quoted strings allowed."
+        },
+        "codec": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^(ZSTD\\([0-9]+\\)|Delta\\([0-9]+\\)|LZ4)$",
+            "description": "Codec. Must be ZSTD(N), Delta(N), or LZ4."
+          }
+        }
+      },
+      "required": ["name", "type"],
+      "additionalProperties": false
+    },
+
+    "storageIndex": {
+      "type": "object",
+      "description": "A skip index definition.",
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^idx_[a-z_][a-z0-9_]*$",
+          "description": "Index name. Must start with idx_."
+        },
+        "column": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Column name. Lowercase with underscores."
+        },
+        "type": {
+          "type": "string",
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\))$",
+          "description": "Index type. Must be minmax, set(N), or bloom_filter(N.NN)."
+        },
+        "granularity": { "type": "integer", "minimum": 1, "default": 1 }
+      },
+      "required": ["name", "column", "type", "granularity"],
+      "additionalProperties": false
+    },
+
+    "storageProjection": {
+      "type": "object",
+      "description": "A materialized projection.",
+      "properties": {
+        "type": { "type": "string", "enum": ["reorder", "aggregate"] },
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z_][a-z0-9_]*$",
+          "description": "Projection name. Lowercase with underscores."
+        },
+        "order_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "ORDER BY columns (for reorder projections)."
+        },
+        "select": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_()., ]*$",
+            "description": "SELECT expression. Column names and aggregate functions only."
+          },
+          "description": "SELECT expressions (for aggregate projections)."
+        },
+        "group_by": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z_][a-z0-9_]*$",
+            "description": "Column name. Lowercase with underscores."
+          },
+          "description": "GROUP BY columns (for aggregate projections)."
+        }
+      },
+      "required": ["type", "name"],
       "additionalProperties": false
     }
   }

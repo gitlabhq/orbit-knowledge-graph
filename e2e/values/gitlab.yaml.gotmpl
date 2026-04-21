@@ -1,0 +1,168 @@
+global:
+  edition: ee
+  hosts:
+    domain: e2e.local
+    https: false
+    externalIP: ""
+  ingress:
+    configureCertmanager: false
+    enabled: false
+    tls:
+      enabled: false
+  appConfig:
+    enableUsagePing: false
+    enableSeatLink: false
+    enableImpersonation: true
+    defaultCanCreateGroup: true
+    initialDefaults:
+      signupEnabled: false
+    knowledgeGraph:
+      enabled: true
+      grpcEndpoint: "tls://gkg-webserver.e2e-{{ requiredEnv "E2E_SHA" }}-gkg.svc.cluster.local:50054"
+      jwtSecret:
+        secret: gitlab-knowledge-graph-jwt
+        key: knowledge_graph_jwt_shared_key
+  certificates:
+    customCAs:
+      - secret: gkg-grpc-ca
+  clickhouse:
+    enabled: true
+    main:
+      username: gitlab
+      password:
+        secret: gitlab-clickhouse-password
+        key: main_password
+      database: datalake
+      url: "http://clickhouse.e2e-{{ requiredEnv "E2E_SHA" }}-clickhouse.svc.cluster.local:8123"
+
+  minio:
+    enabled: true
+  kas:
+    enabled: false
+  pages:
+    enabled: false
+  grafana:
+    enabled: false
+  shell:
+    port: 32022
+
+  psql:
+    password:
+      secret: gitlab-postgresql-password
+      key: postgresql-password
+
+upgradeCheck:
+  enabled: false
+
+installCertmanager: false
+
+certmanager:
+  install: false
+
+nginx-ingress:
+  enabled: false
+
+prometheus:
+  install: false
+
+gitlab-runner:
+  install: false
+
+registry:
+  enabled: false
+
+gitlab:
+  gitaly:
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 200m
+        memory: 512Mi
+      limits:
+        cpu: 1
+        memory: 2Gi
+  webservice:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 300m
+        memory: 2Gi
+      limits:
+        cpu: 4
+        memory: 6Gi
+    workerProcesses: 2
+    workhorse:
+      resources:
+        requests:
+          cpu: 100m
+          memory: 128Mi
+        limits:
+          cpu: 500m
+          memory: 512Mi
+  sidekiq:
+    minReplicas: 1
+    maxReplicas: 1
+    resources:
+      requests:
+        cpu: 200m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+  toolbox:
+    replicas: 1
+    resources:
+      requests:
+        cpu: 100m
+        memory: 1Gi
+      limits:
+        cpu: 1
+        memory: 3Gi
+  gitlab-exporter:
+    enabled: false
+  kas:
+    enabled: false
+  gitlab-pages:
+    enabled: false
+  migrations:
+    resources:
+      requests:
+        cpu: 250m
+        memory: 1Gi
+      limits:
+        cpu: 2
+        memory: 4Gi
+
+postgresql:
+  install: true
+  primary:
+    extendedConfiguration: |
+      wal_level = logical
+      max_replication_slots = 4
+      max_wal_senders = 4
+    persistence:
+      size: 10Gi
+    resources:
+      requests:
+        cpu: 250m
+        memory: 512Mi
+      limits:
+        cpu: 2
+        memory: 2Gi
+    # GitLab chart hardcodes initdb.scriptsConfigMap — custom scripts via
+    # initdb.scripts are ignored. Siphon PG setup runs via pg-cdc-setup helm chart.
+
+redis:
+  install: true
+  master:
+    persistence:
+      enabled: false
+    resources:
+      requests:
+        cpu: 100m
+        memory: 256Mi
+      limits:
+        cpu: 500m
+        memory: 512Mi

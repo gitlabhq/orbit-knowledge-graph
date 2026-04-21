@@ -1,0 +1,37 @@
+name: "Python: nested function scope"
+fixtures:
+  - path: main.py
+    content: |
+      def outer():
+          def inner():
+              pass
+          inner()
+
+      outer()
+
+tests:
+  - name: inner() resolves within outer
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'inner'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "main.outer", callee: "main.outer.inner" } }
+
+  - name: outer() exists as a definition
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'outer'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "main.outer" } }
+
+  - name: inner has correct FQN nesting
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'inner'
+      RETURN d.fqn AS fqn
+    assert:
+      - { match: { field: fqn, pattern: "*outer.*" } }

@@ -1,4 +1,5 @@
 use crate::entities::DataType;
+use crate::loading::node::{StorageColumnYaml, StorageIndexYaml, StorageProjectionYaml};
 use serde::Deserialize;
 use std::collections::BTreeMap;
 
@@ -13,21 +14,96 @@ pub(super) struct SchemaYaml {
     pub edges: BTreeMap<String, String>,
 }
 
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Clone, Deserialize)]
 pub(super) struct EdgeColumnYaml {
     pub name: String,
     #[serde(rename = "type")]
     pub data_type: DataType,
 }
 
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeTableYaml {
+    pub sort_key: Vec<String>,
+    pub columns: Vec<EdgeColumnYaml>,
+    #[serde(default)]
+    pub storage: Option<EdgeTableStorageYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct EdgeTableStorageYaml {
+    #[serde(default)]
+    pub index_granularity: Option<u32>,
+    #[serde(default)]
+    pub primary_key: Option<Vec<String>>,
+    #[serde(default)]
+    pub columns: Vec<StorageColumnYaml>,
+    #[serde(default)]
+    pub indexes: Vec<StorageIndexYaml>,
+    #[serde(default)]
+    pub projections: Vec<StorageProjectionYaml>,
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct SettingsYaml {
     pub table_prefix: String,
-    pub edge_table: String,
+    pub default_edge_table: String,
     pub default_entity_sort_key: Vec<String>,
-    pub edge_sort_key: Vec<String>,
-    pub edge_columns: Vec<EdgeColumnYaml>,
+    pub edge_tables: BTreeMap<String, EdgeTableYaml>,
+    pub internal_column_prefix: String,
+    #[serde(default)]
+    pub skip_security_filter_for_entities: Vec<String>,
+    #[serde(default)]
+    pub local_db: Option<LocalSettingsYaml>,
     pub etl: EtlSettingsYaml,
+    #[serde(default)]
+    pub auxiliary_tables: Vec<AuxiliaryTableYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct AuxiliaryTableYaml {
+    pub name: String,
+    pub columns: Vec<AuxiliaryColumnYaml>,
+    pub order_by: Vec<String>,
+    #[serde(default)]
+    pub version_only_engine: bool,
+    #[serde(default)]
+    pub version_type: Option<String>,
+    #[serde(default)]
+    pub projections: Vec<StorageProjectionYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalSettingsYaml {
+    #[serde(default)]
+    pub entities: Vec<LocalEntityYaml>,
+    #[serde(default)]
+    pub edge_table: Option<LocalEdgeTableYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalEdgeTableYaml {
+    pub name: String,
+    pub columns: Vec<EdgeColumnYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+pub(super) struct LocalEntityYaml {
+    pub name: String,
+    #[serde(default)]
+    pub exclude_properties: Vec<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct AuxiliaryColumnYaml {
+    pub name: String,
+    #[serde(rename = "type")]
+    pub data_type: DataType,
+    #[serde(default)]
+    pub nullable: bool,
+    #[serde(default)]
+    pub codec: Option<Vec<String>>,
+    #[serde(default)]
+    pub default: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]

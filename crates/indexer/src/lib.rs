@@ -28,11 +28,9 @@
 //!
 pub mod checkpoint;
 pub mod clickhouse;
-pub mod configuration;
 pub mod dead_letter;
 pub mod destination;
 pub mod engine;
-pub(crate) mod env;
 pub mod handler;
 pub mod health;
 pub mod llqm_v1;
@@ -41,6 +39,7 @@ pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
+pub mod schema;
 pub mod topic;
 pub mod types;
 pub mod worker_pool;
@@ -51,22 +50,34 @@ pub mod testkit;
 use std::net::SocketAddr;
 use std::sync::Arc;
 
-use clickhouse::ClickHouseConfiguration;
+use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
-use configuration::EngineConfiguration;
 use engine::EngineBuilder;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClient;
+use gkg_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, GitlabClientConfiguration, NatsConfiguration,
+    ScheduleConfig, SchemaConfig,
+};
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
 use locking::INDEXING_LOCKS_BUCKET;
-use nats::{KvBucketConfig, NatsBroker, NatsConfiguration};
-use scheduler::ScheduleConfig;
+use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
+use modules::namespace_deletion::{
+    ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
+};
+use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use nats::{KvBucketConfig, NatsBroker};
+use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
 
 fn default_health_bind_address() -> SocketAddr {
     "0.0.0.0:4202".parse().unwrap()
+}
+
+fn default_dispatcher_health_bind_address() -> SocketAddr {
+    "0.0.0.0:4203".parse().unwrap()
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -85,6 +96,8 @@ pub struct IndexerConfig {
     pub schedule: ScheduleConfig,
     #[serde(default = "default_health_bind_address")]
     pub health_bind_address: SocketAddr,
+    #[serde(default)]
+    pub schema: SchemaConfig,
 }
 
 impl Default for IndexerConfig {
@@ -97,6 +110,7 @@ impl Default for IndexerConfig {
             gitlab: None,
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
+            schema: SchemaConfig::default(),
         }
     }
 }
@@ -117,6 +131,40 @@ pub enum IndexerError {
 
     #[error("Health server failed: {0}")]
     Health(#[from] std::io::Error),
+
+    #[error("Schema version error: {0}")]
+    SchemaVersion(#[from] schema::version::SchemaVersionError),
+
+    #[error("Schema migration error: {0}")]
+    SchemaMigration(#[from] schema::migration::MigrationError),
+
+    #[error("Invalid configuration: {0}")]
+    InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
+}
+
+#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
+pub struct DispatcherConfig {
+    #[serde(default)]
+    pub nats: NatsConfiguration,
+    #[serde(default)]
+    pub graph: ClickHouseConfiguration,
+    #[serde(default)]
+    pub datalake: ClickHouseConfiguration,
+    #[serde(default)]
+    pub schedule: ScheduleConfig,
+    #[serde(default)]
+    pub schema: SchemaConfig,
+    #[serde(default = "default_dispatcher_health_bind_address")]
+    pub health_bind_address: SocketAddr,
+}
+
+#[derive(Debug, Error)]
+pub enum DispatcherError {
+    #[error("scheduler error: {0}")]
+    Scheduler(#[from] scheduler::SchedulerError),
+
+    #[error("health server failed: {0}")]
+    Health(#[from] std::io::Error),
 }
 
 /// Runs the indexer until completion or until the token is cancelled.
@@ -125,12 +173,28 @@ pub async fn run(
     ontology: Arc<ontology::Ontology>,
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
+    config.schema.validate()?;
+
+    let graph_client = config.graph.build_client();
+    info!(url = %config.graph.url, "initializing schema version table");
+    schema::version::init(&graph_client).await?;
+
     info!(url = %config.nats.url, "connecting to NATS");
     let broker = Arc::new(NatsBroker::connect(&config.nats).await?);
 
     let per_message_ttl = KvBucketConfig::with_per_message_ttl();
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
+        .await?;
+
+    // Run the migration orchestrator before the engine starts consuming messages.
+    // This ensures no in-flight NATS messages exist during the drain phase.
+    let migration_metrics = metrics::MigrationMetrics::new();
+    let lock_service: Arc<dyn locking::LockService> = Arc::new(locking::NatsLockService::new(
+        Arc::new(nats::NatsServicesImpl::new(broker.clone())),
+    ));
+    info!("running schema migration check");
+    schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;
 
     let metrics = Arc::new(metrics::EngineMetrics::new());
@@ -200,4 +264,95 @@ pub async fn run(
 
     info!("indexer stopped");
     result
+}
+
+/// Runs the dispatcher (scheduled task loops + health server) until shutdown.
+pub async fn run_dispatcher(
+    config: &DispatcherConfig,
+    ontology: &ontology::Ontology,
+    shutdown: CancellationToken,
+) -> Result<(), DispatcherError> {
+    let services = scheduler::connect(&config.nats).await?;
+    let graph = config.graph.build_client();
+    let datalake = config.datalake.build_client();
+    let metrics = ScheduledTaskMetrics::new();
+    let lock_service = services.lock_service.clone();
+
+    let deletion_graph = Arc::new(config.graph.build_client());
+    let deletion_datalake = Arc::new(config.datalake.build_client());
+    let deletion_store: Arc<dyn NamespaceDeletionStore> =
+        Arc::new(ClickHouseNamespaceDeletionStore::new(
+            deletion_datalake,
+            Arc::clone(&deletion_graph),
+            ontology,
+        ));
+    let checkpoint_store = Arc::new(checkpoint::ClickHouseCheckpointStore::new(deletion_graph));
+
+    let health_state = HealthState {
+        nats_client: services.nats_client.clone(),
+        graph_client: config.graph.build_client(),
+        datalake_client: config.datalake.build_client(),
+        gitlab_client: None,
+    };
+
+    let tasks: Vec<Box<dyn ScheduledTask>> = vec![
+        Box::new(GlobalDispatcher::new(
+            services.nats.clone(),
+            metrics.clone(),
+            config.schedule.tasks.global.clone(),
+        )),
+        Box::new(NamespaceDispatcher::new(
+            services.nats.clone(),
+            datalake,
+            metrics.clone(),
+            config.schedule.tasks.namespace.clone(),
+        )),
+        Box::new(SiphonCodeIndexingTaskDispatcher::new(
+            services.nats.clone(),
+            metrics.clone(),
+            config.schedule.tasks.code_indexing_task.clone(),
+        )),
+        Box::new(NamespaceCodeBackfillDispatcher::new(
+            services.nats.clone(),
+            config.graph.build_client(),
+            config.datalake.build_client(),
+            metrics.clone(),
+            config.schedule.tasks.namespace_code_backfill.clone(),
+        )),
+        Box::new(TableCleanup::new(
+            graph,
+            metrics.clone(),
+            config.schedule.tasks.table_cleanup.clone(),
+        )),
+        Box::new(NamespaceDeletionScheduler::new(
+            deletion_store,
+            checkpoint_store,
+            services.nats.clone(),
+            metrics.clone(),
+            config.schedule.tasks.namespace_deletion.clone(),
+        )),
+        Box::new(schema::completion::MigrationCompletionChecker::new(
+            config.graph.build_client(),
+            config.datalake.build_client(),
+            lock_service.clone(),
+            Arc::new(ontology.clone()),
+            config.schema.clone(),
+            config.schedule.tasks.migration_completion.clone(),
+            metrics,
+        )),
+    ];
+
+    tokio::select! {
+        result = scheduler::run_loop(tasks, lock_service, shutdown.clone()) => {
+            result.map_err(DispatcherError::from)
+        }
+        result = run_health_server(config.health_bind_address, health_state) => {
+            // Health server died — cancel shutdown token so the scheduler drains gracefully
+            shutdown.cancel();
+            let error = result.err().unwrap_or_else(|| std::io::Error::other(
+                "dispatcher health server exited unexpectedly",
+            ));
+            Err(DispatcherError::Health(error))
+        }
+    }
 }

@@ -2,77 +2,323 @@
 
 ## Overview
 
-The GitLab Knowledge Graph schema will evolve over time as we add new entities and relationships. This document will outline the process for managing the schema ranging from initial schema design to schema evolution in ClickHouse. A robust schema management strategy is critical for ensuring the long-term maintainability, scalability and reliability of the service.
+The GitLab Knowledge Graph schema evolves over time as new entities and relationships are added.
+This document describes the implemented approach to schema version tracking and the
+table-prefix-aware migration orchestrator.
 
-This document covers four key areas:
+## Schema Definition
 
-1. **Schema Definition**: How node and edge types are defined.
-2. **Schema Registration**: How the query engine discovers and understands the current schema.
-3. **Schema Evolution**: The strategy for applying schema changes in a live environment with zero downtime.
+The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
+materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
+(one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database.
 
-## Schema Definition and Registration
+## Schema Version Tracking
 
-The schema is defined by the node and relationship types detailed in the [Data Model](./data_model.md) document. However, the Graph Query Engine (`gkg-webserver`) needs an efficient way to understand the available node types (e.g., `File`, `Issue`, `MergeRequest`) and their corresponding table names in ClickHouse without querying database metadata on every request.
+This file covers ClickHouse DDL versioning only. The query **response format** is
+versioned separately as a semver in `config/RAW_OUTPUT_FORMAT_VERSION` and
+enforced by `scripts/check-response-schema-version.sh` alongside
+`scripts/check-schema-version.sh`. See [ADR 004](decisions/004_unified_response_schema.md)
+for the response format contract.
 
-To solve this, we are considering two approaches for managing and propagating schema updates:
+### `config/SCHEMA_VERSION`
 
-### Approach 1: GKG Migration CLI Tool
+A plain text file at `config/SCHEMA_VERSION` holds the current schema version as a `u32` integer.
+The binary reads this at compile time via `include_bytes!` and exposes it as:
 
-This approach relies on a **KG migration CLI tool**. This tool can be used manually during development or integrated into a deployment pipeline for automated updates. Once a migration is complete, the CLI tool updates the schema in the **NATS Key-Value Store**.
+```rust
+pub const SCHEMA_VERSION: u32 = /* parsed from config/SCHEMA_VERSION */;
+```
 
-The `gkg-webserver` instances subscribe to this KV store and maintain an in-memory cache of the schema. This allows the web-server to refresh its schema cache for dynamic updates, avoiding a static configuration.
+Version 0 is the initial (V0) schema — the unversioned table layout used since the service launched.
 
-The process would be as follows:
+#### When to bump
 
-1. A schema migration is applied using a GKG migration tool, either manually or through a deployment pipeline.
-2. Once the migration is complete, the CLI tool updates a well-known NATS KV bucket with the new schema.
-3. The `gkg-webserver` instances, subscribed to the KV bucket, detect the change and refresh their in-memory schema cache.
-4. When a query arrives, the web server uses this up-to-date cache to construct the appropriate SQL to execute against ClickHouse.
+Bump `config/SCHEMA_VERSION` for any ontology or DDL change that affects what is stored in
+ClickHouse, not just table structure:
 
-This approach provides a scalable and decoupled way for the query layer to be aware of all available graph entities and to handle schema evolution gracefully.
+- **DDL shape changes**: new columns, type changes, index additions, engine changes.
+- **Edge type renames**: e.g. `MERGED_BY` → `MERGED`. The `gl_edge.relationship_kind` column
+  stores these as string values, so old rows remain with the old name while the compiler emits
+  the new name. Without a bump, affected edges are silently missing from query results.
+- **ETL mapping changes**: column renames, enum value changes, FK rewiring. The ETL pipeline
+  is fully ontology-driven (`PlanInput` is built from `&Ontology`), so these are always
+  ontology YAML changes and the CI check catches them automatically.
 
-### Approach 2: GKG Service-Managed Schema
+Changes that do **not** require a bump: ontology description updates, comments, formatting,
+documentation-only fields, or query-side-only changes (new filter operators, new query types).
 
-An alternative approach is to build this logic into the GKG service itself. For example, `gkg-indexer` pods triggers the schema update once all pods have been upgraded to the same version. Migration scripts would be packaged with the application, and coordination would be handled through NATS KV during deployment.
+### `gkg_schema_version` control table
 
-Each pod checks the current database schema version on startup against its required version. If a migration is needed, pods compete for a NATS-based lock. The winner performs the migration while others wait for completion. A `schema_migrations` table in the database or NATS KV tracks the current version.
+The Indexer and DispatchIndexing modes create this table on startup if it does not exist;
+the Webserver only reads from it (it runs as a read-only ClickHouse user). On a fresh install,
+the Indexer also creates all graph tables from the ontology DDL generator and records the
+embedded version as active:
 
-The process would be as follows:
+```sql
+CREATE TABLE IF NOT EXISTS gkg_schema_version (
+    version UInt32,
+    status Enum8('active' = 1, 'migrating' = 2, 'retired' = 3, 'dropped' = 4),
+    created_at DateTime DEFAULT now()
+) ENGINE = ReplacingMergeTree(created_at)
+ORDER BY version
+```
 
-1. During a rolling update, the first new pod to start detects a schema version mismatch.
-2. This pod acquires a distributed lock via NATS, preventing concurrent migration attempts.
-3. The pod executes the migration scripts in a transaction, updates the `schema_migrations` table and releases the lock.
-4. Subsequent pods detect the schema is already current and start serving traffic immediately.
-5. NATS can optionally broadcast completion events to accelerate pod startup coordination.
+Key properties:
 
-This approach centralizes schema management within the service itself, eliminating external migration jobs while ensuring safe, coordinated updates during deployments. Migrations must be backward-compatible to allow old pods to continue operating during the rollout window.
+- Uses `FINAL` when reading to handle `ReplacingMergeTree` eventual consistency.
+- The table itself is never prefixed or dropped — it is the single source of truth for the active
+  version across all migrations.
+- Implemented in `crates/indexer/src/schema_version.rs`.
 
-## Schema Evolution and Migrations
+### Table prefix derivation
 
-As GitLab evolves, the Knowledge Graph schema must evolve with it. We must support schema changes, from adding a new property to introducing entirely new node types, without causing service interruptions. The primary goal is to achieve **zero-downtime migrations**.
+Each schema version maps to a string prepended to graph table names:
 
-Our migration strategy will be based on a multi-step process inspired by blue-green deployments, ensuring the service remains available and queries are unaffected during the transition.
+| Version | Prefix | Example table |
+|---------|--------|---------------|
+| 0 | *(empty)* | `gl_user` |
+| 1 | `v1_` | `v1_gl_user` |
+| N | `vN_` | `vN_gl_user` |
 
-### `ALTER TABLE`
+Version 0 uses no prefix for backward compatibility. Functions `table_prefix(version)` and
+`prefixed_table_name(table, version)` are provided in `schema_version.rs`.
 
-While `ALTER TABLE` might seem like a simple solution for schema changes, its behavior in ClickHouse requires careful consideration for a zero-downtime system. Its usage is nuanced (see [GitHub issue on the topic](https://github.com/ClickHouse/ClickHouse/discussions/48613)):
+Unprefixed names are stored in the ontology (the ontology validation enforces the `gl_` prefix
+convention). The prefix is applied at the call site when constructing ClickHouse queries.
 
-- **Simple Changes**: For additive, non-breaking changes like `ADD COLUMN`, the operation is a metadata-only change in ClickHouse. It is nearly instantaneous and does not block reads or writes for a significant duration, making it a viable option for such scenarios.
-- **Complex Changes**: For more complex or breaking changes, such as modifying a column's data type (`CHANGE COLUMN`), ClickHouse must rewrite the data for the affected column. This can be a long-running and resource-intensive process that locks the table, leading to significant service degradation or downtime.
+### Webserver prefix injection
 
-Given this, our strategy is as follows:
+The webserver pins the table prefix to its **embedded** `SCHEMA_VERSION` at startup. The prefix
+flows through the query pipeline once and never changes for the lifetime of the process — a binary
+upgrade is the only way to switch to a new prefix. The active version recorded in
+`gkg_schema_version` is consulted only by the readiness gate (see below), not by the query path.
 
-- For simple, non-breaking schema changes, we may use `ALTER TABLE` where appropriate.
-- For any breaking or complex changes, we will use the **shadow column migration** process described bellow. This approach provides a robust, consistent, and safe mechanism for schema evolution, guaranteeing zero downtime regardless of the change's complexity.
+```text
+startup
+  → schema_version::table_prefix(SCHEMA_VERSION)   # "" for v0, "v1_" for v1, …
+  → GrpcServer::new(…, table_prefix)
+  → QueryPipelineService::new(…, table_prefix)
+  → QueryPipelineContext { table_prefix }          # shared across all pipeline stages
+  → CompilationStage calls compile(…, &ctx.table_prefix)
+  → normalize() prepends prefix to every node table name and edge table name
+  → lower() uses input.compiler.default_edge_table (already prefixed) instead of a
+    compile-time constant
+```
 
-### Shadow Column Migrations
+The query compiler does not access ClickHouse metadata to discover which tables exist — the prefix
+is injected top-down from the embedded version and flows through without further I/O.
 
-The process for a breaking change (e.g., changing a property's data type) will follow the GitLab [zero-downtime migration process](https://docs.gitlab.com/ee/development/database/avoiding_downtime_in_migrations.html):
+### Webserver readiness gate
 
-1. **Create Shadow Column**: Add a new column with the desired schema (e.g., `priority_v2 Int32`) alongside the original column. This avoids locking or rewriting the table.
-2. **Backfill Historical Data**: Copy existing data from the original column to the shadow column. For large tables, perform this in batches to avoid impacting production query performance.
-3. **Dual-write on insert**: On next indexing use either the lowest date between the migration start and the last indexing date as the date of the new data to ensure no data is lost.
-4. **Atomic Column Swap**: Once the shadow column is fully backfilled and in sync, rename the original column (e.g., `priority_old`) and rename the shadow column to the original name. Use a single `ALTER TABLE` with multiple `RENAME COLUMN` clauses for atomicity.
-5. **Clean Up**: After verifying the migration succeeded, drop the old column in a subsequent deployment.
+A background task (`SchemaWatcher`) polls `gkg_schema_version` every
+`schema.version_poll_interval_secs` seconds (default `5`) and classifies the result against the
+binary's embedded version:
 
-After every schema migration, the migration tool is responsible for updating the latest schema definition in the NATS KV store. This ensures that all `gkg-webserver` instances rapidly receive the new schema and use it for query planning, maintaining strong consistency between the data layer and the API without manual intervention.
+| Database active version vs. binary | State | `/ready` response | Action |
+|---|---|---|---|
+| missing (no row yet) | `Pending` | `503` with `schema_pending` | keep polling |
+| `<` binary | `Pending` | `503` with `schema_pending` | keep polling |
+| `==` binary | `Ready` | existing checks (`200` if all healthy) | serve traffic |
+| `>` binary | `Outdated` | `503` with `schema_outdated` | log error, cancel shutdown token, exit |
+
+`/live` is never gated on the watcher — Kubernetes keeps the pod alive while it waits for the
+indexer to promote the matching version. When the binary detects a newer active version than it
+supports, the watcher cancels the shared `CancellationToken`, the gRPC and HTTP servers exit
+their `tokio::select`, and the process returns. Kubernetes restarts the pod; if the operator
+deployed the wrong (too-old) binary, `CrashLoopBackoff` surfaces the mistake instead of silently
+serving the wrong schema.
+
+Transient ClickHouse errors during a poll keep the previous state — the watcher does not
+flap to `Pending` on a single failed read.
+
+Implemented in `crates/gkg-server/src/schema_watcher.rs`.
+
+#### Observability
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `gkg.webserver.schema.state` | observable gauge | `state` (`pending` \| `ready` \| `outdated`) | Value `1` for the active state, `0` otherwise |
+
+### Configuration
+
+```yaml
+schema:
+  max_retained_versions: 2          # total table-sets to keep (default: 2, minimum: 2)
+  version_poll_interval_secs: 5     # webserver readiness-gate poll cadence (default: 5, minimum: 1)
+```
+
+With `max_retained_versions: 2`: after migrating to version N, the indexer keeps the N active
+tables and the N−1 rollback target, and drops older table-sets automatically. The value is
+validated at startup — values below 2 are rejected.
+
+`version_poll_interval_secs` controls how often the webserver re-reads the active version from
+`gkg_schema_version` to drive the readiness gate (see "Webserver readiness gate" below).
+
+## CI and local enforcement
+
+A CI job (`schema-version-check`, lint stage, MR-only) fails if `config/graph.sql`
+or `config/ontology/` changes without a corresponding bump to `config/SCHEMA_VERSION`.
+The same check runs as a lefthook pre-commit hook for immediate local feedback.
+Local (DuckDB) DDL is generated from the ontology at runtime, so `config/ontology/`
+changes automatically affect both ClickHouse and DuckDB schemas.
+
+Non-schema ontology changes (descriptions, comments) can bypass the check by adding
+`[skip schema-version-check]` to the MR description.
+
+## Zero-downtime migration orchestrator
+
+When the indexer starts, it compares the embedded `SCHEMA_VERSION` with the active version in
+`gkg_schema_version`. If they differ, `schema_migration::run_if_needed()` runs the following
+flow **before** the NATS engine starts consuming messages:
+
+### Migration flow
+
+1. **Acquire lock** — NATS KV `indexing_locks/schema_migration` (TTL-based). If another pod
+   holds the lock, wait up to 5 minutes; the other pod is handling the migration.
+
+2. **Re-check after lock** — Another pod may have completed the migration while this pod was
+   waiting. If the active version now matches, skip.
+
+3. **Drain** — The engine has not started; no in-flight NATS messages exist. This phase is a
+   no-op today and is reserved for future dual-write scenarios.
+
+4. **Create new-prefix tables** — Generate DDL from the ontology via
+   `generate_graph_tables_with_prefix()` and execute `CREATE TABLE IF NOT EXISTS vN_<table>`
+   for each graph table. The table list is derived from the ontology: node tables, edge tables,
+   and auxiliary tables (`checkpoint`, `code_indexing_checkpoint`,
+   `namespace_deletion_schedule`). Control tables (`gkg_schema_version`) are not prefixed.
+
+5. **Mark migrating** — Insert the new version with status `migrating` in `gkg_schema_version`.
+   The Webserver cutover (tracked in issue #441) switches reads to the new table-set.
+
+6. **Release lock** — Allow other pods to proceed.
+
+After the orchestrator returns, the indexer starts normally and writes all data to the new-prefix
+tables. Because new-prefix checkpoints are empty, the dispatcher's normal namespace poll cycle
+re-dispatches backfill work automatically — no explicit trigger is needed.
+
+### Write path prefix enforcement
+
+All indexer write paths use `prefixed_table_name(table, SCHEMA_VERSION)` at query construction
+time:
+
+| Module | Tables prefixed |
+|--------|----------------|
+| `checkpoint.rs` | `checkpoint` |
+| `modules/code/checkpoint_store.rs` | `code_indexing_checkpoint` |
+| `modules/code/config.rs` | All code-module node and edge tables (`gl_branch`, `gl_directory`, `gl_file`, `gl_definition`, `gl_imported_symbol`, edge table) |
+| `modules/namespace_deletion/store.rs` | `checkpoint`, `code_indexing_checkpoint`, `namespace_deletion_schedule` |
+| `modules/namespace_deletion/lower.rs` | All ontology node and edge tables |
+| `modules/sdlc/plan/input.rs` | All SDLC node destination tables and per-relationship edge tables (resolved from ontology) |
+
+Datalake tables (`siphon_*`) are never prefixed — only graph tables are.
+
+### Observability
+
+The metric `gkg_schema_migration_total` (counter) tracks migration phase outcomes:
+
+| Label | Values |
+|-------|--------|
+| `phase` | `acquire_lock`, `drain`, `create_tables`, `mark_migrating`, `complete` |
+| `result` | `success`, `failure`, `skipped` |
+
+## Migration completion detection
+
+After the indexer creates new-prefix tables and marks a version as `migrating`, the dispatcher's
+normal namespace poll cycle re-indexes all enabled namespaces into the new tables. A scheduled
+task (`MigrationCompletionChecker`) running in `DispatchIndexing` mode periodically checks
+whether the migration is complete.
+
+Implemented in `crates/indexer/src/migration_completion.rs`.
+
+### Completion criteria
+
+The checker compares checkpoint state in the new-prefix tables against the set of enabled
+namespaces from the datalake. Both SDLC and code indexing must be complete:
+
+1. **SDLC namespaces** — count distinct namespace IDs with checkpoint entries (keys matching
+   `ns.<id>.*`) in the `vN_checkpoint` table, compared against the count of enabled namespaces
+   in `siphon_knowledge_graph_enabled_namespaces`.
+2. **Code indexing namespaces** — count distinct namespace IDs (extracted from the
+   `traversal_path` column) in `vN_code_indexing_checkpoint`, compared against the same enabled
+   namespace count.
+
+When all enabled namespaces have checkpoint entries in both new-prefix tables, the migration is
+considered complete.
+
+#### Known trade-off: checkpoint-based validation
+
+Completion is checkpoint-based, not row-count-based. A checkpoint entry proves the indexing
+pipeline ran and committed for that scope, but does not validate that the output tables contain
+the expected number of rows. This is the standard pattern for CDC/ETL systems: silent data-loss
+bugs (e.g. an upstream source returning empty results) would not be caught by this check. Full
+data correctness validation is deferred to staging E2E tests.
+
+### Status transitions on completion
+
+When completion is detected:
+
+1. All previously `active` versions are marked `retired`.
+2. The `migrating` version is marked `active`.
+3. The `gkg_schema_migration_completed_total` counter is incremented.
+
+Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
+on the next poll, and pods built for an older version detect `active > embedded` and exit via
+the `SchemaWatcher` shutdown path described above. No manual restart is required for either
+fleet — Kubernetes recycles the old pods and routes traffic to the new ones once they pass
+their readiness check.
+
+### Automatic cleanup via retention window
+
+After completion detection, the checker enforces the `max_retained_versions` setting (default: 2).
+Versions outside this window with status `retired` are cleaned up:
+
+```text
+Example with max_retained_versions=2, after migrating to v2:
+  v2 → active  (keep)
+  v1 → retired (keep — within window, rollback target)
+  v0 → retired (OUTSIDE window → drop tables, mark "dropped")
+```
+
+Cleanup logic:
+
+1. Read all versions from `gkg_schema_version` ordered by version descending.
+2. Filter to non-dropped entries; keep the top `max_retained_versions`.
+3. For each entry outside the window with status `retired`:
+   a. Execute `DROP TABLE IF EXISTS <prefix><table>` for each graph table.
+   b. Mark the version as `dropped` in `gkg_schema_version`.
+
+### Safety guarantees
+
+- Only tables for versions with status `retired` are dropped — never `active` or `migrating`.
+- `DROP TABLE IF EXISTS` is idempotent — safe to retry on partial failures.
+- The cleanup runs under the `schema_migration` NATS KV lock — no concurrent cleanup attempts.
+- `DROP TABLE` uses async drop (no `SYNC` keyword) since table names are monotonically
+  versioned and will never be reused.
+- Within the retention window (default 2), the previous version's tables always exist for
+  rollback.
+
+### Configuration
+
+The migration completion checker runs every 5 minutes by default:
+
+```yaml
+schedule:
+  tasks:
+    migration_completion:
+      cron: "0 */5 * * * *"
+```
+
+### Observability
+
+| Metric | Type | Labels | Description |
+|--------|------|--------|-------------|
+| `gkg_schema_migration_completed_total` | counter | — | Successful migration completions |
+| `gkg_schema_cleanup_total` | counter | `version`, `result` | Table cleanup operations per version (`success` or `failure`) |
+
+Table drop operations are logged at `info` level with the version and table name.
+
+---
+
+Breaking schema changes (column type changes, table restructuring) use new prefixed tables rather
+than `ALTER TABLE`, avoiding ClickHouse data rewrites and table locks.

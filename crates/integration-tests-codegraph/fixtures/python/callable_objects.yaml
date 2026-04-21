@@ -1,0 +1,25 @@
+name: "Python: callable object resolution"
+fixtures:
+  - path: main.py
+    content: |
+      class Handler:
+          def __call__(self, data):
+              pass
+
+          def other(self):
+              pass
+
+      def use_handler():
+          h = Handler()
+          h()
+
+tests:
+  - name: All call edges from use_handler
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'use_handler' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "main.Handler" } }
+      - { row: { callee: "main.Handler.__call__" } }
+      - { not: true, row: { callee: "main.Handler.other" } }

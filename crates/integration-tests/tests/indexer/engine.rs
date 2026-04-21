@@ -11,13 +11,15 @@ use arrow::array::{Int32Array, StringArray, UInt64Array};
 use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use gkg_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, HandlerConfiguration, NatsConfiguration,
+};
 use gkg_utils::arrow::ArrowUtils;
-use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseConfiguration, ClickHouseDestination};
-use indexer::configuration::{EngineConfiguration, HandlerConfiguration};
+use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
-use indexer::nats::{NatsBroker, NatsConfiguration};
+use indexer::nats::NatsBroker;
 use indexer::types::{Envelope, Event, Subscription};
 use serde::{Deserialize, Serialize};
 use testcontainers::GenericImage;
@@ -207,7 +209,13 @@ impl TestContext {
 
     async fn connect_clickhouse_with_retry(endpoint: &str) -> ArrowClickHouseClient {
         for attempt in 1..=30 {
-            let client = ArrowClickHouseClient::new(endpoint, "default", USERNAME, Some(PASSWORD));
+            let client = ArrowClickHouseClient::new(
+                endpoint,
+                "default",
+                USERNAME,
+                Some(PASSWORD),
+                &std::collections::HashMap::new(),
+            );
 
             match client.execute("SELECT 1").await {
                 Ok(_) => return client,
@@ -244,6 +252,8 @@ impl TestContext {
                     url: self.clickhouse_endpoint.clone(),
                     username: USERNAME.to_string(),
                     password: Some(PASSWORD.to_string()),
+                    query_settings: std::collections::HashMap::new(),
+                    profiling: Default::default(),
                 },
                 Arc::new(EngineMetrics::default()),
             )
@@ -269,6 +279,7 @@ impl TestContext {
             DATABASE,
             USERNAME,
             Some(PASSWORD),
+            &std::collections::HashMap::new(),
         );
 
         let batches = client

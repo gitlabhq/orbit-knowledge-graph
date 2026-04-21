@@ -1,0 +1,31 @@
+name: "Kotlin: companion object resolution"
+fixtures:
+  - path: com/example/App.kt
+    content: |
+      package com.example
+
+      class Foo {
+          companion object {
+              fun create(): Foo { return Foo() }
+          }
+
+          fun instance() {}
+      }
+
+      class Decoy {
+          fun create() {}
+      }
+
+      fun main() {
+          val f = Foo.create()
+      }
+
+tests:
+  - name: Foo.create() resolves to companion method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row: { callee: "com.example.Foo.Companion.create" } }
+      - { not: true, row: { callee: "com.example.Decoy.create" } }

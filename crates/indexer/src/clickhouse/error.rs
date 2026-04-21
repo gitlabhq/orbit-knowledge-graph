@@ -19,6 +19,9 @@ impl From<ClickHouseError> for DestinationError {
                 format!("arrow encode error: {source}"),
                 Some(Box::new(source)),
             ),
+            ClickHouseError::BadResponse { status, body } => {
+                DestinationError::Write(format!("bad response ({status}): {body}"), None)
+            }
         }
     }
 }

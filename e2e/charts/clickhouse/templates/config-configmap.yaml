@@ -1,0 +1,35 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ .Release.Name }}-config
+data:
+  low_memory_server.xml: |
+    <?xml version="1.0"?>
+    <clickhouse>
+        <mark_cache_size>268435456</mark_cache_size>
+        <uncompressed_cache_size>268435456</uncompressed_cache_size>
+
+        <asynchronous_metric_log>
+            <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        </asynchronous_metric_log>
+        <metric_log>
+            <flush_interval_milliseconds>60000</flush_interval_milliseconds>
+        </metric_log>
+
+        <merge_tree>
+            <merge_max_block_size>1024</merge_max_block_size>
+        </merge_tree>
+    </clickhouse>
+  low_memory_users.xml: |
+    <?xml version="1.0"?>
+    <clickhouse>
+        <profiles>
+            <default>
+                <max_threads>2</max_threads>
+                <max_block_size>8192</max_block_size>
+                <max_download_threads>1</max_download_threads>
+                <input_format_parallel_parsing>0</input_format_parallel_parsing>
+                <output_format_parallel_formatting>0</output_format_parallel_formatting>
+            </default>
+        </profiles>
+    </clickhouse>

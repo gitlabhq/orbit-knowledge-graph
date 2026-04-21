@@ -3,13 +3,14 @@
 use std::sync::Arc;
 
 use crate::IndexerConfig;
-use crate::clickhouse::ClickHouseConfiguration;
-use crate::configuration::{EngineConfiguration, HandlersConfiguration};
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
-use crate::modules::sdlc::{GlobalHandlerConfig, NamespaceHandlerConfig};
 use crate::nats::{NatsBroker, NatsServices};
+use gkg_server_config::{
+    ClickHouseConfiguration, EngineConfiguration, GlobalHandlerConfig, HandlersConfiguration,
+    NamespaceHandlerConfig,
+};
 
 use super::mocks::{MockDestination, MockNatsServices};
 

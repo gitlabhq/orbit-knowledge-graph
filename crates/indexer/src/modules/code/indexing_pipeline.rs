@@ -3,20 +3,19 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::analysis::types::GraphData;
-use code_graph::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::loading::DirectoryFileSource;
-use tempfile::TempDir;
+use code_graph::legacy::linker::analysis::types::GraphData;
+use code_graph::legacy::linker::indexer::{IndexingConfig, RepositoryIndexer};
+use code_graph::legacy::linker::loading::DirectoryFileSource;
 use tracing::{debug, info, warn};
 
-use super::archive;
 use super::arrow_converter::ArrowConverter;
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
-use super::repository_service::RepositoryService;
+use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
+use opentelemetry::KeyValue;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -26,8 +25,21 @@ pub struct IndexingRequest {
     pub commit_sha: Option<String>,
 }
 
+/// Terminal outcome of `CodeIndexingPipeline::index_project`.
+///
+/// The handler records a single `events_processed` outcome label based on
+/// this variant — keeping `indexed` and `empty_repository` mutually exclusive.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum IndexOutcome {
+    /// Repository downloaded, parsed, written to the graph, and checkpointed.
+    Indexed,
+    /// Archive endpoint signalled no repository content (404 or 5xx); the
+    /// checkpoint was still set so retries and DLQ are avoided.
+    EmptyRepository,
+}
+
 pub struct CodeIndexingPipeline {
-    repository_service: Arc<dyn RepositoryService>,
+    resolver: RepositoryResolver,
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
@@ -36,14 +48,14 @@ pub struct CodeIndexingPipeline {
 
 impl CodeIndexingPipeline {
     pub fn new(
-        repository_service: Arc<dyn RepositoryService>,
+        resolver: RepositoryResolver,
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
     ) -> Self {
         Self {
-            repository_service,
+            resolver,
             checkpoint_store,
             stale_data_cleaner,
             metrics,
@@ -55,44 +67,90 @@ impl CodeIndexingPipeline {
         &self,
         context: &HandlerContext,
         request: &IndexingRequest,
-    ) -> Result<(), HandlerError> {
-        let temp_dir = TempDir::new()
-            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
-
+    ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
-        let ref_name = request.commit_sha.as_deref().unwrap_or(&request.branch);
-        let archive_bytes = self
-            .repository_service
-            .download_archive(request.project_id, ref_name)
+        let repo_path = match self
+            .resolver
+            .resolve(
+                request.project_id,
+                &request.branch,
+                request.commit_sha.as_deref(),
+            )
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to download archive: {e}")))
-            .record_error_stage(&self.metrics, "repository_fetch")?;
+        {
+            Ok(path) => {
+                self.metrics.record_resolution_strategy("full_download");
+                path
+            }
+            Err(ResolveError::EmptyRepository { reason, detail }) => {
+                warn!(
+                    project_id = request.project_id,
+                    branch = %request.branch,
+                    reason = %reason,
+                    detail,
+                    "project has no repository content; checkpointing as indexed-empty"
+                );
+                self.metrics.record_resolution_strategy("empty_repository");
+                self.metrics
+                    .record_empty_repository(reason.as_metric_label());
+                self.metrics
+                    .repository_fetch_duration
+                    .record(fetch_start.elapsed().as_secs_f64(), &[]);
+                self.set_checkpoint(
+                    &request.traversal_path,
+                    request.project_id,
+                    &request.branch,
+                    request.task_id,
+                    None,
+                    Utc::now(),
+                )
+                .await?;
+                return Ok(IndexOutcome::EmptyRepository);
+            }
+            Err(ResolveError::Other(err)) => {
+                self.metrics
+                    .errors
+                    .add(1, &[KeyValue::new("stage", "repository_fetch")]);
+                return Err(err);
+            }
+        };
         self.metrics
             .repository_fetch_duration
             .record(fetch_start.elapsed().as_secs_f64(), &[]);
 
         context.progress.notify_in_progress().await;
 
-        let extract_start = Instant::now();
-        archive::extract_tar_gz(&archive_bytes, temp_dir.path())
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
-            .record_error_stage(&self.metrics, "repository_extract")?;
-        self.metrics
-            .repository_extract_duration
-            .record(extract_start.elapsed().as_secs_f64(), &[]);
-
-        context.progress.notify_in_progress().await;
-
         let indexed_at = Utc::now();
-        self.run_indexing(
-            context,
-            request.project_id,
-            &request.branch,
-            &request.traversal_path,
-            indexed_at,
-            temp_dir.path(),
-        )
-        .await?;
+        let commit_sha = request.commit_sha.as_deref().unwrap_or("");
+        let indexing_result = self
+            .run_indexing(
+                context,
+                request.project_id,
+                &request.branch,
+                commit_sha,
+                &request.traversal_path,
+                indexed_at,
+                &repo_path,
+            )
+            .await;
+
+        if let Err(error) = self
+            .resolver
+            .cleanup(request.project_id, &request.branch)
+            .await
+        {
+            self.metrics.record_cleanup("failure");
+            warn!(
+                project_id = request.project_id,
+                branch = %request.branch,
+                %error,
+                "failed to clean up downloaded repository from disk"
+            );
+        } else {
+            self.metrics.record_cleanup("success");
+        }
+
+        indexing_result?;
 
         self.set_checkpoint(
             &request.traversal_path,
@@ -102,7 +160,9 @@ impl CodeIndexingPipeline {
             request.commit_sha.as_deref(),
             indexed_at,
         )
-        .await
+        .await?;
+
+        Ok(IndexOutcome::Indexed)
     }
 
     async fn set_checkpoint(
@@ -140,11 +200,13 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn run_indexing(
         &self,
         context: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
@@ -197,6 +259,7 @@ impl CodeIndexingPipeline {
             context,
             project_id,
             branch,
+            commit_sha,
             traversal_path,
             indexed_at,
             &graph_data,
@@ -219,11 +282,13 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn write_graph_data(
         &self,
         ctx: &HandlerContext,
         project_id: i64,
         branch: &str,
+        commit_sha: &str,
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         graph_data: &GraphData,
@@ -232,6 +297,7 @@ impl CodeIndexingPipeline {
             traversal_path.to_string(),
             project_id,
             branch.to_string(),
+            commit_sha.to_string(),
             indexed_at,
         );
 
@@ -240,6 +306,8 @@ impl CodeIndexingPipeline {
             .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
             .record_error_stage(&self.metrics, "arrow_conversion")?;
 
+        self.write_batch(ctx, &self.table_names.branch, &converted.branch)
+            .await?;
         self.write_batch(ctx, &self.table_names.directory, &converted.directories)
             .await?;
         self.write_batch(ctx, &self.table_names.file, &converted.files)
@@ -252,6 +320,9 @@ impl CodeIndexingPipeline {
             &converted.imported_symbols,
         )
         .await?;
+        // TODO(multi-edge-tables, #454): when gl_code_edge is declared, split converted.edges
+        // by destination table if code edges span multiple tables. Currently all code
+        // edges share one table, so a single write_batch is correct.
         self.write_batch(ctx, &self.table_names.edge, &converted.edges)
             .await?;
 

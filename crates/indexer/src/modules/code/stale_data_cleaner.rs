@@ -9,7 +9,13 @@ use tracing::debug;
 use super::config::CodeTableNames;
 use crate::clickhouse::{ArrowClickHouseClient, TIMESTAMP_FORMAT};
 
-const CODE_EDGE_SOURCE_KINDS: &[&str] = &["Directory", "File", "Definition", "ImportedSymbol"];
+const CODE_EDGE_SOURCE_KINDS: &[&str] = &[
+    "Branch",
+    "Directory",
+    "File",
+    "Definition",
+    "ImportedSymbol",
+];
 
 #[async_trait]
 pub trait StaleDataCleaner: Send + Sync {
@@ -51,6 +57,8 @@ impl ClickHouseStaleDataCleaner {
             .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
             .collect();
 
+        // TODO(multi-edge-tables, #454): when gl_code_edge is declared, table_names.edge
+        // will already point to the correct table via CodeTableNames::from_ontology.
         Self {
             client,
             node_queries,

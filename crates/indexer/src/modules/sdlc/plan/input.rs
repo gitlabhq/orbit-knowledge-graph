@@ -4,8 +4,9 @@ use ontology::{
 };
 use std::collections::BTreeMap;
 
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
 pub(in crate::modules::sdlc) struct PlanInput {
-    pub edge_table: String,
     pub node_plans: Vec<NodePlan>,
     pub standalone_edge_plans: Vec<StandaloneEdgePlan>,
 }
@@ -41,6 +42,8 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub target_kind: EdgeKind,
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
+    /// Resolved edge table for this relationship kind (prefixed).
+    pub destination_table: String,
 }
 
 /// A standalone edge has its own dedicated source table and extraction.
@@ -60,6 +63,7 @@ pub(in crate::modules::sdlc) enum EdgeId {
     Column(String),
     Exploded { column: String, delimiter: String },
     ArrayElement { column: String, field: String },
+    ArrayUnnest { column: String },
 }
 
 pub(in crate::modules::sdlc) enum EdgeKind {
@@ -109,7 +113,6 @@ pub(in crate::modules::sdlc) enum ExtractSource {
 }
 
 pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput {
-    let edge_table = ontology.edge_table().to_string();
     let mut node_plans = Vec::new();
     let mut standalone_edge_plans = Vec::new();
 
@@ -119,16 +122,10 @@ pub(in crate::modules::sdlc) fn from_ontology(ontology: &Ontology) -> PlanInput 
     }
 
     for (relationship_kind, config) in ontology.edge_etl_configs() {
-        standalone_edge_plans.push(resolve_standalone_edge(
-            relationship_kind,
-            config,
-            ontology,
-            &edge_table,
-        ));
+        standalone_edge_plans.push(resolve_standalone_edge(relationship_kind, config, ontology));
     }
 
     PlanInput {
-        edge_table: edge_table.to_string(),
         node_plans,
         standalone_edge_plans,
     }
@@ -143,9 +140,12 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     let mut node_columns: Vec<ExtractColumn> = node
         .fields
         .iter()
-        .map(|field| match &field.data_type {
-            DataType::Uuid => ExtractColumn::ToString(field.source.to_string()),
-            _ => ExtractColumn::Bare(field.source.to_string()),
+        .filter_map(|field| {
+            let col = field.column_name()?;
+            Some(match &field.data_type {
+                DataType::Uuid => ExtractColumn::ToString(col.to_string()),
+                _ => ExtractColumn::Bare(col.to_string()),
+            })
         })
         .collect();
 
@@ -154,12 +154,13 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
     let extra_fk_columns = collect_fk_extract_columns(etl, namespaced);
     append_missing(&mut node_columns, &extra_fk_columns);
 
+    let node_destination = prefixed_table_name(&node.destination_table, *SCHEMA_VERSION);
     NodePlan {
         name: node.name.clone(),
         scope,
         columns: resolve_node_columns(&node.fields),
         edges,
-        extract: build_extract_plan(etl, node_columns, &node.destination_table),
+        extract: build_extract_plan(etl, node_columns, &node_destination),
     }
 }
 
@@ -185,25 +186,26 @@ fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> 
 fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
     fields
         .iter()
-        .map(|field| {
+        .filter_map(|field| {
+            let col = field.column_name()?;
             if field.data_type == DataType::Enum
                 && field.enum_type == EnumType::Int
                 && field.enum_values.is_some()
             {
-                return NodeColumn::IntEnum {
-                    source: field.source.clone(),
+                return Some(NodeColumn::IntEnum {
+                    source: col.to_string(),
                     target: field.name.clone(),
                     values: field.enum_values.clone().unwrap(),
-                };
+                });
             }
-            if field.source == field.name {
+            Some(if col == field.name {
                 NodeColumn::Identity(field.name.clone())
             } else {
                 NodeColumn::Rename {
-                    source: field.source.clone(),
+                    source: col.to_string(),
                     target: field.name.clone(),
                 }
-            }
+            })
         })
         .collect()
 }
@@ -270,6 +272,15 @@ fn resolve_fk_edges(
                     EdgeDirection::Incoming => source_id = array_id,
                 }
                 filters.push(EdgeFilter::ArrayNotEmpty(fk_column.clone()));
+            } else if mapping.array {
+                let array_id = EdgeId::ArrayUnnest {
+                    column: fk_column.clone(),
+                };
+                match mapping.direction {
+                    EdgeDirection::Outgoing => target_id = array_id,
+                    EdgeDirection::Incoming => source_id = array_id,
+                }
+                filters.push(EdgeFilter::ArrayNotEmpty(fk_column.clone()));
             } else {
                 filters.push(EdgeFilter::IsNotNull(fk_column.clone()));
                 if let Some(tf) = type_filter {
@@ -277,6 +288,10 @@ fn resolve_fk_edges(
                 }
             }
 
+            let edge_dest = prefixed_table_name(
+                ontology.edge_table_for_relationship(&mapping.relationship_kind),
+                *SCHEMA_VERSION,
+            );
             FkEdgeTransform {
                 relationship_kind: mapping.relationship_kind.clone(),
                 source_id,
@@ -285,6 +300,7 @@ fn resolve_fk_edges(
                 target_kind,
                 filters,
                 namespaced,
+                destination_table: edge_dest,
             }
         })
         .collect()
@@ -296,8 +312,11 @@ fn resolve_standalone_edge(
     relationship_kind: &str,
     config: &EdgeSourceEtlConfig,
     ontology: &Ontology,
-    edge_table: &str,
 ) -> StandaloneEdgePlan {
+    let edge_table = prefixed_table_name(
+        ontology.edge_table_for_relationship(relationship_kind),
+        *SCHEMA_VERSION,
+    );
     let scope = config.scope;
     let namespaced = scope == EtlScope::Namespaced;
 
@@ -342,7 +361,7 @@ fn resolve_standalone_edge(
         filters,
         namespaced,
         extract: ExtractPlan {
-            destination_table: edge_table.to_string(),
+            destination_table: edge_table,
             columns: extract_columns,
             source: ExtractSource::Table(config.source.clone()),
             watermark: config.watermark.clone(),

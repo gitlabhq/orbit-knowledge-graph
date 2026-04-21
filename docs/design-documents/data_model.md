@@ -12,14 +12,15 @@ The data model follows a [Property Graph](https://neo4j.com/blog/knowledge-graph
 
 ## Data Storage Location
 
-The Knowledge Graph data will be stored in tables that are separate from the existing tables used for analytics.
+The Knowledge Graph data is stored in ClickHouse graph tables that are separate from the raw replicated data lake tables.
 
-- For GitLab.com, the Knowledge Graph tables will be stored in a dedicated ClickHouse instance.
-- For dedicated or self-managed instances, the Knowledge Graph tables can be stored in a separate database or instance. This will be left to the discretion of the instance owner.
+- The implemented graph schema is defined in `config/graph.sql`.
+- The implemented ontology metadata and ETL mappings are defined under `config/ontology/`.
+- In deployed environments, operators can place the graph tables in a dedicated ClickHouse database or instance. The repository supports either a separate graph database or co-location within a broader ClickHouse deployment, depending on operational requirements.
 
 ## Concepts to Know
 
-- **Unified Schema**: Both the Code Graph and the SDLC Graph are built on the same foundational schema provided by `crates/database`. This allows for linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `File` node from the Code Graph).
+- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/` and the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`); each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
 - **Entity as Node**: Every entity in the GitLab ecosystem (e.g., Project, Issue, File, Function Definition) is represented as a node.
 - **Interaction as Edge**: Relationships between these entities (e.g., a User `COMMENTS_ON` an Issue, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
 
@@ -29,64 +30,96 @@ The Knowledge Graph data will be stored in tables that are separate from the exi
 
 The Namespace Graph represents the software development lifecycle (SDLC) entities and their interactions within GitLab. It models how users, projects, issues, merge requests, and CI/CD components relate to one another.
 
-### Example Node Types
+### Implemented Node Types
 
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
-| `Namespace`           | Represents a GitLab group or user namespace.                                                            | `id`, `name`, `full_path`, `type` (Group or User)                             |
+| `Group`               | Represents a GitLab group namespace.                                                                    | `id`, `name`, `full_path`, `visibility_level`                                 |
 | `Project`             | Represents a GitLab project/repository.                                                                 | `id`, `name`, `full_path`, `namespace_id`                                   |
-| `Issue`               | Represents a GitLab issue.                                                                              | `id`, `iid`, `title`, `state`, `project_id`, `author_id`                      |
 | `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id` |
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
 | `Vulnerability`       | Represents a security vulnerability finding.                                                            | `id`, `title`, `severity`, `state`, `project_id`                              |
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
-| `Note`                | Represents a comment on an issue, merge request, or epic.                                               | `id`, `body`, `author_id`, `project_id`                                     |
-| `Epic`                | Represents a GitLab epic.                                                                               | `id`, `iid`, `title`, `state`, `group_id`, `author_id`                        |
-| `Branch`              | Represents a Git branch.                                                                                | `name`, `project_id`                                                        |
+| `Note`                | Represents a comment or annotation on a GitLab object (issue, merge request, commit, vulnerability, etc.). | `id`, `note`, `noteable_type`, `noteable_id`, `author_id`                 |
+| `WorkItem`            | Represents a GitLab work item (issue, task, epic, objective, etc.).                                     | `id`, `iid`, `title`, `state`, `project_id`, `author_id`                      |
+| `Milestone`           | Represents a milestone attached to projects or work items.                                              | `id`, `iid`, `title`, `state`, `due_date`                                    |
+| `Label`               | Represents a label applied to work items.                                                               | `id`, `title`, `color`                                                        |
+| `Branch`              | Represents a Git branch.                                                                                | `id`, `name`, `project_id`, `is_default`                                    |
+| `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `state`, `files_count`                              |
+| `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`     |
+| `Stage`               | Represents a CI stage.                                                                                  | `id`, `name`, `status`, `position`                                            |
+| `Job`                 | Represents a CI job.                                                                                    | `id`, `name`, `status`, `ref`, `allow_failure`                                |
+| `Finding`             | Represents a security finding.                                                                          | `id`, `uuid`, `name`, `severity`                                              |
+| `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
+| `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence.                                                   | `id`, `uuid`, `report_type`, `severity`, `location`                           |
+| `VulnerabilityScanner` | Represents the scanner that produced vulnerability data.                                               | `id`, `external_id`, `name`, `vendor`                                         |
+| `VulnerabilityIdentifier` | Represents a vulnerability identifier such as CVE or GHSA.                                         | `id`, `external_type`, `external_id`, `name`                                  |
 
 ### Relationship Visualization
 
 ```mermaid
 graph TD
-    Namespace -- CONTAINS --> Project
-    Project -- HAS_ISSUE --> Issue
+    Group -- CONTAINS --> Project
+    Group -- CONTAINS --> Group
     Project -- HAS_MERGE_REQUEST --> MergeRequest
     Project -- HAS_PIPELINE --> Pipeline
     Project -- HAS_VULNERABILITY --> Vulnerability
-    Project -- HAS_BRANCH --> Branch
+    Branch -- IN_PROJECT --> Project
 
-    User -- CREATED --> Issue
-    User -- CREATED --> MergeRequest
-    User -- CREATED --> Epic
-    User -- COMMENTS_ON --> Issue
+    User -- AUTHORED --> MergeRequest
+    User -- AUTHORED --> WorkItem
     User -- COMMENTS_ON --> MergeRequest
-    User -- COMMENTS_ON --> Epic
-    Note -- IS_COMMENT_ON --> Issue
+    User -- COMMENTS_ON --> WorkItem
     Note -- IS_COMMENT_ON --> MergeRequest
-    Note -- IS_COMMENT_ON --> Epic
+    Note -- IS_COMMENT_ON --> WorkItem
 
-    MergeRequest -- MERGES_TO --> Branch
-    MergeRequest -- RELATED_TO --> Issue
-    Pipeline -- TRIGGERED_FOR --> MergeRequest
-    Pipeline -- TRIGGERED_FOR --> Branch
+    MergeRequest -- TARGETS --> Branch
+    MergeRequest -- CLOSES --> WorkItem
+    Pipeline -- TRIGGERED --> MergeRequest
+    Pipeline -- TRIGGERED --> Branch
+
+    WorkItem -- IN_PROJECT --> Project
+    WorkItem -- IN_GROUP --> Group
+    User -- APPROVED --> MergeRequest
+    User -- MERGED --> MergeRequest
+    User -- REVIEWER --> MergeRequest
+    User -- CLOSED --> WorkItem
 ```
 
-### Relationship Types
+### Implemented Relationship Types
 
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `CONTAINS`                          | `Namespace`    | `Project`      | A namespace contains a project.                                                                         |
-| `HAS_ISSUE`                         | `Project`      | `Issue`        | A project has an issue.                                                                                 |
+| `CONTAINS`                          | `Group`        | `Group`, `Project` | A group contains a subgroup or project.                                                            |
 | `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
 | `HAS_PIPELINE`                      | `Project`      | `Pipeline`     | A project has a CI/CD pipeline.                                                                         |
 | `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `HAS_BRANCH`                        | `Project`      | `Branch`       | A project has a branch.                                                                                 |
-| `CREATED`                           | `User`         | `Issue`, `MR`... | A user created an entity.                                                                               |
-| `COMMENTS_ON`                       | `User`         | `Issue`, `MR`... | A user commented on an entity (via a `Note`).                                                           |
-| `IS_COMMENT_ON`                     | `Note`         | `Issue`, `MR`... | A note is a comment on a specific entity.                                                               |
-| `MERGES_TO`                         | `MergeRequest` | `Branch`       | A merge request targets a specific branch for merging.                                                  |
-| `RELATED_TO`                        | `MergeRequest` | `Issue`        | A merge request is related to or closes an issue.                                                       |
-| `TRIGGERED_FOR`                     | `Pipeline`     | `MR`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                          |
+| `IN_PROJECT`                        | `Branch`, `WorkItem` | `Project` | An entity belongs to a project.                                                                     |
+| `IN_GROUP`                          | `WorkItem`     | `Group`        | A work item belongs to a group scope.                                                                   |
+| `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest` | A user authored an entity.                                                                |
+| `COMMENTS_ON`                       | `User`         | `MergeRequest`, `WorkItem` | A user commented on an entity (via a `Note`).                                            |
+| `IS_COMMENT_ON`                     | `Note`         | `MergeRequest`, `WorkItem` | A note is a comment on a specific entity.                                                |
+| `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
+| `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
+| `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
+| `CLOSED`                            | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
+| `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
+| `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
+| `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
+| `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
+| `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
+| `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
+| `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
+| `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
+| `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
+| `HAS_LABEL`                         | `WorkItem`     | `Label`        | A work item has labels.                                                                                 |
+| `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |
+| `HAS_DIFF`                          | `MergeRequest` | `MergeRequestDiff` | A merge request has diff versions.                                                                 |
+| `HAS_FILE`                          | `MergeRequestDiff` | `MergeRequestDiffFile` | A diff version contains files.                                                             |
+| `HAS_FINDING`                       | `SecurityScan` | `Finding`      | A security scan produced findings.                                                                      |
+| `HAS_IDENTIFIER`                    | `Vulnerability`| `VulnerabilityIdentifier` | A vulnerability is associated with identifiers.                                               |
+| `DETECTED_IN`                       | `Vulnerability`| `VulnerabilityOccurrence` | A vulnerability is detected in an occurrence.                                                  |
+| `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
 
 ---
 
@@ -98,6 +131,7 @@ The Code Graph represents the structure and relationships within the source code
 
 | Node Type             | Description                                                                                             | Key Properties                                                              |
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
+| `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
 | `Definition`          | Represents a code definition (e.g., class, function, method, module).                                   | `fully_qualified_name`, `display_name`, `definition_type`, `file_path`      |
@@ -107,6 +141,9 @@ The Code Graph represents the structure and relationships within the source code
 
 ```mermaid
 graph TD
+    Branch -- CONTAINS --> Directory
+    Branch -- CONTAINS --> File
+    Branch -- IN_PROJECT --> Project
     Directory -- DIR_CONTAINS_DIR --> Directory
     Directory -- DIR_CONTAINS_FILE --> File
     File -- FILE_DEFINES --> Definition
@@ -120,6 +157,8 @@ graph TD
 
 | Relationship                        | From Node      | To Node        | Description                                                                                             |
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
+| `CONTAINS`                          | `Branch`       | `Directory`, `File` | A branch contains root-level directories and files.                                                |
+| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project (links the Code Graph to the Namespace Graph).                            |
 | `DIR_CONTAINS_DIR`                  | `Directory`    | `Directory`    | A directory contains another directory.                                                                 |
 | `DIR_CONTAINS_FILE`                 | `Directory`    | `File`         | A directory contains a file.                                                                            |
 | `FILE_DEFINES`                      | `File`         | `Definition`   | A file contains a code definition.                                                                      |
@@ -132,13 +171,4 @@ graph TD
 
 ## Cross-Graph Relationships
 
-The power of the Knowledge Graph comes from its ability to link the SDLC and Code graphs. In future iterations, we will be able to link the two graphs together to create a unified graph. For the first iteration, we intend to keep the two graphs separate to keep the complexity of the engineering effort manageable.
-
-Here is an example of how we can link the two graphs together:
-
-| Relationship                        | From Node      | To Node        | Description                                                                                             |
-| ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `HAS_FILE`                          | `Project`      | `File`         | A project (from the Namespace Graph) contains a file (from the Code Graph).                             |
-| `HAS_DIRECTORY`                     | `Project`      | `Directory`    | A project (from the Namespace Graph) contains a directory (from the Code Graph).                        |
-
-These links allow for deep queries, like "Find all merge requests (`SDLC`) that touch files (`Code`) containing a specific function definition (`Code`)."
+The `Project` and `Branch` nodes bridge the SDLC and Code graphs. A `Project` exists in the SDLC graph, while a `Branch` belongs to that project via `IN_PROJECT` and contains the root-level `Directory` and `File` nodes via `CONTAINS`. Cross-graph queries can traverse shared project, branch, and review entities even when edges live in different physical tables, because the compiler emits `UNION ALL` across all relevant edge tables for wildcard and multi-table relationship queries.

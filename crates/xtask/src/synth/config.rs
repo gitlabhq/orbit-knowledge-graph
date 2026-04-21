@@ -95,6 +95,7 @@ impl ClickHouseConfig {
             &self.database,
             &self.username,
             self.password.as_deref(),
+            &std::collections::HashMap::new(),
         )
     }
 }
@@ -139,11 +140,19 @@ pub struct SchemaConfig {
     /// Table engine type: MergeTree, ReplacingMergeTree, etc.
     #[serde(default = "default_engine_type")]
     pub engine: String,
+    /// Use per-node sort_key from the ontology YAML instead of global node_order_by.
+    /// When true, each node table gets its own ORDER BY from the ontology
+    /// (e.g. gl_user uses [id], code tables use [traversal_path, project_id, branch, id]).
+    /// When false (default), all node tables share the same node_order_by.
+    #[serde(default)]
+    pub use_ontology_sort_keys: bool,
     /// PRIMARY KEY columns for node tables (sparse index, not uniqueness constraint).
     /// If empty, defaults to ORDER BY columns.
+    /// Ignored when use_ontology_sort_keys is true.
     #[serde(default)]
     pub node_primary_key: Vec<String>,
     /// ORDER BY columns for node tables (physical sort order on disk).
+    /// Ignored when use_ontology_sort_keys is true.
     #[serde(default = "default_node_order_by")]
     pub node_order_by: Vec<String>,
     /// PRIMARY KEY columns for edge table.
@@ -208,6 +217,7 @@ impl Default for SchemaConfig {
     fn default() -> Self {
         Self {
             engine: default_engine_type(),
+            use_ontology_sort_keys: false,
             node_primary_key: vec![],
             node_order_by: default_node_order_by(),
             edge_primary_key: vec![],
@@ -554,10 +564,10 @@ impl AssociationEdgeValue {
 /// associations:
 ///   AUTHORED:
 ///     "User -> MergeRequest": 1           # Each MR has 1 author
-///   MERGED_BY:
-///     "MergeRequest -> User":             # 30% of MRs have a merger
+///   MERGED:
+///     "User -> MergeRequest":             # 30% of MRs have a merger
 ///       ratio: 0.3
-///       per: source                       # Iterate over MRs, not Users
+///       per: target                       # Iterate over MRs, not Users
 ///   ASSIGNED:
 ///     "User -> WorkItem": 0.7             # 70% of work items have an assignee
 /// ```
@@ -618,6 +628,10 @@ pub struct EvaluationConfig {
     /// Directory to save run metadata (query plans, params, sample data).
     #[serde(default)]
     pub metadata_dir: Option<String>,
+    /// ClickHouse query-level SETTINGS appended to every evaluated query.
+    /// These override the built-in safe defaults (e.g. `join_algorithm`).
+    #[serde(default)]
+    pub settings: std::collections::HashMap<String, String>,
 }
 
 fn default_sample_size() -> usize {
@@ -643,6 +657,7 @@ impl Default for EvaluationConfig {
             filter: None,
             output: OutputConfig::default(),
             metadata_dir: None,
+            settings: std::collections::HashMap::new(),
         }
     }
 }

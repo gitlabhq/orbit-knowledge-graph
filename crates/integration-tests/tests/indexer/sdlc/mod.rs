@@ -22,7 +22,7 @@ use integration_testkit::run_subtests;
 
 #[tokio::test]
 async fn global_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         global::processes_and_transforms_users,
@@ -32,13 +32,20 @@ async fn global_indexing() {
 
 #[tokio::test]
 async fn namespace_indexing() {
-    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, GRAPH_SCHEMA_SQL]).await;
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
         &ctx,
         projects::processes_projects,
+        projects::computes_full_path_for_projects,
+        projects::project_route_update_changes_full_path,
         projects::creates_member_of_edges_for_projects,
         groups::processes_and_transforms_groups,
+        groups::computes_full_path_for_top_level_group,
+        groups::computes_full_path_for_nested_subgroups,
         groups::creates_group_edges,
+        groups::route_rename_updates_full_path,
+        groups::child_route_reflects_parent_rename,
+        groups::no_route_falls_back_to_slug,
         groups::creates_member_of_edges_for_groups,
         labels::processes_labels_with_edges,
         milestones::processes_milestones_with_edges,

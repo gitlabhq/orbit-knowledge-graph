@@ -13,6 +13,98 @@ pub struct EdgeColumn {
     pub data_type: DataType,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Storage metadata — ClickHouse DDL definitions
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A column as it appears in `CREATE TABLE` DDL. Fully explicit: the YAML
+/// specifies the exact ClickHouse type, codec, and default. No auto-derivation.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageColumn {
+    pub name: String,
+    /// Exact ClickHouse type string, e.g. `"Int64"`, `"LowCardinality(String)"`,
+    /// `"Nullable(DateTime64(6, 'UTC'))"`.
+    pub ch_type: String,
+    pub default: Option<String>,
+    pub codec: Option<Vec<String>>,
+}
+
+/// Table-level storage configuration for a node entity. Fully explicit:
+/// columns are listed in DDL order, indexes and projections are complete.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct NodeStorage {
+    /// When true, engine is `ReplacingMergeTree(_version)` instead of
+    /// `ReplacingMergeTree(_version, _deleted)`.
+    pub version_only_engine: bool,
+    /// When set, emit `PRIMARY KEY (...)` in the DDL. When absent, ClickHouse
+    /// defaults PRIMARY KEY to ORDER BY.
+    pub primary_key: Option<Vec<String>>,
+    /// Columns in exact DDL order. Does NOT include `_version`/`_deleted`
+    /// (system columns are appended automatically).
+    pub columns: Vec<StorageColumn>,
+    /// Complete list of indexes (no auto-generation).
+    pub indexes: Vec<StorageIndex>,
+    /// Complete list of projections (no auto-generation).
+    pub projections: Vec<StorageProjection>,
+}
+
+/// An index definition from storage metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct StorageIndex {
+    pub name: String,
+    pub column: String,
+    /// e.g. `"minmax"`, `"set(10)"`, `"bloom_filter(0.01)"`
+    pub index_type: String,
+    pub granularity: u32,
+}
+
+/// A projection definition from storage metadata.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum StorageProjection {
+    Reorder {
+        name: String,
+        order_by: Vec<String>,
+    },
+    Aggregate {
+        name: String,
+        select: Vec<String>,
+        group_by: Vec<String>,
+    },
+}
+
+/// Storage config for edge tables (in schema.yaml).
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct EdgeTableStorage {
+    pub index_granularity: Option<u32>,
+    pub primary_key: Option<Vec<String>>,
+    pub columns: Vec<StorageColumn>,
+    pub indexes: Vec<StorageIndex>,
+    pub projections: Vec<StorageProjection>,
+}
+
+/// A non-ontology auxiliary table definition (checkpoint, etc.).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryTable {
+    pub name: String,
+    pub columns: Vec<AuxiliaryColumn>,
+    pub order_by: Vec<String>,
+    /// When true, engine is `ReplacingMergeTree(_version)` without `_deleted`.
+    pub version_only_engine: bool,
+    /// Override version column type (e.g. `"uint64"` for code_indexing_checkpoint).
+    pub version_type: Option<String>,
+    pub projections: Vec<StorageProjection>,
+}
+
+/// A column in an auxiliary table.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AuxiliaryColumn {
+    pub name: String,
+    pub data_type: DataType,
+    pub nullable: bool,
+    pub codec: Option<Vec<String>>,
+    pub default: Option<String>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct DomainInfo {
     pub name: String,
@@ -104,6 +196,8 @@ pub struct NodeEntity {
     /// Whether this entity's table has a `traversal_path` column.
     /// Derived from the declared fields during ontology loading.
     pub has_traversal_path: bool,
+    /// ClickHouse-specific storage metadata for DDL generation.
+    pub storage: NodeStorage,
 }
 
 impl Default for NodeEntity {
@@ -122,6 +216,7 @@ impl Default for NodeEntity {
             redaction: None,
             style: NodeStyle::default(),
             has_traversal_path: false,
+            storage: NodeStorage::default(),
         }
     }
 }
@@ -133,7 +228,7 @@ impl fmt::Display for NodeEntity {
 }
 
 /// An edge entity representing a relationship between nodes.
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct EdgeEntity {
     /// The name of the relationship (e.g., "AUTHORED", "CONTAINS").
     pub relationship_kind: String,
@@ -145,6 +240,8 @@ pub struct EdgeEntity {
     pub target: String,
     /// The kind of the target node.
     pub target_kind: String,
+    /// ClickHouse table that stores this edge (defaults to the global edge table).
+    pub destination_table: String,
 }
 
 /// ETL configuration for edges sourced from join tables.
@@ -197,13 +294,38 @@ impl fmt::Display for EdgeEntity {
     }
 }
 
+/// Where a field's data comes from.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum FieldSource {
+    /// Backed by a ClickHouse column.
+    DatabaseColumn(String),
+    /// Resolved at query time from a remote service.
+    Virtual(VirtualSource),
+}
+
+/// Configuration for a field resolved from a remote service.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct VirtualSource {
+    /// Logical service name (e.g. "gitaly").
+    pub service: String,
+    /// Logical operation name (e.g. "blob_content").
+    pub lookup: String,
+    /// When true, the field is declared in the ontology but not yet resolvable.
+    /// The compiler will exclude it from hydration plans.
+    pub disabled: bool,
+    /// Column-backed properties this virtual field needs in the property map
+    /// for resolution. The compiler ensures these are fetched during hydration
+    /// even if the user didn't request them.
+    pub depends_on: Vec<String>,
+}
+
 /// A field definition within an entity.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Field {
     /// The name of the field.
     pub name: String,
-    /// The source column name in the source table.
-    pub source: String,
+    /// Where this field's data comes from.
+    pub source: FieldSource,
     /// The data type of the field.
     pub data_type: DataType,
     /// Whether the field can contain null values.
@@ -212,6 +334,49 @@ pub struct Field {
     pub enum_values: Option<BTreeMap<i64, String>>,
     /// How the enum is stored in the source (int or string). Defaults to Int.
     pub enum_type: EnumType,
+    /// Whether LIKE-based filter operators (contains, starts_with, ends_with)
+    /// are allowed on this field. Defaults to true. Set to false for sensitive
+    /// columns (e.g. emails, vulnerability titles) to prevent probing.
+    pub like_allowed: bool,
+    /// Whether users can filter on this field. Defaults to true. Set to false
+    /// for internal columns (e.g. traversal_path) that are system-controlled.
+    pub filterable: bool,
+    /// Whether this field is only visible to instance administrators.
+    /// Defaults to false. When true, non-admin users cannot select or
+    /// filter on this field.
+    pub admin_only: bool,
+}
+
+impl Default for Field {
+    fn default() -> Self {
+        Self {
+            name: String::new(),
+            source: FieldSource::DatabaseColumn(String::new()),
+            data_type: DataType::String,
+            nullable: false,
+            enum_values: None,
+            enum_type: EnumType::default(),
+            like_allowed: true,
+            filterable: true,
+            admin_only: false,
+        }
+    }
+}
+
+impl Field {
+    /// Returns the source column name if this field is column-backed, or `None`
+    /// if the field is virtual.
+    pub fn column_name(&self) -> Option<&str> {
+        match &self.source {
+            FieldSource::DatabaseColumn(name) => Some(name),
+            FieldSource::Virtual(_) => None,
+        }
+    }
+
+    /// Whether this field is resolved from a remote service rather than a DB column.
+    pub fn is_virtual(&self) -> bool {
+        matches!(self.source, FieldSource::Virtual(_))
+    }
 }
 
 impl fmt::Display for Field {

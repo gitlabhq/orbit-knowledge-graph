@@ -13,7 +13,8 @@ use axum::routing::get;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64;
 use clickhouse_client::ArrowClickHouseClient;
-use gitlab_client::{GitlabClient, GitlabClientConfiguration};
+use gitlab_client::GitlabClient;
+use gkg_server_config::GitlabClientConfiguration;
 use indexer::health::{HealthState, create_health_router};
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -69,7 +70,13 @@ async fn start_infra() -> Infra {
         .await
         .unwrap();
     let ch_url = format!("http://{ch_host}:{ch_port}");
-    let ch_client = ArrowClickHouseClient::new(&ch_url, "default", CH_USER, Some(CH_PASS));
+    let ch_client = ArrowClickHouseClient::new(
+        &ch_url,
+        "default",
+        CH_USER,
+        Some(CH_PASS),
+        &std::collections::HashMap::new(),
+    );
 
     // Wait for ClickHouse to accept queries
     for attempt in 1..=30 {

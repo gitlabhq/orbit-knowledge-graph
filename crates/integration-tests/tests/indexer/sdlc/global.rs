@@ -1,5 +1,6 @@
 use arrow::array::{BooleanArray, StringArray, UInt64Array};
 use gkg_utils::arrow::ArrowUtils;
+use integration_testkit::t;
 
 use crate::indexer::common::{
     TestContext, assert_node_count, global_envelope, global_handler, handler_context,
@@ -32,7 +33,9 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
 
     assert_node_count(ctx, "gl_user", 3).await;
 
-    let result = ctx.query("SELECT * FROM gl_user FINAL ORDER BY id").await;
+    let result = ctx
+        .query(&format!("SELECT * FROM {} FINAL ORDER BY id", t("gl_user")))
+        .await;
     let batch = &result[0];
 
     let user_type = ArrowUtils::get_column_by_name::<StringArray>(batch, "user_type")
@@ -49,10 +52,11 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
 }
 
 pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
-    ctx.execute(
-        "INSERT INTO checkpoint (key, watermark, cursor_values) \
+    ctx.execute(&format!(
+        "INSERT INTO {} (key, watermark, cursor_values) \
          VALUES ('global.User', '2024-01-19 00:00:00.000000', 'null')",
-    )
+        t("checkpoint")
+    ))
     .await;
 
     ctx.execute(
@@ -76,7 +80,12 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    let result = ctx.query("SELECT count() as cnt FROM gl_user FINAL").await;
+    let result = ctx
+        .query(&format!(
+            "SELECT count() as cnt FROM {} FINAL",
+            t("gl_user")
+        ))
+        .await;
     let count =
         ArrowUtils::get_column_by_name::<UInt64Array>(&result[0], "cnt").expect("cnt column");
     assert_eq!(
@@ -85,7 +94,9 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
         "should only process new_user, not old_user"
     );
 
-    let usernames = ctx.query("SELECT username FROM gl_user FINAL").await;
+    let usernames = ctx
+        .query(&format!("SELECT username FROM {} FINAL", t("gl_user")))
+        .await;
     let username = ArrowUtils::get_column_by_name::<StringArray>(&usernames[0], "username")
         .expect("username column");
     assert_eq!(username.value(0), "new_user");

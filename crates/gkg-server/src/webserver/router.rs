@@ -1,3 +1,4 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use axum::extract::State;
@@ -5,17 +6,20 @@ use axum::http::StatusCode;
 use axum::response::IntoResponse;
 use axum::{Json, Router, routing::get};
 use clickhouse_client::ArrowClickHouseClient;
-use labkit_rs::correlation::http::{CorrelationIdLayer, PropagateCorrelationIdLayer};
-use labkit_rs::metrics::http::HttpMetricsLayer;
+use gitlab_client::GitlabClient;
+use labkit::http::{CorrelationLayer, GitlabTraceLayer, HttpMetricsLayer};
 use serde::Serialize;
 use tokio::time::timeout;
-use tower_http::trace::TraceLayer;
+
+use crate::schema_watcher::{SchemaState, SchemaWatcher};
 
 const HEALTH_CHECK_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Clone)]
 pub struct AppState {
     pub graph_client: ArrowClickHouseClient,
+    pub gitlab_client: Option<Arc<GitlabClient>>,
+    pub schema_watcher: Arc<SchemaWatcher>,
 }
 
 #[derive(Serialize)]
@@ -27,10 +31,16 @@ struct HealthResponse {
 }
 
 fn version() -> &'static str {
-    match option_env!("GKG_VERSION") {
-        Some(v) => v,
-        None => env!("CARGO_PKG_VERSION"),
-    }
+    use std::sync::OnceLock;
+    static VERSION: OnceLock<String> = OnceLock::new();
+    VERSION
+        .get_or_init(|| {
+            std::env::var("GKG_VERSION")
+                .ok()
+                .filter(|v| !v.is_empty())
+                .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_string())
+        })
+        .as_str()
 }
 
 async fn live() -> Json<HealthResponse> {
@@ -42,13 +52,38 @@ async fn live() -> Json<HealthResponse> {
 }
 
 async fn ready(State(state): State<AppState>) -> impl IntoResponse {
+    let mut unhealthy_components = Vec::new();
+
+    match state.schema_watcher.current() {
+        SchemaState::Ready => {}
+        SchemaState::Pending => unhealthy_components.push("schema_pending"),
+        SchemaState::Outdated => unhealthy_components.push("schema_outdated"),
+    }
+
     let graph_healthy = timeout(HEALTH_CHECK_TIMEOUT, state.graph_client.execute("SELECT 1"))
         .await
         .is_ok_and(|r| r.is_ok());
 
-    let mut unhealthy_components = Vec::new();
+    // Checks both connectivity AND auth. A 401 means the JWT secret is
+    // wrong or expired -- that's unhealthy, not just "unreachable".
+    // Only Ok and NotFound count as healthy (matches indexer behavior).
+    let gitlab_healthy = match &state.gitlab_client {
+        Some(client) => timeout(HEALTH_CHECK_TIMEOUT, client.project_info(1))
+            .await
+            .is_ok_and(|r| {
+                matches!(
+                    r,
+                    Ok(_) | Err(gitlab_client::GitlabClientError::NotFound(_))
+                )
+            }),
+        None => true,
+    };
+
     if !graph_healthy {
         unhealthy_components.push("clickhouse_graph");
+    }
+    if !gitlab_healthy {
+        unhealthy_components.push("gitlab");
     }
 
     let healthy = unhealthy_components.is_empty();
@@ -69,15 +104,22 @@ async fn ready(State(state): State<AppState>) -> impl IntoResponse {
     )
 }
 
-pub fn create_router(graph_client: ArrowClickHouseClient) -> Router {
-    let state = AppState { graph_client };
+pub fn create_router(
+    graph_client: ArrowClickHouseClient,
+    gitlab_client: Option<Arc<GitlabClient>>,
+    schema_watcher: Arc<SchemaWatcher>,
+) -> Router {
+    let state = AppState {
+        graph_client,
+        gitlab_client,
+        schema_watcher,
+    };
 
     Router::new()
         .route("/live", get(live))
         .route("/ready", get(ready))
         .with_state(state)
         .layer(HttpMetricsLayer::new())
-        .layer(CorrelationIdLayer::new())
-        .layer(TraceLayer::new_for_http())
-        .layer(PropagateCorrelationIdLayer::new())
+        .layer(GitlabTraceLayer::new())
+        .layer(CorrelationLayer::new())
 }

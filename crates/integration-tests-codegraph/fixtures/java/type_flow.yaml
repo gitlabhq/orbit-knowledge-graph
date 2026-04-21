@@ -1,0 +1,362 @@
+name: "Java: type-flow chain resolution"
+fixtures:
+  - path: UserService.java
+    content: |
+      public class UserService {
+          public void query() {}
+          public void save() {}
+      }
+
+  - path: App.java
+    content: |
+      public class App {
+          public void run() {
+              UserService svc = new UserService();
+              svc.query();
+          }
+      }
+
+  - path: Inheritance.java
+    content: |
+      public class Animal {
+          public void speak() {}
+      }
+
+      public class Dog extends Animal {
+          public void fetch() {}
+      }
+
+  - path: InheritanceUser.java
+    content: |
+      public class InheritanceUser {
+          public void test() {
+              Dog d = new Dog();
+              d.speak();
+              d.fetch();
+          }
+      }
+
+  - path: Factory.java
+    content: |
+      public class Factory {
+          public UserService getService() {
+              return new UserService();
+          }
+
+          public void useReturnType() {
+              UserService svc = getService();
+              svc.query();
+          }
+      }
+
+  - path: ImplicitThis.java
+    content: |
+      public class ImplicitThis {
+          public void helper() {}
+          public void run() {
+              helper();
+          }
+      }
+
+  - path: SuperCall.java
+    content: |
+      public class Base {
+          public void baseMethod() {}
+      }
+
+  - path: SuperCallChild.java
+    content: |
+      public class Child extends Base {
+          public void run() {
+              super.baseMethod();
+          }
+      }
+
+  - path: ChainedCall.java
+    content: |
+      public class ChainedCall {
+          public UserService getService() { return null; }
+          public void run() {
+              getService().query();
+          }
+      }
+
+  - path: DeepChain.java
+    content: |
+      public class Database {
+          public Cursor execute() { return null; }
+      }
+
+      public class Connection {
+          public Database getDb() { return null; }
+      }
+
+      public class Pool {
+          public Connection getConnection() { return null; }
+      }
+
+      public class Cursor {
+          public void fetchAll() {}
+      }
+
+      public class DeepChainUser {
+          public void run() {
+              Pool pool = new Pool();
+              pool.getConnection().getDb().execute().fetchAll();
+          }
+      }
+
+  - path: DiamondInheritance.java
+    content: |
+      public interface Readable {
+          void read();
+      }
+
+      public interface Writable {
+          void write();
+      }
+
+      public class FileStream implements Readable, Writable {
+          public void read() {}
+          public void write() {}
+          public void flush() {}
+      }
+
+      public class DiamondUser {
+          public void test() {
+              FileStream fs = new FileStream();
+              fs.read();
+              fs.write();
+              fs.flush();
+          }
+      }
+
+  - path: ShadowedBinding.java
+    content: |
+      public class ServiceA {
+          public void methodA() {}
+      }
+
+      public class ServiceB {
+          public void methodB() {}
+      }
+
+      public class ShadowTest {
+          public ServiceA getService() { return null; }
+
+          public void test() {
+              ServiceA svc = getService();
+              svc.methodA();
+              ServiceB svc2 = new ServiceB();
+              svc2.methodB();
+          }
+      }
+
+  - path: ThisCall.java
+    content: |
+      public class ThisCall {
+          public void helper() {}
+          public void run() {
+              this.helper();
+          }
+      }
+
+  - path: PackagedAnimal.java
+    content: |
+      package com.example;
+
+      public class PackagedAnimal {
+          public void speak() {}
+      }
+
+  - path: PackagedDog.java
+    content: |
+      package com.example;
+
+      public class PackagedDog extends PackagedAnimal {
+          public void fetch() {}
+      }
+
+  - path: PackagedUser.java
+    content: |
+      package com.example;
+
+      public class PackagedUser {
+          public void test() {
+              PackagedDog d = new PackagedDog();
+              d.speak();
+              d.fetch();
+          }
+      }
+
+tests:
+  - name: "typed local: svc.query() resolves to UserService.query"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row: { callee: "query", callee_fqn: "UserService.query" } }
+      # no false positive to save()
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'App'
+            AND callee.name = 'save'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "inherited method: d.speak() resolves to Animal.speak"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "fetch" } }
+          - { row: { callee: "speak" } }
+
+  - name: "return type propagation: getService().query() resolves"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'useReturnType'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row: { callee: "query", callee_fqn: "UserService.query" } }
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'useReturnType' AND callee.name = 'save'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "implicit this: bare helper() in method body resolves to ImplicitThis.helper"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ImplicitThis'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { callee: "helper", callee_fqn: "ImplicitThis.helper" } }
+
+  - name: "super.baseMethod() resolves to Base.baseMethod"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'Child'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { row: { callee: "baseMethod", callee_fqn: "Base.baseMethod" } }
+
+  - name: "chained call: getService().query() resolves via return type"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ChainedCall'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row: { callee: "query", callee_fqn: "UserService.query" } }
+          - { row: { callee: "getService", callee_fqn: "ChainedCall.getService" } }
+      # no false positive to save()
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ChainedCall'
+            AND callee.name = 'save'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "deep chain: pool.getConnection().getDb().execute().fetchAll()"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'DeepChainUser'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 6 }
+          - { row: { callee: "Pool" } }
+          - { row: { callee: "getConnection" } }
+          - { row: { callee: "getDb" } }
+          - { row: { callee: "execute" } }
+          - { row: { callee: "fetchAll" } }
+      # no edges to methods on wrong types
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'DeepChainUser'
+            AND NOT callee.name IN ['Pool', 'getConnection', 'getDb', 'execute', 'fetchAll']
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "diamond: FileStream has own + both interface methods"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'DiamondUser'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row_count: 5 }
+          - { row: { callee: "FileStream" } }
+          - { row: { callee: "flush" } }
+          - { row: { callee: "read" } }
+          - { row: { callee: "write" } }
+
+  - name: "no cross-contamination between typed bindings"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'ShadowTest'
+          RETURN callee.name AS callee
+          ORDER BY callee
+        assert:
+          - { row: { callee: "getService" } }
+          - { row: { callee: "methodA" } }
+          - { row: { callee: "methodB" } }
+      # svc.methodB() should NOT resolve (svc is ServiceA, not ServiceB)
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'ShadowTest'
+            AND callee.name = 'methodA' AND callee.fqn STARTS WITH 'ServiceB'
+          RETURN callee.name
+        assert:
+          - { empty: true }
+
+  - name: "this.helper() resolves to ThisCall.helper"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'run' AND caller.fqn STARTS WITH 'ThisCall'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+        assert:
+          - { row_count: 1 }
+          - { row: { callee: "helper", callee_fqn: "ThisCall.helper" } }
+
+  - name: "packaged inheritance: d.speak() resolves via super FQN"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'com.example.PackagedUser'
+          RETURN callee.name AS callee, callee.fqn AS callee_fqn
+          ORDER BY callee
+        assert:
+          - { row_count: 4 }
+          - { row: { callee: "PackagedDog", callee_fqn: "com.example.PackagedDog" } }
+          - { row: { callee: "fetch", callee_fqn: "com.example.PackagedDog.fetch" } }
+          - { row: { callee: "speak", callee_fqn: "com.example.PackagedAnimal.speak" } }
+      # no edges to unpackaged Dog/Animal or wrong members
+      - query: |
+          MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'test' AND caller.fqn STARTS WITH 'com.example.PackagedUser'
+            AND NOT callee.fqn STARTS WITH 'com.example'
+          RETURN callee.name, callee.fqn
+        assert:
+          - { empty: true }

@@ -1,6 +1,6 @@
 # config/ontology/edges/dismissed_by.yaml
 
-description: User who dismissed an entity
+description: User who dismissed a vulnerability
 
 variants:
   - from_node: { type: User, id: id }

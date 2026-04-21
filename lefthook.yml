@@ -15,6 +15,9 @@ pre-commit:
     - name: fmt
       run: mise run lint:fmt
       glob: "**/*.rs"
+    - name: clippy
+      run: mise run lint:code
+      glob: "**/*.rs"
     - name: agent-file-sync
       run: diff AGENTS.md CLAUDE.md
       glob:
@@ -23,34 +26,14 @@ pre-commit:
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
-    - name: docs
-      glob: "**/*.md"
-      group:
-        parallel: true
-        jobs:
-          - name: markdownlint
-            run: mise run lint:markdown
-          - name: vale
-            run: mise run lint:vale
-          - name: lychee
-            run: mise run lint:links
-    - name: helm-lint
-      glob: "helm-dev/**"
-      group:
-        parallel: true
-        jobs:
-          - name: helm-lint-gkg
-            run: helm lint helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-          - name: helm-lint-observability
-            run: helm lint helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-          - name: helm-template-gkg
-            run: helm template gkg helm-dev/gkg -f helm-dev/gkg/values-sandbox.yaml
-          - name: helm-template-observability
-            run: helm template gkg-obs helm-dev/observability -f helm-dev/observability/values-sandbox.yaml
-
-pre-push:
-  parallel: true
-  jobs:
-    - name: clippy
-      run: mise run lint:code
-      glob: "**/*.rs"
+    - name: schema-version-check
+      run: bash ./scripts/check-schema-version.sh
+      glob:
+        - "config/graph.sql"
+        - "config/ontology/**/*.yaml"
+    - name: response-schema-version-check
+      run: bash ./scripts/check-response-schema-version.sh
+      glob:
+        - "crates/query-engine/formatters/src/graph.rs"
+        - "crates/query-engine/formatters/src/lib.rs"
+        - "crates/gkg-server/schemas/query_response.json"

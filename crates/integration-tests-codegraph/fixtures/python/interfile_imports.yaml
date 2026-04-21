@@ -1,0 +1,92 @@
+name: "Python: inter-file import resolution (G1-G11)"
+fixtures:
+  - path: src/main.py
+    content: |
+      from src.utils import helper_func
+
+      def main():
+          helper_func()
+
+  - path: src/utils.py
+    content: |
+      def helper_func():
+          pass
+
+      def unused_func():
+          pass
+
+  - path: src/package/__init__.py
+    content: |
+      from src.package.module import PackageClass
+
+  - path: src/package/module.py
+    content: |
+      class PackageClass:
+          def do_work(self):
+              pass
+
+  - path: src/app.py
+    content: |
+      from src.package.module import PackageClass
+
+      def run_app():
+          obj = PackageClass()
+
+tests:
+  - name: "G1: absolute import resolves (utils.helper_func)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'main' AND callee.name = 'helper_func'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/main.py", tgt: "src/utils.py" } }
+
+  - name: "G2: absolute import of package module resolves"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'run_app' AND callee.name = 'PackageClass'
+      RETURN caller.file_path AS src, callee.file_path AS tgt
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "src/app.py", tgt: "src/package/module.py" } }
+
+  - name: "G7: non-existent import produces no edge"
+    description: "There is no import for 'nonexistent' so no call edge should exist"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'nonexistent'
+      RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "All 5 files exist"
+    query: |
+      MATCH (f:File)
+      RETURN count(f) AS n
+    assert:
+      - { count_equals: { field: n, value: 5 } }
+
+  - name: "helper_func is in src/utils.py"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'helper_func'
+      RETURN d.file_path AS file
+    assert:
+      - { match: { field: file, pattern: "*utils.py" } }
+
+  - name: "PackageClass is in src/package/module.py"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.name = 'PackageClass'
+      RETURN d.file_path AS file
+    assert:
+      - { match: { field: file, pattern: "*module.py" } }
+
+  - name: "unused_func has no incoming call edges"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused_func'
+      RETURN caller.name AS caller
+    assert:
+      - { empty: true }

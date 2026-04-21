@@ -1,0 +1,44 @@
+name: "Python: cross-file return type inference (Phase 3)"
+fixtures:
+  - path: models.py
+    content: |
+      class UserService:
+          def create(self, name):
+              pass
+
+      class Decoy:
+          def create(self):
+              pass
+
+  - path: factories.py
+    content: |
+      from models import UserService
+
+      def get_user_service():
+          return UserService()
+
+  - path: handlers.py
+    content: |
+      from factories import get_user_service
+
+      def handle_request():
+          svc = get_user_service()
+          svc.create("alice")
+
+tests:
+  - name: Cross-file factory return type resolves
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'handle_request' AND callee.name = 'create' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "handlers.handle_request", callee: "models.UserService.create" } }
+
+  - name: No resolution to Decoy.create
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'handle_request' AND callee.fqn = 'models.Decoy.create' AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }

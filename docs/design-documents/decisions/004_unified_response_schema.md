@@ -65,24 +65,33 @@ This already exists via `GET /api/v4/orbit/schema` / `GetGraphSchema` gRPC (see 
 
 **Layer 2: Query response (per-request)**
 
-Typed metadata goes in the proto envelope. The JSON payload is always `{ query_type, nodes, edges }`.
+Typed metadata goes in the proto envelope. The JSON payload is always `{ query_type, nodes, edges }` with an optional `columns` array for aggregation queries.
 
-Target proto shape (changes pending in !479; current proto uses `QueryMetadata` with `query_type`, `raw_query_strings`, `row_count` only):
+Proto shape (as shipped):
 
 ```protobuf
 message ExecuteQueryResult {
-  string result_json = 1;               // JSON: { query_type, nodes, edges }
-  string query_type = 2;               // "search", "traversal", etc.
-  repeated string raw_query_strings = 3; // SQL through pipeline stages
-  int32 row_count = 4;
+  oneof content {
+    string result_json = 1;     // format = RAW: structured JSON
+    string formatted_text = 2;  // format = LLM: compact text
+  }
+  QueryMetadata metadata = 3;
+}
+
+message QueryMetadata {
+  string query_type = 1;
+  repeated string raw_query_strings = 2; // compiled ClickHouse SQL(s), debug only
+  int32 row_count = 3;
+  string format_version = 4;             // semver, e.g. "1.0.0"; empty for stubs
+  FormatName format_name = 5;            // RAW | GOON
 }
 ```
 
-Node `id` is always a JSON integer (ClickHouse Int64). All entity primary keys in the ontology are integer-typed. `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
+Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation column values (`columns[].value`) remain integer-typed; if an aggregate ever needs to return an Int64 that exceeds the JS safe range, that is a separate decision. `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
 
 ### Examples by query type
 
-Every query returns `{ query_type, nodes, edges }`. The content varies, the shape does not.
+Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. The content varies, the base shape does not.
 
 #### Search
 
@@ -92,8 +101,8 @@ Nodes only, no edges.
 {
   "query_type": "search",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice", "state": "active" },
-    { "type": "User", "id": 2, "username": "bob", "name": "Bob", "state": "active" }
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
+    { "type": "User", "id": "2", "username": "bob", "name": "Bob", "state": "active" }
   ],
   "edges": []
 }
@@ -109,15 +118,15 @@ Nodes are deduplicated. Edges are instance-level.
 {
   "query_type": "traversal",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice", "state": "active" },
-    { "type": "User", "id": 2, "username": "bob", "name": "Bob", "state": "active" },
-    { "type": "Project", "id": 101, "name": "Alpha", "full_path": "gitlab-org/alpha" },
-    { "type": "Project", "id": 102, "name": "Beta", "full_path": "gitlab-org/beta" }
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
+    { "type": "User", "id": "2", "username": "bob", "name": "Bob", "state": "active" },
+    { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
+    { "type": "Project", "id": "102", "name": "Beta", "full_path": "gitlab-org/beta" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 102, "type": "MEMBER_OF" },
-    { "from": "User", "from_id": 2, "to": "Project", "to_id": 101, "type": "MEMBER_OF" }
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "102", "type": "MEMBER_OF" },
+    { "from": "User", "from_id": "2", "to": "Project", "to_id": "101", "type": "MEMBER_OF" }
   ]
 }
 ```
@@ -132,31 +141,51 @@ Edges carry a `depth` field.
 {
   "query_type": "traversal",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice" },
-    { "type": "Project", "id": 101, "name": "Alpha" },
-    { "type": "Project", "id": 102, "name": "Beta" },
-    { "type": "Project", "id": 103, "name": "Gamma" }
+    { "type": "User", "id": "1", "username": "alice" },
+    { "type": "Project", "id": "101", "name": "Alpha" },
+    { "type": "Project", "id": "102", "name": "Beta" },
+    { "type": "Project", "id": "103", "name": "Gamma" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF", "depth": 1 },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 102, "type": "MEMBER_OF", "depth": 2 },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 103, "type": "MEMBER_OF", "depth": 3 }
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF", "depth": 1 },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "102", "type": "MEMBER_OF", "depth": 2 },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "103", "type": "MEMBER_OF", "depth": 3 }
   ]
 }
 ```
 
-#### Aggregation
+#### Aggregation (grouped)
 
-Computed values are inlined on the group-by nodes. The frontend uses `query_type` to determine display mode (table vs graph).
+Computed values are inlined on the group-by nodes. `columns` describes each aggregate so the consumer can distinguish computed values from entity properties. The frontend uses `query_type` to determine display mode (table vs graph).
 
 ```json
 {
   "query_type": "aggregation",
   "nodes": [
-    { "type": "Project", "id": 101, "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
-    { "type": "Project", "id": 102, "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
+    { "type": "Project", "id": "101", "name": "Alpha", "mr_count": 15, "avg_mr": 42.7 },
+    { "type": "Project", "id": "102", "name": "Beta", "mr_count": 8, "avg_mr": 23.1 }
   ],
-  "edges": []
+  "edges": [],
+  "columns": [
+    { "name": "mr_count", "function": "count", "target": "m" },
+    { "name": "avg_mr", "function": "avg", "target": "m", "property": "id" }
+  ]
+}
+```
+
+#### Aggregation (ungrouped / scalar)
+
+When no `group_by` is specified, the SQL returns only aggregate values with no entity columns. There are no nodes to carry the values, so `columns` holds both the metadata and the computed `value` directly. `nodes` is empty.
+
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [],
+  "edges": [],
+  "columns": [
+    { "name": "total", "function": "count", "target": "p", "value": 42 },
+    { "name": "avg_size", "function": "avg", "target": "p", "property": "size", "value": 128.5 }
+  ]
 }
 ```
 
@@ -168,16 +197,16 @@ Edges carry `path_id` and `step`. Nodes are deduplicated across paths.
 {
   "query_type": "path_finding",
   "nodes": [
-    { "type": "User", "id": 1, "username": "alice" },
-    { "type": "MergeRequest", "id": 42, "title": "Fix bug" },
-    { "type": "Note", "id": 55, "title": "Design doc" },
-    { "type": "Project", "id": 200, "name": "Omega" }
+    { "type": "User", "id": "1", "username": "alice" },
+    { "type": "MergeRequest", "id": "42", "title": "Fix bug" },
+    { "type": "Note", "id": "55", "title": "Design doc" },
+    { "type": "Project", "id": "200", "name": "Omega" }
   ],
   "edges": [
-    { "from": "User", "from_id": 1, "to": "MergeRequest", "to_id": 42, "type": "AUTHORED", "path_id": 0, "step": 0 },
-    { "from": "MergeRequest", "from_id": 42, "to": "Project", "to_id": 200, "type": "IN_PROJECT", "path_id": 0, "step": 1 },
-    { "from": "User", "from_id": 1, "to": "Note", "to_id": 55, "type": "AUTHORED", "path_id": 1, "step": 0 },
-    { "from": "Note", "from_id": 55, "to": "Project", "to_id": 200, "type": "CONTAINS", "path_id": 1, "step": 1 }
+    { "from": "User", "from_id": "1", "to": "MergeRequest", "to_id": "42", "type": "AUTHORED", "path_id": 0, "step": 0 },
+    { "from": "MergeRequest", "from_id": "42", "to": "Project", "to_id": "200", "type": "IN_PROJECT", "path_id": 0, "step": 1 },
+    { "from": "User", "from_id": "1", "to": "Note", "to_id": "55", "type": "AUTHORED", "path_id": 1, "step": 0 },
+    { "from": "Note", "from_id": "55", "to": "Project", "to_id": "200", "type": "CONTAINS", "path_id": 1, "step": 1 }
   ]
 }
 ```
@@ -192,15 +221,15 @@ Center node plus its neighbors. Edge direction matches the ontology.
 {
   "query_type": "neighbors",
   "nodes": [
-    { "type": "Project", "id": 101, "name": "Alpha", "full_path": "gitlab-org/alpha" },
-    { "type": "MergeRequest", "id": 42, "title": "Fix bug", "state": "merged" },
-    { "type": "User", "id": 1, "username": "alice", "name": "Alice" },
-    { "type": "File", "id": 500, "path": "app/controllers/sessions_controller.rb" }
+    { "type": "Project", "id": "101", "name": "Alpha", "full_path": "gitlab-org/alpha" },
+    { "type": "MergeRequest", "id": "42", "title": "Fix bug", "state": "merged" },
+    { "type": "User", "id": "1", "username": "alice", "name": "Alice" },
+    { "type": "File", "id": "500", "path": "app/controllers/sessions_controller.rb" }
   ],
   "edges": [
-    { "from": "MergeRequest", "from_id": 42, "to": "Project", "to_id": 101, "type": "IN_PROJECT" },
-    { "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" },
-    { "from": "Project", "from_id": 101, "to": "File", "to_id": 500, "type": "CONTAINS" }
+    { "from": "MergeRequest", "from_id": "42", "to": "Project", "to_id": "101", "type": "IN_PROJECT" },
+    { "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" },
+    { "from": "Project", "from_id": "101", "to": "File", "to_id": "500", "type": "CONTAINS" }
   ]
 }
 ```
@@ -212,15 +241,23 @@ The center node (Project:101) is just another node in the list. Neighbor types a
 **Node:** flat object with `type`, `id`, and properties inline. No wrapper.
 
 ```json
-{ "type": "User", "id": 42, "username": "alice", "name": "Alice Smith", "state": "active" }
+{ "type": "User", "id": "42", "username": "alice", "name": "Alice Smith", "state": "active" }
 ```
 
 The frontend builds composite IDs (`"User:42"`) for deduplication. Property names match the ontology, so the frontend can look up data types from the cached schema. For aggregation queries, computed values (like `mr_count`) are inlined as additional properties on the node.
 
+**Column:** describes a computed aggregation value.
+
+```json
+{ "name": "mr_count", "function": "count", "target": "m" }
+```
+
+Optional fields: `target` (node alias being aggregated), `property` (field being aggregated, absent for plain `count`), `value` (the computed result, present only for ungrouped aggregations where `nodes` is empty). Present for all aggregation queries so the consumer can distinguish computed values from entity properties and display correct table headers.
+
 **Edge:** two nodes connected by type and ID.
 
 ```json
-{ "from": "User", "from_id": 1, "to": "Project", "to_id": 101, "type": "MEMBER_OF" }
+{ "from": "User", "from_id": "1", "to": "Project", "to_id": "101", "type": "MEMBER_OF" }
 ```
 
 Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path finding).
@@ -229,13 +266,13 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Search, traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges }`.
+3. One shape for all query types. Search, traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
-5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count` are typed proto fields. The JSON has domain data only.
+5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
 7. Ontology is cached. Display metadata (labels, styles, descriptions) comes from the schema, not the response.
 8. `id` and `type` are always included on nodes, even if the user didn't select them.
-9. Pagination is out of scope for this ADR and will be covered in a separate decision (#248).
+9. Pagination uses an agent-driven cursor model (`{ offset, page_size }`) that slices the authorized (post-redaction) result set. `PaginationInfo { has_more, total_rows }` is returned in both the proto metadata and the JSON body.
 
 ### Display hint
 
@@ -251,6 +288,18 @@ The user can always switch.
 ### Implementation
 
 `GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `crates/gkg-server/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
+
+### Format versioning
+
+Every response includes a `format_version` field (semver string, e.g. `"1.0.0"`). Major bumps signal breaking shape changes, minor bumps signal new optional fields, patch bumps signal formatting bug fixes. The version is loaded at compile time from `config/RAW_OUTPUT_FORMAT_VERSION` and appears in:
+
+1. The JSON response body as a top-level `format_version` string (key order is alphabetical by default since `serde_json` uses `BTreeMap`).
+2. The proto `QueryMetadata.format_version` string + `format_name` enum (`FormatName::Raw` or `FormatName::Goon`).
+3. The JSON Schema `$id` (`schemas/query_response/v1`), whose `vN` suffix tracks the version's major component. CI asserts the two stay in sync.
+
+The `ResultFormatter` trait exposes `format_name() -> FormatName` and `format_version() -> Option<&Version>` so the gRPC service stamps version metadata without hardcoding. A stub formatter (like `GoonFormatter` today, which delegates to `GraphFormatter`) returns `None` from `format_version()` — the proto field then carries an empty string, making "stub" observable in telemetry. CI enforces that changes to formatter code or the response schema require a strictly greater semver bump (`scripts/check-response-schema-version.sh`).
+
+GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a follow-up MR alongside the actual GOON encoding (ADR 009).
 
 ## Consequences
 

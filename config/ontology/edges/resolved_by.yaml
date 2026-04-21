@@ -1,6 +1,6 @@
 # config/ontology/edges/resolved_by.yaml
 
-description: User who resolved an entity
+description: User who resolved a vulnerability
 
 variants:
   - from_node: { type: User, id: id }

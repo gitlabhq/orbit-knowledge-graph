@@ -1,0 +1,76 @@
+name: Python call resolution
+fixtures:
+  - path: utils.py
+    content: |
+      def helper():
+          pass
+
+      def unused():
+          pass
+  - path: main.py
+    content: |
+      from utils import helper
+
+      def run():
+          helper()
+
+tests:
+  # ── Original targeted queries, hardened ──────────────────────
+
+  - name: Cross-file call edge exists
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.file_path <> callee.file_path
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.run", callee: "utils.helper" } }
+
+  - name: helper() resolves to utils.helper
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'helper'
+      RETURN callee.file_path AS file, caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "utils.py", caller: "main.run", callee: "utils.helper" } }
+
+  # ── Broader exhaustive checks ────────────────────────────────
+
+  - name: Exactly 3 definitions with correct types and files
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.fqn AS fqn, d.definition_type AS type, d.file_path AS file
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { column_values: { field: name, values: ["helper", "unused", "run"] } }
+      - { row: { name: "helper", fqn: "utils.helper", type: "Function", file: "utils.py" } }
+      - { row: { name: "unused", fqn: "utils.unused", type: "Function", file: "utils.py" } }
+      - { row: { name: "run", fqn: "main.run", type: "Function", file: "main.py" } }
+
+  - name: unused() has no incoming call edges
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE callee.name = 'unused'
+      RETURN caller.fqn AS caller
+    assert:
+      - { empty: true }
+
+  - name: Import edge
+    query: |
+      MATCH (i:ImportedSymbol)
+      RETURN i.file_path AS file, i.path AS path, i.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "main.py", path: "utils", name: "helper" } }
+
+  - name: Exactly 2 Python files
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 2 }
+      - { match: { field: lang, pattern: "python" } }
+      - { column_values: { field: path, values: ["utils.py", "main.py"] } }

@@ -5,12 +5,11 @@ use super::common;
 use std::collections::HashSet;
 
 use chrono::{DateTime, Utc};
+use clickhouse_client::ClickHouseConfigurationExt;
 use common::TestContext as ClickHouseContext;
 use futures::StreamExt;
-use indexer::modules::sdlc::dispatch::{
-    GlobalDispatcher, GlobalDispatcherConfig, NamespaceDispatcher, NamespaceDispatcherConfig,
-};
-use indexer::nats::NatsConfiguration;
+use gkg_server_config::{GlobalDispatcherConfig, NamespaceDispatcherConfig, NatsConfiguration};
+use indexer::modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::topic::{GLOBAL_INDEXING_SUBJECT, INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN};
 use serde::Deserialize;
@@ -47,7 +46,7 @@ struct TestContext {
 impl TestContext {
     async fn new() -> Self {
         let clickhouse =
-            ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, common::GRAPH_SCHEMA_SQL]).await;
+            ClickHouseContext::new(&[common::SIPHON_SCHEMA_SQL, *common::GRAPH_SCHEMA_SQL]).await;
         let (nats, nats_url) = Self::start_nats().await;
         Self::create_stream(&nats_url).await;
         Self {
@@ -212,7 +211,7 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     ];
 
     let before = Utc::now();
-    indexer::scheduler::run(&tasks, &*lock_service)
+    indexer::scheduler::run_once(&tasks, &*lock_service)
         .await
         .unwrap();
     let after = Utc::now();

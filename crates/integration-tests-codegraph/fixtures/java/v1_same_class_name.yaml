@@ -1,0 +1,29 @@
+name: "Java v1 parity — same class name in same package"
+fixtures:
+  - path: com/example/filter/Filter.java
+    content: |
+      package com.example.filter;
+      public interface Filter {
+          default boolean apply(String input) { return true; }
+      }
+  - path: com/example/filter/ServerFilter.java
+    content: |
+      package com.example.filter;
+      public class ServerFilter implements Filter {
+          class Filter extends ServerFilter {
+              @Override
+              public boolean apply(String input) { return super.apply(input); }
+          }
+      }
+
+tests:
+  # ── J3: test_java_reference_resolution_same_class_name_in_same_package ──
+
+  - name: "ServerFilter.Filter.apply -> Filter.apply (disambiguated)"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.filter.ServerFilter.Filter.apply'
+        AND callee.fqn = 'com.example.filter.Filter.apply'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

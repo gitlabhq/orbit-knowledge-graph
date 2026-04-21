@@ -1,9 +1,9 @@
-use arrow::array::StringArray;
+use arrow::array::{BooleanArray, Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use indexer::handler::Handler;
-use indexer::modules::code::CodeIndexingTaskHandler;
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
+use integration_testkit::{assert_edge_count_for_traversal_path, t};
 
 use super::helpers::*;
 
@@ -14,7 +14,7 @@ async fn indexes_repository() {
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
 
@@ -30,8 +30,6 @@ async fn indexes_repository() {
         }",
         )],
     );
-
-    create_project_in_graph(&clickhouse, project_id, "/test", "test/repo").await;
 
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
@@ -42,6 +40,11 @@ async fn indexes_repository() {
     assert!(result.is_ok(), "handler failed: {:?}", result);
 
     assert_code_indexed(&clickhouse, project_id).await;
+    assert_branch_indexed(&clickhouse, project_id, "main", "/test").await;
+
+    // Nested files should not have direct Branch --CONTAINS--> File edges
+    assert_edge_count_for_traversal_path(&clickhouse, "CONTAINS", "Branch", "File", "/test", 0)
+        .await;
 }
 
 #[tokio::test]
@@ -50,7 +53,7 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
 
     let clickhouse = integration_testkit::TestContext::new(&[
         integration_testkit::SIPHON_SCHEMA_SQL,
-        integration_testkit::GRAPH_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
     ])
     .await;
 
@@ -67,7 +70,6 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
         )],
     );
 
-    create_project_in_graph(&clickhouse, project_id, "/stale-test", "stale/test").await;
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
 
@@ -127,8 +129,130 @@ async fn soft_deletes_stale_code_data_after_reindexing() {
     );
 }
 
+#[tokio::test]
+async fn disk_is_clean_after_successful_indexing() {
+    let project_id: i64 = 4;
+    let commit_sha = "abc123";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main {
+            public void save() {}
+        }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        "/cleanup-test",
+    )
+    .await;
+
+    assert_code_indexed(&clickhouse, project_id).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after indexing, found: {remaining:?}"
+    );
+}
+
+#[tokio::test]
+async fn disk_is_clean_after_multiple_reindexes() {
+    let project_id: i64 = 5;
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[("src/Main.java", "public class Main { public void v1() {} }")],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let cache_dir = deps.cache_dir_path().to_path_buf();
+    let handler = deps.code_indexing_task_handler();
+
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        "/multi-test",
+    )
+    .await;
+
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v2() {} }")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit2",
+        2,
+        "/multi-test",
+    )
+    .await;
+
+    mock.replace_archive(
+        project_id,
+        &[("src/Main.java", "public class Main { public void v3() {} }")],
+    );
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit3",
+        3,
+        "/multi-test",
+    )
+    .await;
+
+    assert_active_definitions(&clickhouse, project_id, "src/Main.java", &["Main", "v3"]).await;
+
+    let remaining: Vec<_> = std::fs::read_dir(&cache_dir)
+        .into_iter()
+        .flatten()
+        .flatten()
+        .collect();
+    assert!(
+        remaining.is_empty(),
+        "cache dir should be empty after repeated indexing, found: {remaining:?}"
+    );
+}
+
 async fn index_code(
-    handler: &CodeIndexingTaskHandler,
+    handler: &indexer::modules::code::CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,
     project_id: i64,
     commit_sha: &str,
@@ -167,8 +291,9 @@ async fn assert_file_not_active(
 ) {
     let active_rows = clickhouse
         .query(&format!(
-            "SELECT id FROM gl_file FINAL \
-             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false"
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -184,8 +309,9 @@ async fn assert_file_is_active(
 ) {
     let result = clickhouse
         .query(&format!(
-            "SELECT id FROM gl_file FINAL \
-             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false"
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_file")
         ))
         .await;
     assert!(
@@ -201,8 +327,9 @@ async fn query_active_definition_names(
 ) -> Vec<String> {
     let result = clickhouse
         .query(&format!(
-            "SELECT name FROM gl_definition FINAL \
-             WHERE project_id = {project_id} AND file_path = '{file_path}' AND _deleted = false"
+            "SELECT name FROM {} FINAL \
+             WHERE project_id = {project_id} AND file_path = '{file_path}' AND _deleted = false",
+            t("gl_definition")
         ))
         .await;
     let Some(batch) = result.first() else {
@@ -237,9 +364,11 @@ async fn count_active_edges(
 ) -> usize {
     let result = clickhouse
         .query(&format!(
-            "SELECT source_id FROM gl_edge FINAL \
+            "SELECT source_id FROM {} FINAL \
              WHERE relationship_kind = '{relationship_kind}' AND _deleted = false \
-             AND source_id IN (SELECT id FROM gl_definition FINAL WHERE project_id = {project_id} AND _deleted = false)"
+             AND source_id IN (SELECT id FROM {} FINAL WHERE project_id = {project_id} AND _deleted = false)",
+            t("gl_edge"),
+            t("gl_definition")
         ))
         .await;
     result.first().map_or(0, |b| b.num_rows())
@@ -255,4 +384,60 @@ async fn assert_no_active_definitions(
         active.is_empty(),
         "definitions in '{file_path}' should not be active (soft-deleted), but found: {active:?}"
     );
+}
+
+async fn assert_branch_indexed(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    expected_name: &str,
+    expected_traversal_path: &str,
+) {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT name, is_default, traversal_path, project_id \
+             FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false",
+            t("gl_branch")
+        ))
+        .await;
+
+    let batch = result
+        .first()
+        .expect("gl_branch should have rows after indexing");
+    assert_eq!(batch.num_rows(), 1, "expected exactly one branch row");
+
+    let names = ArrowUtils::get_column_by_name::<StringArray>(batch, "name").expect("name column");
+    assert_eq!(names.value(0), expected_name);
+
+    let is_default = ArrowUtils::get_column_by_name::<BooleanArray>(batch, "is_default")
+        .expect("is_default column");
+    assert!(is_default.value(0), "branch should be marked as default");
+
+    let traversal_paths = ArrowUtils::get_column_by_name::<StringArray>(batch, "traversal_path")
+        .expect("traversal_path column");
+    assert_eq!(traversal_paths.value(0), expected_traversal_path);
+
+    let project_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "project_id")
+        .expect("project_id column");
+    assert_eq!(project_ids.value(0), project_id);
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "IN_PROJECT",
+        "Branch",
+        "Project",
+        expected_traversal_path,
+        1,
+    )
+    .await;
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "CONTAINS",
+        "Branch",
+        "Directory",
+        expected_traversal_path,
+        1,
+    )
+    .await;
 }

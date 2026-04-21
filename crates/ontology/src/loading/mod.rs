@@ -6,7 +6,7 @@ use rust_embed::Embed;
 use serde::Deserialize;
 use std::path::Path;
 
-use crate::entities::DomainInfo;
+use crate::entities::{DomainInfo, EdgeColumn};
 use crate::{Ontology, OntologyError};
 
 pub(crate) use edge::EdgeYaml;
@@ -83,17 +83,53 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
-    ontology.table_prefix = schema.settings.table_prefix;
-    ontology.edge_table = schema.settings.edge_table;
+    ontology.table_prefix = schema.settings.table_prefix.clone();
+    ontology.default_edge_table = schema.settings.default_edge_table;
     ontology.default_entity_sort_key = schema.settings.default_entity_sort_key;
-    ontology.edge_sort_key = schema.settings.edge_sort_key;
-    ontology.edge_columns = schema
+
+    // Load edge table configs.
+    ontology.edge_table_configs = schema
         .settings
-        .edge_columns
+        .edge_tables
         .into_iter()
-        .map(|c| crate::entities::EdgeColumn {
-            name: c.name,
-            data_type: c.data_type,
+        .map(|(name, cfg)| {
+            let storage = cfg.storage.map(|s| crate::entities::EdgeTableStorage {
+                index_granularity: s.index_granularity,
+                primary_key: s.primary_key,
+                columns: s
+                    .columns
+                    .into_iter()
+                    .map(|col| crate::entities::StorageColumn {
+                        name: col.name,
+                        ch_type: col.ch_type,
+                        default: col.default,
+                        codec: col.codec,
+                    })
+                    .collect(),
+                indexes: s
+                    .indexes
+                    .into_iter()
+                    .map(node::convert_storage_index)
+                    .collect(),
+                projections: s
+                    .projections
+                    .into_iter()
+                    .map(node::convert_storage_projection)
+                    .collect(),
+            });
+            let config = crate::EdgeTableConfig {
+                sort_key: cfg.sort_key,
+                columns: cfg
+                    .columns
+                    .into_iter()
+                    .map(|c| crate::entities::EdgeColumn {
+                        name: c.name,
+                        data_type: c.data_type,
+                    })
+                    .collect(),
+                storage: storage.unwrap_or_default(),
+            };
+            (name, config)
         })
         .collect();
 
@@ -103,23 +139,47 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         order_by: schema.settings.etl.default_etl_order_by,
     };
     ontology.etl_settings = etl_settings.clone();
+    ontology.internal_column_prefix = schema.settings.internal_column_prefix;
 
-    if !ontology.edge_table.starts_with(&ontology.table_prefix) {
+    // Validate edge table names: must start with table_prefix and contain
+    // only lowercase ASCII letters and underscores (safe for SQL identifiers).
+    for table_name in ontology.edge_table_configs.keys() {
+        if !table_name.starts_with(&ontology.table_prefix) {
+            return Err(OntologyError::Validation(format!(
+                "edge table '{}' does not start with table_prefix '{}'",
+                table_name, ontology.table_prefix
+            )));
+        }
+        if !table_name
+            .chars()
+            .all(|c| c.is_ascii_lowercase() || c == '_')
+        {
+            return Err(OntologyError::Validation(format!(
+                "edge table '{}' contains invalid characters (only a-z and _ allowed)",
+                table_name
+            )));
+        }
+    }
+    if !ontology
+        .edge_table_configs
+        .contains_key(&ontology.default_edge_table)
+    {
         return Err(OntologyError::Validation(format!(
-            "edge_table '{}' does not start with table_prefix '{}'",
-            ontology.edge_table, ontology.table_prefix
+            "default_edge_table '{}' is not defined in edge_tables",
+            ontology.default_edge_table
         )));
     }
 
+    // Validate default edge table columns match EDGE_RESERVED_COLUMNS.
     let actual_names: Vec<&str> = ontology
-        .edge_columns
+        .edge_columns()
         .iter()
         .map(|c| c.name.as_str())
         .collect();
     let expected: &[&str] = crate::constants::EDGE_RESERVED_COLUMNS;
     if actual_names != expected {
         return Err(OntologyError::Validation(format!(
-            "edge_columns names {:?} do not match EDGE_RESERVED_COLUMNS {:?}",
+            "default edge table columns {:?} do not match EDGE_RESERVED_COLUMNS {:?}",
             actual_names, expected
         )));
     }
@@ -142,6 +202,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 node_name.clone(),
                 &ontology.default_entity_sort_key,
                 &etl_settings,
+                &ontology.internal_column_prefix,
             )?;
 
             if !entity.destination_table.starts_with(&ontology.table_prefix) {
@@ -171,7 +232,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         let content = reader.read(edge_path)?;
         let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
-        let entities = edge_def.to_entities(edge_name.clone());
+        let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
 
         for entity in &entities {
             if !ontology.nodes.contains_key(&entity.source_kind) {
@@ -186,8 +247,22 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     edge_name, entity.target_kind
                 )));
             }
+            if !ontology
+                .edge_table_configs
+                .contains_key(&entity.destination_table)
+            {
+                return Err(OntologyError::Validation(format!(
+                    "edge '{}' references unknown edge table '{}'",
+                    edge_name, entity.destination_table
+                )));
+            }
         }
 
+        if ontology.edges.contains_key(edge_name) {
+            return Err(OntologyError::Validation(format!(
+                "duplicate edge definition: '{edge_name}'"
+            )));
+        }
         ontology.edges.insert(edge_name.clone(), entities);
 
         if let Some(desc) = &edge_def.description {
@@ -203,5 +278,146 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
+    // Resolve skip_security_filter_for_entities → physical table names.
+    for entity_name in &schema.settings.skip_security_filter_for_entities {
+        let node = ontology.nodes.get(entity_name).ok_or_else(|| {
+            OntologyError::Validation(format!(
+                "skip_security_filter_for_entities: unknown entity '{entity_name}'"
+            ))
+        })?;
+        ontology
+            .skip_security_filter_for_tables
+            .push(node.destination_table.clone());
+    }
+
+    // Validate and store local_db entity settings.
+    if let Some(local_db) = schema.settings.local_db {
+        for entry in local_db.entities {
+            let node = ontology.nodes.get(&entry.name).ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "local_db.entities: unknown entity '{}'",
+                    entry.name
+                ))
+            })?;
+
+            // Validate exclude_properties reference actual fields.
+            let field_names: std::collections::HashSet<&str> =
+                node.fields.iter().map(|f| f.name.as_str()).collect();
+            for prop in &entry.exclude_properties {
+                if !field_names.contains(prop.as_str()) {
+                    return Err(OntologyError::Validation(format!(
+                        "local_db.entities: exclude_properties entry '{}' \
+                         is not a declared property of '{}'",
+                        prop, entry.name
+                    )));
+                }
+            }
+
+            ontology
+                .local_entities
+                .insert(entry.name, entry.exclude_properties);
+        }
+
+        if let Some(edge_table) = local_db.edge_table {
+            // Validate no duplicate column names.
+            let mut seen = std::collections::HashSet::new();
+            for col in &edge_table.columns {
+                if !seen.insert(&col.name) {
+                    return Err(OntologyError::Validation(format!(
+                        "local_db.edge_table: duplicate column name '{}'",
+                        col.name
+                    )));
+                }
+            }
+
+            ontology.local_edge_table_name = Some(edge_table.name);
+            ontology.local_edge_columns = edge_table
+                .columns
+                .into_iter()
+                .map(|c| EdgeColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                })
+                .collect();
+        }
+    }
+
+    // Load auxiliary tables.
+    ontology.auxiliary_tables = schema
+        .settings
+        .auxiliary_tables
+        .into_iter()
+        .map(|t| crate::entities::AuxiliaryTable {
+            name: t.name,
+            columns: t
+                .columns
+                .into_iter()
+                .map(|c| crate::entities::AuxiliaryColumn {
+                    name: c.name,
+                    data_type: c.data_type,
+                    nullable: c.nullable,
+                    codec: c.codec,
+                    default: c.default,
+                })
+                .collect(),
+            order_by: t.order_by,
+            version_only_engine: t.version_only_engine,
+            version_type: t.version_type,
+            projections: t
+                .projections
+                .into_iter()
+                .map(node::convert_storage_projection)
+                .collect(),
+        })
+        .collect();
+
+    // Validate storage columns match declared properties.
+    validate_storage_columns(&ontology)?;
+
     Ok(ontology)
+}
+
+/// Checks that every node's storage columns correspond 1:1 with its
+/// non-virtual properties. Catches drift between the logical schema
+/// (properties) and physical schema (storage).
+fn validate_storage_columns(ontology: &crate::Ontology) -> Result<(), OntologyError> {
+    for node in ontology.nodes() {
+        if node.storage.columns.is_empty() {
+            continue;
+        }
+
+        let property_names: Vec<&str> = node
+            .fields
+            .iter()
+            .filter(|f| !f.is_virtual())
+            .map(|f| f.name.as_str())
+            .collect();
+
+        let storage_names: Vec<String> = node
+            .storage
+            .columns
+            .iter()
+            .map(|c| c.name.trim_matches('`').to_string())
+            .collect();
+
+        for storage_col in &storage_names {
+            if !property_names.contains(&storage_col.as_str()) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: storage column '{}' has no matching property",
+                    node.name, storage_col
+                )));
+            }
+        }
+
+        for prop in &property_names {
+            if !storage_names.iter().any(|s| s == prop) {
+                return Err(OntologyError::Validation(format!(
+                    "{}: property '{}' has no matching storage column",
+                    node.name, prop
+                )));
+            }
+        }
+    }
+
+    Ok(())
 }
