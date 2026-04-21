@@ -319,6 +319,10 @@ description = "Validate ontology YAML files against JSON schema"
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
 
+[tasks."schema:generate:ddl"]
+run = "cargo run --bin orbit -- debug ddl 2>/dev/null > config/graph.sql"
+description = "Regenerate config/graph.sql from ontology"
+
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
 description = "Run markdownlint on all markdown files"
