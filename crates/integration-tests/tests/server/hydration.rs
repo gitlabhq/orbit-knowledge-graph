@@ -82,11 +82,12 @@ async fn setup_test_data(ctx: &TestContext) {
     ))
     .await;
 
+    let ontology = load_ontology();
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 5001, 'File', 'DEFINES', 6001, 'Definition'),
          ('1/100/1000/', 5002, 'File', 'DEFINES', 6002, 'Definition')",
-        t("gl_code_edge")
+        t(ontology.edge_table_for_relationship("DEFINES"))
     ))
     .await;
 
