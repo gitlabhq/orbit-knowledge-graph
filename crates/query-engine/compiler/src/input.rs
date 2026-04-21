@@ -115,6 +115,16 @@ impl Default for CompilerMetadata {
 }
 
 impl CompilerMetadata {
+    /// Collapse all edge table routing to a single table.
+    /// Used by the local/DuckDB pipeline where only one edge table exists.
+    pub fn collapse_to_single_edge_table(&mut self, table: &str) {
+        self.edge_tables = HashSet::from([table.to_string()]);
+        self.default_edge_table = table.to_string();
+        for v in self.edge_table_for_rel.values_mut() {
+            *v = table.to_string();
+        }
+    }
+
     /// Resolve the edge table(s) for a relationship's type list.
     ///
     /// Returns a deduplicated list of physical tables that need to be scanned.

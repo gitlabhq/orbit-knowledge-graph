@@ -680,6 +680,18 @@ impl Ontology {
         self.edge_table_configs.contains_key(table)
     }
 
+    /// Collapse all edge routing to a single table. Used by the local/DuckDB
+    /// pipeline where only one edge table exists.
+    pub fn collapse_edge_tables(&mut self, table: &str) {
+        let table = table.to_string();
+        self.default_edge_table = table.clone();
+        for variants in self.edges.values_mut() {
+            for edge in variants {
+                edge.destination_table = table.clone();
+            }
+        }
+    }
+
     /// Returns the destination table for a given relationship kind.
     ///
     /// Uses the first variant's `destination_table`. This is correct because
