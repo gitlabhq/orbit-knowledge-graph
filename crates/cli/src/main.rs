@@ -227,6 +227,12 @@ enum DebugCommands {
         #[arg(long, short)]
         diff: Option<PathBuf>,
     },
+    /// Generate DuckDB DDL from the ontology (local graph tables + manifest)
+    DdlLocal {
+        /// Path to ontology directory (default: embedded)
+        #[arg(long, short)]
+        ontology: Option<PathBuf>,
+    },
 }
 
 #[tokio::main]
@@ -294,6 +300,18 @@ async fn main() -> Result<()> {
                 prefix,
                 diff,
             } => run_ddl(ontology, prefix, diff),
+            DebugCommands::DdlLocal { ontology } => {
+                let ont = match ontology {
+                    Some(path) => {
+                        Ontology::load_from_dir(&path).context("failed to load ontology")?
+                    }
+                    None => {
+                        Ontology::load_embedded().context("failed to load embedded ontology")?
+                    }
+                };
+                print!("{}", generate_local_ddl(&ont));
+                Ok(())
+            }
         },
     }
 }
