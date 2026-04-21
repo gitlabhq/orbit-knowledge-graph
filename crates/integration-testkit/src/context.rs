@@ -334,7 +334,13 @@ impl TestContext {
     }
 
     async fn create_template_db(url: &str, schema_sqls: &[&str]) {
-        let admin = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        let admin = ArrowClickHouseClient::new(
+            url,
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
+        );
         admin
             .execute(&format!(
                 "CREATE DATABASE IF NOT EXISTS `{TEMPLATE_DATABASE}`"
@@ -350,7 +356,13 @@ impl TestContext {
     /// in a single internal operation per table without parsing the full
     /// CREATE statement.
     async fn clone_tables_from_template(url: &str, target: &str) {
-        let admin = ArrowClickHouseClient::new(url, "default", TEST_USERNAME, Some(TEST_PASSWORD));
+        let admin = ArrowClickHouseClient::new(
+            url,
+            "default",
+            TEST_USERNAME,
+            Some(TEST_PASSWORD),
+            &std::collections::HashMap::new(),
+        );
 
         let batches = admin
             .query_arrow(&format!(
