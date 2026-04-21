@@ -364,6 +364,12 @@ where
         let rules = &lang_ctx.rules;
         let t0 = std::time::Instant::now();
 
+        // Spawn sentinel watchdog if per_file_timeout is configured
+        let sentinel = rules
+            .settings
+            .per_file_timeout
+            .map(|timeout| crate::v2::sentinel::spawn_sentinel(timeout));
+
         eprintln!(
             "[v2-sp] {file_count} files, {} threads",
             rayon::current_num_threads()
@@ -505,13 +511,14 @@ where
                     }
                 };
 
+                let guard = sentinel.as_ref().map(|(handle, _)| handle.file_start(path));
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
                     &lang_ctx,
-                    None,
+                    guard,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
@@ -600,13 +607,16 @@ where
                 let phase3_results: Vec<_> = all_failed
                     .par_iter()
                     .map(|(info, failed_chains)| {
+                        let guard = sentinel
+                            .as_ref()
+                            .map(|(handle, _)| handle.file_start("phase3"));
                         let mut resolver = crate::v2::linker::FileResolver::new(
                             &graph,
                             info.file_node,
                             &info.def_nodes,
                             &info.import_nodes,
                             &lang_ctx,
-                            None,
+                            guard,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {
@@ -632,6 +642,12 @@ where
                     eprintln!("[v2-sp] phase 3: {phase3_edges} cross-file edges resolved");
                 }
             }
+        }
+
+        // Shut down sentinel
+        if let Some((handle, join)) = sentinel {
+            handle.shutdown();
+            let _ = join.join();
         }
 
         eprintln!(
