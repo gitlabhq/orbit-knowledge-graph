@@ -110,7 +110,6 @@ async fn main() -> anyhow::Result<()> {
         Mode::Webserver => {
             config.schema.validate()?;
             let graph = config.graph.build_client();
-            schema::version::init(&graph).await?;
 
             let embedded = *SCHEMA_VERSION;
             let prefix = schema::version::table_prefix(embedded);

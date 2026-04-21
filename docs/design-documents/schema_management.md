@@ -33,9 +33,10 @@ Version 0 is the initial (V0) schema — the unversioned table layout used since
 
 ### `gkg_schema_version` control table
 
-All service modes (Indexer, Webserver, DispatchIndexing) create this table on startup if it does
-not exist. On a fresh install, the Indexer also creates all graph tables from the ontology DDL
-generator and records the embedded version as active:
+The Indexer and DispatchIndexing modes create this table on startup if it does not exist;
+the Webserver only reads from it (it runs as a read-only ClickHouse user). On a fresh install,
+the Indexer also creates all graph tables from the ontology DDL generator and records the
+embedded version as active:
 
 ```sql
 CREATE TABLE IF NOT EXISTS gkg_schema_version (
@@ -78,7 +79,6 @@ upgrade is the only way to switch to a new prefix. The active version recorded i
 
 ```text
 startup
-  → schema_version::init()                         # creates gkg_schema_version if absent
   → schema_version::table_prefix(SCHEMA_VERSION)   # "" for v0, "v1_" for v1, …
   → GrpcServer::new(…, table_prefix)
   → QueryPipelineService::new(…, table_prefix)
