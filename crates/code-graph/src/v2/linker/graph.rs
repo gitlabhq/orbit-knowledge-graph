@@ -822,10 +822,22 @@ impl CodeGraph {
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    compute_id(&[&pid, branch, "def", file_path, self.strings.get(def.fqn)])
+                    let range = format!("{}:{}", def.range.byte_offset.0, def.range.byte_offset.1);
+                    compute_id(&[
+                        &pid,
+                        branch,
+                        "def",
+                        file_path,
+                        self.strings.get(def.fqn),
+                        &range,
+                    ])
                 }
                 GraphNode::Import { file_path, id } => {
                     let import = &self.imports[id.0 as usize];
+                    let range = format!(
+                        "{}:{}",
+                        import.range.byte_offset.0, import.range.byte_offset.1
+                    );
                     compute_id(&[
                         &pid,
                         branch,
@@ -833,6 +845,7 @@ impl CodeGraph {
                         file_path,
                         self.strings.get(import.path),
                         import.name.map(|id| self.strings.get(id)).unwrap_or("*"),
+                        &range,
                     ])
                 }
             };
