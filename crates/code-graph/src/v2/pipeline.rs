@@ -381,14 +381,9 @@ where
             })
             .collect();
 
-        // ── Phase 1: parallel parse_defs_only + graph build ─────
-        let graph = Mutex::new(
-            CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone()),
-        );
+        // ── Phase 1: parallel parse, sequential graph build ─────
         let pb = progress_bar(file_count as u64, "parse + graph");
-        let errors = Mutex::new(Vec::new());
-        let total_defs = std::sync::atomic::AtomicUsize::new(0);
-        let total_imports = std::sync::atomic::AtomicUsize::new(0);
+        let mut all_errors: Vec<PipelineError> = Vec::new();
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
@@ -396,10 +391,20 @@ where
             import_nodes: Vec<petgraph::graph::NodeIndex>,
         }
 
-        let file_infos: Vec<Option<FileInfo>> = files
+        // Phase 1a: parse all files in parallel (no locks, no graph)
+        use crate::v2::dsl::engine::ParsedDefs;
+        struct ParsedFile {
+            path_idx: usize,
+            result: ParsedDefs,
+            ext: String,
+            file_size: u64,
+        }
+
+        let parsed: Vec<Option<ParsedFile>> = files
             .par_iter()
             .zip(sources.par_iter())
-            .map(|(path, source_opt)| {
+            .enumerate()
+            .map(|(idx, (path, source_opt))| {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
@@ -407,70 +412,72 @@ where
                 let source = match source_opt {
                     Some(s) => s,
                     None => {
-                        errors.lock().unwrap().push(PipelineError {
-                            file_path: path.clone(),
-                            error: "Read error".to_string(),
-                        });
                         pb.inc(1);
                         return None;
                     }
                 };
 
-                let result = match spec.parse_defs_only(&source, path, language) {
+                let result = match spec.parse_defs_only(source, path, language) {
                     Ok(r) => r,
-                    Err(e) => {
-                        errors.lock().unwrap().push(PipelineError {
-                            file_path: path.clone(),
-                            error: format!("Parse error: {e}"),
-                        });
+                    Err(_) => {
                         pb.inc(1);
                         return None;
                     }
                 };
 
-                total_defs.fetch_add(
-                    result.definitions.len(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
-
-                let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+                let ext = path
+                    .rsplit_once('.')
+                    .map(|(_, e)| e)
+                    .unwrap_or("")
+                    .to_string();
                 let file_size = source.len() as u64;
-
-                let (file_node, def_nodes, import_nodes) = {
-                    let mut g = graph.lock().unwrap();
-                    g.add_file(
-                        path,
-                        ext,
-                        language,
-                        file_size,
-                        &result.definitions,
-                        &result.imports,
-                    )
-                };
-
                 pb.inc(1);
-                Some(FileInfo {
-                    file_node,
-                    def_nodes,
-                    import_nodes,
+                Some(ParsedFile {
+                    path_idx: idx,
+                    result,
+                    ext,
+                    file_size,
                 })
             })
             .collect();
 
+        // Phase 1b: add to graph sequentially (no lock contention)
+        let mut graph =
+            CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
+        let mut total_defs = 0usize;
+        let mut total_imports = 0usize;
+        let mut file_infos: Vec<Option<FileInfo>> = (0..file_count).map(|_| None).collect();
+
+        for parsed_file in parsed.into_iter().flatten() {
+            let path = &files[parsed_file.path_idx];
+            total_defs += parsed_file.result.definitions.len();
+            total_imports += parsed_file.result.imports.len();
+
+            let (file_node, def_nodes, import_nodes) = graph.add_file(
+                path,
+                &parsed_file.ext,
+                language,
+                parsed_file.file_size,
+                &parsed_file.result.definitions,
+                &parsed_file.result.imports,
+            );
+
+            file_infos[parsed_file.path_idx] = Some(FileInfo {
+                file_node,
+                def_nodes,
+                import_nodes,
+            });
+        }
+
         pb.finish_with_message(format!(
-            "{} defs, {} imports in {:.2?}",
-            total_defs.load(std::sync::atomic::Ordering::Relaxed),
-            total_imports.load(std::sync::atomic::Ordering::Relaxed),
+            "{total_defs} defs, {total_imports} imports in {:.2?}",
             t0.elapsed()
         ));
 
-        let errors = errors.into_inner().unwrap();
-        if !errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
-            return Err(errors);
+        if !all_errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
+            return Err(all_errors);
         }
 
-        let mut graph = graph.into_inner().unwrap();
         graph.finalize(tracer);
 
         // ── Phase 2: parallel parse_full + resolve (callback) ──
