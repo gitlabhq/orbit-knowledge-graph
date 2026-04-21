@@ -184,7 +184,7 @@ ddl-freshness-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - bash ./scripts/check-ddl-freshness.sh "cargo run --bin orbit --"
+    - bash ./scripts/check-ddl-freshness.sh
 
 schema-version-check:
   stage: lint
