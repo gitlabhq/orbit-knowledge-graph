@@ -362,8 +362,8 @@ async fn count_active_edges(
     project_id: i64,
     relationship_kind: &str,
 ) -> usize {
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    let edge_table = t(ontology.edge_table_for_relationship(relationship_kind));
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship(relationship_kind);
     let result = clickhouse
         .query(&format!(
             "SELECT source_id FROM {edge_table} FINAL \

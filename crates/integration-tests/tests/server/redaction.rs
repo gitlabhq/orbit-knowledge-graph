@@ -32,7 +32,10 @@ fn table_edges() -> String {
 
 fn edge_table_for(relationship: &str) -> String {
     let ontology = load_ontology();
-    t(ontology.edge_table_for_relationship(relationship))
+    // load_ontology() already applies the schema version prefix.
+    ontology
+        .edge_table_for_relationship(relationship)
+        .to_string()
 }
 
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
