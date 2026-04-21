@@ -1,50 +1,19 @@
 use std::sync::Arc;
 
-use treesitter_visit::Axis;
-use treesitter_visit::Match;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
-
+use super::types::{LanguageSpec, Rule};
+use super::utils::{
+    canonical_range, find_first_ident, infer_import_binding_kind, resolve_type_name,
+};
+use crate::utils::node_to_range;
 use crate::v2::config::Language;
 use crate::v2::trace::{TraceEvent, Tracer};
-
-/// Resolve a bare or dotted type name to its FQN using import_map,
-/// separator-based splitting, and module_prefix fallback.
-///
-/// Resolution order:
-/// 1. Direct import_map lookup for the full name
-/// 2. Split on separator, resolve first segment via imports, append rest
-/// 3. Prepend module_prefix (same-package/module fallback)
-/// 4. Return bare name unchanged
-fn resolve_type_name(
-    name: &str,
-    import_map: &rustc_hash::FxHashMap<String, String>,
-    module_prefix: Option<&str>,
-    sep: &str,
-) -> String {
-    if let Some(fqn) = import_map.get(name) {
-        return fqn.clone();
-    }
-    if name.contains(sep)
-        && let Some((first, rest)) = name.split_once(sep)
-        && let Some(fqn) = import_map.get(first)
-    {
-        return format!("{fqn}{sep}{rest}");
-    }
-    if let Some(prefix) = module_prefix {
-        return format!("{prefix}{sep}{name}");
-    }
-    name.to_string()
-}
-
 use crate::v2::types::{
     CanonicalDefinition, CanonicalImport, DefKind, DefinitionMetadata, ExpressionStep, Fqn,
     ImportBindingKind, ImportMode,
 };
-
-use crate::utils::node_to_range;
-
-use super::types::{LanguageSpec, Rule};
+use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::{Axis, Match};
+use treesitter_visit::{Node, SupportLang};
 
 /// Result of a defs-only parse. Just definitions and imports.
 pub struct ParsedDefs {
@@ -59,20 +28,6 @@ struct ScopeMatch {
     range: crate::utils::Range,
     creates_scope: bool,
     metadata: Option<Box<DefinitionMetadata>>,
-}
-
-fn infer_import_binding_kind(
-    name: Option<&str>,
-    alias: Option<&str>,
-    wildcard: bool,
-) -> ImportBindingKind {
-    if wildcard {
-        ImportBindingKind::Named
-    } else if name.is_none() && alias.is_none() {
-        ImportBindingKind::SideEffect
-    } else {
-        ImportBindingKind::Named
-    }
 }
 
 impl LanguageSpec {
@@ -1603,22 +1558,6 @@ impl<'a> WalkFullState<'a> {
             tracer,
         }
     }
-}
-
-fn canonical_range(r: &crate::utils::Range) -> crate::v2::types::Range {
-    crate::v2::types::Range::new(
-        crate::v2::types::Position::new(r.start.line, r.start.column),
-        crate::v2::types::Position::new(r.end.line, r.end.column),
-        r.byte_offset,
-    )
-}
-
-/// Find the first identifier node in an expression tree (DFS).
-/// Uses the language's `ident_kinds` from chain config to detect identifiers
-/// generically across languages.
-fn find_first_ident(node: &Node<StrDoc<SupportLang>>, ident_kinds: &[&str]) -> Option<String> {
-    node.find_descendant(|n| n.is_named() && ident_kinds.contains(&n.kind().as_ref()))
-        .map(|n| n.text().to_string())
 }
 
 #[cfg(test)]

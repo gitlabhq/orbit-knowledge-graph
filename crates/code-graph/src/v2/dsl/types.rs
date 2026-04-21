@@ -11,9 +11,7 @@ use super::extractors::MetadataRule;
 /// Signature for import path resolution hooks.
 /// Called with (raw_path, module_scope, separator). Returns resolved path or None.
 pub type ImportPathResolver = fn(&str, &str, &str) -> Option<String>;
-
 type N<'a> = Node<'a, StrDoc<SupportLang>>;
-
 pub type LabelFn = fn(&N<'_>) -> &'static str;
 
 /// Shared behavior for scope and reference rules.
