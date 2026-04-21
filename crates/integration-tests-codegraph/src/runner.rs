@@ -2,6 +2,8 @@ use std::collections::HashMap;
 use std::fmt::Write;
 
 use arrow_56::compute::concat_batches;
+use std::sync::Arc;
+
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
@@ -140,13 +142,13 @@ pub async fn run_yaml_suite(yaml: &str) {
         None
     };
 
-    let datasets = match suite.pipeline.as_deref() {
+    let (datasets, pipeline_ctx) = match suite.pipeline.as_deref() {
         None | Some("generic") => {
-            let pipeline = Pipeline::new(PipelineConfig::default());
+            let config = PipelineConfig::default();
             let result = if let Some(pool) = &pool {
-                pool.install(|| pipeline.run_with_tracer(tmp.path(), &tracer))
+                pool.install(|| Pipeline::run_with_tracer(tmp.path(), config, tracer))
             } else {
-                pipeline.run_with_tracer(tmp.path(), &tracer)
+                Pipeline::run_with_tracer(tmp.path(), config, tracer)
             };
             assert!(
                 result.errors.is_empty(),
@@ -154,11 +156,12 @@ pub async fn run_yaml_suite(yaml: &str) {
                 result.errors
             );
 
-            let ctx = RowContext::empty();
+            let pctx = result.ctx.clone();
+            let row_ctx = RowContext::empty();
             let mut datasets = HashMap::new();
             for graph in &result.graphs {
-                let graph_datasets =
-                    to_lance_datasets(graph, &ctx).expect("Failed to convert graph to datasets");
+                let graph_datasets = to_lance_datasets(graph, &row_ctx)
+                    .expect("Failed to convert graph to datasets");
                 extend_datasets(&mut datasets, graph_datasets);
             }
             for (table, batch) in &result.batches {
@@ -167,7 +170,7 @@ pub async fn run_yaml_suite(yaml: &str) {
                     HashMap::from([(table.clone(), arrow58_to_arrow56(batch))]),
                 );
             }
-            datasets
+            (datasets, pctx)
         }
         Some(tag) => {
             let files: Vec<String> = suite
@@ -175,21 +178,20 @@ pub async fn run_yaml_suite(yaml: &str) {
                 .iter()
                 .map(|f| format!("{root}/{}", f.path))
                 .collect();
-            let config = PipelineConfig::default();
-            let ctx = PipelineContext {
-                config: &config,
-                tracer: &tracer,
-                root_path: &root,
-            };
+            let ctx = Arc::new(PipelineContext {
+                config: PipelineConfig::default(),
+                tracer,
+                root_path: root.clone(),
+            });
             let output = dispatch_by_tag(tag, &files, &ctx)
                 .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                 .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
-            output_to_datasets(output)
+            (output_to_datasets(output), ctx)
         }
     };
 
     // Dump trace once, after all execution is complete
-    tracer.dump(&suite.name);
+    pipeline_ctx.tracer.dump(&suite.name);
 
     let config = make_graph_config().expect("Failed to build graph config");
 

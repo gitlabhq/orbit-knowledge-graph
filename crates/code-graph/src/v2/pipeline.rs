@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::CodeGraph;
+use crate::v2::trace::Tracer;
 
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
 /// Set `cancel()` from any thread to request pipeline shutdown.
@@ -80,13 +81,16 @@ pub enum PipelineOutput {
 /// Immutable context shared across the entire pipeline run.
 /// Bundles config, tracer, root path, and cancellation — everything
 /// that doesn't change per-language or per-file.
-pub struct PipelineContext<'a> {
-    pub config: &'a PipelineConfig,
-    pub tracer: &'a crate::v2::trace::Tracer,
-    pub root_path: &'a str,
+///
+/// Owned so it can be stored in `Arc` and shared across threads
+/// and into structs like `CodeGraph`.
+pub struct PipelineContext {
+    pub config: PipelineConfig,
+    pub tracer: crate::v2::trace::Tracer,
+    pub root_path: String,
 }
 
-impl PipelineContext<'_> {
+impl PipelineContext {
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.config.cancel.is_cancelled()
@@ -104,7 +108,7 @@ impl PipelineContext<'_> {
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
-        ctx: &PipelineContext<'_>,
+        ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
@@ -129,6 +133,8 @@ pub struct PipelineResult {
     pub batches: Vec<(String, arrow::record_batch::RecordBatch)>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
+    /// The pipeline context, including the tracer with accumulated events.
+    pub ctx: Arc<PipelineContext>,
 }
 
 /// Aggregate stats from the pipeline run.
@@ -152,29 +158,19 @@ pub struct PipelineError {
     pub error: String,
 }
 
-pub struct Pipeline {
-    config: PipelineConfig,
-}
+pub struct Pipeline;
 
 impl Pipeline {
-    pub fn new(config: PipelineConfig) -> Self {
-        Self { config }
+    pub fn run(root: &Path, config: PipelineConfig) -> PipelineResult {
+        Self::run_with_tracer(root, config, Tracer::new(false))
     }
 
-    pub fn run(&self, root: &Path) -> PipelineResult {
-        self.run_with_tracer(root, crate::v2::trace::leaked_noop_tracer())
-    }
-
-    pub fn run_with_tracer(
-        &self,
-        root: &Path,
-        tracer: &crate::v2::trace::Tracer,
-    ) -> PipelineResult {
+    pub fn run_with_tracer(root: &Path, config: PipelineConfig, tracer: Tracer) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
         let pb_discover = spinner("Discovering files...");
-        let files_by_language = self.walk_and_group(root);
+        let files_by_language = Self::walk_and_group(root, &config);
         let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_language
             .iter()
@@ -185,11 +181,11 @@ impl Pipeline {
             lang_summary.join(", ")
         ));
 
-        let ctx = PipelineContext {
-            config: &self.config,
+        let ctx = Arc::new(PipelineContext {
+            config,
             tracer,
-            root_path: &root_str,
-        };
+            root_path: root_str,
+        });
 
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
@@ -257,14 +253,15 @@ impl Pipeline {
                 edges_count,
             },
             errors: all_errors,
+            ctx,
         }
     }
 
-    fn walk_and_group(&self, root: &Path) -> FxHashMap<Language, Vec<FileInput>> {
+    fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
         let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
 
         let walker = WalkBuilder::new(root)
-            .git_ignore(self.config.respect_gitignore)
+            .git_ignore(config.respect_gitignore)
             .hidden(true)
             .build();
 
@@ -276,7 +273,7 @@ impl Pipeline {
             let path = entry.path();
 
             if let Ok(metadata) = path.metadata()
-                && metadata.len() > self.config.max_file_size
+                && metadata.len() > config.max_file_size
             {
                 continue;
             }
@@ -322,14 +319,14 @@ where
 {
     fn process_files(
         files: &[FileInput],
-        ctx: &PipelineContext<'_>,
+        ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
         let rules = R::rules();
         let language = P::language();
         let file_count = files.len();
-        let root_path = ctx.root_path;
-        let tracer = ctx.tracer;
+        let root_path = ctx.root_path.as_str();
+        let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
         eprintln!(
@@ -622,13 +619,11 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let config = PipelineConfig::default();
-        let tracer = crate::v2::trace::Tracer::new(false);
-        let ctx = PipelineContext {
-            config: &config,
-            tracer: &tracer,
-            root_path: "/",
-        };
+        let ctx = Arc::new(PipelineContext {
+            config: PipelineConfig::default(),
+            tracer: crate::v2::trace::Tracer::new(false),
+            root_path: "/".to_string(),
+        });
         let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));

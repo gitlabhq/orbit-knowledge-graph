@@ -15,6 +15,8 @@ use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
 use crate::v2::langs::generic::kotlin::{KotlinDsl, KotlinRules};
 use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
+use std::sync::Arc;
+
 use crate::v2::pipeline::{
     FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
 };
@@ -43,7 +45,7 @@ macro_rules! register_v2_pipelines {
         pub fn dispatch_language(
             language: Language,
             files: &[FileInput],
-            ctx: &PipelineContext<'_>,
+            ctx: &Arc<PipelineContext>,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             #[allow(unreachable_patterns)]
             Some(match language {
@@ -57,7 +59,7 @@ macro_rules! register_v2_pipelines {
         pub fn dispatch_by_tag(
             tag: &str,
             files: &[FileInput],
-            ctx: &PipelineContext<'_>,
+            ctx: &Arc<PipelineContext>,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match tag {
                 $($tag => <$($pipeline)*>::process_files(files, ctx),)*
@@ -91,43 +93,29 @@ mod tests {
     use super::*;
     use crate::v2::pipeline::PipelineConfig;
 
-    fn test_ctx() -> (PipelineConfig, crate::v2::trace::Tracer) {
-        (
-            PipelineConfig::default(),
-            crate::v2::trace::Tracer::new(false),
-        )
+    fn test_ctx() -> Arc<PipelineContext> {
+        Arc::new(PipelineContext {
+            config: PipelineConfig::default(),
+            tracer: crate::v2::trace::Tracer::new(false),
+            root_path: "/".to_string(),
+        })
     }
 
     #[test]
     fn javascript_pipeline_is_registered() {
-        let (config, tracer) = test_ctx();
-        let ctx = PipelineContext {
-            config: &config,
-            tracer: &tracer,
-            root_path: "/",
-        };
+        let ctx = test_ctx();
         assert!(dispatch_language(Language::JavaScript, &[], &ctx).is_some());
     }
 
     #[test]
     fn typescript_pipeline_is_registered() {
-        let (config, tracer) = test_ctx();
-        let ctx = PipelineContext {
-            config: &config,
-            tracer: &tracer,
-            root_path: "/",
-        };
+        let ctx = test_ctx();
         assert!(dispatch_language(Language::TypeScript, &[], &ctx).is_some());
     }
 
     #[test]
     fn js_pipeline_tag_is_registered() {
-        let (config, tracer) = test_ctx();
-        let ctx = PipelineContext {
-            config: &config,
-            tracer: &tracer,
-            root_path: "/",
-        };
+        let ctx = test_ctx();
         assert!(dispatch_by_tag("js", &[], &ctx).is_some());
     }
 }

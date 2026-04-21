@@ -20,9 +20,9 @@ pub struct RubyPipeline;
 impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
-        ctx: &PipelineContext<'_>,
+        ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        let root_path = ctx.root_path;
+        let root_path = ctx.root_path.as_str();
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();
         let mut edges: Vec<EdgeEntry> = Vec::new();
