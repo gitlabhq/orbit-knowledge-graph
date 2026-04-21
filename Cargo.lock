@@ -2205,6 +2205,7 @@ dependencies = [
  "cargo_metadata",
  "chrono",
  "criterion",
+ "crossbeam-channel",
  "either",
  "futures",
  "gitalisk-core",

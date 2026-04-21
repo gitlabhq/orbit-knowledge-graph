@@ -74,6 +74,7 @@ swc_atoms = "9.0.0"
 oxc = { workspace = true }
 oxc_linter = { workspace = true }
 oxc_resolver = { workspace = true }
+crossbeam-channel = "0.5"
 
 [dev-dependencies]
 gitalisk-core = { workspace = true }

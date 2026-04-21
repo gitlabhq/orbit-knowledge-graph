@@ -4,6 +4,7 @@
 //! No intermediate collections — the caller drives iteration.
 
 use crate::v2::pipeline::LanguageContext;
+use crate::v2::sentinel::{FileGuard, Killed};
 use crate::v2::trace::{TraceEvent, Tracer};
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
@@ -27,7 +28,9 @@ pub struct RefData<'a> {
 /// Per-file resolver with caches. Create once per file, call `resolve()` per ref.
 pub struct FileResolver<'a> {
     ctx: ResolveCtx<'a>,
-    deadline: Option<std::time::Instant>,
+    /// Sentinel guard — sets kill flag on timeout, sends FileDone on drop.
+    /// None when running without a sentinel (tests, custom pipelines).
+    _guard: Option<FileGuard>,
     /// Edges from definitions to external imported symbols. Stored
     /// separately so they don't interfere with the failed_chains check.
     import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
@@ -40,16 +43,23 @@ impl<'a> FileResolver<'a> {
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
         lang_ctx: &'a Arc<LanguageContext>,
+        guard: Option<FileGuard>,
     ) -> Self {
-        let ctx = ResolveCtx::new(graph, file_node, def_nodes, import_nodes, lang_ctx);
-        let deadline = lang_ctx
-            .rules
-            .settings
-            .per_file_timeout
-            .map(|d| std::time::Instant::now() + d);
+        let kill_flag = guard
+            .as_ref()
+            .map(|g| g.kill_flag())
+            .unwrap_or_else(|| Arc::new(std::sync::atomic::AtomicBool::new(false)));
+        let ctx = ResolveCtx::new(
+            graph,
+            file_node,
+            def_nodes,
+            import_nodes,
+            lang_ctx,
+            kill_flag,
+        );
         Self {
             ctx,
-            deadline,
+            _guard: guard,
             import_edges: Vec::new(),
         }
     }
@@ -76,17 +86,15 @@ impl<'a> FileResolver<'a> {
             rules,
             settings,
             tracer,
+            kill_flag: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             scratch: ScratchBuf::new(),
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
         };
-        let deadline = settings
-            .per_file_timeout
-            .map(|d| std::time::Instant::now() + d);
         Self {
             ctx,
-            deadline,
+            _guard: None,
             import_edges: Vec::new(),
         }
     }
@@ -113,6 +121,7 @@ impl<'a> FileResolver<'a> {
     }
 
     /// Resolve a single reference, returning (source, target, edge) triples.
+    /// Returns `Err(Killed)` if the sentinel has timed out this file.
     pub fn resolve(
         &mut self,
         name: &str,
@@ -120,10 +129,8 @@ impl<'a> FileResolver<'a> {
         reaching: &[ParseValue],
         enclosing_def: Option<u32>,
         edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
-    ) {
-        if self.deadline.is_some_and(|d| std::time::Instant::now() > d) {
-            return;
-        }
+    ) -> Result<(), Killed> {
+        self.ctx.check_killed()?;
 
         let ref_data = RefData {
             name,
@@ -131,12 +138,12 @@ impl<'a> FileResolver<'a> {
             reaching,
             enclosing_def,
         };
-        let targets = self.ctx.resolve_single(&ref_data);
+        let targets = self.ctx.resolve_single(&ref_data)?;
         if targets.is_empty() {
             let mut imp_edges = Vec::new();
             self.emit_imported_symbol_edges(reaching, enclosing_def, &mut imp_edges);
             self.import_edges.extend(imp_edges);
-            return;
+            return Ok(());
         }
 
         let graph = self.ctx.graph;
@@ -168,6 +175,7 @@ impl<'a> FileResolver<'a> {
                 },
             ));
         }
+        Ok(())
     }
 
     /// Emit Definition → ImportedSymbol edges for external (unresolved) refs.
@@ -226,6 +234,7 @@ struct ResolveCtx<'a> {
     rules: &'a ResolutionRules,
     settings: &'a ResolveSettings,
     tracer: &'a Tracer,
+    kill_flag: Arc<std::sync::atomic::AtomicBool>,
     scratch: ScratchBuf,
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
@@ -239,6 +248,7 @@ impl<'a> ResolveCtx<'a> {
         def_nodes: &'a [NodeIndex],
         import_nodes: &'a [NodeIndex],
         lang_ctx: &'a Arc<LanguageContext>,
+        kill_flag: Arc<std::sync::atomic::AtomicBool>,
     ) -> Self {
         let rules = &*lang_ctx.rules;
         let settings = &rules.settings;
@@ -254,10 +264,22 @@ impl<'a> ResolveCtx<'a> {
             rules,
             settings,
             tracer,
+            kill_flag,
             scratch: ScratchBuf::new(),
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
+        }
+    }
+
+    /// Check if the sentinel has killed this file. Returns `Err(Killed)`
+    /// if so, allowing `?` propagation to unwind cleanly.
+    #[inline]
+    fn check_killed(&self) -> Result<(), Killed> {
+        if self.kill_flag.load(std::sync::atomic::Ordering::Relaxed) {
+            Err(Killed)
+        } else {
+            Ok(())
         }
     }
 
@@ -405,7 +427,7 @@ impl<'a> ResolveCtx<'a> {
 
     // ── Resolution methods (formerly free functions) ────────────
 
-    fn resolve_single(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+    fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
         self.tracer.event(TraceEvent::ResolveStart {
             name: r.name.to_string(),
             chain: format_chain(r.chain),
@@ -422,10 +444,11 @@ impl<'a> ResolveCtx<'a> {
             }),
         });
 
+        self.check_killed()?;
         let result = if r.chain.is_some() {
-            self.resolve_chain(r)
+            self.resolve_chain(r)?
         } else {
-            self.resolve_bare(r)
+            self.resolve_bare(r)?
         };
 
         let target_fqns: Vec<String> = result
@@ -443,12 +466,13 @@ impl<'a> ResolveCtx<'a> {
             targets: target_fqns,
         });
 
-        result
+        Ok(result)
     }
 
-    fn resolve_bare(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+    fn resolve_bare(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
+        self.check_killed()?;
         if r.reaching.is_empty() && !self.graph.indexes.by_name.contains(r.name) {
-            return vec![];
+            return Ok(vec![]);
         }
 
         for stage in &self.rules.bare_stages.clone() {
@@ -458,7 +482,7 @@ impl<'a> ResolveCtx<'a> {
                     if r.reaching.is_empty() {
                         vec![]
                     } else {
-                        self.resolve_from_reaching(r.reaching, r.name)
+                        self.resolve_from_reaching(r.reaching, r.name)?
                     }
                 }
                 ResolveStage::ImportStrategies => {
@@ -503,13 +527,18 @@ impl<'a> ResolveCtx<'a> {
                 let mut seen = rustc_hash::FxHashSet::default();
                 let mut result = result;
                 result.retain(|n| seen.insert(*n));
-                return result;
+                return Ok(result);
             }
         }
-        vec![]
+        Ok(vec![])
     }
 
-    fn resolve_from_reaching(&mut self, reaching: &[ParseValue], ref_name: &str) -> Vec<NodeIndex> {
+    fn resolve_from_reaching(
+        &mut self,
+        reaching: &[ParseValue],
+        ref_name: &str,
+    ) -> Result<Vec<NodeIndex>, Killed> {
+        self.check_killed()?;
         let mut result = Vec::new();
         for value in reaching {
             match value {
@@ -617,16 +646,17 @@ impl<'a> ResolveCtx<'a> {
                 ParseValue::Opaque => {}
             }
         }
-        result
+        Ok(result)
     }
 
-    fn resolve_chain(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+    fn resolve_chain(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
+        self.check_killed()?;
         let chain = r.chain.unwrap_or(&[]);
         if chain.is_empty() {
-            return vec![];
+            return Ok(vec![]);
         }
 
-        let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching);
+        let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching)?;
 
         self.tracer.event(TraceEvent::ResolveChainBase {
             step: format!("{:?}", chain[0]),
@@ -731,7 +761,7 @@ impl<'a> ResolveCtx<'a> {
             if is_last {
                 let mut seen = rustc_hash::FxHashSet::default();
                 found_nodes.retain(|n| seen.insert(*n));
-                return found_nodes;
+                return Ok(found_nodes);
             }
 
             {
@@ -744,15 +774,19 @@ impl<'a> ResolveCtx<'a> {
         self.chain_fallback(r, chain)
     }
 
-    fn chain_fallback(&mut self, r: &RefData<'_>, chain: &[ExpressionStep]) -> Vec<NodeIndex> {
+    fn chain_fallback(
+        &mut self,
+        r: &RefData<'_>,
+        chain: &[ExpressionStep],
+    ) -> Result<Vec<NodeIndex>, Killed> {
         if !self.settings.chain_fallback {
-            return vec![];
+            return Ok(vec![]);
         }
         let Some(last_name) = chain.last().and_then(|s| match s {
             ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
             _ => None,
         }) else {
-            return vec![];
+            return Ok(vec![]);
         };
         self.tracer.event(TraceEvent::ResolveChainFallback {
             name: last_name.to_string(),
@@ -770,7 +804,8 @@ impl<'a> ResolveCtx<'a> {
         &mut self,
         base_step: &ExpressionStep,
         reaching: &[ParseValue],
-    ) -> Vec<String> {
+    ) -> Result<Vec<String>, Killed> {
+        self.check_killed()?;
         match base_step {
             ExpressionStep::Ident(_) | ExpressionStep::Call(_) | ExpressionStep::This => {
                 let mut types = Vec::new();
@@ -879,7 +914,7 @@ impl<'a> ResolveCtx<'a> {
                         reaching: &[],
                         enclosing_def: None,
                     };
-                    let mut nodes = self.resolve_bare(&fallback);
+                    let mut nodes = self.resolve_bare(&fallback)?;
                     // GlobalName: last-resort lookup for chain bases only.
                     // Not in import_strategies to avoid O(candidates) scans
                     // on every bare identifier ref.
@@ -900,15 +935,15 @@ impl<'a> ResolveCtx<'a> {
                         }
                     }
                 }
-                types
+                Ok(types)
             }
-            ExpressionStep::Super => reaching
+            ExpressionStep::Super => Ok(reaching
                 .iter()
                 .filter_map(|v| match v {
                     ParseValue::Type(fqn) => Some(fqn.clone()),
                     _ => None,
                 })
-                .collect(),
+                .collect()),
             ExpressionStep::New(type_name) => {
                 let fqn_matches = self.graph.indexes.by_fqn.lookup(type_name, |idx| {
                     self.graph.graph[idx].def_id().is_some_and(|d| {
@@ -916,14 +951,14 @@ impl<'a> ResolveCtx<'a> {
                     })
                 });
                 if !fqn_matches.is_empty() {
-                    return vec![type_name.clone()];
+                    return Ok(vec![type_name.clone()]);
                 }
                 let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
                     self.graph.graph[idx].def_id().is_some_and(|d| {
                         self.graph.str(self.graph.defs[d.0 as usize].name) == *type_name
                     })
                 });
-                name_matches
+                Ok(name_matches
                     .iter()
                     .filter_map(|&idx| {
                         self.graph.graph[idx].def_id().map(|d| {
@@ -932,9 +967,9 @@ impl<'a> ResolveCtx<'a> {
                                 .to_string()
                         })
                     })
-                    .collect()
+                    .collect())
             }
-            _ => vec![],
+            _ => Ok(vec![]),
         }
     }
 

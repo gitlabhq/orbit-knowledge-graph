@@ -511,6 +511,7 @@ where
                     &info.def_nodes,
                     &info.import_nodes,
                     &lang_ctx,
+                    None,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
@@ -526,7 +527,12 @@ where
                             inferred_set = true;
                         }
                         let before = edges.len();
-                        resolver.resolve(name, chain, reaching, enclosing_def, &mut edges);
+                        if resolver
+                            .resolve(name, chain, reaching, enclosing_def, &mut edges)
+                            .is_err()
+                        {
+                            return; // file killed by sentinel
+                        }
                         // Store failed chain refs for Phase 3 re-resolution
                         if edges.len() == before && chain.is_some_and(|c| c.len() >= 2) {
                             failed_chains.push((
@@ -600,16 +606,16 @@ where
                             &info.def_nodes,
                             &info.import_nodes,
                             &lang_ctx,
+                            None,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {
-                            resolver.resolve(
-                                name,
-                                Some(chain),
-                                reaching,
-                                *enclosing_def,
-                                &mut edges,
-                            );
+                            if resolver
+                                .resolve(name, Some(chain), reaching, *enclosing_def, &mut edges)
+                                .is_err()
+                            {
+                                break; // file killed by sentinel
+                            }
                         }
                         edges
                     })
