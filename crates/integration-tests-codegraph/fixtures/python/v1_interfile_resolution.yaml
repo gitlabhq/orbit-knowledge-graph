@@ -1,4 +1,5 @@
 name: "Python v1 parity — interfile import resolution"
+trace: true
 
 # Mirrors the virtual file tree from legacy interfile.rs tests:
 # src/main.py, src/utils.py, src/package/__init__.py, src/package/module.py,
@@ -99,7 +100,7 @@ tests:
 
   # ── T3: test_relative_import_same_directory ──
   - name: "Relative import same dir resolves (from .utils import helper)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.test_relative_same_dir.use_relative_helper'
@@ -110,7 +111,7 @@ tests:
 
   # ── T4: test_relative_import_parent_directory ──
   - name: "Double-dot relative import resolves (from ..module import module_func)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.package.subpackage.test_relative_parent.use_parent_module'
@@ -121,7 +122,7 @@ tests:
 
   # ── T5: test_relative_import_from_init_py ──
   - name: "Relative import from sibling resolves (from .module import module_func)"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.package.test_from_init.use_from_init'
@@ -132,7 +133,7 @@ tests:
 
   # ── T7/T8: test_import_nonexistent_module / test_relative_import_nonexistent ──
   - name: "Nonexistent absolute import produces no call edges"
-    skip: true
+    skip: false
     query: |
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'src.test_nonexistent.use_nonexistent'

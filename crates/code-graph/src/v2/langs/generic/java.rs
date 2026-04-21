@@ -286,6 +286,7 @@ impl DslLanguage for JavaDsl {
         types::SsaConfig {
             self_names: &["this", "self"],
             super_name: Some("super"),
+            ..Default::default()
         }
     }
 }

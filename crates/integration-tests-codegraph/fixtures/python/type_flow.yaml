@@ -100,7 +100,7 @@ tests:
       via instance_attr_prefixes writing to the class scope block.
       The SSA compound key fallback ("self.db" read from run's block)
       should find it via predecessor chain, but doesn't yet.
-    skip: true
+    skip: false
     queries:
       - query: |
           MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)

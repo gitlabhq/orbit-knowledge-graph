@@ -768,49 +768,44 @@ impl CodeGraph {
         if !by_fqn.is_empty() {
             return by_fqn;
         }
-        let by_name = self
-            .indexes
-            .by_name
-            .lookup(name, |idx| self.def_name(idx) == name);
+        let by_name = self.indexes.by_name.lookup(name, |idx| {
+            self.def_name(idx) == name
+                && self.graph[idx]
+                    .def_id()
+                    .is_some_and(|d| self.defs[d.0 as usize].kind.is_type_container())
+        });
         if !by_name.is_empty() {
             return by_name;
         }
-        // Qualified bare name (e.g. "Child.GrandChild"): resolve first
-        // segment by name to find a def, use that def's fqn_sep as the
-        // separator, then nested lookup for the remaining segment.
-        // Try common separators to find the split point.
+        // Qualified bare name (e.g. "Parent.Child"): resolve the first
+        // segment by name to find candidate prefixes, then check by_fqn
+        // for the full qualified name under each prefix. O(first_matches)
+        // instead of O(matches^segments).
         for sep in &[".", "::"] {
             let segments: Vec<&str> = name.split(sep).collect();
             if segments.len() < 2 {
                 continue;
             }
-            let mut current = self
-                .indexes
-                .by_name
-                .lookup(segments[0], |idx| self.def_name(idx) == segments[0]);
-            if current.is_empty() {
+            let first_matches = self.indexes.by_name.lookup(segments[0], |idx| {
+                self.def_name(idx) == segments[0]
+                    && self.graph[idx]
+                        .def_id()
+                        .is_some_and(|d| self.defs[d.0 as usize].kind.is_type_container())
+            });
+            if first_matches.is_empty() {
                 continue;
             }
-            for &segment in &segments[1..] {
-                let mut next = SmallVec::new();
-                for &node in &current {
-                    let fqn = self.def_fqn(node);
-                    let mut found = Vec::new();
-                    self.indexes.nested.lookup_into(
-                        fqn,
-                        segment,
-                        |idx| self.def_name(idx) == segment,
-                        &mut found,
-                    );
-                    next.extend(found);
+            let rest = &segments[1..].join(sep);
+            for &node in &first_matches {
+                let prefix_fqn = self.def_fqn(node);
+                let candidate = format!("{prefix_fqn}{sep}{rest}");
+                let matches = self
+                    .indexes
+                    .by_fqn
+                    .lookup(&candidate, |idx| self.def_fqn(idx) == candidate);
+                if !matches.is_empty() {
+                    return matches;
                 }
-                current = next;
-                if current.is_empty() {
-                    break;
-                }
-            }
-            if !current.is_empty() {
-                return current;
             }
         }
         SmallVec::new()
