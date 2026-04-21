@@ -312,7 +312,7 @@ pub async fn assert_code_indexed(clickhouse: &TestContext, project_id: i64) {
             "SELECT source_id FROM {} \
              WHERE source_kind = 'File' AND target_kind = 'Definition' \
              AND relationship_kind = 'DEFINES'",
-            t("gl_edge")
+            t("gl_code_edge")
         ))
         .await;
     assert!(

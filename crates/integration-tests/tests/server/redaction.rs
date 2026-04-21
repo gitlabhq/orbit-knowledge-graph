@@ -30,6 +30,10 @@ fn table_edges() -> String {
     t("gl_edge")
 }
 
+fn table_code_edges() -> String {
+    t("gl_code_edge")
+}
+
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
 const ALL_GROUP_IDS: &[i64] = &[100, 101, 102];
 const ALL_PROJECT_IDS: &[i64] = &[1000, 1001, 1002, 1003, 1004];
@@ -3058,14 +3062,14 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     ))
     .await;
 
-    // Edges: File --DEFINES--> Definition
+    // Edges: File --DEFINES--> Definition (routed to gl_code_edge)
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5001, 'Definition'),
          ('1/100/1000/', 3001, 'File', 'DEFINES', 5002, 'Definition'),
          ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')",
-        table_edges()
+        table_code_edges()
     ))
     .await;
 }
