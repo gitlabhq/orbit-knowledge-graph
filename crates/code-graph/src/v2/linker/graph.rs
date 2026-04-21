@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::trace;
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
@@ -340,10 +341,13 @@ impl CodeGraph {
                 let fqn = self.def_fqn(idx).to_string();
                 let ancestor_fqns: Vec<String> =
                     chain.iter().map(|&a| self.def_fqn(a).to_string()).collect();
-                tracer.event(crate::v2::trace::TraceEvent::AncestorChainBuilt {
-                    fqn,
-                    ancestors: ancestor_fqns,
-                });
+                trace!(
+                    tracer,
+                    AncestorChainBuilt {
+                        fqn: fqn,
+                        ancestors: ancestor_fqns,
+                    }
+                );
                 self.indexes.ancestors.insert(idx, chain);
             }
         }
@@ -748,11 +752,14 @@ impl CodeGraph {
                                 .map(|d| self.strings.get(self.defs[d.0 as usize].fqn).to_string())
                         })
                         .collect();
-                    tracer.event(crate::v2::trace::TraceEvent::ExtendsLinked {
-                        child_fqn: child_fqn.clone(),
-                        super_type: super_name.to_string(),
-                        resolved_to: resolved_fqns,
-                    });
+                    trace!(
+                        tracer,
+                        ExtendsLinked {
+                            child_fqn: child_fqn.clone(),
+                            super_type: super_name.to_string(),
+                            resolved_to: resolved_fqns,
+                        }
+                    );
                     for &target in &targets {
                         edges.push((idx, target));
                     }

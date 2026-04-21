@@ -13,6 +13,18 @@
 use std::fmt;
 use std::sync::Mutex;
 
+/// Emit a trace event only if the tracer is enabled. The event
+/// expression is not evaluated when tracing is off, avoiding all
+/// allocations (`.to_string()`, `format!()`, `.clone()`).
+///
+/// Usage: `trace!(tracer, VariantName { field: expr, ... })`
+#[macro_export]
+macro_rules! trace {
+    ($tracer:expr, $variant:ident { $($field:ident : $val:expr),* $(,)? }) => {
+        $tracer.event_if(|| $crate::v2::trace::TraceEvent::$variant { $($field: $val),* })
+    };
+}
+
 /// All observable events in the engine + resolver pipeline.
 #[derive(Debug, Clone)]
 pub enum TraceEvent {
@@ -656,6 +668,15 @@ impl Tracer {
     pub fn event(&self, event: TraceEvent) {
         if self.enabled {
             self.events.lock().unwrap().push(event);
+        }
+    }
+
+    /// Record a trace event, but only construct it if tracing is enabled.
+    /// Use via `trace_event!(tracer, VariantName { field: value, ... })`.
+    #[inline]
+    pub fn event_if(&self, f: impl FnOnce() -> TraceEvent) {
+        if self.enabled {
+            self.events.lock().unwrap().push(f());
         }
     }
 

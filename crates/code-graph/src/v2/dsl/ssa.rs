@@ -6,7 +6,8 @@
 //!
 //! All variable names are `&'a str` backed by `FileArena` (bumpalo).
 
-use crate::v2::trace::{TraceEvent, Tracer};
+use crate::trace;
+use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
 use petgraph::algo::tarjan_scc;
 use petgraph::graph::{DiGraph, NodeIndex};
@@ -164,18 +165,20 @@ impl<'a> SsaEngine<'a> {
             sealed: false,
         });
         self.stats.blocks_created += 1;
-        self.tracer
-            .event(TraceEvent::SsaBlockCreated { block_id: id.0 });
+        trace!(self.tracer, SsaBlockCreated { block_id: id.0 });
         id
     }
 
     /// Add a predecessor edge: `pred` flows into `block`.
     pub(crate) fn add_predecessor(&mut self, block: BlockId, pred: BlockId) {
         self.blocks[block.0].predecessors.push(pred);
-        self.tracer.event(TraceEvent::SsaAddPredecessor {
-            block_id: block.0,
-            pred_id: pred.0,
-        });
+        trace!(
+            self.tracer,
+            SsaAddPredecessor {
+                block_id: block.0,
+                pred_id: pred.0,
+            }
+        );
     }
 
     /// Create a sealed successor block with a single predecessor.
@@ -243,8 +246,7 @@ impl<'a> SsaEngine<'a> {
             }
         }
         self.blocks[block.0].sealed = true;
-        self.tracer
-            .event(TraceEvent::SsaBlockSealed { block_id: block.0 });
+        trace!(self.tracer, SsaBlockSealed { block_id: block.0 });
     }
 
     /// Seal any blocks that haven't been sealed yet.
@@ -282,11 +284,14 @@ impl<'a> SsaEngine<'a> {
         } else {
             value
         };
-        self.tracer.event(TraceEvent::SsaWrite {
-            variable: variable.to_string(),
-            block_id: block.0,
-            value: resolved.trace_display(),
-        });
+        trace!(
+            self.tracer,
+            SsaWrite {
+                variable: variable.to_string(),
+                block_id: block.0,
+                value: resolved.trace_display(),
+            }
+        );
         self.current_def
             .entry(variable)
             .or_default()
@@ -317,11 +322,14 @@ impl<'a> SsaEngine<'a> {
             value = target_value;
         }
         let result = self.resolve_value(&value);
-        self.tracer.event(TraceEvent::SsaRead {
-            variable: variable.to_string(),
-            block_id: block.0,
-            values: result.values.iter().map(|v| v.trace_display()).collect(),
-        });
+        trace!(
+            self.tracer,
+            SsaRead {
+                variable: variable.to_string(),
+                block_id: block.0,
+                values: result.values.iter().map(|v| v.trace_display()).collect(),
+            }
+        );
         result
     }
 
@@ -447,11 +455,14 @@ impl<'a> SsaEngine<'a> {
             operands: SmallVec::new(),
             witnesses: [None, None],
         });
-        self.tracer.event(TraceEvent::SsaPhiCreated {
-            phi_id: id.0,
-            block_id: block.0,
-            variable: variable.to_string(),
-        });
+        trace!(
+            self.tracer,
+            SsaPhiCreated {
+                phi_id: id.0,
+                block_id: block.0,
+                variable: variable.to_string(),
+            }
+        );
         id
     }
 
@@ -513,10 +524,13 @@ impl<'a> SsaEngine<'a> {
 
         let replacement = same.unwrap_or(SsaValue::Opaque);
         self.stats.phis_trivial += 1;
-        self.tracer.event(TraceEvent::SsaPhiTrivial {
-            phi_id: phi_id.0,
-            replacement: replacement.trace_display(),
-        });
+        trace!(
+            self.tracer,
+            SsaPhiTrivial {
+                phi_id: phi_id.0,
+                replacement: replacement.trace_display(),
+            }
+        );
 
         let variable = self.phis[phi_id.0].variable;
         let block = self.phis[phi_id.0].block;
@@ -643,10 +657,13 @@ impl<'a> SsaEngine<'a> {
             if outer_values.len() == 1 {
                 // All phis in the SCC produce the same external value — collapse.
                 let replacement = outer_values.into_iter().next().unwrap();
-                self.tracer.event(TraceEvent::SsaSccCollapse {
-                    scc_size: scc.len(),
-                    replacement: replacement.trace_display(),
-                });
+                trace!(
+                    self.tracer,
+                    SsaSccCollapse {
+                        scc_size: scc.len(),
+                        replacement: replacement.trace_display(),
+                    }
+                );
                 let phi_vals: Vec<SsaValue<'a>> = scc.iter().map(|&p| SsaValue::Phi(p)).collect();
                 for &pid in &scc {
                     // Update current_def

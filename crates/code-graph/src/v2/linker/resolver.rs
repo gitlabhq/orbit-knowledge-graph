@@ -3,9 +3,10 @@
 //! `FileResolver` resolves one reference at a time via `resolve()`.
 //! No intermediate collections — the caller drives iteration.
 
+use crate::trace;
 use crate::v2::pipeline::LanguageContext;
 use crate::v2::sentinel::{FileGuard, Killed};
-use crate::v2::trace::{TraceEvent, Tracer};
+use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
 use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
 use petgraph::graph::NodeIndex;
@@ -318,11 +319,14 @@ impl<'a> ResolveCtx<'a> {
                     })
                 })
                 .collect();
-            self.tracer.event(TraceEvent::ImportResolve {
-                import_fqn: fqn,
-                found: !result.is_empty(),
-                result_fqns,
-            });
+            trace!(
+                self.tracer,
+                ImportResolve {
+                    import_fqn: fqn,
+                    found: !result.is_empty(),
+                    result_fqns: result_fqns,
+                }
+            );
         }
         self.import_cache.insert(import_node, result.clone());
         result
@@ -354,12 +358,15 @@ impl<'a> ResolveCtx<'a> {
                 self.graph
                     .lookup_nested_with_hierarchy(&sub_scope, member_name, &mut result);
                 if !result.is_empty() {
-                    self.tracer.event(TraceEvent::ImplicitSubScope {
-                        scope_fqn: scope_fqn.to_string(),
-                        sub_scope: sub.to_string(),
-                        member_name: member_name.to_string(),
-                        found: true,
-                    });
+                    trace!(
+                        self.tracer,
+                        ImplicitSubScope {
+                            scope_fqn: scope_fqn.to_string(),
+                            sub_scope: sub.to_string(),
+                            member_name: member_name.to_string(),
+                            found: true,
+                        }
+                    );
                     break;
                 }
             }
@@ -393,11 +400,14 @@ impl<'a> ResolveCtx<'a> {
                 }
             }
             if !result.is_empty() {
-                self.tracer.event(TraceEvent::ReceiverTypeLookup {
-                    type_name: scope_fqn.to_string(),
-                    member_name: member_name.to_string(),
-                    found_count: result.len(),
-                });
+                trace!(
+                    self.tracer,
+                    ReceiverTypeLookup {
+                        type_name: scope_fqn.to_string(),
+                        member_name: member_name.to_string(),
+                        found_count: result.len(),
+                    }
+                );
             }
         }
 
@@ -412,12 +422,15 @@ impl<'a> ResolveCtx<'a> {
                 })
             })
             .collect();
-        self.tracer.event(TraceEvent::NestedLookup {
-            scope_fqn: scope_fqn.to_string(),
-            member_name: member_name.to_string(),
-            found,
-            result_fqns,
-        });
+        trace!(
+            self.tracer,
+            NestedLookup {
+                scope_fqn: scope_fqn.to_string(),
+                member_name: member_name.to_string(),
+                found: found,
+                result_fqns: result_fqns,
+            }
+        );
         if found {
             out.extend_from_slice(&result);
         }
@@ -428,21 +441,24 @@ impl<'a> ResolveCtx<'a> {
     // ── Resolution methods (formerly free functions) ────────────
 
     fn resolve_single(&mut self, r: &RefData<'_>) -> Result<Vec<NodeIndex>, Killed> {
-        self.tracer.event(TraceEvent::ResolveStart {
-            name: r.name.to_string(),
-            chain: format_chain(r.chain),
-            reaching: format_reaching(r.reaching),
-            enclosing_def: r.enclosing_def.and_then(|i| {
-                self.def_nodes
-                    .get(i as usize)
-                    .and_then(|&n| self.graph.graph[n].def_id())
-                    .map(|d| {
-                        self.graph
-                            .str(self.graph.defs[d.0 as usize].fqn)
-                            .to_string()
-                    })
-            }),
-        });
+        trace!(
+            self.tracer,
+            ResolveStart {
+                name: r.name.to_string(),
+                chain: format_chain(r.chain),
+                reaching: format_reaching(r.reaching),
+                enclosing_def: r.enclosing_def.and_then(|i| {
+                    self.def_nodes
+                        .get(i as usize)
+                        .and_then(|&n| self.graph.graph[n].def_id())
+                        .map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
+                }),
+            }
+        );
 
         self.check_killed()?;
         let result = if r.chain.is_some() {
@@ -461,10 +477,13 @@ impl<'a> ResolveCtx<'a> {
                 })
             })
             .collect();
-        self.tracer.event(TraceEvent::ResolveResult {
-            name: r.name.to_string(),
-            targets: target_fqns,
-        });
+        trace!(
+            self.tracer,
+            ResolveResult {
+                name: r.name.to_string(),
+                targets: target_fqns,
+            }
+        );
 
         Ok(result)
     }
@@ -517,12 +536,15 @@ impl<'a> ResolveCtx<'a> {
                     })
                 })
                 .collect();
-            self.tracer.event(TraceEvent::ResolveBareStage {
-                stage: stage_name,
-                name: r.name.to_string(),
-                result_count: result.len(),
-                result_fqns,
-            });
+            trace!(
+                self.tracer,
+                ResolveBareStage {
+                    stage: stage_name,
+                    name: r.name.to_string(),
+                    result_count: result.len(),
+                    result_fqns: result_fqns,
+                }
+            );
             if !result.is_empty() {
                 let mut seen = rustc_hash::FxHashSet::default();
                 let mut result = result;
@@ -551,44 +573,64 @@ impl<'a> ResolveCtx<'a> {
                             let name = self.graph.str(gdef.name);
                             let fqn = self.graph.str(gdef.fqn);
                             if ref_name == name {
-                                self.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("constructor -> {fqn}"),
-                                });
+                                trace!(
+                                    self.tracer,
+                                    ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("constructor -> {fqn}"),
+                                    }
+                                );
                                 result.push(node);
                             } else if !self.lookup_nested_cached(fqn, ref_name, &mut result) {
                                 if let Some(call_method) = self.rules.hooks.call_method {
                                     let before = result.len();
                                     self.lookup_nested_cached(fqn, call_method, &mut result);
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!(
-                                            "LocalDef({i}) = {fqn} ({:?})",
-                                            gdef.kind
-                                        ),
-                                        result: if result.len() > before {
-                                            format!("call_method({call_method}) found")
-                                        } else {
-                                            format!("{fqn}.{ref_name} not found, call_method({call_method}) not found")
-                                        },
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: if result.len() > before {
+                                                format!("call_method({call_method}) found")
+                                            } else {
+                                                format!(
+                                                    "{fqn}.{ref_name} not found, call_method({call_method}) not found"
+                                                )
+                                            },
+                                        }
+                                    );
                                 } else {
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                        result: format!("{fqn}.{ref_name} not found"),
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("{fqn}.{ref_name} not found"),
+                                        }
+                                    );
                                 }
                             } else {
-                                self.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("nested {fqn}.{ref_name} found"),
-                                });
+                                trace!(
+                                    self.tracer,
+                                    ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("nested {fqn}.{ref_name} found"),
+                                    }
+                                );
                             }
                         } else {
                             let fqn = self.graph.str(gdef.fqn);
-                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                result: format!("direct -> {fqn}"),
-                            });
+                            trace!(
+                                self.tracer,
+                                ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("direct -> {fqn}"),
+                                }
+                            );
                             result.push(node);
                         }
                     }
@@ -606,14 +648,17 @@ impl<'a> ResolveCtx<'a> {
                                 })
                             })
                             .collect();
-                        self.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("ImportRef({i})"),
-                            result: if fqns.is_empty() {
-                                "import not resolved".to_string()
-                            } else {
-                                format!("import -> [{}]", fqns.join(", "))
-                            },
-                        });
+                        trace!(
+                            self.tracer,
+                            ReachingDefResolved {
+                                value: format!("ImportRef({i})"),
+                                result: if fqns.is_empty() {
+                                    "import not resolved".to_string()
+                                } else {
+                                    format!("import -> [{}]", fqns.join(", "))
+                                },
+                            }
+                        );
                         result.extend(resolved);
                     }
                 }
@@ -622,25 +667,36 @@ impl<'a> ResolveCtx<'a> {
                     if !self.lookup_nested_cached(type_fqn, ref_name, &mut result) {
                         if let Some(call_method) = self.rules.hooks.call_method {
                             self.lookup_nested_cached(type_fqn, call_method, &mut result);
-                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("Type({type_fqn})"),
-                                result: if result.len() > before {
-                                    format!("call_method({call_method}) found")
-                                } else {
-                                    format!("{type_fqn}.{ref_name} not found, call_method({call_method}) not found")
-                                },
-                            });
+                            trace!(
+                                self.tracer,
+                                ReachingDefResolved {
+                                    value: format!("Type({type_fqn})"),
+                                    result: if result.len() > before {
+                                        format!("call_method({call_method}) found")
+                                    } else {
+                                        format!(
+                                            "{type_fqn}.{ref_name} not found, call_method({call_method}) not found"
+                                        )
+                                    },
+                                }
+                            );
                         } else {
-                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("Type({type_fqn})"),
-                                result: format!("{type_fqn}.{ref_name} not found"),
-                            });
+                            trace!(
+                                self.tracer,
+                                ReachingDefResolved {
+                                    value: format!("Type({type_fqn})"),
+                                    result: format!("{type_fqn}.{ref_name} not found"),
+                                }
+                            );
                         }
                     } else {
-                        self.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("Type({type_fqn})"),
-                            result: format!("nested {type_fqn}.{ref_name} found"),
-                        });
+                        trace!(
+                            self.tracer,
+                            ReachingDefResolved {
+                                value: format!("Type({type_fqn})"),
+                                result: format!("nested {type_fqn}.{ref_name} found"),
+                            }
+                        );
                     }
                 }
                 ParseValue::Opaque => {}
@@ -658,10 +714,13 @@ impl<'a> ResolveCtx<'a> {
 
         let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching)?;
 
-        self.tracer.event(TraceEvent::ResolveChainBase {
-            step: format!("{:?}", chain[0]),
-            types: current_types.clone(),
-        });
+        trace!(
+            self.tracer,
+            ResolveChainBase {
+                step: format!("{:?}", chain[0]),
+                types: current_types.clone(),
+            }
+        );
 
         if current_types.is_empty() {
             return self.chain_fallback(r, chain);
@@ -748,15 +807,18 @@ impl<'a> ResolveCtx<'a> {
                     })
                 })
                 .collect();
-            self.tracer.event(TraceEvent::ResolveChainStep {
-                depth,
-                step: format!("{step:?}"),
-                member_name: member_name.to_string(),
-                scope_types: current_types.clone(),
-                found_count: found_nodes.len(),
-                found_fqns,
-                next_types: next_types.clone(),
-            });
+            trace!(
+                self.tracer,
+                ResolveChainStep {
+                    depth: depth,
+                    step: format!("{step:?}"),
+                    member_name: member_name.to_string(),
+                    scope_types: current_types.clone(),
+                    found_count: found_nodes.len(),
+                    found_fqns: found_fqns,
+                    next_types: next_types.clone(),
+                }
+            );
 
             if is_last {
                 let mut seen = rustc_hash::FxHashSet::default();
@@ -788,9 +850,12 @@ impl<'a> ResolveCtx<'a> {
         }) else {
             return Ok(vec![]);
         };
-        self.tracer.event(TraceEvent::ResolveChainFallback {
-            name: last_name.to_string(),
-        });
+        trace!(
+            self.tracer,
+            ResolveChainFallback {
+                name: last_name.to_string(),
+            }
+        );
         let fallback = RefData {
             name: last_name,
             chain: None,
@@ -812,10 +877,13 @@ impl<'a> ResolveCtx<'a> {
                 for value in reaching {
                     match value {
                         ParseValue::Type(fqn) => {
-                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("Type({fqn})"),
-                                result: format!("base type -> {fqn}"),
-                            });
+                            trace!(
+                                self.tracer,
+                                ReachingDefResolved {
+                                    value: format!("Type({fqn})"),
+                                    result: format!("base type -> {fqn}"),
+                                }
+                            );
                             types.push(fqn.clone());
                         }
                         ParseValue::LocalDef(i) => {
@@ -825,31 +893,55 @@ impl<'a> ResolveCtx<'a> {
                                 let gdef = &self.graph.defs[did.0 as usize];
                                 let fqn = self.graph.str(gdef.fqn);
                                 if gdef.kind.is_type_container() {
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                        result: format!("base type (container) -> {fqn}"),
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (container) -> {fqn}"),
+                                        }
+                                    );
                                     types.push(fqn.to_string());
                                 } else if let Some(meta) = &gdef.metadata
                                     && let Some(rt) = meta.return_type
                                 {
                                     let rt_str = self.graph.str(rt);
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                        result: format!("base type (return_type) -> {rt_str}"),
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (return_type) -> {rt_str}"),
+                                        }
+                                    );
                                     types.push(rt_str.to_string());
                                 } else if let Some(rt) = self.inferred_returns.get(&node) {
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                        result: format!("base type (inferred) -> {rt}"),
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: format!("base type (inferred) -> {rt}"),
+                                        }
+                                    );
                                     types.push(rt.clone());
                                 } else {
-                                    self.tracer.event(TraceEvent::ReachingDefResolved {
-                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                        result: "no type info".to_string(),
-                                    });
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!(
+                                                "LocalDef({i}) = {fqn} ({:?})",
+                                                gdef.kind
+                                            ),
+                                            result: "no type info".to_string(),
+                                        }
+                                    );
                                 }
                             }
                         }
@@ -861,37 +953,48 @@ impl<'a> ResolveCtx<'a> {
                                         let gdef = &self.graph.defs[did.0 as usize];
                                         let fqn = self.graph.str(gdef.fqn);
                                         if gdef.kind.is_type_container() {
-                                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                                value: format!(
-                                                    "ImportRef({i}) -> {fqn} ({:?})",
-                                                    gdef.kind
-                                                ),
-                                                result: format!("base type (container) -> {fqn}"),
-                                            });
+                                            trace!(
+                                                self.tracer,
+                                                ReachingDefResolved {
+                                                    value: format!(
+                                                        "ImportRef({i}) -> {fqn} ({:?})",
+                                                        gdef.kind
+                                                    ),
+                                                    result: format!(
+                                                        "base type (container) -> {fqn}"
+                                                    ),
+                                                }
+                                            );
                                             types.push(fqn.to_string());
                                         } else if let Some(meta) = &gdef.metadata
                                             && let Some(rt) = meta.return_type
                                         {
                                             let rt_str = self.graph.str(rt);
-                                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                                value: format!(
-                                                    "ImportRef({i}) -> {fqn} ({:?})",
-                                                    gdef.kind
-                                                ),
-                                                result: format!(
-                                                    "base type (return_type) -> {rt_str}"
-                                                ),
-                                            });
+                                            trace!(
+                                                self.tracer,
+                                                ReachingDefResolved {
+                                                    value: format!(
+                                                        "ImportRef({i}) -> {fqn} ({:?})",
+                                                        gdef.kind
+                                                    ),
+                                                    result: format!(
+                                                        "base type (return_type) -> {rt_str}"
+                                                    ),
+                                                }
+                                            );
                                             types.push(rt_str.to_string());
                                         } else if let Some(rt) = self.inferred_returns.get(&def_idx)
                                         {
-                                            self.tracer.event(TraceEvent::ReachingDefResolved {
-                                                value: format!(
-                                                    "ImportRef({i}) -> {fqn} ({:?})",
-                                                    gdef.kind
-                                                ),
-                                                result: format!("base type (inferred) -> {rt}"),
-                                            });
+                                            trace!(
+                                                self.tracer,
+                                                ReachingDefResolved {
+                                                    value: format!(
+                                                        "ImportRef({i}) -> {fqn} ({:?})",
+                                                        gdef.kind
+                                                    ),
+                                                    result: format!("base type (inferred) -> {rt}"),
+                                                }
+                                            );
                                             types.push(rt.clone());
                                         }
                                     }
@@ -926,10 +1029,13 @@ impl<'a> ResolveCtx<'a> {
                             let gdef = &self.graph.defs[did.0 as usize];
                             if gdef.kind.is_type_container() {
                                 let fqn = self.graph.str(gdef.fqn).to_string();
-                                self.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("bare({name})"),
-                                    result: format!("base type (import fallback) -> {fqn}"),
-                                });
+                                trace!(
+                                    self.tracer,
+                                    ReachingDefResolved {
+                                        value: format!("bare({name})"),
+                                        result: format!("base type (import fallback) -> {fqn}"),
+                                    }
+                                );
                                 types.push(fqn);
                             }
                         }
