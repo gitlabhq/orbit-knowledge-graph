@@ -96,12 +96,13 @@ async fn watch_loop(
     );
 
     loop {
-        let next = poll_once(&graph, embedded_version, &state).await;
+        let (next, active) = poll_once(&graph, embedded_version, &state).await;
         transition(&state, next);
 
         if next == SchemaState::Outdated {
             error!(
                 embedded_version,
+                active_version = active,
                 "active schema version exceeds binary version — \
                  binary too old, requesting shutdown"
             );
@@ -120,13 +121,13 @@ async fn poll_once(
     graph: &ArrowClickHouseClient,
     embedded_version: u32,
     state: &Arc<AtomicU8>,
-) -> SchemaState {
+) -> (SchemaState, Option<u32>) {
     match read_active_version(graph).await {
-        Ok(Some(active)) => classify(active, embedded_version),
-        Ok(None) => SchemaState::Pending,
+        Ok(Some(active)) => (classify(active, embedded_version), Some(active)),
+        Ok(None) => (SchemaState::Pending, None),
         Err(e) => {
             warn!(error = %e, "failed to read active schema version — keeping previous state");
-            SchemaState::from_raw(state.load(Ordering::Relaxed))
+            (SchemaState::from_raw(state.load(Ordering::Relaxed)), None)
         }
     }
 }
