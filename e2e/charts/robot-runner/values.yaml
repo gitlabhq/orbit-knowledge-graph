@@ -17,5 +17,6 @@ namespaces:
   gkg: ""
 
 configMap: e2e-robot-tests
+fixturesConfigMap: e2e-robot-fixtures
 rootCredentialsSecret: gitlab-root-credentials
 ttlSecondsAfterFinished: 600

@@ -89,3 +89,151 @@ Wait For Node Indexed Within Budget
     ${budget}=    Remaining Budget
     Wait Until Keyword Succeeds    ${budget}    3s
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
+
+# --- Generic Orbit query helpers (used for code-graph assertions) -----------
+# These take a filter dict (project_id, fqn, definition_type, …) instead of
+# requiring the caller to know the node's primary id ahead of time, which is
+# essential for File/Definition where ids are produced inside the indexer.
+
+Orbit Query
+    [Documentation]    Low-level POST /orbit/query. Accepts a fully-formed query dict and returns the parsed JSON response.
+    [Arguments]    ${query}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    query=${query}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=200
+    RETURN    ${resp.json()}
+
+Orbit Search Nodes With Filters
+    [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
+    [Arguments]    ${entity}    ${filters}    ${limit}=30
+    ${limit_int}=    Convert To Integer    ${limit}
+    ${node}=    Create Dictionary    id=n    entity=${entity}    filters=${filters}
+    ${query}=    Create Dictionary    query_type=search    node=${node}    limit=${limit_int}
+    ${resp}=    Orbit Query    ${query}
+    RETURN    ${resp}
+
+Orbit Count Nodes With Filters
+    [Documentation]    Aggregation count(*) of ${entity} matching ${filters} (dict). Returns int.
+    [Arguments]    ${entity}    ${filters}
+    ${node}=    Create Dictionary    id=n    entity=${entity}    filters=${filters}
+    ${agg}=    Create Dictionary    function=count    target=n
+    ${query}=    Create Dictionary    query_type=aggregation
+    ...    nodes=${{[$node]}}    aggregations=${{[$agg]}}
+    ${resp}=    Orbit Query    ${query}
+    RETURN    ${resp["result"]["columns"][0]["value"]}
+
+Orbit Traversal Two Hop
+    [Documentation]    Traversal between two nodes via a single relationship. Returns the parsed response.
+    [Arguments]    ${src_entity}    ${src_filters}    ${rel_type}    ${dst_entity}    ${dst_filters}    ${limit}=10
+    ${limit_int}=    Convert To Integer    ${limit}
+    ${src}=    Create Dictionary    id=src    entity=${src_entity}    filters=${src_filters}
+    ${dst}=    Create Dictionary    id=dst    entity=${dst_entity}    filters=${dst_filters}
+    ${rel}=    Create Dictionary    type=${rel_type}    from=src    to=dst
+    ${query}=    Create Dictionary    query_type=traversal
+    ...    nodes=${{[$src, $dst]}}    relationships=${{[$rel]}}    limit=${limit_int}
+    ${resp}=    Orbit Query    ${query}
+    RETURN    ${resp}
+
+# --- Code-graph assertions (per-project) ------------------------------------
+
+File Count For Project Is
+    [Documentation]    Wait until File node count under ${project_id} equals ${expected}.
+    [Arguments]    ${project_id}    ${expected}    ${timeout}=180s    ${interval}=5s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Assert Entity Count For Project    File    ${project_id}    ${expected}
+
+Definition Count For Project Is At Least
+    [Arguments]    ${project_id}    ${minimum}    ${timeout}=180s    ${interval}=5s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Assert Entity Count At Least For Project    Definition    ${project_id}    ${minimum}
+
+Assert Entity Count For Project
+    [Arguments]    ${entity}    ${project_id}    ${expected}
+    ${filters}=    Create Dictionary    project_id=${project_id}
+    ${count}=    Orbit Count Nodes With Filters    ${entity}    ${filters}
+    Should Be Equal As Integers    ${count}    ${expected}
+    ...    ${entity} count for project ${project_id} = ${count} (expected ${expected})
+
+Assert Entity Count At Least For Project
+    [Arguments]    ${entity}    ${project_id}    ${minimum}
+    ${filters}=    Create Dictionary    project_id=${project_id}
+    ${count}=    Orbit Count Nodes With Filters    ${entity}    ${filters}
+    Should Be True    ${count} >= ${minimum}
+    ...    ${entity} count for project ${project_id} = ${count} (need >= ${minimum})
+
+Definition Exists In Project
+    [Documentation]    Assert that a Definition with ${fqn} (and optional ${definition_type}) exists under ${project_id}.
+    ...                Returns the matched node dict.
+    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=5s
+    ${node}=    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${definition_type}
+    RETURN    ${node}
+
+Lookup Definition By Fqn
+    [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}
+    ${filters}=    Create Dictionary    project_id=${project_id}    fqn=${fqn}
+    IF    $definition_type is not None
+        Set To Dictionary    ${filters}    definition_type=${definition_type}
+    END
+    ${resp}=    Orbit Search Nodes With Filters    Definition    ${filters}    limit=5
+    Should Be True    ${resp["row_count"]} >= 1
+    ...    Definition fqn=${fqn} type=${definition_type} not found in project ${project_id}
+    RETURN    ${resp["result"]["nodes"][0]}
+
+# NOTE: the ontology has a CALLS edge (Definition→Definition, Definition→ImportedSymbol)
+# and the indexer populates it in v1_gl_edge — but `config/ontology/schema.yaml` does not
+# register it under `edges:`, so the Orbit API rejects "type": "CALLS" with a 400. The
+# closest assertion we can make through the API today is DEFINES, which models containment
+# (Module→Class, Class→Method, File→top-level-Definition).
+
+Defines Edge Exists Between Definitions
+    [Documentation]    Assert a DEFINES edge from Definition fqn=${parent_fqn} to Definition fqn=${child_fqn}
+    ...                under ${project_id}. Models structural containment (e.g. Class defines Method).
+    [Arguments]    ${project_id}    ${parent_fqn}    ${child_fqn}    ${timeout}=180s    ${interval}=5s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Assert Defines Edge Between Definitions    ${project_id}    ${parent_fqn}    ${child_fqn}
+
+Assert Defines Edge Between Definitions
+    [Arguments]    ${project_id}    ${parent_fqn}    ${child_fqn}
+    ${src_filters}=    Create Dictionary    project_id=${project_id}    fqn=${parent_fqn}
+    ${dst_filters}=    Create Dictionary    project_id=${project_id}    fqn=${child_fqn}
+    ${resp}=    Orbit Traversal Two Hop    Definition    ${src_filters}
+    ...    DEFINES    Definition    ${dst_filters}
+    Should Be True    ${resp["row_count"]} >= 1
+    ...    No DEFINES edge from ${parent_fqn} to ${child_fqn} in project ${project_id}
+
+Defines Edge Exists Between File And Definition
+    [Documentation]    Assert a DEFINES edge from File path=${file_path} to Definition fqn=${def_fqn}
+    ...                under ${project_id}. Models the file→top-level-definition relationship.
+    [Arguments]    ${project_id}    ${file_path}    ${def_fqn}    ${timeout}=180s    ${interval}=5s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Assert Defines Edge Between File And Definition    ${project_id}    ${file_path}    ${def_fqn}
+
+Assert Defines Edge Between File And Definition
+    [Arguments]    ${project_id}    ${file_path}    ${def_fqn}
+    ${src_filters}=    Create Dictionary    project_id=${project_id}    path=${file_path}
+    ${dst_filters}=    Create Dictionary    project_id=${project_id}    fqn=${def_fqn}
+    ${resp}=    Orbit Traversal Two Hop    File    ${src_filters}
+    ...    DEFINES    Definition    ${dst_filters}
+    Should Be True    ${resp["row_count"]} >= 1
+    ...    No DEFINES edge from File ${file_path} to Definition ${def_fqn} in project ${project_id}
+
+Imports Edge Exists Between File And Imported Symbol
+    [Documentation]    Assert an IMPORTS edge from File path=${file_path} to ImportedSymbol matching
+    ...                (import_path=${import_path}, identifier_name=${identifier_name}) under ${project_id}.
+    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+    ...    ${timeout}=180s    ${interval}=5s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Assert Imports Edge Between File And Imported Symbol
+    ...    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+
+Assert Imports Edge Between File And Imported Symbol
+    [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
+    ${src_filters}=    Create Dictionary    project_id=${project_id}    path=${file_path}
+    ${dst_filters}=    Create Dictionary    project_id=${project_id}
+    ...    import_path=${import_path}    identifier_name=${identifier_name}
+    ${resp}=    Orbit Traversal Two Hop    File    ${src_filters}
+    ...    IMPORTS    ImportedSymbol    ${dst_filters}
+    Should Be True    ${resp["row_count"]} >= 1
+    ...    No IMPORTS edge from File ${file_path} to ${import_path}.${identifier_name} in project ${project_id}
