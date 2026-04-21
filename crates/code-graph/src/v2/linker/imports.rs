@@ -229,7 +229,7 @@ fn same_package(
     vec![]
 }
 
-fn global_name(graph: &CodeGraph, _file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
+pub(crate) fn global_name(graph: &CodeGraph, _file_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
     graph
         .indexes
         .by_name

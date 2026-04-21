@@ -851,7 +851,8 @@ fn resolve_base_type_fqns(
             }
             // Fallback: when reaching defs produce no types (e.g. chain base
             // is an untracked name like a same-package class), try resolving
-            // the base name via import strategies to find its FQN.
+            // the base name via import strategies to find its FQN, then
+            // global name lookup as a last resort.
             if types.is_empty()
                 && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
             {
@@ -861,7 +862,13 @@ fn resolve_base_type_fqns(
                     reaching: &[],
                     enclosing_def: None,
                 };
-                let nodes = resolve_bare(ctx, &fallback);
+                let mut nodes = resolve_bare(ctx, &fallback);
+                // GlobalName: last-resort lookup for chain bases only.
+                // Not in import_strategies to avoid O(candidates) scans
+                // on every bare identifier ref.
+                if nodes.is_empty() {
+                    nodes = super::imports::global_name(ctx.graph, ctx.file_node, name);
+                }
                 for n in nodes {
                     if let Some(did) = ctx.graph.graph[n].def_id() {
                         let gdef = &ctx.graph.defs[did.0 as usize];

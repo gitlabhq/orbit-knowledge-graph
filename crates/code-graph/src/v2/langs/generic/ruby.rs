@@ -38,6 +38,12 @@ impl DslLanguage for RubyDsl {
             scope("module", "Module").def_kind(DefKind::Class),
             scope("method", "Method").def_kind(DefKind::Method),
             scope("singleton_method", "SingletonMethod").def_kind(DefKind::Method),
+            // class << self: transparent scope, methods inside are
+            // scoped to the parent class (don't add to FQN).
+            scope("singleton_class", "SingletonClass")
+                .def_kind(DefKind::Class)
+                .no_scope()
+                .name_from(no_extract()),
             scopes(&["lambda", "do_block", "block"], "Lambda")
                 .def_kind(DefKind::Lambda)
                 .no_scope()
@@ -51,13 +57,24 @@ impl DslLanguage for RubyDsl {
             reference("call")
                 .name_from(field("method"))
                 .receiver("receiver"),
-            // bare method call without parens/args — just an identifier in Ruby
-            // e.g. `validate_name` inside a method body. Exclude identifiers
-            // that are the method name or arguments of a `call` node — those
-            // are already handled by the call ref rule above.
-            reference("identifier")
+            // Qualified constant reference: Foo::Bar::Baz used as a value
+            // (not as a scope definition). The full text is the ref name,
+            // resolved via scope_fqn_walk or GlobalName.
+            reference("scope_resolution")
                 .name_from(text())
-                .when((!parent_is("call")).and(!parent_is("argument_list"))),
+                .when(!parent_is("scope_resolution").and(!parent_is("call"))),
+            // bare method call without parens/args — just an identifier in Ruby
+            // e.g. `validate_name` inside a method body. Exclude positions
+            // where identifiers are definitely not method calls.
+            reference("identifier").name_from(text()).when(
+                (!parent_is("call"))
+                    .and(!parent_is("argument_list"))
+                    .and(!parent_is("method_parameters"))
+                    .and(!parent_is("block_parameters"))
+                    .and(!parent_is("pair"))
+                    .and(!parent_is("interpolation"))
+                    .and(!parent_is("scope_resolution")),
+            ),
         ]
     }
 
@@ -98,9 +115,14 @@ impl DslLanguage for RubyDsl {
                 .branches(&["then", "else"])
                 .condition("condition"),
             branch("case").branches(&["when", "else"]),
+            // Ruby 3+ pattern matching: case x; in pattern; end
+            branch("case_match").branches(&["in_clause", "else"]),
             branch("ternary")
                 .branches(&["consequence", "alternative"])
                 .condition("condition"),
+            // begin/rescue/ensure: rescue and ensure are alternate branches.
+            // Main body children are walked in the pre-block (non-branch path).
+            branch("begin").branches(&["rescue", "ensure"]),
         ]
     }
 
@@ -135,14 +157,38 @@ impl DslLanguage for RubyDsl {
     }
 }
 
-/// Extract synthetic method definitions from attr_accessor/attr_reader/attr_writer.
+/// Extract synthetic definitions from attr_accessor/attr_reader/attr_writer
+/// and alias declarations.
 fn ruby_extract_attr_methods(
     node: &N<'_>,
     defs: &mut Vec<crate::v2::types::CanonicalDefinition>,
     scope_stack: &[std::sync::Arc<str>],
     sep: &'static str,
 ) -> bool {
-    if node.kind().as_ref() != "call" {
+    let nk = node.kind();
+    let nk_ref = nk.as_ref();
+
+    // alias new_name old_name → synthetic method def for new_name
+    if nk_ref == "alias" {
+        if let Some(name_node) = node.field("name") {
+            let name = name_node.text().to_string();
+            if !name.is_empty() {
+                let fqn = crate::v2::types::Fqn::from_scope(scope_stack, &name, sep);
+                defs.push(crate::v2::types::CanonicalDefinition {
+                    definition_type: "Method",
+                    kind: DefKind::Method,
+                    name,
+                    fqn,
+                    range: crate::v2::types::Range::empty(),
+                    is_top_level: false,
+                    metadata: None,
+                });
+            }
+        }
+        return true;
+    }
+
+    if nk_ref != "call" {
         return false;
     }
     let method = node
@@ -279,11 +325,7 @@ impl HasRules for RubyRules {
                 ResolveStage::ImplicitMember,
                 ResolveStage::ImportStrategies,
             ],
-            vec![
-                ImportStrategy::ScopeFqnWalk,
-                ImportStrategy::SameFile,
-                ImportStrategy::GlobalName,
-            ],
+            vec![ImportStrategy::ScopeFqnWalk, ImportStrategy::SameFile],
             ReceiverMode::None,
             "::",
             &["self"],
