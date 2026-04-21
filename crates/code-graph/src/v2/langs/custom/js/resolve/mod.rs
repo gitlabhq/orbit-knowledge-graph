@@ -109,7 +109,7 @@ fn add_local_call_edges(
     let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
     for call in &analyzed.analysis.local_calls {
         resolved.clear();
-        resolver.resolve(
+        let _ = resolver.resolve(
             &call.name,
             call.chain.as_deref(),
             &call.reaching,

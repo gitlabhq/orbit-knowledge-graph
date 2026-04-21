@@ -690,7 +690,7 @@ async fn index_repo_v2(
         respect_gitignore: config.respect_gitignore,
         ..Default::default()
     };
-    let tracer = code_graph::v2::trace::Tracer::new(show_stats);
+    let tracer = code_graph::v2::trace::Tracer::new(false);
 
     let v2_result = if config.worker_threads > 0 {
         let pool = rayon::ThreadPoolBuilder::new()
