@@ -45,8 +45,7 @@ pub enum StaleDataCleanerError {
 pub struct ClickHouseStaleDataCleaner {
     client: Arc<ArrowClickHouseClient>,
     node_queries: Vec<(String, String)>,
-    edge_table: String,
-    edge_query: String,
+    edge_queries: Vec<(String, String)>,
 }
 
 impl ClickHouseStaleDataCleaner {
@@ -57,11 +56,16 @@ impl ClickHouseStaleDataCleaner {
             .map(|table| (table.to_string(), Self::build_node_delete_query(table)))
             .collect();
 
+        let edge_queries = table_names
+            .edge_table_names()
+            .iter()
+            .map(|table| (table.to_string(), Self::build_edge_delete_query(table)))
+            .collect();
+
         Self {
             client,
             node_queries,
-            edge_table: table_names.edge.clone(),
-            edge_query: Self::build_edge_delete_query(&table_names.edge),
+            edge_queries,
         }
     }
 
@@ -149,21 +153,26 @@ impl ClickHouseStaleDataCleaner {
         traversal_path: &str,
         formatted_watermark: &str,
     ) -> Result<(), StaleDataCleanerError> {
-        debug!(traversal_path, "deleting stale edges");
+        let futures = self.edge_queries.iter().map(|(table, query)| async move {
+            debug!(table, traversal_path, "deleting stale edges");
 
-        self.client
-            .query(&self.edge_query)
-            .param("traversal_path", traversal_path)
-            .param("watermark_time", formatted_watermark)
-            .execute()
-            .await
-            .map_err(|e| StaleDataCleanerError::Query {
-                table: self.edge_table.clone(),
-                traversal_path: traversal_path.to_string(),
-                project_id: 0,
-                branch: String::new(),
-                reason: e.to_string(),
-            })
+            self.client
+                .query(query)
+                .param("traversal_path", traversal_path)
+                .param("watermark_time", formatted_watermark)
+                .execute()
+                .await
+                .map_err(|e| StaleDataCleanerError::Query {
+                    table: table.to_string(),
+                    traversal_path: traversal_path.to_string(),
+                    project_id: 0,
+                    branch: String::new(),
+                    reason: e.to_string(),
+                })
+        });
+
+        try_join_all(futures).await?;
+        Ok(())
     }
 }
 
