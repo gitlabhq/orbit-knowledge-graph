@@ -9,6 +9,8 @@ use gitlab_client::GitlabClient;
 use tokio::net::TcpListener;
 use tracing::info;
 
+use crate::schema_watcher::SchemaWatcher;
+
 pub use health_client::InfrastructureHealthClient;
 pub use router::create_router;
 
@@ -22,9 +24,10 @@ impl Server {
         addr: SocketAddr,
         graph_client: ArrowClickHouseClient,
         gitlab_client: Option<Arc<GitlabClient>>,
+        schema_watcher: Arc<SchemaWatcher>,
     ) -> std::io::Result<Self> {
         let listener = TcpListener::bind(addr).await?;
-        let router = create_router(graph_client, gitlab_client);
+        let router = create_router(graph_client, gitlab_client, schema_watcher);
         Ok(Self { listener, router })
     }
 
