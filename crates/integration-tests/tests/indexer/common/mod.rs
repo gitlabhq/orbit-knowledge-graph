@@ -34,4 +34,3 @@ pub async fn wait_for_nats(url: &str, timeout: Duration) {
         tokio::time::sleep(poll_interval).await;
     }
 }
-
