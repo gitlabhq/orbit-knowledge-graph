@@ -100,7 +100,7 @@ impl<'a> FileResolver<'a> {
             reaching,
             enclosing_def,
         };
-        let targets = resolve_single(&mut self.ctx, &ref_data);
+        let targets = self.ctx.resolve_single(&ref_data);
         if targets.is_empty() {
             let mut imp_edges = Vec::new();
             self.emit_imported_symbol_edges(reaching, enclosing_def, &mut imp_edges);
@@ -366,7 +366,554 @@ impl<'a> ResolveCtx<'a> {
         self.nested_cache.insert(key, result);
         found
     }
+
+    // ── Resolution methods (formerly free functions) ────────────
+
+    fn resolve_single(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+        self.tracer.event(TraceEvent::ResolveStart {
+            name: r.name.to_string(),
+            chain: format_chain(r.chain),
+            reaching: format_reaching(r.reaching),
+            enclosing_def: r.enclosing_def.and_then(|i| {
+                self.def_nodes
+                    .get(i as usize)
+                    .and_then(|&n| self.graph.graph[n].def_id())
+                    .map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
+            }),
+        });
+
+        let result = if r.chain.is_some() {
+            self.resolve_chain(r)
+        } else {
+            self.resolve_bare(r)
+        };
+
+        let target_fqns: Vec<String> = result
+            .iter()
+            .filter_map(|&n| {
+                self.graph.graph[n].def_id().map(|d| {
+                    self.graph
+                        .str(self.graph.defs[d.0 as usize].fqn)
+                        .to_string()
+                })
+            })
+            .collect();
+        self.tracer.event(TraceEvent::ResolveResult {
+            name: r.name.to_string(),
+            targets: target_fqns,
+        });
+
+        result
+    }
+
+    fn resolve_bare(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+        if r.reaching.is_empty() && !self.graph.indexes.by_name.contains(r.name) {
+            return vec![];
+        }
+
+        for stage in &self.rules.bare_stages.clone() {
+            let stage_name = format!("{stage:?}");
+            let result = match stage {
+                ResolveStage::SSA => {
+                    if r.reaching.is_empty() {
+                        vec![]
+                    } else {
+                        self.resolve_from_reaching(r.reaching, r.name)
+                    }
+                }
+                ResolveStage::ImportStrategies => {
+                    if !self.graph.indexes.by_name.contains(r.name) {
+                        continue;
+                    }
+                    apply_import_strategies(
+                        &self.rules.import_strategies,
+                        self.graph,
+                        self.file_node,
+                        r.name,
+                        self.rules.fqn_separator,
+                        &self.import_map,
+                        &mut self.scratch,
+                    )
+                }
+                ResolveStage::ImplicitMember => {
+                    if !self.graph.indexes.by_name.contains(r.name) {
+                        continue;
+                    }
+                    if let Some(enclosing_idx) = r.enclosing_def
+                        && let Some(&enclosing_node) = self.def_nodes.get(enclosing_idx as usize)
+                    {
+                        resolve_implicit_member(
+                            self.graph,
+                            enclosing_node,
+                            r.name,
+                            self.rules.fqn_separator,
+                        )
+                    } else {
+                        vec![]
+                    }
+                }
+            };
+            let result_fqns: Vec<String> = result
+                .iter()
+                .filter_map(|&n| {
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
+                })
+                .collect();
+            self.tracer.event(TraceEvent::ResolveBareStage {
+                stage: stage_name,
+                name: r.name.to_string(),
+                result_count: result.len(),
+                result_fqns,
+            });
+            if !result.is_empty() {
+                let mut seen = rustc_hash::FxHashSet::default();
+                let mut result = result;
+                result.retain(|n| seen.insert(*n));
+                return result;
+            }
+        }
+        vec![]
+    }
+
+    fn resolve_from_reaching(&mut self, reaching: &[ParseValue], ref_name: &str) -> Vec<NodeIndex> {
+        let mut result = Vec::new();
+        for value in reaching {
+            match value {
+                ParseValue::LocalDef(i) => {
+                    if let Some(&node) = self.def_nodes.get(*i as usize)
+                        && let Some(did) = self.graph.graph[node].def_id()
+                    {
+                        let gdef = &self.graph.defs[did.0 as usize];
+                        if gdef.kind.is_type_container() {
+                            let name = self.graph.str(gdef.name);
+                            let fqn = self.graph.str(gdef.fqn);
+                            if ref_name == name {
+                                self.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("constructor -> {fqn}"),
+                                });
+                                result.push(node);
+                            } else if !self.lookup_nested_cached(fqn, ref_name, &mut result) {
+                                if let Some(call_method) = self.rules.hooks.call_method {
+                                    let before = result.len();
+                                    self.lookup_nested_cached(fqn, call_method, &mut result);
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!(
+                                            "LocalDef({i}) = {fqn} ({:?})",
+                                            gdef.kind
+                                        ),
+                                        result: if result.len() > before {
+                                            format!("call_method({call_method}) found")
+                                        } else {
+                                            format!("{fqn}.{ref_name} not found, call_method({call_method}) not found")
+                                        },
+                                    });
+                                } else {
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("{fqn}.{ref_name} not found"),
+                                    });
+                                }
+                            } else {
+                                self.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                    result: format!("nested {fqn}.{ref_name} found"),
+                                });
+                            }
+                        } else {
+                            let fqn = self.graph.str(gdef.fqn);
+                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                result: format!("direct -> {fqn}"),
+                            });
+                            result.push(node);
+                        }
+                    }
+                }
+                ParseValue::ImportRef(i) => {
+                    if let Some(&import_node) = self.import_nodes.get(*i as usize) {
+                        let resolved = self.resolve_import_cached(import_node);
+                        let fqns: Vec<String> = resolved
+                            .iter()
+                            .filter_map(|&n| {
+                                self.graph.graph[n].def_id().map(|d| {
+                                    self.graph
+                                        .str(self.graph.defs[d.0 as usize].fqn)
+                                        .to_string()
+                                })
+                            })
+                            .collect();
+                        self.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("ImportRef({i})"),
+                            result: if fqns.is_empty() {
+                                "import not resolved".to_string()
+                            } else {
+                                format!("import -> [{}]", fqns.join(", "))
+                            },
+                        });
+                        result.extend(resolved);
+                    }
+                }
+                ParseValue::Type(type_fqn) => {
+                    let before = result.len();
+                    if !self.lookup_nested_cached(type_fqn, ref_name, &mut result) {
+                        if let Some(call_method) = self.rules.hooks.call_method {
+                            self.lookup_nested_cached(type_fqn, call_method, &mut result);
+                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("Type({type_fqn})"),
+                                result: if result.len() > before {
+                                    format!("call_method({call_method}) found")
+                                } else {
+                                    format!("{type_fqn}.{ref_name} not found, call_method({call_method}) not found")
+                                },
+                            });
+                        } else {
+                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("Type({type_fqn})"),
+                                result: format!("{type_fqn}.{ref_name} not found"),
+                            });
+                        }
+                    } else {
+                        self.tracer.event(TraceEvent::ReachingDefResolved {
+                            value: format!("Type({type_fqn})"),
+                            result: format!("nested {type_fqn}.{ref_name} found"),
+                        });
+                    }
+                }
+                ParseValue::Opaque => {}
+            }
+        }
+        result
+    }
+
+    fn resolve_chain(&mut self, r: &RefData<'_>) -> Vec<NodeIndex> {
+        let chain = r.chain.unwrap_or(&[]);
+        if chain.is_empty() {
+            return vec![];
+        }
+
+        let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching);
+
+        self.tracer.event(TraceEvent::ResolveChainBase {
+            step: format!("{:?}", chain[0]),
+            types: current_types.clone(),
+        });
+
+        if current_types.is_empty() {
+            return self.chain_fallback(r, chain);
+        }
+
+        for (depth, step) in chain[1..].iter().enumerate() {
+            if depth >= self.settings.max_chain_depth || current_types.is_empty() {
+                break;
+            }
+            let member_name = match step {
+                ExpressionStep::Call(n) | ExpressionStep::Field(n) => n.as_str(),
+                _ => continue,
+            };
+
+            let is_last = depth == chain.len() - 2;
+
+            let mut found_nodes = Vec::new();
+            let mut next_types = Vec::new();
+
+            for type_fqn in &current_types {
+                let before = found_nodes.len();
+                self.lookup_nested_cached(type_fqn, member_name, &mut found_nodes);
+
+                for &def_idx in &found_nodes[before..] {
+                    if let Some(did) = self.graph.graph[def_idx].def_id() {
+                        let gdef = &self.graph.defs[did.0 as usize];
+                        if matches!(step, ExpressionStep::Call(_)) {
+                            let mut has_return_type = false;
+                            if let Some(meta) = &gdef.metadata
+                                && let Some(rt) = meta.return_type
+                            {
+                                next_types.push(self.graph.str(rt).to_string());
+                                has_return_type = true;
+                            }
+                            if !has_return_type
+                                && let Some(rt) = self.inferred_returns.get(&def_idx)
+                            {
+                                next_types.push(rt.clone());
+                                has_return_type = true;
+                            }
+                            if !has_return_type && gdef.kind.is_type_container() {
+                                next_types.push(self.graph.str(gdef.fqn).to_string());
+                            }
+                        }
+                        if matches!(step, ExpressionStep::Field(_)) {
+                            if let Some(meta) = &gdef.metadata
+                                && let Some(ta) = meta.type_annotation
+                            {
+                                next_types.push(self.graph.str(ta).to_string());
+                            } else if let Some(meta) = &gdef.metadata
+                                && let Some(rt) = meta.return_type
+                            {
+                                next_types.push(self.graph.str(rt).to_string());
+                            } else if gdef.kind == DefKind::EnumEntry {
+                                let fqn = self.graph.str(gdef.fqn);
+                                if let Some((parent, _)) = fqn.rsplit_once(self.rules.fqn_separator)
+                                {
+                                    next_types.push(parent.to_string());
+                                }
+                            } else if gdef.kind.is_type_container() {
+                                next_types.push(self.graph.str(gdef.fqn).to_string());
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Constructor method hook: when Call("new") (or similar) finds no
+            // nested member, the call returns an instance of the receiver type.
+            if found_nodes.is_empty()
+                && matches!(step, ExpressionStep::Call(_))
+                && self.rules.hooks.constructor_methods.contains(&member_name)
+            {
+                next_types.extend(current_types.iter().cloned());
+            }
+
+            let found_fqns: Vec<String> = found_nodes
+                .iter()
+                .filter_map(|&n| {
+                    self.graph.graph[n].def_id().map(|d| {
+                        self.graph
+                            .str(self.graph.defs[d.0 as usize].fqn)
+                            .to_string()
+                    })
+                })
+                .collect();
+            self.tracer.event(TraceEvent::ResolveChainStep {
+                depth,
+                step: format!("{step:?}"),
+                member_name: member_name.to_string(),
+                scope_types: current_types.clone(),
+                found_count: found_nodes.len(),
+                found_fqns,
+                next_types: next_types.clone(),
+            });
+
+            if is_last {
+                let mut seen = rustc_hash::FxHashSet::default();
+                found_nodes.retain(|n| seen.insert(*n));
+                return found_nodes;
+            }
+
+            {
+                let mut seen = rustc_hash::FxHashSet::default();
+                next_types.retain(|t| seen.insert(t.clone()));
+            }
+            current_types = next_types;
+        }
+
+        self.chain_fallback(r, chain)
+    }
+
+    fn chain_fallback(&mut self, r: &RefData<'_>, chain: &[ExpressionStep]) -> Vec<NodeIndex> {
+        if !self.settings.chain_fallback {
+            return vec![];
+        }
+        let Some(last_name) = chain.last().and_then(|s| match s {
+            ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
+            _ => None,
+        }) else {
+            return vec![];
+        };
+        self.tracer.event(TraceEvent::ResolveChainFallback {
+            name: last_name.to_string(),
+        });
+        let fallback = RefData {
+            name: last_name,
+            chain: None,
+            reaching: &[],
+            enclosing_def: r.enclosing_def,
+        };
+        self.resolve_bare(&fallback)
+    }
+
+    fn resolve_base_type_fqns(
+        &mut self,
+        base_step: &ExpressionStep,
+        reaching: &[ParseValue],
+    ) -> Vec<String> {
+        match base_step {
+            ExpressionStep::Ident(_) | ExpressionStep::Call(_) | ExpressionStep::This => {
+                let mut types = Vec::new();
+                for value in reaching {
+                    match value {
+                        ParseValue::Type(fqn) => {
+                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                value: format!("Type({fqn})"),
+                                result: format!("base type -> {fqn}"),
+                            });
+                            types.push(fqn.clone());
+                        }
+                        ParseValue::LocalDef(i) => {
+                            if let Some(&node) = self.def_nodes.get(*i as usize)
+                                && let Some(did) = self.graph.graph[node].def_id()
+                            {
+                                let gdef = &self.graph.defs[did.0 as usize];
+                                let fqn = self.graph.str(gdef.fqn);
+                                if gdef.kind.is_type_container() {
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("base type (container) -> {fqn}"),
+                                    });
+                                    types.push(fqn.to_string());
+                                } else if let Some(meta) = &gdef.metadata
+                                    && let Some(rt) = meta.return_type
+                                {
+                                    let rt_str = self.graph.str(rt);
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("base type (return_type) -> {rt_str}"),
+                                    });
+                                    types.push(rt_str.to_string());
+                                } else if let Some(rt) = self.inferred_returns.get(&node) {
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: format!("base type (inferred) -> {rt}"),
+                                    });
+                                    types.push(rt.clone());
+                                } else {
+                                    self.tracer.event(TraceEvent::ReachingDefResolved {
+                                        value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
+                                        result: "no type info".to_string(),
+                                    });
+                                }
+                            }
+                        }
+                        ParseValue::ImportRef(i) => {
+                            if let Some(&import_node) = self.import_nodes.get(*i as usize) {
+                                let resolved = self.resolve_import_cached(import_node);
+                                for def_idx in resolved {
+                                    if let Some(did) = self.graph.graph[def_idx].def_id() {
+                                        let gdef = &self.graph.defs[did.0 as usize];
+                                        let fqn = self.graph.str(gdef.fqn);
+                                        if gdef.kind.is_type_container() {
+                                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                                value: format!(
+                                                    "ImportRef({i}) -> {fqn} ({:?})",
+                                                    gdef.kind
+                                                ),
+                                                result: format!("base type (container) -> {fqn}"),
+                                            });
+                                            types.push(fqn.to_string());
+                                        } else if let Some(meta) = &gdef.metadata
+                                            && let Some(rt) = meta.return_type
+                                        {
+                                            let rt_str = self.graph.str(rt);
+                                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                                value: format!(
+                                                    "ImportRef({i}) -> {fqn} ({:?})",
+                                                    gdef.kind
+                                                ),
+                                                result: format!(
+                                                    "base type (return_type) -> {rt_str}"
+                                                ),
+                                            });
+                                            types.push(rt_str.to_string());
+                                        } else if let Some(rt) = self.inferred_returns.get(&def_idx)
+                                        {
+                                            self.tracer.event(TraceEvent::ReachingDefResolved {
+                                                value: format!(
+                                                    "ImportRef({i}) -> {fqn} ({:?})",
+                                                    gdef.kind
+                                                ),
+                                                result: format!("base type (inferred) -> {rt}"),
+                                            });
+                                            types.push(rt.clone());
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        ParseValue::Opaque => {}
+                    }
+                }
+                // Fallback: when reaching defs produce no types (e.g. chain base
+                // is an untracked name like a same-package class), try resolving
+                // the base name via import strategies to find its FQN, then
+                // global name lookup as a last resort.
+                if types.is_empty()
+                    && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
+                {
+                    let fallback = RefData {
+                        name,
+                        chain: None,
+                        reaching: &[],
+                        enclosing_def: None,
+                    };
+                    let mut nodes = self.resolve_bare(&fallback);
+                    // GlobalName: last-resort lookup for chain bases only.
+                    // Not in import_strategies to avoid O(candidates) scans
+                    // on every bare identifier ref.
+                    if nodes.is_empty() {
+                        nodes = super::imports::global_name(self.graph, self.file_node, name, 10);
+                    }
+                    for n in nodes {
+                        if let Some(did) = self.graph.graph[n].def_id() {
+                            let gdef = &self.graph.defs[did.0 as usize];
+                            if gdef.kind.is_type_container() {
+                                let fqn = self.graph.str(gdef.fqn).to_string();
+                                self.tracer.event(TraceEvent::ReachingDefResolved {
+                                    value: format!("bare({name})"),
+                                    result: format!("base type (import fallback) -> {fqn}"),
+                                });
+                                types.push(fqn);
+                            }
+                        }
+                    }
+                }
+                types
+            }
+            ExpressionStep::Super => reaching
+                .iter()
+                .filter_map(|v| match v {
+                    ParseValue::Type(fqn) => Some(fqn.clone()),
+                    _ => None,
+                })
+                .collect(),
+            ExpressionStep::New(type_name) => {
+                let fqn_matches = self.graph.indexes.by_fqn.lookup(type_name, |idx| {
+                    self.graph.graph[idx].def_id().is_some_and(|d| {
+                        self.graph.str(self.graph.defs[d.0 as usize].fqn) == *type_name
+                    })
+                });
+                if !fqn_matches.is_empty() {
+                    return vec![type_name.clone()];
+                }
+                let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
+                    self.graph.graph[idx].def_id().is_some_and(|d| {
+                        self.graph.str(self.graph.defs[d.0 as usize].name) == *type_name
+                    })
+                });
+                name_matches
+                    .iter()
+                    .filter_map(|&idx| {
+                        self.graph.graph[idx].def_id().map(|d| {
+                            self.graph
+                                .str(self.graph.defs[d.0 as usize].fqn)
+                                .to_string()
+                        })
+                    })
+                    .collect()
+            }
+            _ => vec![],
+        }
+    }
 }
+
+// ── Utility functions ───────────────────────────────────────────
 
 fn format_reaching(reaching: &[ParseValue]) -> Vec<String> {
     reaching
@@ -382,541 +929,6 @@ fn format_reaching(reaching: &[ParseValue]) -> Vec<String> {
 
 fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
     chain.map(|c| c.iter().map(|s| format!("{s:?}")).collect())
-}
-
-fn resolve_single(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
-    ctx.tracer.event(TraceEvent::ResolveStart {
-        name: r.name.to_string(),
-        chain: format_chain(r.chain),
-        reaching: format_reaching(r.reaching),
-        enclosing_def: r.enclosing_def.and_then(|i| {
-            ctx.def_nodes
-                .get(i as usize)
-                .and_then(|&n| ctx.graph.graph[n].def_id())
-                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
-        }),
-    });
-
-    let result = if r.chain.is_some() {
-        resolve_chain(ctx, r)
-    } else {
-        resolve_bare(ctx, r)
-    };
-
-    let target_fqns: Vec<String> = result
-        .iter()
-        .filter_map(|&n| {
-            ctx.graph.graph[n]
-                .def_id()
-                .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
-        })
-        .collect();
-    ctx.tracer.event(TraceEvent::ResolveResult {
-        name: r.name.to_string(),
-        targets: target_fqns,
-    });
-
-    result
-}
-
-fn resolve_bare(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
-    if r.reaching.is_empty() && !ctx.graph.indexes.by_name.contains(r.name) {
-        return vec![];
-    }
-
-    for stage in &ctx.rules.bare_stages.clone() {
-        let stage_name = format!("{stage:?}");
-        let result = match stage {
-            ResolveStage::SSA => {
-                if r.reaching.is_empty() {
-                    vec![]
-                } else {
-                    resolve_from_reaching(ctx, r.reaching, r.name)
-                }
-            }
-            ResolveStage::ImportStrategies => {
-                if !ctx.graph.indexes.by_name.contains(r.name) {
-                    continue;
-                }
-                apply_import_strategies(
-                    &ctx.rules.import_strategies,
-                    ctx.graph,
-                    ctx.file_node,
-                    r.name,
-                    ctx.rules.fqn_separator,
-                    &ctx.import_map,
-                    &mut ctx.scratch,
-                )
-            }
-            ResolveStage::ImplicitMember => {
-                if !ctx.graph.indexes.by_name.contains(r.name) {
-                    continue;
-                }
-                if let Some(enclosing_idx) = r.enclosing_def
-                    && let Some(&enclosing_node) = ctx.def_nodes.get(enclosing_idx as usize)
-                {
-                    resolve_implicit_member(
-                        ctx.graph,
-                        enclosing_node,
-                        r.name,
-                        ctx.rules.fqn_separator,
-                    )
-                } else {
-                    vec![]
-                }
-            }
-        };
-        let result_fqns: Vec<String> = result
-            .iter()
-            .filter_map(|&n| {
-                ctx.graph.graph[n]
-                    .def_id()
-                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
-            })
-            .collect();
-        ctx.tracer.event(TraceEvent::ResolveBareStage {
-            stage: stage_name,
-            name: r.name.to_string(),
-            result_count: result.len(),
-            result_fqns,
-        });
-        if !result.is_empty() {
-            let mut seen = rustc_hash::FxHashSet::default();
-            let mut result = result;
-            result.retain(|n| seen.insert(*n));
-            return result;
-        }
-    }
-    vec![]
-}
-
-fn resolve_from_reaching(
-    ctx: &mut ResolveCtx<'_>,
-    reaching: &[ParseValue],
-    ref_name: &str,
-) -> Vec<NodeIndex> {
-    let mut result = Vec::new();
-    for value in reaching {
-        match value {
-            ParseValue::LocalDef(i) => {
-                if let Some(&node) = ctx.def_nodes.get(*i as usize)
-                    && let Some(did) = ctx.graph.graph[node].def_id()
-                {
-                    let gdef = &ctx.graph.defs[did.0 as usize];
-                    if gdef.kind.is_type_container() {
-                        let name = ctx.graph.str(gdef.name);
-                        let fqn = ctx.graph.str(gdef.fqn);
-                        if ref_name == name {
-                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                result: format!("constructor -> {fqn}"),
-                            });
-                            result.push(node);
-                        } else if !ctx.lookup_nested_cached(fqn, ref_name, &mut result) {
-                            if let Some(call_method) = ctx.rules.hooks.call_method {
-                                let before = result.len();
-                                ctx.lookup_nested_cached(fqn, call_method, &mut result);
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: if result.len() > before {
-                                        format!("call_method({call_method}) found")
-                                    } else {
-                                        format!("{fqn}.{ref_name} not found, call_method({call_method}) not found")
-                                    },
-                                });
-                            } else {
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("{fqn}.{ref_name} not found"),
-                                });
-                            }
-                        } else {
-                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                result: format!("nested {fqn}.{ref_name} found"),
-                            });
-                        }
-                    } else {
-                        let fqn = ctx.graph.str(gdef.fqn);
-                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                            result: format!("direct -> {fqn}"),
-                        });
-                        result.push(node);
-                    }
-                }
-            }
-            ParseValue::ImportRef(i) => {
-                if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
-                    let resolved = ctx.resolve_import_cached(import_node);
-                    let fqns: Vec<String> = resolved
-                        .iter()
-                        .filter_map(|&n| {
-                            ctx.graph.graph[n].def_id().map(|d| {
-                                ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string()
-                            })
-                        })
-                        .collect();
-                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                        value: format!("ImportRef({i})"),
-                        result: if fqns.is_empty() {
-                            "import not resolved".to_string()
-                        } else {
-                            format!("import -> [{}]", fqns.join(", "))
-                        },
-                    });
-                    result.extend(resolved);
-                }
-            }
-            ParseValue::Type(type_fqn) => {
-                let before = result.len();
-                if !ctx.lookup_nested_cached(type_fqn, ref_name, &mut result) {
-                    if let Some(call_method) = ctx.rules.hooks.call_method {
-                        ctx.lookup_nested_cached(type_fqn, call_method, &mut result);
-                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("Type({type_fqn})"),
-                            result: if result.len() > before {
-                                format!("call_method({call_method}) found")
-                            } else {
-                                format!("{type_fqn}.{ref_name} not found, call_method({call_method}) not found")
-                            },
-                        });
-                    } else {
-                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("Type({type_fqn})"),
-                            result: format!("{type_fqn}.{ref_name} not found"),
-                        });
-                    }
-                } else {
-                    ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                        value: format!("Type({type_fqn})"),
-                        result: format!("nested {type_fqn}.{ref_name} found"),
-                    });
-                }
-            }
-            ParseValue::Opaque => {}
-        }
-    }
-    result
-}
-
-fn resolve_chain(ctx: &mut ResolveCtx<'_>, r: &RefData<'_>) -> Vec<NodeIndex> {
-    let chain = r.chain.unwrap_or(&[]);
-    if chain.is_empty() {
-        return vec![];
-    }
-
-    let mut current_types: Vec<String> = resolve_base_type_fqns(ctx, &chain[0], r.reaching);
-
-    ctx.tracer.event(TraceEvent::ResolveChainBase {
-        step: format!("{:?}", chain[0]),
-        types: current_types.clone(),
-    });
-
-    if current_types.is_empty() {
-        return chain_fallback(ctx, r, chain);
-    }
-
-    for (depth, step) in chain[1..].iter().enumerate() {
-        if depth >= ctx.settings.max_chain_depth || current_types.is_empty() {
-            break;
-        }
-        let member_name = match step {
-            ExpressionStep::Call(n) | ExpressionStep::Field(n) => n.as_str(),
-            _ => continue,
-        };
-
-        let is_last = depth == chain.len() - 2;
-
-        let mut found_nodes = Vec::new();
-        let mut next_types = Vec::new();
-
-        for type_fqn in &current_types {
-            let before = found_nodes.len();
-            ctx.lookup_nested_cached(type_fqn, member_name, &mut found_nodes);
-
-            for &def_idx in &found_nodes[before..] {
-                if let Some(did) = ctx.graph.graph[def_idx].def_id() {
-                    let gdef = &ctx.graph.defs[did.0 as usize];
-                    if matches!(step, ExpressionStep::Call(_)) {
-                        let mut has_return_type = false;
-                        if let Some(meta) = &gdef.metadata
-                            && let Some(rt) = meta.return_type
-                        {
-                            next_types.push(ctx.graph.str(rt).to_string());
-                            has_return_type = true;
-                        }
-                        if !has_return_type && let Some(rt) = ctx.inferred_returns.get(&def_idx) {
-                            next_types.push(rt.clone());
-                            has_return_type = true;
-                        }
-                        if !has_return_type && gdef.kind.is_type_container() {
-                            next_types.push(ctx.graph.str(gdef.fqn).to_string());
-                        }
-                    }
-                    if matches!(step, ExpressionStep::Field(_)) {
-                        if let Some(meta) = &gdef.metadata
-                            && let Some(ta) = meta.type_annotation
-                        {
-                            next_types.push(ctx.graph.str(ta).to_string());
-                        } else if let Some(meta) = &gdef.metadata
-                            && let Some(rt) = meta.return_type
-                        {
-                            next_types.push(ctx.graph.str(rt).to_string());
-                        } else if gdef.kind == DefKind::EnumEntry {
-                            // Enum constant: propagate the parent enum's FQN
-                            let fqn = ctx.graph.str(gdef.fqn);
-                            if let Some((parent, _)) = fqn.rsplit_once(ctx.rules.fqn_separator) {
-                                next_types.push(parent.to_string());
-                            }
-                        } else if gdef.kind.is_type_container() {
-                            // Nested type access (e.g. Outer.Inner.method()):
-                            // propagate the type's own FQN so the chain continues
-                            next_types.push(ctx.graph.str(gdef.fqn).to_string());
-                        }
-                    }
-                }
-            }
-        }
-
-        // Constructor method hook: when Call("new") (or similar) finds no
-        // nested member, the call returns an instance of the receiver type.
-        if found_nodes.is_empty()
-            && matches!(step, ExpressionStep::Call(_))
-            && ctx.rules.hooks.constructor_methods.contains(&member_name)
-        {
-            next_types.extend(current_types.iter().cloned());
-        }
-
-        let found_fqns: Vec<String> = found_nodes
-            .iter()
-            .filter_map(|&n| {
-                ctx.graph.graph[n]
-                    .def_id()
-                    .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
-            })
-            .collect();
-        ctx.tracer.event(TraceEvent::ResolveChainStep {
-            depth,
-            step: format!("{step:?}"),
-            member_name: member_name.to_string(),
-            scope_types: current_types.clone(),
-            found_count: found_nodes.len(),
-            found_fqns,
-            next_types: next_types.clone(),
-        });
-
-        if is_last {
-            let mut seen = rustc_hash::FxHashSet::default();
-            found_nodes.retain(|n| seen.insert(*n));
-            return found_nodes;
-        }
-
-        {
-            let mut seen = rustc_hash::FxHashSet::default();
-            next_types.retain(|t| seen.insert(t.clone()));
-        }
-        current_types = next_types;
-    }
-
-    chain_fallback(ctx, r, chain)
-}
-
-/// When chain resolution fails (empty base or mid-chain step failure),
-/// fall back to bare resolution of the terminal name. Handles extension
-/// functions, static methods, and other cases where the def isn't nested
-/// under the chain's resolved type.
-fn chain_fallback(
-    ctx: &mut ResolveCtx<'_>,
-    r: &RefData<'_>,
-    chain: &[ExpressionStep],
-) -> Vec<NodeIndex> {
-    if !ctx.settings.chain_fallback {
-        return vec![];
-    }
-    let Some(last_name) = chain.last().and_then(|s| match s {
-        ExpressionStep::Call(n) | ExpressionStep::Field(n) => Some(n.as_str()),
-        _ => None,
-    }) else {
-        return vec![];
-    };
-    ctx.tracer.event(TraceEvent::ResolveChainFallback {
-        name: last_name.to_string(),
-    });
-    let fallback = RefData {
-        name: last_name,
-        chain: None,
-        reaching: &[],
-        enclosing_def: r.enclosing_def,
-    };
-    resolve_bare(ctx, &fallback)
-}
-
-fn resolve_base_type_fqns(
-    ctx: &mut ResolveCtx<'_>,
-    base_step: &ExpressionStep,
-    reaching: &[ParseValue],
-) -> Vec<String> {
-    match base_step {
-        ExpressionStep::Ident(_) | ExpressionStep::Call(_) | ExpressionStep::This => {
-            let mut types = Vec::new();
-            for value in reaching {
-                match value {
-                    ParseValue::Type(fqn) => {
-                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                            value: format!("Type({fqn})"),
-                            result: format!("base type -> {fqn}"),
-                        });
-                        types.push(fqn.clone());
-                    }
-                    ParseValue::LocalDef(i) => {
-                        if let Some(&node) = ctx.def_nodes.get(*i as usize)
-                            && let Some(did) = ctx.graph.graph[node].def_id()
-                        {
-                            let gdef = &ctx.graph.defs[did.0 as usize];
-                            let fqn = ctx.graph.str(gdef.fqn);
-                            if gdef.kind.is_type_container() {
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("base type (container) -> {fqn}"),
-                                });
-                                types.push(fqn.to_string());
-                            } else if let Some(meta) = &gdef.metadata
-                                && let Some(rt) = meta.return_type
-                            {
-                                let rt_str = ctx.graph.str(rt);
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("base type (return_type) -> {rt_str}"),
-                                });
-                                types.push(rt_str.to_string());
-                            } else if let Some(rt) = ctx.inferred_returns.get(&node) {
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: format!("base type (inferred) -> {rt}"),
-                                });
-                                types.push(rt.clone());
-                            } else {
-                                ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                    value: format!("LocalDef({i}) = {fqn} ({:?})", gdef.kind),
-                                    result: "no type info".to_string(),
-                                });
-                            }
-                        }
-                    }
-                    ParseValue::ImportRef(i) => {
-                        if let Some(&import_node) = ctx.import_nodes.get(*i as usize) {
-                            let resolved = ctx.resolve_import_cached(import_node);
-                            for def_idx in resolved {
-                                if let Some(did) = ctx.graph.graph[def_idx].def_id() {
-                                    let gdef = &ctx.graph.defs[did.0 as usize];
-                                    let fqn = ctx.graph.str(gdef.fqn);
-                                    if gdef.kind.is_type_container() {
-                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                            value: format!(
-                                                "ImportRef({i}) -> {fqn} ({:?})",
-                                                gdef.kind
-                                            ),
-                                            result: format!("base type (container) -> {fqn}"),
-                                        });
-                                        types.push(fqn.to_string());
-                                    } else if let Some(meta) = &gdef.metadata
-                                        && let Some(rt) = meta.return_type
-                                    {
-                                        let rt_str = ctx.graph.str(rt);
-                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                            value: format!(
-                                                "ImportRef({i}) -> {fqn} ({:?})",
-                                                gdef.kind
-                                            ),
-                                            result: format!("base type (return_type) -> {rt_str}"),
-                                        });
-                                        types.push(rt_str.to_string());
-                                    } else if let Some(rt) = ctx.inferred_returns.get(&def_idx) {
-                                        ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                            value: format!(
-                                                "ImportRef({i}) -> {fqn} ({:?})",
-                                                gdef.kind
-                                            ),
-                                            result: format!("base type (inferred) -> {rt}"),
-                                        });
-                                        types.push(rt.clone());
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    ParseValue::Opaque => {}
-                }
-            }
-            // Fallback: when reaching defs produce no types (e.g. chain base
-            // is an untracked name like a same-package class), try resolving
-            // the base name via import strategies to find its FQN, then
-            // global name lookup as a last resort.
-            if types.is_empty()
-                && let ExpressionStep::Ident(name) | ExpressionStep::Call(name) = base_step
-            {
-                let fallback = RefData {
-                    name,
-                    chain: None,
-                    reaching: &[],
-                    enclosing_def: None,
-                };
-                let mut nodes = resolve_bare(ctx, &fallback);
-                // GlobalName: last-resort lookup for chain bases only.
-                // Not in import_strategies to avoid O(candidates) scans
-                // on every bare identifier ref.
-                if nodes.is_empty() {
-                    nodes = super::imports::global_name(ctx.graph, ctx.file_node, name, 10);
-                }
-                for n in nodes {
-                    if let Some(did) = ctx.graph.graph[n].def_id() {
-                        let gdef = &ctx.graph.defs[did.0 as usize];
-                        if gdef.kind.is_type_container() {
-                            let fqn = ctx.graph.str(gdef.fqn).to_string();
-                            ctx.tracer.event(TraceEvent::ReachingDefResolved {
-                                value: format!("bare({name})"),
-                                result: format!("base type (import fallback) -> {fqn}"),
-                            });
-                            types.push(fqn);
-                        }
-                    }
-                }
-            }
-            types
-        }
-        ExpressionStep::Super => reaching
-            .iter()
-            .filter_map(|v| match v {
-                ParseValue::Type(fqn) => Some(fqn.clone()),
-                _ => None,
-            })
-            .collect(),
-        ExpressionStep::New(type_name) => {
-            let fqn_matches = ctx.graph.indexes.by_fqn.lookup(type_name, |idx| {
-                ctx.graph.graph[idx]
-                    .def_id()
-                    .is_some_and(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn) == *type_name)
-            });
-            if !fqn_matches.is_empty() {
-                return vec![type_name.clone()];
-            }
-            let name_matches = ctx.graph.indexes.by_name.lookup(type_name, |idx| {
-                ctx.graph.graph[idx]
-                    .def_id()
-                    .is_some_and(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].name) == *type_name)
-            });
-            name_matches
-                .iter()
-                .filter_map(|&idx| {
-                    ctx.graph.graph[idx]
-                        .def_id()
-                        .map(|d| ctx.graph.str(ctx.graph.defs[d.0 as usize].fqn).to_string())
-                })
-                .collect()
-        }
-        _ => vec![],
-    }
 }
 
 fn pre_resolve_imports(
