@@ -1204,4 +1204,91 @@ mod tests {
             1
         );
     }
+
+    fn make_def_at(
+        name: &str,
+        fqn_parts: &[&str],
+        start: usize,
+        end: usize,
+    ) -> CanonicalDefinition {
+        CanonicalDefinition {
+            definition_type: "Method",
+            kind: DefKind::Function,
+            name: name.to_string(),
+            fqn: Fqn::from_parts(fqn_parts, "."),
+            range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
+            is_top_level: false,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn assign_ids_distinguishes_definitions_sharing_fqn_in_same_file() {
+        // Regression: v2 Definition ids previously hashed only
+        // (project_id, branch, file_path, fqn). Two methods that share
+        // an fqn (e.g. Go methods on different receivers, or generated
+        // protobuf methods with the same synthesized fqn) collapsed to
+        // one id and dedup'd on insert.
+        let cg = build_graph(
+            "/repo/main.go",
+            vec![
+                make_def_at("Dup", &["main", "Dup"], 100, 120),
+                make_def_at("Dup", &["main", "Dup"], 200, 220),
+            ],
+        );
+
+        let ids = cg.assign_ids(42, "main");
+        let def_ids: Vec<i64> = cg
+            .definitions()
+            .map(|(idx, _, _)| ids[idx.index()])
+            .collect();
+
+        assert_eq!(def_ids.len(), 2);
+        assert_ne!(def_ids[0], def_ids[1]);
+    }
+
+    #[test]
+    fn assign_ids_distinguishes_imports_sharing_path_in_same_file() {
+        // Regression: v2 Import ids previously hashed only
+        // (project_id, branch, file_path, import_path, name|"*"),
+        // so repeated `use foo::bar` style imports in one file
+        // (common in tonic-generated Rust) collapsed to one id.
+        let import_a = CanonicalImport {
+            import_type: "Use",
+            binding_kind: ImportBindingKind::Namespace,
+            mode: ImportMode::Declarative,
+            path: "tonic::codegen".to_string(),
+            name: None,
+            alias: None,
+            scope_fqn: None,
+            range: Range::new(Position::new(0, 0), Position::new(0, 20), (100, 120)),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let import_b = CanonicalImport {
+            range: Range::new(Position::new(0, 0), Position::new(0, 20), (500, 520)),
+            ..import_a.clone()
+        };
+
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        cg.add_file(
+            "/repo/gen.rs",
+            "rs",
+            Language::Python,
+            100,
+            &[],
+            &[import_a, import_b],
+        );
+        let tracer = crate::v2::trace::Tracer::new(false);
+        cg.finalize(&tracer);
+
+        let ids = cg.assign_ids(42, "main");
+        let import_ids: Vec<i64> = cg
+            .imports_iter()
+            .map(|(idx, _, _)| ids[idx.index()])
+            .collect();
+
+        assert_eq!(import_ids.len(), 2);
+        assert_ne!(import_ids[0], import_ids[1]);
+    }
 }
