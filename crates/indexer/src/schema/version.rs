@@ -24,8 +24,16 @@ const VERSION_TABLE: &str = "gkg_schema_version";
 /// Schema version loaded from `config/SCHEMA_VERSION`.
 ///
 /// Bump this file whenever `config/graph.sql` or `config/ontology/` changes
-/// in a way that requires a new table-set. The CI `schema-version-check` job
-/// enforces this.
+/// in a way that requires a new table-set or invalidates existing stored data.
+/// This includes:
+/// - DDL shape changes (new columns, type changes, index additions)
+/// - Edge type renames (e.g. `MERGED_BY` → `MERGED`) since `gl_edge.relationship_kind`
+///   stores the string value and old rows become invisible to the new compiler
+/// - ETL mapping changes (column renames, enum value changes, FK rewiring)
+///
+/// The ETL pipeline is fully ontology-driven (`PlanInput` is built from
+/// `&Ontology`), so all data-affecting changes are ontology YAML changes and
+/// the CI `schema-version-check` job catches them automatically.
 pub static SCHEMA_VERSION: LazyLock<u32> = LazyLock::new(|| {
     include_str!("../../../../config/SCHEMA_VERSION")
         .trim()

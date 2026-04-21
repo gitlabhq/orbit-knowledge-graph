@@ -31,6 +31,22 @@ pub const SCHEMA_VERSION: u32 = /* parsed from config/SCHEMA_VERSION */;
 
 Version 0 is the initial (V0) schema — the unversioned table layout used since the service launched.
 
+#### When to bump
+
+Bump `config/SCHEMA_VERSION` for any ontology or DDL change that affects what is stored in
+ClickHouse, not just table structure:
+
+- **DDL shape changes**: new columns, type changes, index additions, engine changes.
+- **Edge type renames**: e.g. `MERGED_BY` → `MERGED`. The `gl_edge.relationship_kind` column
+  stores these as string values, so old rows remain with the old name while the compiler emits
+  the new name. Without a bump, affected edges are silently missing from query results.
+- **ETL mapping changes**: column renames, enum value changes, FK rewiring. The ETL pipeline
+  is fully ontology-driven (`PlanInput` is built from `&Ontology`), so these are always
+  ontology YAML changes and the CI check catches them automatically.
+
+Changes that do **not** require a bump: ontology description updates, comments, formatting,
+documentation-only fields, or query-side-only changes (new filter operators, new query types).
+
 ### `gkg_schema_version` control table
 
 The Indexer and DispatchIndexing modes create this table on startup if it does not exist;
