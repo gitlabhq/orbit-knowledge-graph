@@ -446,7 +446,6 @@ integration-test:
 code-indexing-benchmark-build:
   stage: benchmark
   needs: []
-  allow_failure: true
   extends:
     - .job-template
     - .sccache-template
@@ -465,7 +464,6 @@ code-indexing-benchmark-build:
   stage: benchmark
   needs:
     - code-indexing-benchmark-build
-  allow_failure: true
   extends:
     - .code-indexing-benchmark-rules
   interruptible: true
@@ -527,7 +525,6 @@ code-indexing-benchmark-v2-linux:
 
 .code-indexing-benchmark-analyze-template:
   stage: benchmark
-  allow_failure: true
   extends:
     - .job-template
     - .code-indexing-benchmark-rules
