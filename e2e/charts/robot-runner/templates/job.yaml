@@ -14,9 +14,15 @@ spec:
         command: ["sh", "-c"]
         args:
         - |
+          set -e
+          apt-get update -qq && apt-get install -qq -y --no-install-recommends \
+            git ca-certificates >/dev/null
+          mkdir -p /fixtures
+          tar xzf /fixtures-archive/fixtures.tar.gz -C /fixtures
           pip install --quiet --disable-pip-version-check --root-user-action=ignore \
             robotframework=={{ .Values.robotframework.version }} \
-            robotframework-requests=={{ .Values.robotframework.requestsVersion }} &&
+            robotframework-requests=={{ .Values.robotframework.requestsVersion }}
+          set +e
           robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
             --consolecolors off --exitonfailure /tests/
           RC=$?
@@ -36,9 +42,15 @@ spec:
         - name: tests
           mountPath: /tests
           readOnly: true
+        - name: fixtures
+          mountPath: /fixtures-archive
+          readOnly: true
         resources:
           {{- toYaml .Values.resources | nindent 10 }}
       volumes:
       - name: tests
         configMap:
           name: {{ .Values.configMap }}
+      - name: fixtures
+        configMap:
+          name: {{ .Values.fixturesConfigMap }}
