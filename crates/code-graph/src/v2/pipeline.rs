@@ -838,9 +838,11 @@ namespace MyApp {
         )
         .unwrap();
 
-        let pipeline = Pipeline::new(PipelineConfig::default());
-        let tracer = crate::v2::trace::Tracer::new(false);
-        let result = pipeline.run_with_tracer(root, &tracer);
+        let result = Pipeline::run_with_tracer(
+            root,
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+        );
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");
