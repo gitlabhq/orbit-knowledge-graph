@@ -370,10 +370,16 @@ where
             .per_file_timeout
             .map(|timeout| crate::v2::sentinel::spawn_sentinel(timeout));
 
-        eprintln!(
-            "[v2-sp] {file_count} files, {} threads",
-            rayon::current_num_threads()
-        );
+        // ── Pre-phase: bulk file read into memory ───────────────
+        // Read all files once upfront. Both Phase 1 and Phase 2
+        // index into this buffer — no per-file I/O in the hot loop.
+        let sources: Vec<Option<Vec<u8>>> = files
+            .par_iter()
+            .map(|path| {
+                let abs_path = format!("{root_path}/{path}");
+                std::fs::read(&abs_path).ok()
+            })
+            .collect();
 
         // ── Phase 1: parallel parse_defs_only + graph build ─────
         let graph = Mutex::new(
@@ -392,19 +398,18 @@ where
 
         let file_infos: Vec<Option<FileInfo>> = files
             .par_iter()
-            .enumerate()
-            .map(|(_, path)| {
+            .zip(sources.par_iter())
+            .map(|(path, source_opt)| {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
                 }
-                let abs_path = format!("{root_path}/{path}");
-                let source = match std::fs::read(&abs_path) {
-                    Ok(s) => s,
-                    Err(e) => {
+                let source = match source_opt {
+                    Some(s) => s,
+                    None => {
                         errors.lock().unwrap().push(PipelineError {
                             file_path: path.clone(),
-                            error: format!("Read error: {e}"),
+                            error: "Read error".to_string(),
                         });
                         pb.inc(1);
                         return None;
@@ -491,24 +496,16 @@ where
 
         let resolve_results: Vec<Phase2Result> = file_infos
             .into_par_iter()
+            .zip(sources.par_iter())
             .zip(files.par_iter())
-            .map(|(info_opt, path)| -> Phase2Result {
+            .map(|((info_opt, source_opt), path)| -> Phase2Result {
                 if ctx.is_cancelled() {
                     pb2.inc(1);
                     return Default::default();
                 }
-                let Some(info) = info_opt else {
+                let (Some(info), Some(source)) = (info_opt, source_opt) else {
                     pb2.inc(1);
                     return Default::default();
-                };
-
-                let abs_path = format!("{root_path}/{path}");
-                let source = match std::fs::read(&abs_path) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        pb2.inc(1);
-                        return Default::default();
-                    }
                 };
 
                 let guard = sentinel.as_ref().map(|(handle, _)| handle.file_start(path));
