@@ -1,3 +1,5 @@
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.74s
+     Running `target/debug/orbit debug ddl`
 CREATE TABLE IF NOT EXISTS checkpoint (
     key String CODEC(ZSTD(1)),
     watermark DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
@@ -638,6 +640,23 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_code_edge (
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
+    source_kind LowCardinality(String) CODEC(LZ4),
+    relationship_kind LowCardinality(String) CODEC(LZ4),
+    target_id Int64 CODEC(Delta(8), ZSTD(1)),
+    target_kind LowCardinality(String) CODEC(LZ4),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
+    PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)),
+    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind))
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
+PRIMARY KEY (traversal_path, source_id, relationship_kind)
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),

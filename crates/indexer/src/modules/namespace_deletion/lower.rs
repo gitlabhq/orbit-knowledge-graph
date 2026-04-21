@@ -156,12 +156,15 @@ mod tests {
             );
         }
 
-        assert!(
-            generated_tables.contains(&ontology.edge_table()),
-            "missing edge table: {generated_tables:?}"
-        );
+        for edge_table in ontology.edge_tables() {
+            assert!(
+                generated_tables.contains(&edge_table),
+                "missing edge table {edge_table}: {generated_tables:?}"
+            );
+        }
 
-        let expected_count = expected_namespaced.len() + 1;
+        let edge_table_count = ontology.edge_tables().len();
+        let expected_count = expected_namespaced.len() + edge_table_count;
         assert_eq!(
             statements.len(),
             expected_count,
