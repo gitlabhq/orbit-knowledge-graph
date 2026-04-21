@@ -1,5 +1,3 @@
-    Finished `dev` profile [unoptimized + debuginfo] target(s) in 0.74s
-     Running `target/debug/orbit debug ddl`
 CREATE TABLE IF NOT EXISTS checkpoint (
     key String CODEC(ZSTD(1)),
     watermark DateTime64(6, 'UTC') CODEC(Delta(8), ZSTD(1)),
