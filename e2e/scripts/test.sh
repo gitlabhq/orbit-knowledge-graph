@@ -13,11 +13,22 @@ mkdir -p "$DIAG_DIR"
 # Cleanup previous run
 helm uninstall "$RELEASE_NAME" -n "$NS_GKG" --kube-context "$KCTX" 2>/dev/null || true
 $KC delete configmap e2e-robot-tests -n "$NS_GKG" --ignore-not-found 2>/dev/null
+$KC delete configmap e2e-robot-fixtures -n "$NS_GKG" --ignore-not-found 2>/dev/null
 
 # Upload test files
 log "Creating ConfigMap from test files"
 $KC create configmap e2e-robot-tests -n "$NS_GKG" \
   --from-file="$E2E_DIR/tests/"
+
+# Bundle fixtures (binary tarball — preserves directory structure and exec bits
+# that --from-file= would flatten/strip). Robot job extracts at startup into
+# /fixtures and the git.resource pushes them to per-test GitLab projects.
+log "Bundling fixtures into ConfigMap"
+FIX_TMP="$(mktemp -d -p "$GKG_ROOT/.tmp" robot-fixtures.XXXXXX)"
+trap 'rm -rf "$FIX_TMP"' EXIT
+tar czf "$FIX_TMP/fixtures.tar.gz" -C "$E2E_DIR/fixtures" .
+$KC create configmap e2e-robot-fixtures -n "$NS_GKG" \
+  --from-file=fixtures.tar.gz="$FIX_TMP/fixtures.tar.gz"
 
 # Install robot-runner chart
 log "Launching Robot Framework job"
