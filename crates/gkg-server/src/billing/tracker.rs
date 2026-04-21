@@ -15,9 +15,17 @@ pub struct SnowplowBillingTracker {
 
 impl SnowplowBillingTracker {
     pub fn from_config(config: &BillingConfig) -> Result<Self, labkit_events::Error> {
+        let oidc_config = labkit_events::oidc::ConfigBuilder::new()
+            .skip_if_unsupported_cloud(true)
+            .build();
+        let source = labkit_events::oidc::Source::new(oidc_config)
+            .map_err(|e| labkit_events::Error::Emitter(e.to_string()))?;
+
         let tracker = labkit_events::Tracker::builder(&config.collector_url, APP_ID)
             .batch_size(1)
+            .token_source(Arc::new(source))
             .build()?;
+
         Ok(Self {
             tracker: Arc::new(tracker),
         })
