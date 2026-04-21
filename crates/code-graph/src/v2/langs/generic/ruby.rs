@@ -69,6 +69,8 @@ impl DslLanguage for RubyDsl {
             reference("identifier").name_from(text()).when(
                 (!parent_is("call"))
                     .and(!parent_is("argument_list"))
+                    .and(!parent_is("method"))
+                    .and(!parent_is("singleton_method"))
                     .and(!parent_is("method_parameters"))
                     .and(!parent_is("block_parameters"))
                     .and(!parent_is("pair"))
@@ -95,8 +97,7 @@ impl DslLanguage for RubyDsl {
             binding("assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .value_from("right")
-                .instance_attrs(&["@"])
-                .typed(vec![field("right").then(field("receiver"))], &[]),
+                .instance_attrs(&["@"]),
             binding("operator_assignment", BindingKind::Assignment)
                 .name_from(&["left"])
                 .no_value(),
@@ -153,6 +154,7 @@ impl DslLanguage for RubyDsl {
         types::SsaConfig {
             self_names: &["self"],
             super_name: Some("super"),
+            constructor_methods: &["new", "find", "find_by", "create", "first", "last"],
         }
     }
 }
@@ -325,14 +327,18 @@ impl HasRules for RubyRules {
                 ResolveStage::ImplicitMember,
                 ResolveStage::ImportStrategies,
             ],
-            vec![ImportStrategy::ScopeFqnWalk, ImportStrategy::SameFile],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::SameFile,
+                ImportStrategy::GlobalName,
+            ],
             ReceiverMode::None,
             "::",
             &["self"],
             Some("super"),
         )
         .with_hooks(crate::v2::linker::rules::ResolverHooks {
-            constructor_methods: &["new"],
+            constructor_methods: &["new", "find", "find_by", "create", "first", "last"],
             ..Default::default()
         })
     }

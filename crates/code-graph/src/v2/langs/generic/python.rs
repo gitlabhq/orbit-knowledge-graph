@@ -266,6 +266,7 @@ impl DslLanguage for PythonDsl {
         types::SsaConfig {
             self_names: &["self"],
             super_name: Some("super"),
+            ..Default::default()
         }
     }
 }

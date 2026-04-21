@@ -593,6 +593,36 @@ impl BindingRule {
         None
     }
 
+    /// Extract a type from a constructor call on the RHS.
+    /// For `x = User.new(params)`, returns `Some("User")` when `"new"` is in
+    /// `constructor_methods`. For non-constructor calls, returns `None`.
+    pub fn extract_constructor_type(
+        &self,
+        node: &N<'_>,
+        spec: &LanguageSpec,
+        constructor_methods: &[&str],
+    ) -> Option<String> {
+        if constructor_methods.is_empty() {
+            return None;
+        }
+        let value_node = if let Some(extract) = &self.value_extract {
+            extract.navigate(node)?
+        } else {
+            node.field(self.value_field?)?
+        };
+        let cc = spec.chain_config.as_ref()?;
+        for fa in &cc.field_access {
+            let vk = value_node.kind();
+            if vk.as_ref() == fa.kind {
+                let method = fa.member.apply(&value_node)?;
+                if constructor_methods.contains(&method.as_str()) {
+                    return Some(fa.object.navigate(&value_node)?.text().to_string());
+                }
+            }
+        }
+        None
+    }
+
     /// Extract the RHS name from a binding's value field.
     /// Returns the callee/identifier/object name for SSA alias chasing.
     pub fn extract_rhs_name(&self, node: &N<'_>, spec: &LanguageSpec) -> Option<String> {
@@ -706,6 +736,10 @@ pub struct SsaConfig {
     /// Variable name for the super-class reference. Written as
     /// `LocalDef(super_def_idx)` when entering a class with super_types.
     pub super_name: Option<&'static str>,
+    /// Method names that act as constructors. When a binding RHS is
+    /// `Receiver.new(args)`, the SSA value is `Type(Receiver)` instead
+    /// of `Alias(new)`. e.g. `&["new"]` for Ruby.
+    pub constructor_methods: &'static [&'static str],
 }
 
 // ── Hooks ───────────────────────────────────────────────────────

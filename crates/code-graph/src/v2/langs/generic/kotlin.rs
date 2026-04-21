@@ -322,6 +322,7 @@ impl DslLanguage for KotlinDsl {
         types::SsaConfig {
             self_names: &["this", "self"],
             super_name: Some("super"),
+            ..Default::default()
         }
     }
 }

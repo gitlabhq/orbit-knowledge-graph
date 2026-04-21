@@ -1205,6 +1205,18 @@ impl LanguageSpec {
                             sep,
                         );
                         super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
+                    } else if let Some(ctor_type) = rule.extract_constructor_type(
+                        node,
+                        self,
+                        self.ssa_config.constructor_methods,
+                    ) {
+                        let resolved = resolve_type_name(
+                            &ctor_type,
+                            &state.import_map,
+                            module_prefix.as_deref(),
+                            sep,
+                        );
+                        super::ssa::SsaValue::Type(state.arena.alloc_str(&resolved))
                     } else if let Some(rhs_name) = rule.extract_rhs_name(node, self) {
                         super::ssa::SsaValue::Alias(state.arena.alloc_str(&rhs_name))
                     } else {

@@ -867,7 +867,7 @@ fn resolve_base_type_fqns(
                 // Not in import_strategies to avoid O(candidates) scans
                 // on every bare identifier ref.
                 if nodes.is_empty() {
-                    nodes = super::imports::global_name(ctx.graph, ctx.file_node, name);
+                    nodes = super::imports::global_name(ctx.graph, ctx.file_node, name, 10);
                 }
                 for n in nodes {
                     if let Some(did) = ctx.graph.graph[n].def_id() {
