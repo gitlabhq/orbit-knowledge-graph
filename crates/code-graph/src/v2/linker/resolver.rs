@@ -12,7 +12,7 @@ use rustc_hash::FxHashMap;
 use std::sync::Arc;
 
 use super::graph::{CodeGraph, GraphEdge};
-use super::imports::{self, ResolveSettings, apply_import_strategies};
+use super::imports::{ImportResolver, ResolveSettings};
 use super::rules::{ResolutionRules, ResolveStage};
 use super::state::ScratchBuf;
 
@@ -65,7 +65,7 @@ impl<'a> FileResolver<'a> {
         settings: &'a ResolveSettings,
         tracer: &'a Tracer,
     ) -> Self {
-        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
+        let import_map = pre_resolve_imports(graph, import_nodes);
         let ctx = ResolveCtx {
             graph,
             file_node,
@@ -243,7 +243,7 @@ impl<'a> ResolveCtx<'a> {
         let rules = &*lang_ctx.rules;
         let settings = &rules.settings;
         let tracer = lang_ctx.tracer();
-        let import_map = pre_resolve_imports(graph, import_nodes, rules.fqn_separator);
+        let import_map = pre_resolve_imports(graph, import_nodes);
         Self {
             graph,
             file_node,
@@ -261,16 +261,22 @@ impl<'a> ResolveCtx<'a> {
         }
     }
 
+    /// Build a temporary `ImportResolver` from this context's state.
+    fn import_resolver(&mut self) -> ImportResolver<'_> {
+        ImportResolver {
+            graph: self.graph,
+            file_node: self.file_node,
+            import_map: &self.import_map,
+            scratch: &mut self.scratch,
+            settings: self.settings,
+        }
+    }
+
     fn resolve_import_cached(&mut self, import_node: NodeIndex) -> Vec<NodeIndex> {
         if let Some(cached) = self.import_cache.get(&import_node) {
             return cached.clone();
         }
-        let result = imports::resolve_import(
-            self.graph,
-            import_node,
-            self.rules.fqn_separator,
-            &mut self.scratch,
-        );
+        let result = self.import_resolver().resolve_import(import_node);
         if let Some(iid) = self.graph.graph[import_node].import_id() {
             let gimp = &self.graph.imports[iid.0 as usize];
             let path = self.graph.str(gimp.path);
@@ -278,7 +284,7 @@ impl<'a> ResolveCtx<'a> {
             let fqn = if path.is_empty() {
                 name.to_string()
             } else {
-                format!("{path}{}{name}", self.rules.fqn_separator)
+                format!("{path}{}{name}", self.graph.sep())
             };
             let result_fqns: Vec<String> = result
                 .iter()
@@ -459,16 +465,10 @@ impl<'a> ResolveCtx<'a> {
                     if !self.graph.indexes.by_name.contains(r.name) {
                         continue;
                     }
-                    apply_import_strategies(
-                        &self.rules.import_strategies,
-                        self.graph,
-                        self.file_node,
-                        r.name,
-                        self.rules.fqn_separator,
-                        &self.import_map,
-                        &mut self.scratch,
-                        self.settings.global_name_max_results,
-                    )
+                    {
+                        let strategies = self.rules.import_strategies.clone();
+                        self.import_resolver().apply_strategies(&strategies, r.name)
+                    }
                 }
                 ResolveStage::ImplicitMember => {
                     if !self.graph.indexes.by_name.contains(r.name) {
@@ -477,12 +477,7 @@ impl<'a> ResolveCtx<'a> {
                     if let Some(enclosing_idx) = r.enclosing_def
                         && let Some(&enclosing_node) = self.def_nodes.get(enclosing_idx as usize)
                     {
-                        resolve_implicit_member(
-                            self.graph,
-                            enclosing_node,
-                            r.name,
-                            self.rules.fqn_separator,
-                        )
+                        self.resolve_implicit_member(enclosing_node, r.name)
                     } else {
                         vec![]
                     }
@@ -889,12 +884,7 @@ impl<'a> ResolveCtx<'a> {
                     // Not in import_strategies to avoid O(candidates) scans
                     // on every bare identifier ref.
                     if nodes.is_empty() {
-                        nodes = super::imports::global_name(
-                            self.graph,
-                            self.file_node,
-                            name,
-                            self.settings.global_name_max_results,
-                        );
+                        nodes = self.import_resolver().global_name(name);
                     }
                     for n in nodes {
                         if let Some(did) = self.graph.graph[n].def_id() {
@@ -947,6 +937,36 @@ impl<'a> ResolveCtx<'a> {
             _ => vec![],
         }
     }
+
+    fn resolve_implicit_member(&self, enclosing_node: NodeIndex, name: &str) -> Vec<NodeIndex> {
+        let sep = self.graph.sep();
+        let mut result = Vec::new();
+        if let Some(did) = self.graph.graph[enclosing_node].def_id() {
+            let gdef = &self.graph.defs[did.0 as usize];
+            let fqn = self.graph.str(gdef.fqn);
+            let mut scope = fqn;
+            loop {
+                self.graph.indexes.nested.lookup_into(
+                    scope,
+                    name,
+                    |idx| {
+                        self.graph.graph[idx].def_id().is_some_and(|d| {
+                            self.graph.str(self.graph.defs[d.0 as usize].name) == name
+                        })
+                    },
+                    &mut result,
+                );
+                if !result.is_empty() {
+                    break;
+                }
+                match scope.rfind(sep) {
+                    Some(pos) => scope = &scope[..pos],
+                    None => break,
+                }
+            }
+        }
+        result
+    }
 }
 
 // ── Utility functions ───────────────────────────────────────────
@@ -970,8 +990,8 @@ fn format_chain(chain: Option<&[ExpressionStep]>) -> Option<Vec<String>> {
 fn pre_resolve_imports(
     graph: &CodeGraph,
     import_nodes: &[NodeIndex],
-    sep: &str,
 ) -> FxHashMap<String, Vec<NodeIndex>> {
+    let sep = graph.sep();
     let mut map: FxHashMap<String, Vec<NodeIndex>> = FxHashMap::default();
     for &import_node in import_nodes {
         if let Some(iid) = graph.graph[import_node].import_id() {
@@ -998,38 +1018,4 @@ fn pre_resolve_imports(
         }
     }
     map
-}
-
-fn resolve_implicit_member(
-    graph: &CodeGraph,
-    enclosing_node: NodeIndex,
-    name: &str,
-    sep: &str,
-) -> Vec<NodeIndex> {
-    let mut result = Vec::new();
-    if let Some(did) = graph.graph[enclosing_node].def_id() {
-        let gdef = &graph.defs[did.0 as usize];
-        let fqn = graph.str(gdef.fqn);
-        let mut scope = fqn;
-        loop {
-            graph.indexes.nested.lookup_into(
-                scope,
-                name,
-                |idx| {
-                    graph.graph[idx]
-                        .def_id()
-                        .is_some_and(|d| graph.str(graph.defs[d.0 as usize].name) == name)
-                },
-                &mut result,
-            );
-            if !result.is_empty() {
-                break;
-            }
-            match scope.rfind(sep) {
-                Some(pos) => scope = &scope[..pos],
-                None => break,
-            }
-        }
-    }
-    result
 }
