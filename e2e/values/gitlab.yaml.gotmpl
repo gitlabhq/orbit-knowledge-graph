@@ -1,5 +1,14 @@
 global:
   edition: ee
+  # Trust licenses signed by the staging customer portal (loads
+  # .test_license_encryption_key.pub as a fallback decryption key) and point the
+  # subscription/activation client at the staging portal. Applied to every Rails
+  # component (webservice, sidekiq, toolbox, migrations) so the license is
+  # decryptable from first boot. The activation itself is performed by
+  # scripts/activate-license.sh after gitlab is Ready.
+  extraEnv:
+    GITLAB_LICENSE_MODE: "test"
+    CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
   hosts:
     domain: e2e.local
     https: false

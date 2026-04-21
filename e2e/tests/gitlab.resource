@@ -133,6 +133,27 @@ Create Issue
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
 
+Create Epic
+    [Documentation]    Create a group-scoped epic and return its dict. The response includes
+    ...                both the epic id (REST-scoped) and work_item_id (the global id indexed
+    ...                by Orbit as a WorkItem with work_item_type=epic).
+    [Arguments]    ${group_id}    ${title}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    title=${title}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/groups/${group_id}/epics
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Add Issue To Epic
+    [Documentation]    Parent ${issue_id} under epic ${epic_iid} in ${group_id}. Creates a
+    ...                WorkItem CONTAINS WorkItem edge once Siphon replicates the
+    ...                work_item_parent_links row.
+    [Arguments]    ${group_id}    ${epic_iid}    ${issue_id}
+    ${headers}=    GitLab Auth Headers
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/groups/${group_id}/epics/${epic_iid}/issues/${issue_id}
+    ...    headers=${headers}    expected_status=201
+    RETURN    ${resp.json()}
+
 Create Note On Issue
     [Arguments]    ${project_id}    ${issue_iid}    ${body_text}
     ${headers}=    GitLab Auth Headers

@@ -90,6 +90,13 @@ Wait For Node Indexed Within Budget
     Wait Until Keyword Succeeds    ${budget}    3s
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
 
+Wait For Edge Indexed Within Budget
+    [Documentation]    Same as Wait For Edge Indexed but pulls timeout from the shared budget.
+    [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
+    ${budget}=    Remaining Budget
+    Wait Until Keyword Succeeds    ${budget}    3s
+    ...    Verify Edge Indexed    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
+
 # --- Generic Orbit query helpers (used for code-graph assertions) -----------
 # These take a filter dict (project_id, fqn, definition_type, …) instead of
 # requiring the caller to know the node's primary id ahead of time, which is
@@ -134,6 +141,33 @@ Orbit Traversal Two Hop
     ...    nodes=${{[$src, $dst]}}    relationships=${{[$rel]}}    limit=${limit_int}
     ${resp}=    Orbit Query    ${query}
     RETURN    ${resp}
+
+# --- Generic edge assertions -------------------------------------------------
+
+Wait For Edge Indexed
+    [Documentation]    Poll until an edge of ${rel_type} between ${src_entity} (filtered by
+    ...                id=${src_id} when not None) and ${dst_entity} (filtered by id=${dst_id}
+    ...                when not None) is queryable. Pass ${None} on either side to match any
+    ...                node of that entity (useful for e.g. "some User AUTHORED this Note").
+    [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
+    ...            ${timeout}=120s    ${interval}=3s
+    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ...    Verify Edge Indexed    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
+
+Verify Edge Indexed
+    [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
+    ${src_filters}=    Create Dictionary
+    IF    $src_id is not None
+        Set To Dictionary    ${src_filters}    id=${src_id}
+    END
+    ${dst_filters}=    Create Dictionary
+    IF    $dst_id is not None
+        Set To Dictionary    ${dst_filters}    id=${dst_id}
+    END
+    ${resp}=    Orbit Traversal Two Hop    ${src_entity}    ${src_filters}
+    ...    ${rel_type}    ${dst_entity}    ${dst_filters}
+    Should Be True    ${resp["row_count"]} >= 1
+    ...    No ${rel_type} edge ${src_entity}(${src_id}) -> ${dst_entity}(${dst_id})
 
 # --- Code-graph assertions (per-project) ------------------------------------
 
