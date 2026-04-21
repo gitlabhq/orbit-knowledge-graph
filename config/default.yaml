@@ -115,6 +115,7 @@ metrics:
 
 schema:
   max_retained_versions: 2
+  version_poll_interval_secs: 5
 
 analytics:
   deployment:

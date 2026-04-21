@@ -8,6 +8,7 @@ pub mod health_check;
 pub mod pipeline;
 pub mod proto;
 pub mod redaction;
+pub mod schema_watcher;
 pub mod shutdown;
 pub mod tls;
 pub mod tools;
