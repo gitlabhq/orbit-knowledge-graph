@@ -24,6 +24,7 @@ $KC create configmap e2e-robot-tests -n "$NS_GKG" \
 # that --from-file= would flatten/strip). Robot job extracts at startup into
 # /fixtures and the git.resource pushes them to per-test GitLab projects.
 log "Bundling fixtures into ConfigMap"
+mkdir -p "$GKG_ROOT/.tmp"
 FIX_TMP="$(mktemp -d -p "$GKG_ROOT/.tmp" robot-fixtures.XXXXXX)"
 trap 'rm -rf "$FIX_TMP"' EXIT
 tar czf "$FIX_TMP/fixtures.tar.gz" -C "$E2E_DIR/fixtures" .
