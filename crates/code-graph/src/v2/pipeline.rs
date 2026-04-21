@@ -97,6 +97,36 @@ impl PipelineContext {
     }
 }
 
+/// Per-language context built inside `process_files`. Bundles the
+/// pipeline-wide context with the language-specific spec and rules.
+pub struct LanguageContext {
+    pub pipeline: Arc<PipelineContext>,
+    pub spec: crate::v2::dsl::types::LanguageSpec,
+    pub rules: Arc<crate::v2::linker::rules::ResolutionRules>,
+}
+
+impl LanguageContext {
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.pipeline.is_cancelled()
+    }
+
+    #[inline]
+    pub fn tracer(&self) -> &crate::v2::trace::Tracer {
+        &self.pipeline.tracer
+    }
+
+    #[inline]
+    pub fn root_path(&self) -> &str {
+        &self.pipeline.root_path
+    }
+
+    #[inline]
+    pub fn sep(&self) -> &str {
+        self.rules.fqn_separator
+    }
+}
+
 /// Trait for language-specific graph production.
 ///
 /// Two strategies:
@@ -321,12 +351,17 @@ where
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        let spec = P::spec();
-        let rules = Arc::new(R::rules());
+        let lang_ctx = Arc::new(LanguageContext {
+            pipeline: ctx.clone(),
+            spec: P::spec(),
+            rules: Arc::new(R::rules()),
+        });
         let language = P::language();
         let file_count = files.len();
-        let root_path = ctx.root_path.as_str();
-        let tracer = &ctx.tracer;
+        let root_path = lang_ctx.root_path();
+        let tracer = lang_ctx.tracer();
+        let spec = &lang_ctx.spec;
+        let rules = &lang_ctx.rules;
         let t0 = std::time::Instant::now();
 
         eprintln!(
@@ -335,8 +370,9 @@ where
         );
 
         // ── Phase 1: parallel parse_defs_only + graph build ─────
-        let graph =
-            Mutex::new(CodeGraph::new_with_root(root_path.to_string()).with_rules(rules.clone()));
+        let graph = Mutex::new(
+            CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone()),
+        );
         let pb = progress_bar(file_count as u64, "parse + graph");
         let errors = Mutex::new(Vec::new());
         let total_defs = std::sync::atomic::AtomicUsize::new(0);
