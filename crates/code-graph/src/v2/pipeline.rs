@@ -322,7 +322,7 @@ where
         ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let spec = P::spec();
-        let rules = R::rules();
+        let rules = Arc::new(R::rules());
         let language = P::language();
         let file_count = files.len();
         let root_path = ctx.root_path.as_str();
@@ -335,7 +335,8 @@ where
         );
 
         // ── Phase 1: parallel parse_defs_only + graph build ─────
-        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
+        let graph =
+            Mutex::new(CodeGraph::new_with_root(root_path.to_string()).with_rules(rules.clone()));
         let pb = progress_bar(file_count as u64, "parse + graph");
         let errors = Mutex::new(Vec::new());
         let total_defs = std::sync::atomic::AtomicUsize::new(0);
@@ -473,7 +474,7 @@ where
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
-                    &rules,
+                    &*rules,
                     &rules.settings,
                     tracer,
                 );
@@ -564,7 +565,7 @@ where
                             info.file_node,
                             &info.def_nodes,
                             &info.import_nodes,
-                            &rules,
+                            &*rules,
                             &rules.settings,
                             tracer,
                         );

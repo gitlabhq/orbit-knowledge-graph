@@ -308,12 +308,8 @@ impl<'a> ResolveCtx<'a> {
         // structs (`Service` embeds `Logger`, `svc.Log()` resolves via
         // Logger's receiver type).
         if result.is_empty() {
-            self.graph.lookup_by_receiver_type(
-                scope_fqn,
-                member_name,
-                self.rules.fqn_separator,
-                &mut result,
-            );
+            self.graph
+                .lookup_by_receiver_type(scope_fqn, member_name, &mut result);
             // Walk ancestors for receiver type lookup (struct embedding,
             // extension functions on parent types). Collects ALL matches
             // across the full ancestor chain — doesn't early-exit so that
@@ -327,7 +323,6 @@ impl<'a> ResolveCtx<'a> {
                             self.graph.lookup_by_receiver_type(
                                 ancestor_fqn,
                                 member_name,
-                                self.rules.fqn_separator,
                                 &mut result,
                             );
                         }
