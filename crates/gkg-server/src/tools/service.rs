@@ -78,7 +78,6 @@ impl ToolService {
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
-            "get_query_dsl_schema" => self.execute_get_query_dsl_schema(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -104,6 +103,8 @@ impl ToolService {
     }
 
     fn execute_get_graph_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        use ontology::query_dsl;
+
         let args: GetGraphSchemaArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
@@ -112,30 +113,31 @@ impl ToolService {
         let response = self.build_graph_schema_response(expand_nodes);
 
         let result = match format {
-            OutputFormat::Llm => self.format_as_toon(&response)?,
-            OutputFormat::Raw => serde_json::to_value(&response)
-                .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
-        };
-
-        Ok(ToolPlan::Immediate { result })
-    }
-
-    fn execute_get_query_dsl_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
-        use ontology::query_dsl;
-
-        let format = parse_format(arguments);
-
-        let result = match format {
             OutputFormat::Llm => {
-                let toon = query_dsl::condensed_query_schema()
-                    .map_err(|e| ExecutorError::InvalidArguments(e))?;
-                Value::String(toon)
+                let mut toon = self.format_as_toon(&response)?;
+                if args.include_query_dsl {
+                    if let Value::String(ref mut s) = toon {
+                        if let Ok(dsl) = query_dsl::condensed_query_schema() {
+                            s.push_str("\n\nQuery DSL Schema:\n");
+                            s.push_str(&dsl);
+                        }
+                    }
+                }
+                toon
             }
             OutputFormat::Raw => {
-                let json = query_dsl::condensed_query_schema_json()
-                    .map_err(|e| ExecutorError::InvalidArguments(e))?;
-                serde_json::from_str(&json)
-                    .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?
+                let mut obj = serde_json::to_value(&response)
+                    .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+                if args.include_query_dsl {
+                    if let Value::Object(ref mut map) = obj {
+                        map.insert(
+                            "query_dsl_schema".to_string(),
+                            Value::String(query_dsl::condensed_query_schema_json()
+                                .unwrap_or_default()),
+                        );
+                    }
+                }
+                obj
             }
         };
 
@@ -176,6 +178,8 @@ fn parse_format(arguments: &Value) -> OutputFormat {
 struct GetGraphSchemaArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
+    #[serde(default)]
+    include_query_dsl: bool,
 }
 
 #[cfg(test)]
