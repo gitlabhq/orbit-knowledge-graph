@@ -38,6 +38,8 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `Project`             | Represents a GitLab project/repository.                                                                 | `id`, `name`, `full_path`, `namespace_id`                                   |
 | `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id` |
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
+| `Deployment`          | Represents a deployment of a commit to a CI/CD environment.                                             | `id`, `iid`, `project_id`, `status`, `ref`, `sha`                             |
+| `Environment`         | Represents a CI/CD deployment target (production, staging, review app, etc.).                           | `id`, `project_id`, `name`, `slug`, `state`, `tier`, `environment_type`       |
 | `Vulnerability`       | Represents a security vulnerability finding.                                                            | `id`, `title`, `severity`, `state`, `project_id`                              |
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
 | `Note`                | Represents a comment or annotation on a GitLab object (issue, merge request, commit, vulnerability, etc.). | `id`, `note`, `noteable_type`, `noteable_id`, `author_id`                 |
@@ -120,6 +122,10 @@ graph TD
 | `HAS_IDENTIFIER`                    | `Vulnerability`| `VulnerabilityIdentifier` | A vulnerability is associated with identifiers.                                               |
 | `DETECTED_IN`                       | `Vulnerability`| `VulnerabilityOccurrence` | A vulnerability is detected in an occurrence.                                                  |
 | `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
+| `DEPLOYED_BY`                       | `User`         | `Deployment`   | User who triggered the deployment.                                                                      |
+| `DEPLOYED_TO`                       | `MergeRequest` | `Deployment`   | Merge request was included in a deployment.                                                             |
+| `IN_ENVIRONMENT`                    | `Deployment`   | `Environment`  | Deployment targets a specific environment.                                                              |
+| `CREATED_FOR_MR`                    | `Environment`  | `MergeRequest` | Environment was first created by a merge request pipeline.                                              |
 
 ---
 

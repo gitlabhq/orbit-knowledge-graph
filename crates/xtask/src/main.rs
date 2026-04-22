@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod graph_sql;
 mod schema;
 mod synth;
 
@@ -25,6 +26,12 @@ enum Command {
     /// Generate JSON Schema for the server configuration.
     Schema {
         /// Write schema to a file instead of stdout.
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+    },
+    /// Dump ClickHouse graph DDL generated from the embedded ontology.
+    DumpGraphSql {
+        /// Write DDL to a file instead of stdout.
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
     },
@@ -118,5 +125,6 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
+        Command::DumpGraphSql { output } => graph_sql::run(output),
     }
 }
