@@ -1,0 +1,144 @@
+//! Query DSL schema condensation.
+//!
+//! Loads `graph_query.schema.json` at compile time, strips trivial
+//! descriptions and defaults, and encodes the result as TOON text.
+//! This gives LLM callers a compact reference for the query DSL
+//! alongside the ontology schema.
+
+use serde_json::{Map, Value};
+
+const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
+
+const TRIVIAL_DESCRIPTIONS: &[&str] = &[
+    "Integer value",
+    "String value",
+    "Boolean value",
+    "List of values",
+];
+
+/// Return the condensed query DSL schema as a TOON-encoded string.
+pub fn condensed_query_schema() -> Result<String, String> {
+    let schema: Value = serde_json::from_str(BASE_SCHEMA)
+        .map_err(|e| format!("failed to parse base schema: {e}"))?;
+
+    let condensed = condense_schema(schema);
+
+    toon_format::encode(&condensed, &toon_format::EncodeOptions::default())
+        .map_err(|e| e.to_string())
+}
+
+/// Return the condensed query DSL schema as a JSON string.
+pub fn condensed_query_schema_json() -> Result<String, String> {
+    let schema: Value = serde_json::from_str(BASE_SCHEMA)
+        .map_err(|e| format!("failed to parse base schema: {e}"))?;
+
+    let condensed = condense_schema(schema);
+
+    serde_json::to_string_pretty(&condensed).map_err(|e| e.to_string())
+}
+
+fn condense_schema(mut schema: Value) -> Value {
+    condense_value(&mut schema);
+    schema
+}
+
+fn condense_value(value: &mut Value) {
+    match value {
+        Value::Object(map) => condense_object(map),
+        Value::Array(arr) => {
+            for item in arr {
+                condense_value(item);
+            }
+        }
+        _ => {}
+    }
+}
+
+fn condense_object(map: &mut Map<String, Value>) {
+    map.remove("default");
+
+    let should_remove = matches!(
+        map.get("description"),
+        Some(Value::String(desc)) if is_trivial_description(desc)
+    );
+    if should_remove {
+        map.remove("description");
+    }
+
+    for value in map.values_mut() {
+        condense_value(value);
+    }
+}
+
+fn is_trivial_description(desc: &str) -> bool {
+    TRIVIAL_DESCRIPTIONS.contains(&desc)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn condensed_schema_is_valid_toon() {
+        let result = condensed_query_schema();
+        assert!(result.is_ok(), "Should produce valid TOON: {:?}", result);
+
+        let toon = result.unwrap();
+        assert!(!toon.is_empty(), "TOON output should not be empty");
+        assert!(
+            !toon.starts_with('{'),
+            "Should be TOON format, not raw JSON"
+        );
+    }
+
+    #[test]
+    fn condensed_schema_reasonable_size() {
+        let condensed = condensed_query_schema().expect("Should condense");
+        assert!(
+            condensed.len() < 17000,
+            "Condensed schema should be under 17KB, got {} bytes",
+            condensed.len()
+        );
+    }
+
+    #[test]
+    fn condensed_schema_preserves_structure() {
+        let toon = condensed_query_schema().expect("Should condense");
+
+        assert!(toon.contains("query_type"), "Should contain query_type");
+        assert!(toon.contains("traversal"), "Should contain traversal");
+        assert!(toon.contains("aggregation"), "Should contain aggregation");
+        assert!(toon.contains("search"), "Should contain search");
+        assert!(toon.contains("neighbors"), "Should contain neighbors");
+        assert!(toon.contains("path_finding"), "Should contain path_finding");
+
+        assert!(toon.contains("$defs"), "Should preserve $defs");
+        assert!(toon.contains("allOf"), "Should preserve allOf conditionals");
+        assert!(toon.contains("NodeSelector"), "Should contain NodeSelector");
+        assert!(toon.contains("Filter"), "Should contain Filter");
+    }
+
+    #[test]
+    fn condensed_schema_removes_trivial_descriptions() {
+        let toon = condensed_query_schema().expect("Should condense");
+        assert!(
+            !toon.contains("Integer value"),
+            "Should remove trivial descriptions"
+        );
+    }
+
+    #[test]
+    fn condensed_schema_keeps_security_notes() {
+        let toon = condensed_query_schema().expect("Should condense");
+        assert!(
+            toon.contains("SECURITY"),
+            "Should preserve SECURITY notes in descriptions"
+        );
+    }
+
+    #[test]
+    fn condensed_json_is_valid() {
+        let json = condensed_query_schema_json().expect("Should condense to JSON");
+        let _: Value = serde_json::from_str(&json).expect("Should be valid JSON");
+    }
+}

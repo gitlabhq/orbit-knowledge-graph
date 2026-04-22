@@ -16,10 +16,11 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
-pub mod constants;
 mod entities;
+pub mod constants;
 pub mod etl;
 pub mod introspection;
+pub mod query_dsl;
 mod json_schema;
 mod loading;
 

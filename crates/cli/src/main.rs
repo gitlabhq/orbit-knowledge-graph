@@ -183,26 +183,35 @@ enum Commands {
         #[arg(long)]
         local: bool,
     },
-    /// Describe the graph schema (entities, edges, properties) visible to the
-    /// local DuckDB index. Use --all to include server-only entities.
+    /// Describe the graph schema. Requires --ontology or --query.
     Schema {
+        /// Show the graph ontology (entities, edges, properties).
+        #[arg(long, conflicts_with = "query")]
+        ontology: bool,
+
+        /// Show the query DSL schema (how to write queries).
+        #[arg(long, conflicts_with = "ontology")]
+        query: bool,
+
         /// Expand one or more entities to show their properties and edges.
-        /// Pass `*` to expand every entity.
-        #[arg(long, short = 'e', value_name = "NODE", num_args = 1..)]
+        /// Pass `*` to expand every entity. Only valid with --ontology.
+        #[arg(long, short = 'e', value_name = "NODE", num_args = 1.., requires = "ontology")]
         expand: Vec<String>,
+
+        /// Include the full server ontology (debugging aid). Default is
+        /// restricted to entities present in the local DuckDB.
+        /// Only valid with --ontology.
+        #[arg(long, requires = "ontology")]
+        all: bool,
+
+        /// Path to ontology directory (default: embedded).
+        /// Only valid with --ontology.
+        #[arg(long, short = 'p', value_name = "PATH", requires = "ontology")]
+        ontology_path: Option<PathBuf>,
 
         /// Emit JSON instead of the default LLM-friendly TOON format.
         #[arg(long)]
         raw: bool,
-
-        /// Include the full server ontology (debugging aid). Default is
-        /// restricted to entities present in the local DuckDB.
-        #[arg(long)]
-        all: bool,
-
-        /// Path to ontology directory (default: embedded)
-        #[arg(long, short)]
-        ontology: Option<PathBuf>,
     },
     /// Maintainer-only tools (DDL generation, etc.)
     Debug {
@@ -283,11 +292,21 @@ async fn main() -> Result<()> {
             local,
         } => run_compile(json, traversal_paths, ontology, format, local),
         Commands::Schema {
-            expand,
-            raw,
-            all,
             ontology,
-        } => run_schema_introspect(expand, raw, all, ontology),
+            query,
+            expand,
+            all,
+            ontology_path,
+            raw,
+        } => {
+            if query {
+                run_query_dsl_schema(raw)
+            } else if ontology {
+                run_schema_introspect(expand, raw, all, ontology_path)
+            } else {
+                anyhow::bail!("specify --ontology or --query (see: orbit schema --help)")
+            }
+        }
         Commands::Debug { command } => match command {
             DebugCommands::Ddl {
                 ontology,
@@ -322,6 +341,19 @@ fn run_schema_introspect(
     } else {
         let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
             .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
+        println!("{toon}");
+    }
+    Ok(())
+}
+
+fn run_query_dsl_schema(raw: bool) -> Result<()> {
+    if raw {
+        let json = ontology::query_dsl::condensed_query_schema_json()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("{json}");
+    } else {
+        let toon = ontology::query_dsl::condensed_query_schema()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
         println!("{toon}");
     }
     Ok(())
