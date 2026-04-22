@@ -159,21 +159,6 @@ INSERT INTO gl_label (id, title, color, traversal_path) VALUES
     (7001, 'feature', '#0075ca', '1/100/'),
     (7002, 'urgent', '#e4e669', '1/101/');
 
--- Vulnerabilities for role-scoped aggregation tests.
--- Each vuln lives under a project's traversal path so the compiler's
--- security pass filters them exactly like any other namespaced entity.
--- read_vulnerability is granted at Developer+, which is why Vulnerability's
--- ontology declares `required_role: developer`.
-INSERT INTO gl_vulnerability (id, title, state, severity, report_type, resolved_on_default_branch, present_on_default_branch, traversal_path) VALUES
-    (8000, 'SQLi in login', 'detected', 'critical', 'sast', false, true, '1/100/1000/'),
-    (8001, 'XSS in comments', 'detected', 'high', 'sast', false, true, '1/101/1001/'),
-    (8002, 'Exposed secret in CI', 'detected', 'critical', 'secret_detection', false, true, '1/102/1004/');
-
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-    ('1/100/1000/', 8000, 'Vulnerability', 'IN_PROJECT', 1000, 'Project'),
-    ('1/101/1001/', 8001, 'Vulnerability', 'IN_PROJECT', 1001, 'Project'),
-    ('1/102/1004/', 8002, 'Vulnerability', 'IN_PROJECT', 1004, 'Project');
-
 INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, traversal_path) VALUES
     (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, '1/100/'),
     (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', '1/100/'),
