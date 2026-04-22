@@ -1,0 +1,15 @@
+.env
+.env.*
+!.env.example
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+.eval-servers/
+results/
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.ruff_cache/
+uv.lock

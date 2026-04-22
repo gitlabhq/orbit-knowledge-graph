@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "EvalTask",
+  "type": "object",
+  "required": ["id", "prompt", "category"],
+  "properties": {
+    "id": {
+      "type": "string",
+      "description": "Unique task identifier, used for fixture matching"
+    },
+    "prompt": {
+      "type": "string",
+      "description": "Prompt template. Use {{param}} for parameter substitution from params.json"
+    },
+    "category": {
+      "type": "string",
+      "enum": ["traversal", "search", "aggregation", "mutation", "multi-hop"],
+      "description": "Task category for filtering and grouping"
+    },
+    "difficulty": {
+      "type": "string",
+      "enum": ["easy", "medium", "hard"],
+      "default": "medium"
+    },
+    "description": {
+      "type": "string",
+      "description": "Human-readable description of what this task tests"
+    },
+    "structured_output_schema": {
+      "type": "object",
+      "description": "JSON Schema the agent must conform its response to"
+    },
+    "tags": {
+      "type": "array",
+      "items": { "type": "string" }
+    },
+    "timeout_override": {
+      "type": "integer",
+      "description": "Per-task timeout override in seconds"
+    }
+  },
+  "additionalProperties": false
+}

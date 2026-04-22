@@ -1,0 +1,24 @@
+id: user-open-mrs
+prompt: |
+  Find all open merge requests authored by the user "{{username}}" in the project with ID {{project_id}}.
+  Return a list of objects with iid, title, and created_at for each MR.
+category: traversal
+difficulty: medium
+description: Two-hop traversal from user through authored relationship to MRs, filtered by project and state
+structured_output_schema:
+  type: object
+  required: [merge_requests]
+  properties:
+    merge_requests:
+      type: array
+      items:
+        type: object
+        required: [iid, title, created_at]
+        properties:
+          iid:
+            type: integer
+          title:
+            type: string
+          created_at:
+            type: string
+tags: [traversal, merge-requests]

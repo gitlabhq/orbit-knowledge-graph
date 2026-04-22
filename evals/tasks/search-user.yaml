@@ -1,0 +1,20 @@
+id: search-user
+prompt: |
+  Find the GitLab user with username "{{username}}".
+  Return their id, username, name, and state.
+category: search
+difficulty: easy
+description: Simple single-entity search by username
+structured_output_schema:
+  type: object
+  required: [id, username, name, state]
+  properties:
+    id:
+      type: string
+    username:
+      type: string
+    name:
+      type: string
+    state:
+      type: string
+tags: [smoke, baseline]

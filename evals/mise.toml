@@ -1,0 +1,47 @@
+[tools]
+python = "3.12"
+uv = "latest"
+
+[env]
+_.file = ".env"
+PYTHONPATH = "."
+
+[tasks.setup]
+run = "uv sync"
+description = "Install Python dependencies"
+
+[tasks.run]
+run = "uv run python -m harness.cli run"
+description = "Run full evaluation"
+
+[tasks."run:orbit"]
+run = "uv run python -m harness.cli run --arm orbit"
+description = "Run Orbit arm only"
+
+[tasks."run:glab"]
+run = "uv run python -m harness.cli run --arm glab"
+description = "Run glab arm only"
+
+[tasks.score]
+run = "uv run python -m harness.cli score"
+description = "Score latest run"
+
+[tasks.report]
+run = "uv run python -m harness.cli report"
+description = "Generate report from latest scored run"
+
+[tasks.dry-run]
+run = "uv run python -m harness.cli dry-run"
+description = "Validate config and tasks without running"
+
+[tasks.full]
+depends = ["run", "score", "report"]
+description = "Run -> score -> report"
+
+[tasks.lint]
+run = "uv run ruff check harness/ tools/"
+description = "Lint Python code"
+
+[tasks.typecheck]
+run = "uv run pyright harness/ tools/"
+description = "Type-check Python code"

@@ -1,0 +1,8 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "path_found": true,
+  "steps": [
+    {"from_type": "User", "from_id": "1", "relationship": "AUTHORED", "to_type": "MergeRequest", "to_id": "5001"},
+    {"from_type": "MergeRequest", "from_id": "5001", "relationship": "REVIEWED", "to_type": "User", "to_id": "2"}
+  ]
+}

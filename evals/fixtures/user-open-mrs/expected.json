@@ -1,0 +1,7 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "merge_requests": [
+    {"iid": 101, "title": "Fix pipeline timeout", "created_at": "2026-03-15T10:00:00Z"},
+    {"iid": 98, "title": "Update dependencies", "created_at": "2026-03-10T14:30:00Z"}
+  ]
+}

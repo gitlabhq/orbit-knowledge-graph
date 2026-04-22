@@ -1,0 +1,22 @@
+id: mr-count-by-project
+prompt: |
+  Count the number of merge requests per project for the top {{limit}} projects by MR count.
+  Return a list of objects with project_name and mr_count, sorted descending by count.
+category: aggregation
+difficulty: medium
+description: Aggregation query grouping MRs by project with count and sort
+structured_output_schema:
+  type: object
+  required: [projects]
+  properties:
+    projects:
+      type: array
+      items:
+        type: object
+        required: [project_name, mr_count]
+        properties:
+          project_name:
+            type: string
+          mr_count:
+            type: integer
+tags: [aggregation, merge-requests]

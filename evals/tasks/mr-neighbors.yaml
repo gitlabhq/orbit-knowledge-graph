@@ -1,0 +1,24 @@
+id: mr-neighbors
+prompt: |
+  Find all entities directly connected to merge request with iid {{mr_iid}} in project {{project_id}}.
+  Return the list of connected entities, each with their type, id, and the relationship type connecting them.
+category: search
+difficulty: easy
+description: Neighbors query on a single merge request to discover connected entities
+structured_output_schema:
+  type: object
+  required: [neighbors]
+  properties:
+    neighbors:
+      type: array
+      items:
+        type: object
+        required: [entity_type, entity_id, relationship]
+        properties:
+          entity_type:
+            type: string
+          entity_id:
+            type: string
+          relationship:
+            type: string
+tags: [neighbors, merge-requests]

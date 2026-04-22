@@ -1,0 +1,31 @@
+id: path-between-users
+prompt: |
+  Find the shortest path (up to depth {{max_depth}}) between user "{{user_a}}" and user "{{user_b}}" in the knowledge graph.
+  Return the path as a list of steps, where each step has a from_type, from_id, relationship, to_type, and to_id.
+category: multi-hop
+difficulty: hard
+description: Path-finding query between two users, testing multi-hop graph traversal
+structured_output_schema:
+  type: object
+  required: [path_found, steps]
+  properties:
+    path_found:
+      type: boolean
+    steps:
+      type: array
+      items:
+        type: object
+        required: [from_type, from_id, relationship, to_type, to_id]
+        properties:
+          from_type:
+            type: string
+          from_id:
+            type: string
+          relationship:
+            type: string
+          to_type:
+            type: string
+          to_id:
+            type: string
+tags: [path-finding, multi-hop]
+timeout_override: 600

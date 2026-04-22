@@ -1,0 +1,10 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "projects": [
+    {"project_name": "gitlab-org/gitlab", "mr_count": 15234},
+    {"project_name": "gitlab-org/gitaly", "mr_count": 4521},
+    {"project_name": "gitlab-org/gitlab-runner", "mr_count": 2103},
+    {"project_name": "gitlab-org/omnibus-gitlab", "mr_count": 1876},
+    {"project_name": "gitlab-org/gitlab-pages", "mr_count": 987}
+  ]
+}

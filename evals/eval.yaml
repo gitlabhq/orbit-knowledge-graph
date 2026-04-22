@@ -1,0 +1,87 @@
+run:
+  name: orbit-vs-glab-baseline
+  concurrency: 4
+  task_timeout: 300
+  output_dir: results
+
+  tasks:
+    paths:
+      - tasks/*.yaml
+    filter:
+      categories: []
+      min_difficulty: easy
+
+  scoring:
+    fixtures_path: fixtures
+    report_formats: [markdown, json]
+
+  retry:
+    max_attempts: 3
+    base_delay_ms: 1000
+    max_delay_ms: 30000
+    backoff_factor: 2
+    jitter: true
+
+  timeouts:
+    task: 300
+    server_start: 30
+    session_create: 10
+    data_extract: 10
+
+arms:
+  - name: orbit
+    agent: agents/orbit.md
+    skills:
+      - skills/orbit-query
+    env:
+      GITLAB_TOKEN: ${GITLAB_TOKEN}
+      GITLAB_HOST: ${GITLAB_HOST}
+    model:
+      provider: anthropic
+      model: claude-haiku-4-5
+      temperature: 0
+      max_tokens: 16384
+    tools:
+      allow:
+        - bash
+        - read
+        - glob
+        - grep
+        - skill
+      bash_scope:
+        - "python tools/orbit_query.py*"
+    port: 4096
+
+  - name: glab
+    agent: agents/glab.md
+    skills:
+      - skills/glab-data
+    env:
+      GITLAB_TOKEN: ${GITLAB_TOKEN}
+      GITLAB_HOST: ${GITLAB_HOST}
+    model:
+      provider: anthropic
+      model: claude-haiku-4-5
+      temperature: 0
+      max_tokens: 16384
+    tools:
+      allow:
+        - bash
+        - read
+        - glob
+        - grep
+        - skill
+      bash_scope:
+        - "glab *"
+        - "curl *"
+    port: 4097
+
+evaluators:
+  - graph
+  - efficiency
+  - behavior
+
+aggregators:
+  - descriptive
+  - comparative
+  - distributional

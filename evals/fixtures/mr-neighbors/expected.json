@@ -1,0 +1,9 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "neighbors": [
+    {"entity_type": "User", "entity_id": "1", "relationship": "AUTHORED"},
+    {"entity_type": "Project", "entity_id": "278964", "relationship": "BELONGS_TO"},
+    {"entity_type": "User", "entity_id": "42", "relationship": "REVIEWED"},
+    {"entity_type": "Pipeline", "entity_id": "99001", "relationship": "TRIGGERED_BY"}
+  ]
+}
