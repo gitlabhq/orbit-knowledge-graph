@@ -24,7 +24,7 @@ pub mod tls;
 
 pub use analytics::{AnalyticsConfig, DeploymentConfig, DeploymentEnvironment, DeploymentKind};
 pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
-pub use billing::BillingConfig;
+pub use billing::{BillingConfig, QuotaConfig};
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
     CodeIndexingTaskHandlerConfig, EngineConfiguration, GlobalDispatcherConfig,

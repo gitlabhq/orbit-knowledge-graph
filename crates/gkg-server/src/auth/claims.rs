@@ -36,4 +36,8 @@ pub struct Claims {
     pub deployment_type: Option<String>,
     #[serde(default)]
     pub realm: Option<String>,
+    #[serde(default)]
+    pub feature_qualified_name: Option<String>,
+    #[serde(default)]
+    pub feature_enablement_type: Option<String>,
 }

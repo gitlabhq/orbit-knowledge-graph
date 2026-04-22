@@ -12,7 +12,7 @@ use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
 use crate::auth::{Claims, JwtValidator};
-use crate::billing::BillingTracker;
+use crate::billing::{BillingTracker, QuotaService};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_stats::GraphStatsService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
@@ -48,6 +48,7 @@ pub struct KnowledgeGraphServiceImpl {
     cluster_health: Arc<ClusterHealthChecker>,
     graph_stats: GraphStatsService,
     stream_timeout_secs: u64,
+    quota: Arc<QuotaService>,
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -74,7 +75,13 @@ impl KnowledgeGraphServiceImpl {
             cluster_health,
             graph_stats,
             stream_timeout_secs,
+            quota: Arc::new(QuotaService::disabled()),
         }
+    }
+
+    pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
+        self.quota = quota;
+        self
     }
 
     pub fn with_resolver_registry(mut self, registry: Arc<ColumnResolverRegistry>) -> Self {
@@ -135,6 +142,12 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
         record_ai_session_id(&claims.ai_session_id);
+
+        // Quota gate runs before we touch the query stream so a denied request
+        // short-circuits with gRPC RESOURCE_EXHAUSTED instead of opening a
+        // half-used streaming channel. Non-metered source types and disabled
+        // config both return Ok immediately inside the service.
+        self.quota.check(&claims).await?;
 
         let mut stream = request.into_inner();
         let (tx, rx) = mpsc::channel(4);
@@ -729,6 +742,8 @@ mod tests {
             root_namespace_id: None,
             deployment_type: None,
             realm: None,
+            feature_qualified_name: None,
+            feature_enablement_type: None,
         }
     }
 

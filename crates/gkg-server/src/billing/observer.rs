@@ -157,6 +157,8 @@ mod tests {
             root_namespace_id: Some(9970),
             deployment_type: Some(".com".into()),
             realm: Some("SaaS".into()),
+            feature_qualified_name: Some("orbit_query".into()),
+            feature_enablement_type: Some("duo_enterprise".into()),
         }
     }
 

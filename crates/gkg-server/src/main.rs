@@ -6,7 +6,7 @@ use std::sync::Arc;
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
-use gkg_server::billing::SnowplowBillingTracker;
+use gkg_server::billing::{QuotaService, SnowplowBillingTracker};
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;
@@ -199,6 +199,25 @@ async fn run_webserver(
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
+    }
+
+    if config.billing.quota.enabled {
+        if config.billing.quota.customers_dot_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "billing.quota.enabled=true but billing.quota.customers_dot_url is empty — \
+                 set GKG_BILLING__QUOTA__CUSTOMERS_DOT_URL"
+            ));
+        }
+        info!(
+            customers_dot_url = %config.billing.quota.customers_dot_url,
+            "initializing CustomersDot quota client"
+        );
+        let quota = QuotaService::from_config(
+            &config.billing.quota,
+            config.analytics.deployment.environment.as_str(),
+        )
+        .map_err(|e| anyhow::anyhow!("quota service initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_quota(Arc::new(quota));
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

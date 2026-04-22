@@ -124,4 +124,10 @@ analytics:
 billing:
   enabled: false
   collector_url: "http://localhost:9090"
+  quota:
+    enabled: false
+    customers_dot_url: "https://customers.gitlab.com"
+    request_timeout_ms: 2000
+    default_ttl_secs: 3600
+    max_cache_entries: 10000
 

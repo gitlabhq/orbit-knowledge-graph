@@ -39,6 +39,16 @@ pub enum DeploymentEnvironment {
     Production,
 }
 
+impl DeploymentEnvironment {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            DeploymentEnvironment::Development => "development",
+            DeploymentEnvironment::Staging => "staging",
+            DeploymentEnvironment::Production => "production",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

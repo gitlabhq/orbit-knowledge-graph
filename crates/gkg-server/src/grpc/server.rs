@@ -10,7 +10,7 @@ use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
 use crate::auth::JwtValidator;
-use crate::billing::BillingTracker;
+use crate::billing::{BillingTracker, QuotaService};
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
 
@@ -60,6 +60,11 @@ impl GrpcServer {
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
+        self
+    }
+
+    pub fn with_quota(mut self, quota: Arc<QuotaService>) -> Self {
+        self.service = self.service.with_quota(quota);
         self
     }
 
