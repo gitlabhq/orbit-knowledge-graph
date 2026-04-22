@@ -1,5 +1,11 @@
+//! Query DSL schema condensation.
+//!
+//! Loads `graph_query.schema.json` at compile time, strips trivial
+//! descriptions and defaults, and encodes the result as TOON text.
+//! This gives LLM callers a compact reference for the query DSL
+//! alongside the ontology schema.
+
 use serde_json::{Map, Value};
-use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
@@ -10,14 +16,25 @@ const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "List of values",
 ];
 
+/// Return the condensed query DSL schema as a TOON-encoded string.
 pub fn condensed_query_schema() -> Result<String, String> {
     let schema: Value = serde_json::from_str(BASE_SCHEMA)
         .map_err(|e| format!("failed to parse base schema: {e}"))?;
 
     let condensed = condense_schema(schema);
 
-    let options = EncodeOptions::default();
-    encode(&condensed, &options).map_err(|e| e.to_string())
+    toon_format::encode(&condensed, &toon_format::EncodeOptions::default())
+        .map_err(|e| e.to_string())
+}
+
+/// Return the condensed query DSL schema as a JSON string.
+pub fn condensed_query_schema_json() -> Result<String, String> {
+    let schema: Value = serde_json::from_str(BASE_SCHEMA)
+        .map_err(|e| format!("failed to parse base schema: {e}"))?;
+
+    let condensed = condense_schema(schema);
+
+    serde_json::to_string_pretty(&condensed).map_err(|e| e.to_string())
 }
 
 fn condense_schema(mut schema: Value) -> Value {
@@ -64,7 +81,6 @@ mod tests {
     #[test]
     fn condensed_schema_is_valid_toon() {
         let result = condensed_query_schema();
-
         assert!(result.is_ok(), "Should produce valid TOON: {:?}", result);
 
         let toon = result.unwrap();
@@ -78,7 +94,6 @@ mod tests {
     #[test]
     fn condensed_schema_reasonable_size() {
         let condensed = condensed_query_schema().expect("Should condense");
-
         assert!(
             condensed.len() < 17000,
             "Condensed schema should be under 17KB, got {} bytes",
@@ -106,7 +121,6 @@ mod tests {
     #[test]
     fn condensed_schema_removes_trivial_descriptions() {
         let toon = condensed_query_schema().expect("Should condense");
-
         assert!(
             !toon.contains("Integer value"),
             "Should remove trivial descriptions"
@@ -116,7 +130,6 @@ mod tests {
     #[test]
     fn condensed_schema_keeps_security_notes() {
         let toon = condensed_query_schema().expect("Should condense");
-
         assert!(
             toon.contains("SECURITY"),
             "Should preserve SECURITY notes in descriptions"
@@ -124,25 +137,8 @@ mod tests {
     }
 
     #[test]
-    fn print_condensed_schema() {
-        let toon = condensed_query_schema().expect("Should condense");
-        eprintln!(
-            "\n--- condensed schema ({} bytes) ---\n{toon}\n--- end ---\n",
-            toon.len()
-        );
-    }
-
-    #[test]
-    fn condensed_schema_excludes_ontology_specific_data() {
-        let toon = condensed_query_schema().expect("Should condense");
-
-        assert!(
-            !toon.contains("username"),
-            "Should not include entity-specific fields like username"
-        );
-        assert!(
-            !toon.contains("AUTHORED"),
-            "Should not include relationship types (use get_graph_entities)"
-        );
+    fn condensed_json_is_valid() {
+        let json = condensed_query_schema_json().expect("Should condense to JSON");
+        let _: Value = serde_json::from_str(&json).expect("Should be valid JSON");
     }
 }

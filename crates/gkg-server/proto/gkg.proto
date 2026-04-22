@@ -125,6 +125,9 @@ message StructuredSchema {
   repeated SchemaDomain domains = 2;
   repeated SchemaNode nodes = 3;
   repeated SchemaEdge edges = 4;
+  // Condensed JSON Schema for the query DSL. Lets callers discover
+  // both the graph structure and the query format in a single request.
+  string query_dsl_schema = 5;
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").

@@ -118,6 +118,10 @@ pub struct StructuredSchema {
     pub nodes: ::prost::alloc::vec::Vec<SchemaNode>,
     #[prost(message, repeated, tag = "4")]
     pub edges: ::prost::alloc::vec::Vec<SchemaEdge>,
+    /// Condensed JSON Schema for the query DSL, so callers can discover
+    /// both the graph structure and the query format in a single request.
+    #[prost(string, tag = "5")]
+    pub query_dsl_schema: ::prost::alloc::string::String,
 }
 /// Logical grouping of related node types (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

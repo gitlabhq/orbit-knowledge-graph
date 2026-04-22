@@ -23,6 +23,7 @@ use crate::proto::{
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
+use ontology::query_dsl::condensed_query_schema;
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
@@ -384,6 +385,7 @@ impl KnowledgeGraphServiceImpl {
             domains,
             nodes,
             edges,
+            query_dsl_schema: condensed_query_schema().unwrap_or_default(),
         }
     }
 

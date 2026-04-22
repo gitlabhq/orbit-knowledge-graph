@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
+use ontology::query_dsl::condensed_query_schema;
+
 #[derive(Debug, Error)]
 pub enum ExecutorError {
     #[error("Tool not found: {0}")]
@@ -109,9 +111,27 @@ impl ToolService {
         let response = self.build_graph_schema_response(expand_nodes);
 
         let result = match format {
-            OutputFormat::Llm => self.format_as_toon(&response)?,
-            OutputFormat::Raw => serde_json::to_value(&response)
-                .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
+            OutputFormat::Llm => {
+                let mut toon = self.format_as_toon(&response)?;
+                if let Value::String(ref mut s) = toon {
+                    if let Ok(dsl) = condensed_query_schema() {
+                        s.push_str("\n\nQuery DSL Schema:\n");
+                        s.push_str(&dsl);
+                    }
+                }
+                toon
+            }
+            OutputFormat::Raw => {
+                let mut obj = serde_json::to_value(&response)
+                    .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+                if let Value::Object(ref mut map) = obj {
+                    map.insert(
+                        "query_dsl_schema".to_string(),
+                        Value::String(condensed_query_schema().unwrap_or_default()),
+                    );
+                }
+                obj
+            }
         };
 
         Ok(ToolPlan::Immediate { result })

@@ -318,11 +318,21 @@ fn run_schema_introspect(
     let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
 
     if raw {
-        println!("{}", serde_json::to_string_pretty(&response)?);
+        let mut obj = serde_json::to_value(&response)?;
+        if let serde_json::Value::Object(ref mut map) = obj {
+            map.insert(
+                "query_dsl_schema".to_string(),
+                serde_json::Value::String(
+                    ontology::query_dsl::condensed_query_schema_json().unwrap_or_default(),
+                ),
+            );
+        }
+        println!("{}", serde_json::to_string_pretty(&obj)?);
     } else {
         let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
             .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
-        println!("{toon}");
+        let dsl = ontology::query_dsl::condensed_query_schema().unwrap_or_default();
+        println!("{toon}\n\nQuery DSL Schema:\n{dsl}");
     }
     Ok(())
 }

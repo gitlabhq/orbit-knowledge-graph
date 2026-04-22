@@ -4,7 +4,7 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::schema::condensed_query_schema;
+use ontology::query_dsl::condensed_query_schema;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
