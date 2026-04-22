@@ -15,6 +15,7 @@ redaction:
   resource_type: security_finding
   id_column: id
   ability: read_security_resource
+  required_role: security_manager
 
 properties:
   id:
