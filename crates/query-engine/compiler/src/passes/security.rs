@@ -28,7 +28,6 @@ use regex::Regex;
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
-use crate::input::EntityAuthConfig;
 pub use crate::types::SecurityContext;
 use ontology::Ontology;
 
@@ -75,18 +74,6 @@ fn unprefix_gl_table(table: &str) -> &str {
         .and_then(|c| c.get(1))
         .map(|m| m.as_str())
         .unwrap_or(table)
-}
-
-/// Same map but keyed by entity name. Consumed by callers that work from
-/// `EntityAuthConfig` (e.g. hydration-style lookups) rather than from a
-/// physical table.
-pub fn build_entity_min_role(
-    entity_auth: &HashMap<String, EntityAuthConfig>,
-) -> HashMap<String, u32> {
-    entity_auth
-        .iter()
-        .map(|(name, cfg)| (name.clone(), cfg.required_access_level))
-        .collect()
 }
 
 /// Inject security filters into an AST node (mutates in place).
