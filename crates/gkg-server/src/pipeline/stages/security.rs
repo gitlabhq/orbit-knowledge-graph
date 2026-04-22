@@ -1,4 +1,4 @@
-use query_engine::compiler::SecurityContext;
+use query_engine::compiler::{SecurityContext, TraversalPath};
 use thiserror::Error;
 
 use crate::auth::Claims;
@@ -6,6 +6,10 @@ use crate::auth::Claims;
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
+
+/// Access level assigned to the admin org-root path. Matches `Gitlab::Access::OWNER`
+/// so that every entity's `required_role` check passes for admins.
+const ADMIN_ORG_ROOT_ACCESS_LEVEL: u32 = 50;
 
 #[derive(Clone)]
 pub struct SecurityStage;
@@ -17,15 +21,26 @@ impl SecurityStage {
             .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
             as i64;
         let traversal_paths = if claims.admin {
-            vec![format!("{}/", org_id)]
-        } else if claims.group_traversal_ids.is_empty() {
-            return Err(SecurityError(
-                "no enabled namespaces for this user".to_string(),
-            ));
+            // Admins get the org-root path tagged Owner so every entity's
+            // required_role check passes. This mirrors the pre-role-scoping
+            // behavior where admins bypassed all filtering.
+            vec![TraversalPath::new(
+                format!("{org_id}/"),
+                ADMIN_ORG_ROOT_ACCESS_LEVEL,
+            )]
         } else {
-            claims.group_traversal_ids.clone()
+            if claims.group_traversal_ids.is_empty() {
+                return Err(SecurityError(
+                    "no enabled namespaces for this user".to_string(),
+                ));
+            }
+            claims
+                .group_traversal_ids
+                .iter()
+                .map(|tp| TraversalPath::new(tp.path.clone(), tp.access_level))
+                .collect()
         };
-        SecurityContext::new(org_id, traversal_paths)
+        SecurityContext::new_with_roles(org_id, traversal_paths)
             .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
             .map_err(|e| SecurityError(e.to_string()))
     }
@@ -58,10 +73,11 @@ pub struct SecurityError(pub String);
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::auth::claims::TraversalPathClaim;
 
     fn make_claims(
         admin: bool,
-        group_traversal_ids: Vec<String>,
+        group_traversal_ids: Vec<TraversalPathClaim>,
         organization_id: Option<u64>,
     ) -> Claims {
         Claims {
@@ -81,12 +97,38 @@ mod tests {
         }
     }
 
+    fn reporter(path: &str) -> TraversalPathClaim {
+        TraversalPathClaim {
+            path: path.to_string(),
+            access_level: 20,
+        }
+    }
+
+    fn developer(path: &str) -> TraversalPathClaim {
+        TraversalPathClaim {
+            path: path.to_string(),
+            access_level: 30,
+        }
+    }
+
+    fn paths(sc: &SecurityContext) -> Vec<String> {
+        sc.traversal_paths
+            .iter()
+            .map(|tp| tp.path.clone())
+            .collect()
+    }
+
     #[test]
     fn admin_gets_org_wide_access() {
         let claims = make_claims(true, vec![], Some(42));
         let ctx = SecurityStage::build_context(&claims).unwrap();
         assert_eq!(ctx.org_id, 42);
-        assert_eq!(ctx.traversal_paths, vec!["42/"]);
+        assert_eq!(paths(&ctx), vec!["42/".to_string()]);
+        // Admin is tagged Owner so entity-level required_role gates always pass.
+        assert_eq!(
+            ctx.traversal_paths[0].access_level,
+            ADMIN_ORG_ROOT_ACCESS_LEVEL
+        );
     }
 
     #[test]
@@ -98,9 +140,10 @@ mod tests {
 
     #[test]
     fn non_admin_gets_their_group_paths() {
-        let claims = make_claims(false, vec!["1/22/".into(), "1/33/".into()], Some(1));
+        let claims = make_claims(false, vec![reporter("1/22/"), reporter("1/33/")], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
+        assert_eq!(paths(&ctx), vec!["1/22/".to_string(), "1/33/".to_string()]);
+        assert!(ctx.traversal_paths.iter().all(|tp| tp.access_level == 20));
     }
 
     #[test]
@@ -108,5 +151,16 @@ mod tests {
         let claims = make_claims(false, vec![], Some(1));
         let err = SecurityStage::build_context(&claims).unwrap_err();
         assert!(err.to_string().contains("no enabled namespaces"));
+    }
+
+    #[test]
+    fn mixed_roles_propagate_into_context() {
+        // Reporter on 1/22/, Developer on 1/33/. The compiler security pass
+        // drops 1/22/ from any entity that requires Developer (e.g. Vulnerability).
+        let claims = make_claims(false, vec![reporter("1/22/"), developer("1/33/")], Some(1));
+        let ctx = SecurityStage::build_context(&claims).unwrap();
+
+        assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "1/33/"]);
+        assert_eq!(ctx.paths_at_least(30), vec!["1/33/"]);
     }
 }

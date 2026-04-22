@@ -79,7 +79,7 @@ fn can_see_debug_sql(ctx: &QueryPipelineContext) -> bool {
         let direct_gitlab_org_member = sc
             .traversal_paths
             .iter()
-            .any(|p| p == GITLAB_ORG_PATH_PREFIX);
+            .any(|tp| tp.path == GITLAB_ORG_PATH_PREFIX);
         let reporter_or_above = sc
             .access_level
             .is_some_and(|level| level >= compiler::AccessLevel::Reporter);
