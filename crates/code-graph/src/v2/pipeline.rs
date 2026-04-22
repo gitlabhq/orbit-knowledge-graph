@@ -383,7 +383,7 @@ where
 
         // ── Phase 1: parallel parse, sequential graph build ─────
         let pb = progress_bar(file_count as u64, "parse + graph");
-        let mut all_errors: Vec<PipelineError> = Vec::new();
+        let all_errors: Vec<PipelineError> = Vec::new();
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
