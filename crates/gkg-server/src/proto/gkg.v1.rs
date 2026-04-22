@@ -118,10 +118,6 @@ pub struct StructuredSchema {
     pub nodes: ::prost::alloc::vec::Vec<SchemaNode>,
     #[prost(message, repeated, tag = "4")]
     pub edges: ::prost::alloc::vec::Vec<SchemaEdge>,
-    /// Condensed JSON Schema for the query DSL, so callers can discover
-    /// both the graph structure and the query format in a single request.
-    #[prost(string, tag = "5")]
-    pub query_dsl_schema: ::prost::alloc::string::String,
 }
 /// Logical grouping of related node types (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -202,6 +198,28 @@ pub struct SchemaNodeStyle {
     /// hex color, e.g. "#6366f1"
     #[prost(string, tag = "2")]
     pub color: ::prost::alloc::string::String,
+}
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetQueryDslSchemaRequest {
+    #[prost(enumeration = "ResponseFormat", tag = "1")]
+    pub format: i32,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetQueryDslSchemaResponse {
+    #[prost(oneof = "get_query_dsl_schema_response::Content", tags = "1, 2")]
+    pub content: ::core::option::Option<get_query_dsl_schema_response::Content>,
+}
+/// Nested message and enum types in `GetQueryDSLSchemaResponse`.
+pub mod get_query_dsl_schema_response {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Content {
+        /// TOON-encoded condensed schema (format = LLM)
+        #[prost(string, tag = "1")]
+        Text(::prost::alloc::string::String),
+        /// JSON string of the condensed schema (format = RAW)
+        #[prost(string, tag = "2")]
+        Json(::prost::alloc::string::String),
+    }
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.
@@ -718,6 +736,35 @@ pub mod knowledge_graph_service_client {
                 );
             self.inner.unary(req, path, codec).await
         }
+        /// Returns the condensed query DSL JSON Schema so callers can discover
+        /// the query format without inspecting MCP tool descriptions.
+        /// Used by GET /api/v4/orbit/query_schema.
+        pub async fn get_query_dsl_schema(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetQueryDslSchemaRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetQueryDslSchemaResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetQueryDSLSchema",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetQueryDSLSchema"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
     }
 }
 /// Generated server implementations.
@@ -785,6 +832,16 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<super::GetGraphStatsRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Status,
+        >;
+        /// Returns the condensed query DSL JSON Schema so callers can discover
+        /// the query format without inspecting MCP tool descriptions.
+        /// Used by GET /api/v4/orbit/query_schema.
+        async fn get_query_dsl_schema(
+            &self,
+            request: tonic::Request<super::GetQueryDslSchemaRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetQueryDslSchemaResponse>,
             tonic::Status,
         >;
     }
@@ -1094,6 +1151,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetGraphStatsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetQueryDSLSchema" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetQueryDSLSchemaSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetQueryDslSchemaRequest>
+                    for GetQueryDSLSchemaSvc<T> {
+                        type Response = super::GetQueryDslSchemaResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetQueryDslSchemaRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_query_dsl_schema(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetQueryDSLSchemaSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

@@ -17,13 +17,14 @@ use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_er
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse, ListToolsRequest,
+    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse,
+    GetQueryDslSchemaRequest, GetQueryDslSchemaResponse, ListToolsRequest,
     ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
     SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    get_query_dsl_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
-use ontology::query_dsl::condensed_query_schema;
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 use super::auth::extract_claims;
@@ -279,6 +280,36 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let response = self.graph_stats.get_stats(&req.traversal_path).await?;
         Ok(Response::new(response))
     }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn get_query_dsl_schema(
+        &self,
+        request: Request<GetQueryDslSchemaRequest>,
+    ) -> Result<Response<GetQueryDslSchemaResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching query DSL schema for user");
+
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let toon = ontology::query_dsl::condensed_query_schema()
+                .map_err(|e| Status::internal(e))?;
+            GetQueryDslSchemaResponse {
+                content: Some(get_query_dsl_schema_response::Content::Text(toon)),
+            }
+        } else {
+            let json = ontology::query_dsl::condensed_query_schema_json()
+                .map_err(|e| Status::internal(e))?;
+            GetQueryDslSchemaResponse {
+                content: Some(get_query_dsl_schema_response::Content::Json(json)),
+            }
+        };
+
+        Ok(Response::new(response))
+    }
 }
 
 impl KnowledgeGraphServiceImpl {
@@ -385,7 +416,6 @@ impl KnowledgeGraphServiceImpl {
             domains,
             nodes,
             edges,
-            query_dsl_schema: condensed_query_schema().unwrap_or_default(),
         }
     }
 

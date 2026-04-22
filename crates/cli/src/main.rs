@@ -185,6 +185,7 @@ enum Commands {
     },
     /// Describe the graph schema (entities, edges, properties) visible to the
     /// local DuckDB index. Use --all to include server-only entities.
+    /// Use --query to show the query DSL schema instead.
     Schema {
         /// Expand one or more entities to show their properties and edges.
         /// Pass `*` to expand every entity.
@@ -199,6 +200,10 @@ enum Commands {
         /// restricted to entities present in the local DuckDB.
         #[arg(long)]
         all: bool,
+
+        /// Show the query DSL schema instead of the graph ontology.
+        #[arg(long)]
+        query: bool,
 
         /// Path to ontology directory (default: embedded)
         #[arg(long, short)]
@@ -286,8 +291,15 @@ async fn main() -> Result<()> {
             expand,
             raw,
             all,
+            query,
             ontology,
-        } => run_schema_introspect(expand, raw, all, ontology),
+        } => {
+            if query {
+                run_query_dsl_schema(raw)
+            } else {
+                run_schema_introspect(expand, raw, all, ontology)
+            }
+        }
         Commands::Debug { command } => match command {
             DebugCommands::Ddl {
                 ontology,
@@ -318,21 +330,24 @@ fn run_schema_introspect(
     let response = ontology::introspection::build_schema_response(&ont, scope, &expand);
 
     if raw {
-        let mut obj = serde_json::to_value(&response)?;
-        if let serde_json::Value::Object(ref mut map) = obj {
-            map.insert(
-                "query_dsl_schema".to_string(),
-                serde_json::Value::String(
-                    ontology::query_dsl::condensed_query_schema_json().unwrap_or_default(),
-                ),
-            );
-        }
-        println!("{}", serde_json::to_string_pretty(&obj)?);
+        println!("{}", serde_json::to_string_pretty(&response)?);
     } else {
         let toon = toon_format::encode(&response, &toon_format::EncodeOptions::default())
             .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
-        let dsl = ontology::query_dsl::condensed_query_schema().unwrap_or_default();
-        println!("{toon}\n\nQuery DSL Schema:\n{dsl}");
+        println!("{toon}");
+    }
+    Ok(())
+}
+
+fn run_query_dsl_schema(raw: bool) -> Result<()> {
+    if raw {
+        let json = ontology::query_dsl::condensed_query_schema_json()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("{json}");
+    } else {
+        let toon = ontology::query_dsl::condensed_query_schema()
+            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        println!("{toon}");
     }
     Ok(())
 }
