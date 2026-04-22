@@ -11,6 +11,7 @@
   "description": "Golden-signal stats across all Orbit components. Drill into component dashboards via the Orbit links menu in the top bar.",
   "tags": [
     "orbit",
+    "protected",
     "overview"
   ],
   "schemaVersion": 39,

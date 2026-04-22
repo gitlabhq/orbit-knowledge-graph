@@ -11,6 +11,7 @@
   "description": "Rails monolith gitlab_knowledge_graph_* metrics: Rails \u2192 GKG gRPC client, redaction, JWT build, auth-context, traversal-ID compaction.",
   "tags": [
     "orbit",
+    "protected",
     "rails",
     "gkg"
   ],

@@ -11,6 +11,7 @@
   "description": "Siphon producer and ClickHouse consumer metrics (analytics-eventsdot tenant).",
   "tags": [
     "orbit",
+    "protected",
     "siphon"
   ],
   "schemaVersion": 39,

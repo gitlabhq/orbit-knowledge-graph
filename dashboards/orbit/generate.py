@@ -499,7 +499,7 @@ def dashboard_shell(uid: str, title: str, tags: list[str], description: str) -> 
         "uid": uid,
         "title": title,
         "description": description,
-        "tags": ["orbit"] + tags,
+        "tags": ["orbit", "protected"] + tags,
         "schemaVersion": 39,
         "version": 1,
         "time": {"from": "now-3h", "to": "now"},

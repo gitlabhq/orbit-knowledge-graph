@@ -100,10 +100,19 @@ Existing dashboards in this directory (`query-pipeline.json`,
 the real scrape label (the real value is `gkg/gkg-webserver` /
 `gkg/gkg-indexer`). `container` is the stable join dimension.
 
+## Cleanup exemption
+
+Every dashboard carries the `protected` tag, which the runbooks sweep
+(`runbooks/dashboards/delete-orphaned-dashboards.sh`) honors via
+`protected-grafana-dashboards.jsonnet → protectedTags: ['protected']`.
+That means the cleanup script will not delete them even though they
+live under the Playground folder.
+
 ## Promotion path
 
-These live under Playground and are subject to the
-`runbooks/dashboards/delete-orphaned-dashboards.sh` sweep (~2-week TTL).
+These live under Playground for now. Even with the `protected` tag
+preventing auto-deletion, the proper long-term home is the top-level
+`orbit` folder on dashboards.gitlab.net.
 When the signal set stabilises:
 
 1. Translate the JSON into JSONnet under `runbooks/dashboards/orbit/`

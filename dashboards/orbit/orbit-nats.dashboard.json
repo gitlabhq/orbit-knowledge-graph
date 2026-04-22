@@ -11,6 +11,7 @@
   "description": "NATS varz + JetStream stream/consumer metrics for the Orbit cluster.",
   "tags": [
     "orbit",
+    "protected",
     "nats"
   ],
   "schemaVersion": 39,

@@ -11,6 +11,7 @@
   "description": "All metrics emitted by the GKG indexer: ETL engine, code pipeline, SDLC pipeline, namespace deletion, scheduler, schema migration.",
   "tags": [
     "orbit",
+    "protected",
     "gkg",
     "indexer"
   ],

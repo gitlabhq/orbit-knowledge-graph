@@ -11,6 +11,7 @@
   "description": "Every Orbit metric in one scrollable dashboard. Prefer the per-component dashboards; this one is for ad-hoc discovery.",
   "tags": [
     "orbit",
+    "protected",
     "all"
   ],
   "schemaVersion": 39,

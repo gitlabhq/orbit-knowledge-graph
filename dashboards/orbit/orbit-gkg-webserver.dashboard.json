@@ -11,6 +11,7 @@
   "description": "All metrics emitted by the GKG webserver: HTTP + gRPC transport, query pipeline, content resolution, query-engine threat counters, schema watcher.",
   "tags": [
     "orbit",
+    "protected",
     "gkg",
     "webserver"
   ],
