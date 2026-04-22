@@ -54,7 +54,7 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     let result = ctx
         .query(&format!(
             "SELECT title, state, project_id, \
-             merged_commit_sha, squash_commit_sha, metric_commits_count, metric_added_lines \
+             merged_commit_sha, squash_commit_sha, commits_count, added_lines \
              FROM {} FINAL ORDER BY id",
             t("gl_merge_request")
         ))
@@ -85,13 +85,13 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     assert!(squash_sha.is_null(0));
     assert_eq!(squash_sha.value(1), "squash789");
 
-    let commits = ArrowUtils::get_column_by_name::<Int64Array>(batch, "metric_commits_count")
-        .expect("metric_commits_count column");
+    let commits = ArrowUtils::get_column_by_name::<Int64Array>(batch, "commits_count")
+        .expect("commits_count column");
     assert_eq!(commits.value(0), 3);
     assert_eq!(commits.value(1), 2);
 
-    let added = ArrowUtils::get_column_by_name::<Int64Array>(batch, "metric_added_lines")
-        .expect("metric_added_lines column");
+    let added = ArrowUtils::get_column_by_name::<Int64Array>(batch, "added_lines")
+        .expect("added_lines column");
     assert_eq!(added.value(0), 120);
     assert_eq!(added.value(1), 15);
 

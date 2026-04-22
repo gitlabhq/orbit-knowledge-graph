@@ -130,121 +130,103 @@ properties:
     nullable: true
     description: "SHA of the squash commit, if the merge request was squashed."
 
-  metric_latest_build_started_at:
+  latest_build_started_at:
     type: timestamp
     source: metric_latest_build_started_at
     nullable: true
     description: "Timestamp when the latest CI build for this MR started."
 
-  metric_latest_build_finished_at:
+  latest_build_finished_at:
     type: timestamp
     source: metric_latest_build_finished_at
     nullable: true
     description: "Timestamp when the latest CI build for this MR finished."
 
-  metric_first_deployed_to_production_at:
+  first_deployed_to_production_at:
     type: timestamp
     source: metric_first_deployed_to_production_at
     nullable: true
     description: "Timestamp when the MR was first deployed to the production environment."
 
-  metric_merged_at:
+  merged_at:
     type: timestamp
     source: metric_merged_at
     nullable: true
     description: "Timestamp when the MR was merged."
 
-  metric_merged_by_id:
-    type: int64
-    source: metric_merged_by_id
-    nullable: true
-    description: "User ID of the actor who merged the MR (metrics snapshot)."
-
-  metric_latest_closed_by_id:
-    type: int64
-    source: metric_latest_closed_by_id
-    nullable: true
-    description: "User ID of the actor who most recently closed the MR."
-
-  metric_latest_closed_at:
+  latest_closed_at:
     type: timestamp
     source: metric_latest_closed_at
     nullable: true
     description: "Timestamp when the MR was most recently closed."
 
-  metric_first_comment_at:
+  first_comment_at:
     type: timestamp
     source: metric_first_comment_at
     nullable: true
     description: "Timestamp of the first comment on the MR."
 
-  metric_first_commit_at:
+  first_commit_at:
     type: timestamp
     source: metric_first_commit_at
     nullable: true
     description: "Authored timestamp of the first commit in the MR."
 
-  metric_last_commit_at:
+  last_commit_at:
     type: timestamp
     source: metric_last_commit_at
     nullable: true
     description: "Authored timestamp of the last commit in the MR."
 
-  metric_diff_size:
+  diff_size:
     type: int64
     source: metric_diff_size
     nullable: true
     description: "Total size of the MR diff, in bytes."
 
-  metric_modified_paths_size:
+  modified_paths_size:
     type: int64
     source: metric_modified_paths_size
     nullable: true
     description: "Number of modified file paths in the MR."
 
-  metric_commits_count:
+  commits_count:
     type: int64
     source: metric_commits_count
     nullable: true
     description: "Number of commits in the MR."
 
-  metric_first_approved_at:
+  first_approved_at:
     type: timestamp
     source: metric_first_approved_at
     nullable: true
     description: "Timestamp of the first approval on the MR."
 
-  metric_first_reassigned_at:
+  first_reassigned_at:
     type: timestamp
     source: metric_first_reassigned_at
     nullable: true
     description: "Timestamp of the first reassignment of the MR."
 
-  metric_added_lines:
+  added_lines:
     type: int64
     source: metric_added_lines
     nullable: true
     description: "Lines added across all files in the MR diff."
 
-  metric_removed_lines:
+  removed_lines:
     type: int64
     source: metric_removed_lines
     nullable: true
     description: "Lines removed across all files in the MR diff."
 
-  metric_first_contribution:
+  first_contribution:
     type: boolean
     source: metric_first_contribution
     nullable: false
     description: "Whether this MR represents the author's first contribution to the project."
 
-  metric_pipeline_id:
-    type: int64
-    source: metric_pipeline_id
-    nullable: true
-    description: "Pipeline ID captured at the time the metrics snapshot was taken."
-
-  metric_reviewer_first_assigned_at:
+  reviewer_first_assigned_at:
     type: timestamp
     source: metric_reviewer_first_assigned_at
     nullable: true
@@ -294,6 +276,10 @@ etl:
       to: User
       as: LAST_EDITED_BY
       direction: incoming
+    metric_latest_closed_by_id:
+      to: User
+      as: CLOSED
+      direction: incoming
     milestone_id:
       to: Milestone
       as: IN_MILESTONE
@@ -340,32 +326,30 @@ storage:
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: merged_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: squash_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: metric_latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_latest_build_finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_first_deployed_to_production_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_merged_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_merged_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_latest_closed_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_latest_closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_diff_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_modified_paths_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: metric_added_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_removed_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_first_contribution, type: "Bool", default: "false"}
-    - {name: metric_pipeline_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: metric_reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_build_finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: merged_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: diff_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: added_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: removed_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: first_contribution, type: "Bool", default: "false"}
+    - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}
     - {name: idx_draft, column: draft, type: "minmax", granularity: 1}
     - {name: idx_squash, column: squash, type: "minmax", granularity: 1}
     - {name: idx_discussion_locked, column: discussion_locked, type: "minmax", granularity: 1}
+    - {name: idx_first_contribution, column: first_contribution, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
