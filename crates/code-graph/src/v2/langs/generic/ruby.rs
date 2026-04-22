@@ -13,6 +13,11 @@ use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
 use crate::v2::linker::{HasRules, ResolutionRules};
+
+/// Methods that act as constructors — `Class.method(args)` returns a
+/// `Class` instance. Shared between `SsaConfig` (binding analysis) and
+/// `ResolverHooks` (chain resolution) to ensure consistency.
+const CONSTRUCTOR_METHODS: &[&str] = &["new", "find", "find_by", "create", "first", "last"];
 use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
@@ -154,7 +159,7 @@ impl DslLanguage for RubyDsl {
         types::SsaConfig {
             self_names: &["self"],
             super_name: Some("super"),
-            constructor_methods: &["new", "find", "find_by", "create", "first", "last"],
+            constructor_methods: CONSTRUCTOR_METHODS,
         }
     }
 }
@@ -338,7 +343,7 @@ impl HasRules for RubyRules {
             Some("super"),
         )
         .with_hooks(crate::v2::linker::rules::ResolverHooks {
-            constructor_methods: &["new", "find", "find_by", "create", "first", "last"],
+            constructor_methods: CONSTRUCTOR_METHODS,
             ..Default::default()
         })
     }

@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::trace;
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
@@ -107,6 +108,9 @@ pub struct CodeGraph {
     pub strings: StringPool,
     pub indexes: GraphIndexes,
     pub root_path: String,
+    /// Language-specific resolution rules (spec, separator, hooks, settings).
+    /// Set once at construction via `with_rules()`.
+    pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
 impl CodeGraph {
@@ -118,6 +122,7 @@ impl CodeGraph {
             strings: StringPool::new(),
             indexes: GraphIndexes::new(),
             root_path: String::new(),
+            rules: None,
         }
     }
 
@@ -126,6 +131,17 @@ impl CodeGraph {
             root_path,
             ..Self::new()
         }
+    }
+
+    pub fn with_rules(mut self, rules: std::sync::Arc<super::rules::ResolutionRules>) -> Self {
+        self.rules = Some(rules);
+        self
+    }
+
+    /// FQN separator for this language. Falls back to `"."`.
+    #[inline]
+    pub fn sep(&self) -> &str {
+        self.rules.as_ref().map(|r| r.fqn_separator).unwrap_or(".")
     }
 
     /// Resolve a StrId to its string.
@@ -325,10 +341,13 @@ impl CodeGraph {
                 let fqn = self.def_fqn(idx).to_string();
                 let ancestor_fqns: Vec<String> =
                     chain.iter().map(|&a| self.def_fqn(a).to_string()).collect();
-                tracer.event(crate::v2::trace::TraceEvent::AncestorChainBuilt {
-                    fqn,
-                    ancestors: ancestor_fqns,
-                });
+                trace!(
+                    tracer,
+                    AncestorChainBuilt {
+                        fqn: fqn,
+                        ancestors: ancestor_fqns,
+                    }
+                );
                 self.indexes.ancestors.insert(idx, chain);
             }
         }
@@ -394,8 +413,8 @@ impl CodeGraph {
     pub fn pre_resolve_file_imports(
         &self,
         file_node: NodeIndex,
-        sep: &str,
     ) -> FxHashMap<String, Vec<NodeIndex>> {
+        let sep = self.sep();
         let mut map = FxHashMap::default();
         for neighbor in self
             .graph
@@ -493,7 +512,6 @@ impl CodeGraph {
         &self,
         type_name: &str,
         member_name: &str,
-        sep: &str,
         out: &mut Vec<NodeIndex>,
     ) {
         let candidates = self.indexes.by_name.lookup(member_name, |idx| {
@@ -501,7 +519,9 @@ impl CodeGraph {
                 .def_id()
                 .is_some_and(|d| self.str(self.defs[d.0 as usize].name) == member_name)
         });
-        let bare_type = type_name.rsplit_once(sep).map_or(type_name, |(_, t)| t);
+        let bare_type = type_name
+            .rsplit_once(self.sep())
+            .map_or(type_name, |(_, t)| t);
 
         for idx in candidates {
             if let Some(did) = self.graph[idx].def_id() {
@@ -732,11 +752,14 @@ impl CodeGraph {
                                 .map(|d| self.strings.get(self.defs[d.0 as usize].fqn).to_string())
                         })
                         .collect();
-                    tracer.event(crate::v2::trace::TraceEvent::ExtendsLinked {
-                        child_fqn: child_fqn.clone(),
-                        super_type: super_name.to_string(),
-                        resolved_to: resolved_fqns,
-                    });
+                    trace!(
+                        tracer,
+                        ExtendsLinked {
+                            child_fqn: child_fqn.clone(),
+                            super_type: super_name.to_string(),
+                            resolved_to: resolved_fqns,
+                        }
+                    );
                     for &target in &targets {
                         edges.push((idx, target));
                     }

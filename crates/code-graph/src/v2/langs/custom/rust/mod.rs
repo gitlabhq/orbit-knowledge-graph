@@ -35,13 +35,16 @@ use ra_ap_syntax::{
 };
 use ra_ap_vfs::{self as vfs, FileExcluded, Vfs, loader};
 use rayon::prelude::*;
-use triomphe::Arc;
+// triomphe::Arc is re-exported for submodules (workspace.rs) that
+// call ra_ap APIs expecting triomphe::Arc, not std::sync::Arc.
+pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
 use crate::v2::linker::CodeGraph;
+
 use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineConfig, PipelineError, PipelineOutput,
+    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
 };
 use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
 
@@ -108,10 +111,10 @@ struct EdgeCollectionResult {
 impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        _config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &std::sync::Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        let root_path = ctx.root_path.as_str();
+        let tracer = &ctx.tracer;
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
         let workspaces = match WorkspaceCatalog::load(root_path, files) {
