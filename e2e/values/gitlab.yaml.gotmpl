@@ -1,3 +1,4 @@
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
 global:
   edition: ee
   # Trust licenses signed by the staging customer portal (loads
@@ -97,6 +98,12 @@ gitlab:
         cpu: 1
         memory: 2Gi
   webservice:
+    # Pin image to the digest resolved by scripts/bump-gitlab-pins.sh. Docker
+    # treats "name:tag@digest" as authoritative-by-digest; the "master" prefix
+    # just satisfies the chart helper that expects a non-empty tag. Every pod
+    # in this deployment pulls the exact same image.
+    image:
+      tag: "master@{{ $v.gitlab.images.webservice.digest }}"
     minReplicas: 1
     maxReplicas: 1
     resources:
@@ -116,6 +123,8 @@ gitlab:
           cpu: 500m
           memory: 512Mi
   sidekiq:
+    image:
+      tag: "master@{{ $v.gitlab.images.sidekiq.digest }}"
     minReplicas: 1
     maxReplicas: 1
     resources:
@@ -126,6 +135,8 @@ gitlab:
         cpu: 2
         memory: 4Gi
   toolbox:
+    image:
+      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
     replicas: 1
     resources:
       requests:
@@ -141,6 +152,8 @@ gitlab:
   gitlab-pages:
     enabled: false
   migrations:
+    image:
+      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
     # Don't run post-deployment migrations in the migrations job at all. PDMs
     # are async-background cleanup that's free on an empty DB, and skipping
     # them is the biggest single saving on migration job duration. Paired with
