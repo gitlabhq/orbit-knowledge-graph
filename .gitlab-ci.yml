@@ -439,7 +439,6 @@ integration-test:
         - crates/ontology/**/*
         - crates/duckdb-client/**/*
         - crates/utils/**/*
-        - config/ontology/**/*
         - code-indexing-benchmark.yaml
         - .gitlab-ci.yml
 
