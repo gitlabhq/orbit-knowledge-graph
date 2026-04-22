@@ -126,6 +126,7 @@ pub mod test_utils {
     pub struct MockRepositoryService {
         default_branches: Mutex<HashMap<i64, String>>,
         download_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
+        project_info_errors: Mutex<HashMap<i64, RepositoryServiceError>>,
     }
 
     impl MockRepositoryService {
@@ -141,11 +142,16 @@ pub mod test_utils {
             Arc::new(Self {
                 default_branches: Mutex::new(map),
                 download_errors: Mutex::new(HashMap::new()),
+                project_info_errors: Mutex::new(HashMap::new()),
             })
         }
 
         pub fn set_download_error(&self, project_id: i64, error: RepositoryServiceError) {
             self.download_errors.lock().insert(project_id, error);
+        }
+
+        pub fn set_project_info_error(&self, project_id: i64, error: RepositoryServiceError) {
+            self.project_info_errors.lock().insert(project_id, error);
         }
     }
 
@@ -155,6 +161,10 @@ pub mod test_utils {
             &self,
             project_id: i64,
         ) -> Result<ProjectInfo, RepositoryServiceError> {
+            if let Some(err) = self.project_info_errors.lock().remove(&project_id) {
+                return Err(err);
+            }
+
             let default_branch = self
                 .default_branches
                 .lock()
