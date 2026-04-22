@@ -9,6 +9,5 @@ indexmap = { workspace = true, features = ["serde"] }
 serde = { workspace = true }
 serde_json = { workspace = true }
 serde_yaml = { workspace = true }
-rust-embed = { workspace = true }
-strum = { workspace = true }
 toon-format = { workspace = true }
+rust-embed = { workspace = true }
