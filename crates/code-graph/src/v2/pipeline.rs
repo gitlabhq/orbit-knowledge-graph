@@ -5,8 +5,8 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::CodeGraph;
 use crate::v2::trace::Tracer;
