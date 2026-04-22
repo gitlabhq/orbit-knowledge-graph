@@ -1,3 +1,57 @@
+## [0.29.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.28.0...v0.29.0) (2026-04-22)
+
+### Features
+
+* add CODEOWNERS for security and core files ([d3de60d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d3de60d6185f04bfea961e7e18de79d3a9a079fe)) by Michael Usachenko
+* **cli:** add `orbit schema` introspection scoped to local DuckDB ([d6609a8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d6609a891fe2787c56b79d4de6c69c5624673e8c)) by Michael Angelo Rivera
+* **code-graph:** add JavaScript and TypeScript v2 config ([6be5d60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6be5d60e278c41d7bd1da4b12c2622cd3af230c8)) by Michael Angelo Rivera
+* **code-graph:** add rust-analyzer-backed Rust v2 pipeline ([b24d74d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b24d74d9d7cbf237de815d422471594e4534b048)) by Michael Angelo Rivera
+* **code-graph:** getting v2 code indexing ready for production ([3e641d2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e641d2febbcab3d4415b82cc2e3ae7fb1cf4cca)) by Michael Usachenko
+* **code-graph:** integrate js ecosystem indexing into v2 ([899a2d8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/899a2d83124274dbfc92661c341a9c975ce39062)) by Michael Angelo Rivera
+* **code-graph:** re-add phi elimination + CLI thread propagation ([9f0743b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f0743bdd81505c31265d3bcb4838c3e7de63d77)) by Michael Usachenko
+* **code-graph:** significantly simplify reference resolution ([6f284db](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6f284db26baf34b5a24da97817f5948dd697c1a6)) by Michael Usachenko
+* **code-graph:** ssa resolution improvements ([927e884](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/927e884f6d0d1d95594b8a44a4b433c46350a329)) by Michael Usachenko
+* **code-graph:** structured dsl and resolver tracing and Java v1 parity fixes ([965667e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/965667e761a5dce51fd314ec156acdcebdc918de)) by Michael Usachenko
+* **code-graph:** v1 coverage complete — Kotlin, Python, Ruby resolution ([28bf7cf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/28bf7cf32fc69121b497af3bb3274a51347be74e)) by Michael Usachenko
+* **code-graph:** v1 parity — 62 tests unskipped, tracer cleanup ([de1adbe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/de1adbe38807149f31197b43fa9b40d0fdef60f9)) by Michael Usachenko
+* **code-graph:** v1 parity — Go coverage, deterministic indexes, dead code removal ([0c62809](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0c628099280d74a643518572ccdcc4ecd8ee2d86)) by Michael Usachenko
+* **code-graph:** v2 resolution improvements with better fqn coverage ([96f2591](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/96f2591c07e353178ee4b28485950d1cad0e8578)) by Michael Usachenko
+* **e2e:** generate siphon CDC config from SSOT ([9eb2c9b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9eb2c9b8b049179cc880c6d36f9b3952702068db)) by Bohdan Parkhomchuk
+* **webserver:** readiness gate on schema version ([d0c96fe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d0c96fe1646f9a8067a9bd90653e71f3f1fa26a2)) by Bohdan Parkhomchuk
+
+### Fixes
+
+* **ci:** enforce monotonic SCHEMA_VERSION increments ([34decce](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/34decce44f6c4601d04e40bcd03a54a541dd8531)) by Michael Usachenko
+* **code-graph:** drop dead chain_mode from custom rules constructor ([d13b792](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d13b7927448b6370dab40d7c5445dd55c30ae53b)) by Michael Angelo Rivera
+* **code-graph:** include byte range in v2 Definition/Import node IDs ([535b9d7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/535b9d71de53bba8612ec415f1e7267e75a05933)) by Michael Angelo Rivera
+* **compiler:** aggregation pk in GROUP BY and DuckDB LIKE escape ([79eeb6d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79eeb6d89f15defdeb550e1063ae218aa33e02c6)) by Michael Angelo Rivera
+* **compiler:** aggregation with relationships emits valid SQL ([35f8fd4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/35f8fd43e1167c05683dbb73fc983d14b443e0e4)) by Michael Angelo Rivera
+* **e2e:** pin gitlab devel and skip post-deploy migrations ([a3333be](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a3333be9cdadd2dd6f5bbae6a68bed681939c1cd)) by Bohdan Parkhomchuk
+* **fs:** validate_symlinks deletes all bad symlinks, not just the first ([cfeb8be](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cfeb8be00d4eca3f578a33cb0438b81e8957d2be)) by Michael Usachenko
+* **indexer:** ack code tasks when project_info 404s instead of nacking ([36af03c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36af03cdbacb2606170879233e0e58c6383600ba)) by Michael Angelo Rivera
+* **indexer:** clarify schema version bump policy for data-value changes ([94b71e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/94b71e46f2d9114fcc50cb120167101e2b258090)) by Michael Usachenko
+* **indexer:** harden archive extraction against symlink traversal attacks ([d4375cf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d4375cf1583c04648c1ee8ba51844a3e3dda96ed)) by Michael Usachenko
+* **indexer:** map polymorphic noteable_type to WorkItem ([dc8d754](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dc8d7541dcd58e2344d440343b663ab314566f19)) by Bohdan Parkhomchuk
+* **security:** restrict is_admin and is_auditor visibility to admins ([2d37f46](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d37f46764b8fc67ebe4c4a348de0fed05aec89a)) by Michael Angelo Rivera
+
+### Other
+
+* bump rust to 1.95.0 ([30a9e49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/30a9e49e14c0d1c99a3b1cdb54b669d06f05b4d0)) by Michael Angelo Rivera
+* **code-graph:** collapse sub-crates into v2/legacy split ([4c7809a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4c7809ad6e50e98a6d729fc4d2f58461f6d6bc4f)) by Michael Angelo Rivera
+* **code-graph:** harden integration test assertions ([d49662c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d49662c761c80a49ae2c02f076559560152501ca)) by Michael Usachenko
+* **code-graph:** port v1 legacy resolution tests to v2 integration fixtures ([5eaf79a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5eaf79aee1990e433b906ee0a8ac32d70582eb00)) by Michael Usachenko
+* **e2e:** activate license, cover sdlc edges ([0cbd08c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cbd08c7f03cfe027518b9def1d84414c25a0cb0)) by Bohdan Parkhomchuk
+* **e2e:** bump siphon to 0.0.64-beta with faster snapshot polls ([c8371fb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c8371fbe859622a7653b1232c7ef06c7deaaa7ae)) by Bohdan Parkhomchuk
+* **e2e:** code backfill on namespace enablement ([4fd557a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4fd557a262c403142122b5d558555cc14365728e)) by Bohdan Parkhomchuk
+* **e2e:** code indexing assertions via orbit api ([1ac9fc9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1ac9fc97574adecaa23d63ac0ec011630cc79d2e)) by Bohdan Parkhomchuk
+* **e2e:** run on main and simplify test job ([363532e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/363532efbc31b0c84ec917b1fc51c70420f56cc3)) by Bohdan Parkhomchuk
+* fail pipeline when benchmarks fail ([36587e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/36587e6182d4a759b9093f48f66869c70339603d)) by Michael Angelo Rivera
+* move e2e stage after build ([3a0ce49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3a0ce49162b1553931d4f0fcf3c80b81632311a7)) by Bohdan Parkhomchuk
+* revert CODEOWNERS file ([df901fd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df901fda05864116c4c3577f8570f3328323af15)) by Michael Usachenko
+* **security:** add aggregation SQL security assertions and multi-path aggregation tests ([2bbb54c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2bbb54c765443369d371c52290995f091bfd994c)) by Michael Usachenko
+* **security:** add cross-org isolation tests and fix security docs ([5e59d1c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e59d1c7b8efc7708d94090d0ab0f2b8252346a3)) by Michael Usachenko
+* switch to [secure] rust build-images registry ([73cb4af](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/73cb4afed03ef5681cd6ace12ab8a8fa4ec2febc)) by Bohdan Parkhomchuk
+
 ## [0.28.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.27.0...v0.28.0) (2026-04-17)
 
 ### Features

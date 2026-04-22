@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
 use super::checkpoint_store::CodeCheckpointStore;
@@ -9,7 +10,7 @@ use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
-use super::repository::RepositoryService;
+use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
@@ -75,22 +76,26 @@ impl Handler for CodeIndexingTaskHandler {
 }
 
 impl CodeIndexingTaskHandler {
+    /// Returns `Ok(Some(branch))` when the branch is known, `Ok(None)` when
+    /// the project is gone from Rails (terminal: the dispatcher has a stale
+    /// view; acking avoids DLQ churn), and `Err` for transient failures.
     async fn resolve_branch(
         &self,
         request: &CodeIndexingTaskRequest,
-    ) -> Result<String, HandlerError> {
+    ) -> Result<Option<String>, HandlerError> {
         match &request.branch {
-            Some(branch) => Ok(branch.clone()),
-            None => {
-                let project_info = self
-                    .repository_service
-                    .project_info(request.project_id)
-                    .await
-                    .map_err(|e| {
-                        HandlerError::Processing(format!("failed to fetch project info: {e}"))
-                    })?;
-                Ok(project_info.default_branch)
-            }
+            Some(branch) => Ok(Some(branch.clone())),
+            None => match self
+                .repository_service
+                .project_info(request.project_id)
+                .await
+            {
+                Ok(project_info) => Ok(Some(project_info.default_branch)),
+                Err(RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(_))) => Ok(None),
+                Err(e) => Err(HandlerError::Processing(format!(
+                    "failed to fetch project info: {e}"
+                ))),
+            },
         }
     }
 
@@ -101,7 +106,20 @@ impl CodeIndexingTaskHandler {
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
 
-        let branch = self.resolve_branch(request).await?;
+        let Some(branch) = self.resolve_branch(request).await? else {
+            warn!(
+                project_id = request.project_id,
+                task_id = request.task_id,
+                "project not found resolving default branch; acknowledging as deleted"
+            );
+            self.metrics
+                .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
+            self.metrics.record_outcome("empty_repository");
+            self.metrics
+                .handler_duration
+                .record(started_at.elapsed().as_secs_f64(), &[]);
+            return Ok(());
+        };
 
         if self.is_already_indexed(request, &branch).await {
             self.metrics.record_outcome("skipped_checkpoint");
@@ -390,6 +408,77 @@ mod tests {
         let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
         assert!(result.is_ok());
         assert!(!ctx.lock_exists(123, "main"));
+    }
+
+    #[tokio::test]
+    async fn project_info_404_acks_without_checkpoint() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_project_info_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::NotFound(123)),
+        );
+
+        let envelope = Envelope::new(&CodeIndexingTaskRequest {
+            task_id: 99,
+            project_id: 123,
+            branch: None,
+            commit_sha: None,
+            traversal_path: "/org/project-123".to_string(),
+        })
+        .unwrap();
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            result.is_ok(),
+            "project_info 404 should ack (deleted project), got {result:?}"
+        );
+        assert!(
+            !ctx.lock_exists(123, "main"),
+            "no lock should be acquired when branch cannot be resolved"
+        );
+        assert!(
+            ctx.mock_checkpoints
+                .get_checkpoint("/org/project-123", 123, "main")
+                .await
+                .unwrap()
+                .is_none(),
+            "no checkpoint expected when branch is unknown"
+        );
+    }
+
+    #[tokio::test]
+    async fn project_info_non_404_error_is_retried() {
+        use crate::modules::code::repository::RepositoryServiceError;
+        use gitlab_client::GitlabClientError;
+
+        let ctx = TestContext::new();
+        ctx.mock_repo.set_project_info_error(
+            123,
+            RepositoryServiceError::GitlabApi(GitlabClientError::ServerError {
+                project_id: 123,
+                status: 500,
+            }),
+        );
+
+        let envelope = Envelope::new(&CodeIndexingTaskRequest {
+            task_id: 99,
+            project_id: 123,
+            branch: None,
+            commit_sha: None,
+            traversal_path: "/org/project-123".to_string(),
+        })
+        .unwrap();
+
+        let result = ctx.handler.handle(ctx.handler_context(), envelope).await;
+
+        assert!(
+            result.is_err(),
+            "project_info 500 should nack (transient), got {result:?}"
+        );
     }
 
     #[tokio::test]
