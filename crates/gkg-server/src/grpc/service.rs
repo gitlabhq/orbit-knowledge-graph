@@ -426,14 +426,10 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
         .organization_id
         .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
 
-    let authorized_paths: Vec<String> = if claims.admin {
+    let authorized_paths = if claims.admin {
         vec![format!("{org_id}/")]
     } else {
-        claims
-            .group_traversal_ids
-            .iter()
-            .map(|tp| tp.path.clone())
-            .collect()
+        claims.group_traversal_ids.clone()
     };
 
     let is_authorized = authorized_paths
@@ -732,13 +728,7 @@ mod tests {
         };
         let user = |org, groups: Vec<&str>| Claims {
             organization_id: Some(org),
-            group_traversal_ids: groups
-                .into_iter()
-                .map(|p| crate::auth::claims::TraversalPathClaim {
-                    path: p.to_string(),
-                    access_level: 20,
-                })
-                .collect(),
+            group_traversal_ids: groups.into_iter().map(String::from).collect(),
             ..test_claims()
         };
 

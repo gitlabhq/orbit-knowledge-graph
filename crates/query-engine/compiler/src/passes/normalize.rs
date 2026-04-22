@@ -48,7 +48,6 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
                         ability: r.ability.clone(),
                         auth_id_column: r.id_column.clone(),
                         owner_entity,
-                        required_access_level: r.required_role.as_access_level(),
                     },
                 )
             })
