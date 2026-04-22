@@ -68,8 +68,7 @@ pub(in crate::modules::sdlc) enum EdgeId {
 
 pub(in crate::modules::sdlc) enum EdgeKind {
     Literal(String),
-    Column(String),
-    TypeMapping {
+    Column {
         column: String,
         mapping: BTreeMap<String, String>,
     },
@@ -251,13 +250,9 @@ fn resolve_fk_edges(
                             types: filter_types,
                         })
                     };
-                    let kind = if type_mapping.is_empty() {
-                        EdgeKind::Column(type_column.clone())
-                    } else {
-                        EdgeKind::TypeMapping {
-                            column: type_column.clone(),
-                            mapping: type_mapping.clone(),
-                        }
+                    let kind = EdgeKind::Column {
+                        column: type_column.clone(),
+                        mapping: type_mapping.clone(),
                     };
                     (kind, filter)
                 }
@@ -414,13 +409,9 @@ fn resolve_endpoint(
                     types: allowed,
                 })
             };
-            let kind = if type_mapping.is_empty() {
-                EdgeKind::Column(column.clone())
-            } else {
-                EdgeKind::TypeMapping {
-                    column: column.clone(),
-                    mapping: type_mapping.clone(),
-                }
+            let kind = EdgeKind::Column {
+                column: column.clone(),
+                mapping: type_mapping.clone(),
             };
             (id, kind, filter)
         }

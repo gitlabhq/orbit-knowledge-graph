@@ -183,8 +183,8 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
 fn lower_edge_kind(kind: &EdgeKind) -> Expr {
     match kind {
         EdgeKind::Literal(value) => Expr::raw(format!("'{value}'")),
-        EdgeKind::Column(column) => Expr::col("", column),
-        EdgeKind::TypeMapping { column, mapping } => {
+        EdgeKind::Column { column, mapping } if mapping.is_empty() => Expr::col("", column),
+        EdgeKind::Column { column, mapping } => {
             let cases: Vec<String> = mapping
                 .iter()
                 .map(|(from, to)| format!("WHEN {column} = '{from}' THEN '{to}'"))
@@ -529,7 +529,7 @@ mod tests {
         let fk_edge = FkEdgeTransform {
             relationship_kind: "HAS_NOTE".to_string(),
             source_id: EdgeId::Column("noteable_id".to_string()),
-            source_kind: EdgeKind::TypeMapping {
+            source_kind: EdgeKind::Column {
                 column: "noteable_type".to_string(),
                 mapping,
             },
