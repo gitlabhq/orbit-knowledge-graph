@@ -20,7 +20,6 @@
 //! target. Now the target entity's scan is filtered down to zero paths
 //! (producing a Bool(false) predicate) and the aggregation counts nothing.
 
-use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -34,58 +33,14 @@ use ontology::Ontology;
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
 
-/// Build a table-name → required access level map from the ontology.
-///
-/// Tables without a `redaction` block inherit the default (Reporter) so
-/// the historical path-set behavior is unchanged for them. We key by the
-/// unprefixed physical table name (e.g. `gl_vulnerability`) so lookups
-/// work for both `gl_*` and `v{N}_gl_*` variants emitted by lower. This
-/// matters because schema-version-aware ontologies (`with_schema_version_prefix`)
-/// set `destination_table` to the prefixed name, and the lowerer scans
-/// the prefixed tables directly — keying by the prefixed string would
-/// miss lookups that come through `required_role_for_table`, which
-/// strips the prefix before consulting the map.
-pub fn build_table_min_role(ontology: &Ontology) -> HashMap<String, u32> {
-    ontology
-        .nodes()
-        .filter_map(|n| {
-            n.redaction.as_ref().map(|r| {
-                (
-                    unprefix_gl_table(&n.destination_table).to_string(),
-                    r.required_role.as_access_level(),
-                )
-            })
-        })
-        .collect()
-}
-
-/// Strip any `v{N}_` schema-version prefix from a table name, returning
-/// the original slice if no prefix is present. The returned slice is
-/// owned by the input, so callers typically `.to_string()` it.
-fn unprefix_gl_table(table: &str) -> &str {
-    let re = GL_TABLE_RE.get_or_init(|| {
-        Regex::new(&format!(
-            r"^(?:v\d+_)?({}.+)$",
-            regex::escape(GL_TABLE_PREFIX)
-        ))
-        .expect("valid regex")
-    });
-    re.captures(table)
-        .and_then(|c| c.get(1))
-        .map(|m| m.as_str())
-        .unwrap_or(table)
-}
-
 /// Inject security filters into an AST node (mutates in place).
 ///
-/// `table_min_role` is the per-table minimum role map. Pass
-/// `&HashMap::new()` to preserve legacy behavior (all paths eligible for
-/// every alias); production call sites should pass the ontology-derived
-/// map so that per-entity role scoping is enforced.
+/// Per-alias role floors come from `ontology.min_access_level_for_table`;
+/// tables without a `redaction` block keep the historical Reporter floor.
 pub fn apply_security_context(
     node: &mut Node,
     ctx: &SecurityContext,
-    table_min_role: &HashMap<String, u32>,
+    ontology: &Ontology,
 ) -> Result<()> {
     // An entirely empty security context is treated as a fail-closed bug:
     // the caller forgot to populate traversal paths. Emitting `Bool(false)`
@@ -106,23 +61,21 @@ pub fn apply_security_context(
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx, table_min_role)?;
+                apply_to_query(&mut cte.query, ctx, ontology)?;
             }
-            apply_to_query(q, ctx, table_min_role)
+            apply_to_query(q, ctx, ontology)
         }
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn apply_to_query(
-    q: &mut Query,
-    ctx: &SecurityContext,
-    table_min_role: &HashMap<String, u32>,
-) -> Result<()> {
+fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> Result<()> {
     let aliased_tables = collect_aliased_tables(&q.from);
     if !aliased_tables.is_empty() {
         let security_conds = aliased_tables.iter().map(|(alias, table)| {
-            let min_role = required_role_for_table(table, table_min_role);
+            let min_role = ontology
+                .min_access_level_for_table(table)
+                .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL);
             let eligible_paths = ctx.paths_at_least(min_role);
             build_path_filter(alias, &eligible_paths)
         });
@@ -134,24 +87,14 @@ fn apply_to_query(
     }
 
     // Recurse into derived tables (UNION ALL arms, subqueries) in FROM
-    apply_security_to_from(&mut q.from, ctx, table_min_role)?;
+    apply_security_to_from(&mut q.from, ctx, ontology)?;
 
     // Recurse into top-level UNION ALL arms
     for arm in &mut q.union_all {
-        apply_to_query(arm, ctx, table_min_role)?;
+        apply_to_query(arm, ctx, ontology)?;
     }
 
     Ok(())
-}
-
-/// Resolve the required role for a physical table, handling `v{N}_` schema
-/// prefixes and falling back to the default for edge tables or any table
-/// without an explicit declaration.
-fn required_role_for_table(table: &str, table_min_role: &HashMap<String, u32>) -> u32 {
-    table_min_role
-        .get(unprefix_gl_table(table))
-        .copied()
-        .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL)
 }
 
 fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
@@ -232,20 +175,20 @@ pub(crate) fn collect_aliased_tables(table_ref: &TableRef) -> Vec<(String, Strin
 fn apply_security_to_from(
     table_ref: &mut TableRef,
     ctx: &SecurityContext,
-    table_min_role: &HashMap<String, u32>,
+    ontology: &Ontology,
 ) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                apply_to_query(arm, ctx, table_min_role)?;
+                apply_to_query(arm, ctx, ontology)?;
             }
         }
         TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx, table_min_role)?;
+            apply_to_query(query, ctx, ontology)?;
         }
         TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx, table_min_role)?;
-            apply_security_to_from(right, ctx, table_min_role)?;
+            apply_security_to_from(left, ctx, ontology)?;
+            apply_security_to_from(right, ctx, ontology)?;
         }
         TableRef::Scan { .. } => {}
     }
@@ -365,6 +308,15 @@ mod tests {
         assert!(sc.paths_at_least(50).is_empty());
     }
 
+    /// Build a minimal ontology where `Vulnerability` requires
+    /// Security Manager. Used by the per-entity role scoping tests.
+    fn ontology_with_sm_vulnerability() -> Ontology {
+        Ontology::new()
+            .with_nodes(["Project", "Vulnerability"])
+            .with_redaction("Vulnerability", "vulnerabilities", "id")
+            .with_redaction_role("Vulnerability", ontology::RequiredRole::SecurityManager)
+    }
+
     /// apply_security_context with a table requiring Security Manager drops
     /// any Reporter-only paths from that alias's filter while leaving other
     /// aliases untouched. Paths tagged at Developer (30) still qualify
@@ -380,8 +332,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 25); // SecurityManager
+        let ontology = ontology_with_sm_vulnerability();
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -398,7 +349,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &table_min_role).unwrap();
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -437,8 +388,7 @@ mod tests {
         )
         .unwrap();
 
-        let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 25);
+        let ontology = ontology_with_sm_vulnerability();
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -450,7 +400,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &table_min_role).unwrap();
+        apply_security_context(&mut node, &ctx, &ontology).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -466,32 +416,6 @@ mod tests {
         assert!(
             where_sql.contains("Bool") && where_sql.contains("false"),
             "where clause should compile to Bool(false) for empty path set, got: {where_sql}"
-        );
-    }
-
-    /// Schema-version prefixes (e.g. `v1_gl_vulnerability`) must resolve
-    /// to the unprefixed ontology key so role lookups work after the
-    /// schema-migration pass.
-    #[test]
-    fn required_role_resolves_schema_prefixed_tables() {
-        let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 25);
-        assert_eq!(
-            required_role_for_table("gl_vulnerability", &table_min_role),
-            25
-        );
-        assert_eq!(
-            required_role_for_table("v1_gl_vulnerability", &table_min_role),
-            25
-        );
-        assert_eq!(
-            required_role_for_table("v42_gl_vulnerability", &table_min_role),
-            25
-        );
-        // Unknown tables fall back to the default Reporter.
-        assert_eq!(
-            required_role_for_table("gl_unknown", &table_min_role),
-            crate::types::DEFAULT_PATH_ACCESS_LEVEL
         );
     }
 
@@ -514,7 +438,7 @@ mod tests {
     fn inject_adds_security_to_simple_query() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -530,7 +454,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -625,7 +549,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -672,7 +596,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
+        apply_security_context(&mut node, &ctx, &Ontology::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()

@@ -139,32 +139,26 @@ impl NodeStyle {
     }
 }
 
-/// GitLab access levels. Numeric values match `Gitlab::Access` in Rails so
+/// GitLab access levels. Discriminants match `Gitlab::Access` in Rails so
 /// that YAML strings, JWT claim integers, and compiler-side comparisons all
 /// agree. `SecurityManager` intentionally sits between `Reporter` and
 /// `Developer` (25) to match the role's hybrid scope: broader than reporter
 /// for security resources, narrower than developer for code changes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, strum::FromRepr)]
 #[serde(rename_all = "snake_case")]
 pub enum RequiredRole {
-    Guest,
-    Reporter,
-    SecurityManager,
-    Developer,
-    Maintainer,
-    Owner,
+    Guest = 10,
+    Reporter = 20,
+    SecurityManager = 25,
+    Developer = 30,
+    Maintainer = 40,
+    Owner = 50,
 }
 
 impl RequiredRole {
     pub fn as_access_level(self) -> u32 {
-        match self {
-            RequiredRole::Guest => 10,
-            RequiredRole::Reporter => 20,
-            RequiredRole::SecurityManager => 25,
-            RequiredRole::Developer => 30,
-            RequiredRole::Maintainer => 40,
-            RequiredRole::Owner => 50,
-        }
+        self as u32
     }
 }
 
