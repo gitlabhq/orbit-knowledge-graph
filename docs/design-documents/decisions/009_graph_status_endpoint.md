@@ -41,15 +41,21 @@ Four phases, each a standalone MR.
 
 ### Phase 1: Accurate counts with `uniq(id)`
 
-The request keeps `traversal_path` as the only input:
+The request includes a `scope` field so Rails tells GKG whether this is a group or project request. Rails already knows the scope from the request context, so there is no reason for GKG to spend extra ClickHouse queries looking it up:
 
 ```protobuf
 message GetGraphStatsRequest {
   string traversal_path = 1;
+  SourceType source_type = 2;
+}
+
+enum SourceType {
+  SOURCE_TYPE_GROUP = 0;
+  SOURCE_TYPE_PROJECT = 1;
 }
 ```
 
-The service looks up the traversal path in `gl_group` and `gl_project` to determine whether it belongs to a group or project. Either way, entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it. If neither table matches, the request fails with `not_found`.
+Entity counts are returned for all node types under the traversal path using `startsWith(traversal_path, ...)`. Subgroups roll up: requesting a parent group counts everything under it.
 
 Replace `count()` with `uniq(id)`. Graph tables use `ReplacingMergeTree`, which keeps multiple row versions between background merges. `count()` overcounts proportionally to update volume (observed 49% overall, up to 300% for frequently updated types on staging). `uniq(id)` uses HyperLogLog to count distinct entity IDs with ~1-2% error at high cardinalities — acceptable for a status indicator and far better than the current overcount.
 
@@ -73,6 +79,7 @@ Rename the RPC to `GetGraphStatus`.
 ```protobuf
 message GetGraphStatusRequest {
   string traversal_path = 1;
+  SourceType source_type = 2;
 }
 ```
 
@@ -99,7 +106,7 @@ The indexer invalidates the cached entry for the relevant traversal path after e
 **Flow:**
 
 1. Authorize the caller against the traversal path.
-2. Look up the traversal path in `gl_group` and `gl_project`. Matches `gl_group` — group-scoped request.
+2. Scope is `GROUP` (provided by Rails).
 3. If not a top-level group, resolve the top-level group from the traversal path. SDLC indexing runs at the top-level namespace, so indexing metadata comes from the top-level group's progress entry.
 4. Read indexing progress from NATS KV (`sdlc.{namespace_id}`).
 5. Count all entities under the traversal path using `uniq(id)` per entity type, grouped by domain.
@@ -163,7 +170,7 @@ For a subgroup, indexing metadata comes from the top-level group. Entity counts 
 **Flow:**
 
 1. Authorize the caller against the traversal path.
-2. Look up the traversal path in `gl_group` and `gl_project`. Matches `gl_project` — project-scoped request.
+2. Source type is `PROJECT` (provided by Rails).
 3. Read indexing progress from NATS KV (`code.{project_id}`).
 4. Count all entities under the project using `uniq(id)` per entity type, grouped by domain.
 
