@@ -33,6 +33,11 @@ log "Deploying via helmfile"
 cd "$E2E_DIR"
 helmfile --file helmfile.yaml.gotmpl sync
 
+# Activate GitLab with the cloud license from the staging customer portal so
+# EE-gated features (epics, work item hierarchies, etc.) are available in the
+# test suite. Runs after helmfile sync because it requires a Ready toolbox pod.
+"$E2E_DIR/scripts/activate-license.sh"
+
 # Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
 # vs-namespaces race window for new namespaces is sub-second instead of the
 # upstream 60-300s. Must run after GitLab CH migrations created the dicts.

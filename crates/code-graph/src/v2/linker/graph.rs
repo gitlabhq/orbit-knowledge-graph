@@ -2,6 +2,7 @@ use std::hash::{Hash, Hasher};
 use std::path::Path;
 use std::sync::Arc;
 
+use crate::trace;
 use crate::v2::config::Language;
 use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
@@ -107,6 +108,9 @@ pub struct CodeGraph {
     pub strings: StringPool,
     pub indexes: GraphIndexes,
     pub root_path: String,
+    /// Language-specific resolution rules (spec, separator, hooks, settings).
+    /// Set once at construction via `with_rules()`.
+    pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
 }
 
 impl CodeGraph {
@@ -118,6 +122,7 @@ impl CodeGraph {
             strings: StringPool::new(),
             indexes: GraphIndexes::new(),
             root_path: String::new(),
+            rules: None,
         }
     }
 
@@ -126,6 +131,17 @@ impl CodeGraph {
             root_path,
             ..Self::new()
         }
+    }
+
+    pub fn with_rules(mut self, rules: std::sync::Arc<super::rules::ResolutionRules>) -> Self {
+        self.rules = Some(rules);
+        self
+    }
+
+    /// FQN separator for this language. Falls back to `"."`.
+    #[inline]
+    pub fn sep(&self) -> &str {
+        self.rules.as_ref().map(|r| r.fqn_separator).unwrap_or(".")
     }
 
     /// Resolve a StrId to its string.
@@ -325,10 +341,13 @@ impl CodeGraph {
                 let fqn = self.def_fqn(idx).to_string();
                 let ancestor_fqns: Vec<String> =
                     chain.iter().map(|&a| self.def_fqn(a).to_string()).collect();
-                tracer.event(crate::v2::trace::TraceEvent::AncestorChainBuilt {
-                    fqn,
-                    ancestors: ancestor_fqns,
-                });
+                trace!(
+                    tracer,
+                    AncestorChainBuilt {
+                        fqn: fqn,
+                        ancestors: ancestor_fqns,
+                    }
+                );
                 self.indexes.ancestors.insert(idx, chain);
             }
         }
@@ -394,8 +413,8 @@ impl CodeGraph {
     pub fn pre_resolve_file_imports(
         &self,
         file_node: NodeIndex,
-        sep: &str,
     ) -> FxHashMap<String, Vec<NodeIndex>> {
+        let sep = self.sep();
         let mut map = FxHashMap::default();
         for neighbor in self
             .graph
@@ -493,7 +512,6 @@ impl CodeGraph {
         &self,
         type_name: &str,
         member_name: &str,
-        sep: &str,
         out: &mut Vec<NodeIndex>,
     ) {
         let candidates = self.indexes.by_name.lookup(member_name, |idx| {
@@ -501,7 +519,9 @@ impl CodeGraph {
                 .def_id()
                 .is_some_and(|d| self.str(self.defs[d.0 as usize].name) == member_name)
         });
-        let bare_type = type_name.rsplit_once(sep).map_or(type_name, |(_, t)| t);
+        let bare_type = type_name
+            .rsplit_once(self.sep())
+            .map_or(type_name, |(_, t)| t);
 
         for idx in candidates {
             if let Some(did) = self.graph[idx].def_id() {
@@ -732,11 +752,14 @@ impl CodeGraph {
                                 .map(|d| self.strings.get(self.defs[d.0 as usize].fqn).to_string())
                         })
                         .collect();
-                    tracer.event(crate::v2::trace::TraceEvent::ExtendsLinked {
-                        child_fqn: child_fqn.clone(),
-                        super_type: super_name.to_string(),
-                        resolved_to: resolved_fqns,
-                    });
+                    trace!(
+                        tracer,
+                        ExtendsLinked {
+                            child_fqn: child_fqn.clone(),
+                            super_type: super_name.to_string(),
+                            resolved_to: resolved_fqns,
+                        }
+                    );
                     for &target in &targets {
                         edges.push((idx, target));
                     }
@@ -822,10 +845,22 @@ impl CodeGraph {
                 GraphNode::File(f) => compute_id(&[&pid, branch, "file", &f.path]),
                 GraphNode::Definition { file_path, id } => {
                     let def = &self.defs[id.0 as usize];
-                    compute_id(&[&pid, branch, "def", file_path, self.strings.get(def.fqn)])
+                    let range = format!("{}:{}", def.range.byte_offset.0, def.range.byte_offset.1);
+                    compute_id(&[
+                        &pid,
+                        branch,
+                        "def",
+                        file_path,
+                        self.strings.get(def.fqn),
+                        &range,
+                    ])
                 }
                 GraphNode::Import { file_path, id } => {
                     let import = &self.imports[id.0 as usize];
+                    let range = format!(
+                        "{}:{}",
+                        import.range.byte_offset.0, import.range.byte_offset.1
+                    );
                     compute_id(&[
                         &pid,
                         branch,
@@ -833,6 +868,7 @@ impl CodeGraph {
                         file_path,
                         self.strings.get(import.path),
                         import.name.map(|id| self.strings.get(id)).unwrap_or("*"),
+                        &range,
                     ])
                 }
             };
@@ -1190,5 +1226,92 @@ mod tests {
                 .len(),
             1
         );
+    }
+
+    fn make_def_at(
+        name: &str,
+        fqn_parts: &[&str],
+        start: usize,
+        end: usize,
+    ) -> CanonicalDefinition {
+        CanonicalDefinition {
+            definition_type: "Method",
+            kind: DefKind::Function,
+            name: name.to_string(),
+            fqn: Fqn::from_parts(fqn_parts, "."),
+            range: Range::new(Position::new(0, 0), Position::new(10, 0), (start, end)),
+            is_top_level: false,
+            metadata: None,
+        }
+    }
+
+    #[test]
+    fn assign_ids_distinguishes_definitions_sharing_fqn_in_same_file() {
+        // Regression: v2 Definition ids previously hashed only
+        // (project_id, branch, file_path, fqn). Two methods that share
+        // an fqn (e.g. Go methods on different receivers, or generated
+        // protobuf methods with the same synthesized fqn) collapsed to
+        // one id and dedup'd on insert.
+        let cg = build_graph(
+            "/repo/main.go",
+            vec![
+                make_def_at("Dup", &["main", "Dup"], 100, 120),
+                make_def_at("Dup", &["main", "Dup"], 200, 220),
+            ],
+        );
+
+        let ids = cg.assign_ids(42, "main");
+        let def_ids: Vec<i64> = cg
+            .definitions()
+            .map(|(idx, _, _)| ids[idx.index()])
+            .collect();
+
+        assert_eq!(def_ids.len(), 2);
+        assert_ne!(def_ids[0], def_ids[1]);
+    }
+
+    #[test]
+    fn assign_ids_distinguishes_imports_sharing_path_in_same_file() {
+        // Regression: v2 Import ids previously hashed only
+        // (project_id, branch, file_path, import_path, name|"*"),
+        // so repeated `use foo::bar` style imports in one file
+        // (common in tonic-generated Rust) collapsed to one id.
+        let import_a = CanonicalImport {
+            import_type: "Use",
+            binding_kind: ImportBindingKind::Namespace,
+            mode: ImportMode::Declarative,
+            path: "tonic::codegen".to_string(),
+            name: None,
+            alias: None,
+            scope_fqn: None,
+            range: Range::new(Position::new(0, 0), Position::new(0, 20), (100, 120)),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let import_b = CanonicalImport {
+            range: Range::new(Position::new(0, 0), Position::new(0, 20), (500, 520)),
+            ..import_a.clone()
+        };
+
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        cg.add_file(
+            "/repo/gen.rs",
+            "rs",
+            Language::Python,
+            100,
+            &[],
+            &[import_a, import_b],
+        );
+        let tracer = crate::v2::trace::Tracer::new(false);
+        cg.finalize(&tracer);
+
+        let ids = cg.assign_ids(42, "main");
+        let import_ids: Vec<i64> = cg
+            .imports_iter()
+            .map(|(idx, _, _)| ids[idx.index()])
+            .collect();
+
+        assert_eq!(import_ids.len(), 2);
+        assert_ne!(import_ids[0], import_ids[1]);
     }
 }

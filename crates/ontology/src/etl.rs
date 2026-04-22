@@ -29,7 +29,14 @@ pub enum EdgeTarget {
     /// A fixed node type (e.g., "User").
     Literal(String),
     /// Type read from a column at runtime (e.g., "noteable_type").
-    Column(String),
+    ///
+    /// `type_mapping` collapses raw legacy values into ontology node names
+    /// (e.g., `Issue -> WorkItem`). Values missing from the map pass through
+    /// unchanged — the `TypeIn` extract filter still rejects unrelated types.
+    Column {
+        column: String,
+        type_mapping: BTreeMap<String, String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]

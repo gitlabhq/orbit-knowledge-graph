@@ -375,10 +375,19 @@ The Knowledge Graph service connects to ClickHouse with restricted privileges:
 
 ## Handling Aggregations
 
-For aggregation queries (counts, averages, etc.), the Reporter+ group-level access model provides the necessary security boundary. Since aggregations do not return individual resource details, the final redaction layer is not applicable. Instead:
+Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor), which left an oracle: a Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts even though they did not hold `read_vulnerability` on the target entity.
 
-- **Pre-filtering Only**: Aggregation queries rely on Layers 1 and 2 (organization_id and traversal_id filtering) to ensure users can only aggregate over data they have group-level access to.
-- **No Item-Level Redaction**: We do not perform post-aggregation filtering, as this would be ineffective (e.g., you cannot "redact" a count after it's been computed).
-- **Query Shape Restrictions**: The query planner may restrict certain aggregation patterns to prevent information leakage through timing attacks or result patterns.
+To close this, each ontology entity now declares a `required_role` in its redaction block (`config/ontology/nodes/**`). Rails publishes traversal paths tagged with the user's highest access level on the leaf group (`{path, access_level}` tuples in the JWT), and the compiler's `SecurityPass` drops any path whose tag falls below an entity's `required_role` before emitting the `startsWith(traversal_path, ...)` predicate for that entity's alias. If no path qualifies, the alias compiles to `Bool(false)` and the aggregation sees zero rows for that entity.
 
-This approach aligns with the existing GitLab Analytics products, which use the same Reporter+ group-level access model for aggregations.
+Controls:
+
+- **Per-entity role floor**: `redaction.required_role` defaults to `reporter`. Security-domain entities (Vulnerability, Finding, VulnerabilityScanner, VulnerabilityIdentifier, VulnerabilityOccurrence, SecurityScan) declare `security_manager`, matching the minimum GitLab role designed for security team members.
+- **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause so the security pass has an alias to filter. Without this the compiler would elide the scan and defeat the gate.
+- **Pre-filtering stays in place**: Layers 1 and 2 (organization_id and traversal_id filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
+- **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere, so misconfigured callers surface instead of silently returning empty results.
+
+**Code Review Requirements**:
+
+- Ontology entries declaring `required_role` above Reporter must be justified against `config/authz/roles/` in the monolith so the gate tracks real ability requirements.
+- Compiler unit tests cover per-alias role filtering, empty-path-set compilation to `Bool(false)`, and schema-version-prefix resolution.
+- Integration tests exercise the attack patterns (Reporter-only aggregations, filter-oracle variants, search on protected entities) and confirm zero rows come back.

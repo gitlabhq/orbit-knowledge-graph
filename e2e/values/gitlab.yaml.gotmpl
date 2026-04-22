@@ -1,5 +1,20 @@
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
 global:
   edition: ee
+  # Trust licenses signed by the staging customer portal (loads
+  # .test_license_encryption_key.pub as a fallback decryption key) and point the
+  # subscription/activation client at the staging portal. Applied to every Rails
+  # component (webservice, sidekiq, toolbox, migrations) so the license is
+  # decryptable from first boot. The activation itself is performed by
+  # scripts/activate-license.sh after gitlab is Ready.
+  extraEnv:
+    GITLAB_LICENSE_MODE: "test"
+    CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
+    # Skip post-deployment migrations in the dependencies init check so
+    # webservice/sidekiq pods can start even when the migrations job applied
+    # regular migrations but left PDMs for the async background runner. Only
+    # safe in ephemeral test environments; production must leave this unset.
+    BYPASS_POST_DEPLOYMENT: "true"
   hosts:
     domain: e2e.local
     https: false
@@ -83,6 +98,12 @@ gitlab:
         cpu: 1
         memory: 2Gi
   webservice:
+    # Pin image to the digest resolved by scripts/bump-gitlab-pins.sh. Docker
+    # treats "name:tag@digest" as authoritative-by-digest; the "master" prefix
+    # just satisfies the chart helper that expects a non-empty tag. Every pod
+    # in this deployment pulls the exact same image.
+    image:
+      tag: "master@{{ $v.gitlab.images.webservice.digest }}"
     minReplicas: 1
     maxReplicas: 1
     resources:
@@ -102,6 +123,8 @@ gitlab:
           cpu: 500m
           memory: 512Mi
   sidekiq:
+    image:
+      tag: "master@{{ $v.gitlab.images.sidekiq.digest }}"
     minReplicas: 1
     maxReplicas: 1
     resources:
@@ -112,6 +135,8 @@ gitlab:
         cpu: 2
         memory: 4Gi
   toolbox:
+    image:
+      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
     replicas: 1
     resources:
       requests:
@@ -127,6 +152,14 @@ gitlab:
   gitlab-pages:
     enabled: false
   migrations:
+    image:
+      tag: "master@{{ $v.gitlab.images.toolbox.digest }}"
+    # Don't run post-deployment migrations in the migrations job at all. PDMs
+    # are async-background cleanup that's free on an empty DB, and skipping
+    # them is the biggest single saving on migration job duration. Paired with
+    # global BYPASS_POST_DEPLOYMENT so webservice/sidekiq don't wait for them.
+    extraEnv:
+      SKIP_POST_DEPLOYMENT_MIGRATIONS: "true"
     resources:
       requests:
         cpu: 250m
@@ -138,10 +171,27 @@ gitlab:
 postgresql:
   install: true
   primary:
+    # Tuned for an ephemeral test cluster that's torn down between runs.
+    # The fsync/full_page_writes/synchronous_commit trio trades crash safety
+    # for raw write throughput (PG docs pair these explicitly). WAL is still
+    # produced normally so logical replication to Siphon is unaffected. The
+    # *_work_mem bumps speed up the CREATE INDEX / ALTER TABLE wave that
+    # dominates a first-time migration.
     extendedConfiguration: |
       wal_level = logical
       max_replication_slots = 4
       max_wal_senders = 4
+
+      fsync = off
+      synchronous_commit = off
+      full_page_writes = off
+
+      checkpoint_timeout = 30min
+      max_wal_size = 2GB
+
+      maintenance_work_mem = 256MB
+      shared_buffers = 256MB
+      work_mem = 32MB
     persistence:
       size: 10Gi
     resources:

@@ -79,8 +79,9 @@ tests:
   # Diamond embedding: Foo and Bar both define Dup(). Go would reject
   # this as ambiguous at compile time. The resolver walks all ancestors
   # and finds both Foo.Dup and Bar.Dup (2 NodeIndex values). Both share
-  # the FQN main.Dup (Go methods are package-scoped), and the query
-  # join produces 4 rows (2 edges × 2 matching Definition rows each).
+  # the FQN main.Dup (Go methods are package-scoped) but have distinct
+  # byte ranges, so each gets a unique id and the query join produces
+  # 2 rows (2 edges × 1 matching Definition row each).
   - name: "Diamond ambiguity: resolver finds Dup from both ancestors"
     queries:
       - query: |
@@ -89,4 +90,4 @@ tests:
             AND callee.name = 'Dup'
           RETURN callee.fqn AS callee
         assert:
-          - { row_count: 4 }
+          - { row_count: 2 }

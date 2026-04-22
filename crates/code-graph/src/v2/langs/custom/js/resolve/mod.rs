@@ -94,7 +94,7 @@ fn add_local_call_edges(
 
     let rules = js_local_rules();
     let settings = js_local_settings();
-    let mut resolver = FileResolver::new(
+    let mut resolver = FileResolver::from_parts(
         graph,
         file_info.file_node,
         &file_info.local_def_nodes,
@@ -109,7 +109,7 @@ fn add_local_call_edges(
     let mut semantic_seen: FxHashSet<(usize, String, EdgeKind)> = FxHashSet::default();
     for call in &analyzed.analysis.local_calls {
         resolved.clear();
-        resolver.resolve(
+        let _ = resolver.resolve(
             &call.name,
             call.chain.as_deref(),
             &call.reaching,
