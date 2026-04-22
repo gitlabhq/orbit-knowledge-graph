@@ -38,6 +38,13 @@ mod params {
             "description": "Node types to expand with properties and relationships."
         })
     }
+
+    pub fn include_query_dsl() -> Value {
+        json!({
+            "type": "boolean",
+            "description": "Include the query DSL schema in the response. Shows how to write queries."
+        })
+    }
 }
 
 pub struct ToolRegistry;
@@ -80,12 +87,14 @@ impl ToolRegistry {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types."
+                          property details for specific types. Use include_query_dsl to also \
+                          return the query DSL schema showing how to write queries."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "expand_nodes": params::expand_nodes(),
+                    "include_query_dsl": params::include_query_dsl(),
                     "format": params::format()
                 },
                 "additionalProperties": false
