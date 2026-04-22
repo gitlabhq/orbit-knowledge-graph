@@ -59,6 +59,23 @@ Entity counts are returned for all node types under the traversal path using `st
 
 Replace `count()` with `uniq(id)`. Graph tables use `ReplacingMergeTree`, which keeps multiple row versions between background merges. `count()` overcounts proportionally to update volume (observed 49% overall, up to 300% for frequently updated types on staging). `uniq(id)` uses HyperLogLog to count distinct entity IDs with ~1-2% error at high cardinalities — acceptable for a status indicator and far better than the current overcount.
 
+#### Per-entity access control
+
+Entity counts must respect the caller's access level. A user who cannot see vulnerabilities in the query pipeline must not see vulnerability counts in the stats response.
+
+[!987](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987) adds `required_role` to ontology nodes (e.g., `security_manager` for Vulnerability) and tags each traversal path in the JWT with the user's `access_level` on that path. The compiler's security pass calls `SecurityContext::paths_at_least(min_role)` to drop paths where the user's role is below the entity's floor.
+
+The stats endpoint uses the same check. Before including a node type in the `UNION ALL`, skip it if the user has no traversal path that meets the entity's `required_access_level`:
+
+```rust
+.filter(|node| {
+    let min_role = node.required_access_level();
+    !security_context.paths_at_least(min_role).is_empty()
+})
+```
+
+Entities the user cannot access at any path are excluded from the query entirely. A Reporter-only user sees zero Vulnerability rows in query results and zero Vulnerability counts in stats.
+
 ### Phase 2: Indexing progress via NATS KV
 
 The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) after each run completes. Each key maps to a project or namespace:
@@ -235,6 +252,100 @@ For a subgroup, indexing metadata comes from the top-level group. Entity counts 
 | `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` |
 | `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` |
 
+## Rails endpoint
+
+`GET /api/v4/orbit/graph_status` is the REST surface that consumers (Rails UI, Duo) call. It is a thin proxy: Rails resolves the namespace, builds a JWT with the caller's per-path access levels, and forwards to GKG's `GetGraphStatus` gRPC. GKG owns the response schema.
+
+Based on the initial implementation in [Rails MR !231381](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381), adapted to the current design.
+
+### Request
+
+Callers identify the scope with exactly one of three parameters:
+
+| Parameter | Type | Description |
+|---|---|---|
+| `namespace_id` | Integer | Group ID |
+| `project_id` | Integer | Project ID |
+| `full_path` | String | Full path of a group or project (e.g., `gitlab-org/gitlab`) |
+
+The endpoint resolves the parameter to a namespace, checks `read_group` permission, and derives the `traversal_path` and `source_type` for the gRPC call.
+
+### Namespace resolution
+
+```ruby
+def resolve_graph_status_namespace(params)
+  namespace = if params[:namespace_id]
+                Group.find_by_id(params[:namespace_id])
+              elsif params[:project_id]
+                Project.find_by_id(params[:project_id])&.namespace
+              elsif params[:full_path]
+                routable = Routable.find_by_full_path(params[:full_path])
+                routable.is_a?(Project) ? routable.namespace : routable
+              end
+
+  namespace.is_a?(Group) ? namespace : nil
+end
+```
+
+For projects, the namespace is the parent group. The `source_type` sent to GKG is `SOURCE_TYPE_PROJECT` when the caller passed `project_id`, `SOURCE_TYPE_GROUP` otherwise.
+
+### gRPC call
+
+The gRPC client builds the request and forwards it to GKG. The JWT (built by `request_kwargs`) carries the caller's `group_traversal_ids` with per-path `access_level`. GKG uses these for traversal-path scoping and per-entity role filtering.
+
+```ruby
+def get_graph_status(user:, source_type:, traversal_path:, timeout: DEFAULT_TIMEOUT)
+  request = Gkg::V1::GetGraphStatusRequest.new(
+    traversal_path: traversal_path,
+    source_type: source_type
+  )
+  kwargs = request_kwargs(user: user, source_type: source_type, timeout: timeout)
+
+  response = stub.get_graph_status(request, **kwargs)
+  map_graph_status_response(response)
+end
+```
+
+### Response mapping
+
+GKG returns the protobuf response; Rails maps it to JSON for the REST API:
+
+```ruby
+def map_graph_status_response(response)
+  {
+    last_started_at: response.last_started_at,
+    last_completed_at: response.last_completed_at,
+    last_duration_ms: response.last_duration_ms,
+    last_error: response.last_error.presence,
+    projects: {
+      indexed: response.projects.indexed,
+      total_known: response.projects.total_known
+    },
+    stats: response.domains.map do |domain|
+      {
+        name: domain.name,
+        items: domain.items.map { |item| { name: item.name, count: item.count } }
+      }
+    end
+  }
+end
+```
+
+### Authorization
+
+- Route-level: `permissions: :read_knowledge_graph` with `boundary_type: :user`.
+- Namespace-level: `can?(current_user, :read_group, namespace)` before calling GKG.
+- Entity-level: handled by GKG via per-entity role scoping (see Phase 1). The JWT carries per-path access levels; GKG filters entity counts based on the caller's role. Rails does not need to know which entity types require elevated access.
+
+### Error handling
+
+| Condition | HTTP status |
+|---|---|
+| No lookup parameter provided | 400 |
+| Namespace not found or not accessible | 404 |
+| GKG unreachable | 503 |
+| GKG authorization error | 403 |
+
 ## Alternatives considered
 
 ### Separate `GetIndexingStatus` RPC
@@ -269,4 +380,5 @@ What gets harder:
 - [SDLC indexing design document](../indexing/sdlc_indexing.md)
 - [ADR 005: PostgreSQL task table for code indexing triggers](005_code_indexing_task_table.md)
 - [Security and authorization design](../security.md)
+- [MR !987: Per-entity role scoping for aggregation targets](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/987)
 - [Rails MR !231381: Add GET /api/v4/orbit/graph_status endpoint](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/231381)
