@@ -82,7 +82,7 @@ The `projects` counts use `startsWith(traversal_path, ...)` on both `gl_project`
 
 Cache the full serialized response in a NATS KV bucket keyed by traversal path with a 60-second TTL. On a hit, return the cached response without touching ClickHouse. On a miss, run the queries, cache, and return.
 
-This absorbs bursts from the UI or multiple consumers polling the same namespace without hammering ClickHouse. 60 seconds is short enough for reasonably fresh data.
+The indexer invalidates the cached entry for the relevant traversal path after each indexing run, so consumers see fresh data immediately after indexing completes rather than waiting for the TTL to expire. The 60-second TTL is a fallback for bursts between indexing runs.
 
 ## Examples
 
@@ -219,24 +219,12 @@ For a subgroup, indexing metadata comes from the top-level group. Entity counts 
 
 ### Data sources
 
-| Response field | Source | Scope |
-|---|---|---|
-| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error` | NATS KV `indexing_progress`, key `sdlc.{top_level_namespace_id}` (group) or `code.{project_id}` (project) | Both |
-| `projects.total_known` | `uniq(id)` on `gl_project`, `startsWith(traversal_path, ...)` | Both (1 for project scope) |
-| `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` | Both (1 or 0 for project scope) |
-| `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` | Both |
-
-## Why the code/SDLC split
-
-| Property | Code indexing | SDLC indexing |
-|---|---|---|
-| Trigger | Push to default branch (discrete task) | CDC stream (continuous) |
-| Granularity | Per-project, per-branch | Per-namespace, per-entity-type |
-| Checkpoint | `code_indexing_checkpoint` (last_commit, indexed_at) | `checkpoint` (watermark, cursor) |
-| "Is it done?" | Yes: checkpoint exists with recent `indexed_at` | Not really: CDC is ongoing, freshness is the metric |
-| Scope | Project-level | Namespace-level |
-
-A project can be "fully code-indexed" while SDLC data is always streaming. The split lets consumers show a completion indicator for code and a freshness indicator for SDLC rather than a misleading unified status.
+| Response field | Source |
+|---|---|
+| `last_started_at`, `last_completed_at`, `last_duration_ms`, `last_error` | NATS KV `indexing_progress`, key `sdlc.{top_level_namespace_id}` (group) or `code.{project_id}` (project) |
+| `projects.total_known` | `uniq(id)` on `gl_project`, `startsWith(traversal_path, ...)` |
+| `projects.indexed` | `uniq(project_id)` on `code_indexing_checkpoint`, `startsWith(traversal_path, ...)` |
+| `stats[].items[].count` | `uniq(id)` per node table, `startsWith(traversal_path, ...)` |
 
 ## Alternatives considered
 
@@ -248,9 +236,9 @@ Two RPCs that consumers must call and correlate. Low entity counts might mean "n
 
 `FINAL` forces ClickHouse to deduplicate at query time. On staging with 16M edge rows, `FINAL` reads 14.4M rows (620 MB) and takes 579ms vs 71ms without. At production scale this would take minutes. `uniq(id)` gets equivalent deduplication via HyperLogLog without the cost.
 
-### HTTP GET for CDN caching
+### Pre-compute stats at index time
 
-A bodyless GET could benefit from CDN caching, but the initial implementation is gRPC-only. Worth revisiting when the endpoint is exposed directly to the UI.
+The indexer could write pre-aggregated entity counts to NATS KV alongside the indexing progress, making the entire response an O(1) read. Rejected because it adds complexity to the indexer for an endpoint that doesn't get enough traffic to justify it. If that changes, this is a natural next step after Phase 4.
 
 ## Consequences
 
