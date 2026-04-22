@@ -368,7 +368,7 @@ where
         let sentinel = rules
             .settings
             .per_file_timeout
-            .map(|timeout| crate::v2::sentinel::spawn_sentinel(timeout));
+            .map(crate::v2::sentinel::spawn_sentinel);
 
         // ── Pre-phase: bulk file read into memory ───────────────
         // Read all files once upfront. Both Phase 1 and Phase 2
@@ -529,7 +529,7 @@ where
                 let mut inferred_set = false;
 
                 let inferred_result = spec.parse_full_and_resolve(
-                    &source,
+                    source,
                     path,
                     language,
                     &mut |name, chain, reaching, enclosing_def, inferred| {
