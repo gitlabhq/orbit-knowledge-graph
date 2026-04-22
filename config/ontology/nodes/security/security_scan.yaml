@@ -15,7 +15,6 @@ redaction:
   resource_type: security_scan
   id_column: id
   ability: read_scan
-  required_role: security_manager
 
 properties:
   id:

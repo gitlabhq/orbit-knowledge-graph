@@ -133,14 +133,14 @@ pub struct SecurityPass;
 
 impl<E, S> CompilerPass<E, S> for SecurityPass
 where
-    E: PipelineEnv + HasSecurityCtx + HasOntology,
+    E: PipelineEnv + HasSecurityCtx,
     S: PipelineState + HasNode,
 {
     const NAME: &'static str = "security";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let node = state.node_mut()?;
-        security::apply_security_context(node, env.security_ctx(), env.ontology())
+        security::apply_security_context(node, env.security_ctx())
     }
 }
 

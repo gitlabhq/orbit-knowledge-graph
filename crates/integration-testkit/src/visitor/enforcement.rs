@@ -176,22 +176,6 @@ impl AssertionTracker {
         }
     }
 
-    /// Mark every `Requirement::Filter { .. }` in the required set as
-    /// satisfied. Used by empty-result assertions where filter checks
-    /// are vacuously true.
-    pub(super) fn satisfy_all_filters(&self) {
-        let filters: Vec<Requirement> = self
-            .required
-            .iter()
-            .filter(|r| matches!(r, Requirement::Filter { .. }))
-            .cloned()
-            .collect();
-        let mut satisfied = self.satisfied.borrow_mut();
-        for f in filters {
-            satisfied.insert(f);
-        }
-    }
-
     fn unsatisfied(&self) -> HashSet<Requirement> {
         self.required
             .difference(&self.satisfied.borrow())

@@ -290,11 +290,6 @@
         "ability": {
           "type": "string",
           "description": "Rails ability to check (e.g., 'read_project'). If not specified, uses the default ability for the resource type."
-        },
-        "required_role": {
-          "type": "string",
-          "enum": ["guest", "reporter", "security_manager", "developer", "maintainer", "owner"],
-          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
         }
       },
       "required": ["resource_type"],
