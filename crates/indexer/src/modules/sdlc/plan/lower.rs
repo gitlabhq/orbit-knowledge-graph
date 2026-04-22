@@ -183,8 +183,8 @@ fn lower_edge_id(id: &EdgeId) -> Expr {
 fn lower_edge_kind(kind: &EdgeKind) -> Expr {
     match kind {
         EdgeKind::Literal(value) => Expr::raw(format!("'{value}'")),
-        EdgeKind::Column(column) => Expr::col("", column),
-        EdgeKind::TypeMapping { column, mapping } => {
+        EdgeKind::Column { column, mapping } if mapping.is_empty() => Expr::col("", column),
+        EdgeKind::Column { column, mapping } => {
             let cases: Vec<String> = mapping
                 .iter()
                 .map(|(from, to)| format!("WHEN {column} = '{from}' THEN '{to}'"))
@@ -386,6 +386,41 @@ mod tests {
     }
 
     #[test]
+    fn note_has_note_edge_transform_applies_type_mapping() {
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1_000_000);
+
+        let note_plan = plans.namespaced.iter().find(|p| p.name == "Note").unwrap();
+        let sql = note_plan
+            .transforms
+            .iter()
+            .map(|t| emit(&t.query))
+            .find(|sql| sql.contains("'HAS_NOTE' AS relationship_kind"))
+            .expect("HAS_NOTE transform on Note plan");
+
+        assert!(
+            sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("WHEN noteable_type = 'Epic' THEN 'WorkItem'"),
+            "sql: {sql}"
+        );
+        // Raw Rails values pass the extract TypeIn filter so the CASE can map them.
+        assert!(
+            sql.contains("'Issue'"),
+            "sql should keep raw Issue for filter: {sql}"
+        );
+        assert!(
+            sql.contains("'Epic'"),
+            "sql should keep raw Epic for filter: {sql}"
+        );
+        // Ontology-native values (verbatim matches) stay allowed.
+        assert!(sql.contains("'MergeRequest'"), "sql: {sql}");
+        assert!(sql.contains("'Vulnerability'"), "sql: {sql}");
+    }
+
+    #[test]
     fn standalone_edges_produce_separate_plans() {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
         let plans = build_plans(&ontology, 1_000_000);
@@ -483,6 +518,56 @@ mod tests {
         assert!(sql.contains("'User' AS source_kind"));
         assert!(sql.contains("id AS target_id"));
         assert!(sql.contains("'Note' AS target_kind"));
+    }
+
+    #[test]
+    fn fk_edge_transform_sql_type_mapping_collapses_raw_values() {
+        let mut mapping = BTreeMap::new();
+        mapping.insert("Issue".to_string(), "WorkItem".to_string());
+        mapping.insert("Epic".to_string(), "WorkItem".to_string());
+
+        let fk_edge = FkEdgeTransform {
+            relationship_kind: "HAS_NOTE".to_string(),
+            source_id: EdgeId::Column("noteable_id".to_string()),
+            source_kind: EdgeKind::Column {
+                column: "noteable_type".to_string(),
+                mapping,
+            },
+            target_id: EdgeId::Column("id".to_string()),
+            target_kind: EdgeKind::Literal("Note".to_string()),
+            filters: vec![
+                EdgeFilter::IsNotNull("noteable_id".to_string()),
+                EdgeFilter::TypeIn {
+                    column: "noteable_type".to_string(),
+                    types: vec![
+                        "MergeRequest".to_string(),
+                        "WorkItem".to_string(),
+                        "Vulnerability".to_string(),
+                        "Issue".to_string(),
+                        "Epic".to_string(),
+                    ],
+                },
+            ],
+            namespaced: true,
+            destination_table: "gl_edge".to_string(),
+        };
+
+        let transform = lower_fk_edge_transform(&fk_edge);
+        let sql = emit(&transform.query);
+
+        // Mapped values collapse to ontology names via CASE.
+        assert!(
+            sql.contains("WHEN noteable_type = 'Issue' THEN 'WorkItem'"),
+            "sql: {sql}"
+        );
+        assert!(
+            sql.contains("WHEN noteable_type = 'Epic' THEN 'WorkItem'"),
+            "sql: {sql}"
+        );
+        assert!(sql.contains("ELSE noteable_type END"), "sql: {sql}");
+        // Raw legacy values must survive the extract filter so the CASE can map them.
+        assert!(sql.contains("'Issue'"), "sql: {sql}");
+        assert!(sql.contains("'Epic'"), "sql: {sql}");
     }
 
     #[test]

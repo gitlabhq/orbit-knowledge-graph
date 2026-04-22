@@ -160,6 +160,11 @@
           "type": "string",
           "description": "Column containing the target node type (for polymorphic edges)."
         },
+        "type_mapping": {
+          "type": "object",
+          "description": "Maps raw column values to ontology node types (e.g., Issue -> WorkItem). Only valid with `to_column`.",
+          "additionalProperties": { "type": "string" }
+        },
         "as": {
           "type": "string",
           "description": "Relationship kind name for the generated edge."

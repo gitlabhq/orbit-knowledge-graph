@@ -125,6 +125,15 @@ etl:
       to_column: noteable_type
       as: HAS_NOTE
       direction: incoming
+      # Rails stores the polymorphic base class in `noteable_type` via
+      # `Note#noteable_type=` → `klass.base_class.to_s`. WorkItem subclasses of
+      # Issue (Task, Incident, Ticket, Objective, KeyResult, TestCase,
+      # Requirement) all collapse to `Issue`. Legacy Epic notes created via
+      # `Groups::Epics::NotesController` still arrive as `Epic` until the
+      # unified work-item model fully replaces the legacy record.
+      type_mapping:
+        Issue: WorkItem
+        Epic: WorkItem
 
 storage:
   primary_key: [traversal_path, id]

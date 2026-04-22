@@ -8,12 +8,19 @@ use crate::indexer::common::{
 };
 
 pub async fn processes_notes_with_edges(ctx: &TestContext) {
+    // Seed raw Rails `noteable_type` values as Siphon replicates them
+    // (post `Note#noteable_type=` normalization to `base_class.to_s`).
+    //   - Issue  → WorkItem (all Issue subclasses: Task, Incident, ...)
+    //   - Epic   → WorkItem (legacy Groups::Epics::NotesController path)
+    //   - Commit → has no ontology node, must be filtered out
     ctx.execute(
         "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, system, internal, traversal_path, created_at, updated_at, _siphon_replicated_at)
         VALUES
         (1, 'MR comment', 'MergeRequest', 100, 1, false, false, '1/100/', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00'),
-        (2, 'Work item note', 'WorkItem', 200, 2, false, false, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
-        (3, 'Vuln comment', 'Vulnerability', 300, 1, false, true, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00')",
+        (2, 'Issue note', 'Issue', 200, 2, false, false, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
+        (3, 'Vuln comment', 'Vulnerability', 300, 1, false, true, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00'),
+        (4, 'Legacy epic note', 'Epic', 400, 1, false, false, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00'),
+        (5, 'Commit comment', 'Commit', 500, 1, false, false, '1/100/', '2024-01-19', '2024-01-19', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -23,9 +30,9 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
         .await
         .unwrap();
 
-    assert_node_count(ctx, "gl_note", 3).await;
+    assert_node_count(ctx, "gl_note", 5).await;
 
-    assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 3).await;
+    assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 5).await;
 
     let has_note_edges = ctx
         .query(&format!(
@@ -35,14 +42,27 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
         ))
         .await;
     assert!(!has_note_edges.is_empty(), "HAS_NOTE edges should exist");
-    assert_eq!(has_note_edges[0].num_rows(), 3);
+    assert_eq!(
+        has_note_edges[0].num_rows(),
+        4,
+        "expect 4 HAS_NOTE edges (MR, Issue→WorkItem, Vuln, Epic→WorkItem); Commit has no ontology target"
+    );
 
     let source_kind =
         ArrowUtils::get_column_by_name::<StringArray>(&has_note_edges[0], "source_kind")
             .expect("source_kind column");
     assert_eq!(source_kind.value(0), "MergeRequest");
-    assert_eq!(source_kind.value(1), "WorkItem");
+    assert_eq!(
+        source_kind.value(1),
+        "WorkItem",
+        "Issue collapses to WorkItem"
+    );
     assert_eq!(source_kind.value(2), "Vulnerability");
+    assert_eq!(
+        source_kind.value(3),
+        "WorkItem",
+        "Epic collapses to WorkItem"
+    );
 }
 
 pub async fn filters_out_system_notes(ctx: &TestContext) {
@@ -52,7 +72,7 @@ pub async fn filters_out_system_notes(ctx: &TestContext) {
         (1, 'User comment', 'MergeRequest', 100, 1, false, false, '1/100/', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00'),
         (2, 'added 1 commit', 'MergeRequest', 100, 2, true, false, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
         (3, 'mentioned in issue #123', 'MergeRequest', 100, 2, true, false, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00'),
-        (4, 'Another user comment', 'WorkItem', 200, 1, false, false, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00')",
+        (4, 'Another user comment', 'Issue', 200, 1, false, false, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00')",
     )
     .await;
 

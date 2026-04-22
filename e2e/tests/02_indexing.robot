@@ -95,3 +95,11 @@ Hierarchy Is Linked By Expected Edges
 
     Wait For Edge Indexed Within Budget    User    ${None}
     ...    AUTHORED    Note    ${HIER_NOTE2}[id]
+
+    # WorkItem→HAS_NOTE→Note proves the polymorphic `noteable_type='Issue'`
+    # Rails value is collapsed to the ontology's WorkItem name during ETL.
+    Wait For Edge Indexed Within Budget    WorkItem    ${HIER_ISSUE}[id]
+    ...    HAS_NOTE    Note    ${HIER_NOTE1}[id]
+
+    Wait For Edge Indexed Within Budget    WorkItem    ${HIER_ISSUE}[id]
+    ...    HAS_NOTE    Note    ${HIER_NOTE2}[id]
