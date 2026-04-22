@@ -1,0 +1,8 @@
+# config/ontology/edges/created_for_mr.yaml
+
+description: Environment was first created by a merge request pipeline
+
+variants:
+  - from_node: { type: Environment, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "Environment was first created by a merge request pipeline."

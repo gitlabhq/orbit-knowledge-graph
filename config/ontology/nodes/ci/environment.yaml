@@ -1,0 +1,186 @@
+# config/ontology/nodes/ci/environment.yaml
+
+node_type: Environment
+domain: ci
+description: A CI/CD deployment target (production, staging, review app, etc.)
+label: name
+destination_table: gl_environment
+default_columns: [id, name, state, tier]
+
+style:
+  size: 22
+  color: "#0EA5E9"
+
+redaction:
+  resource_type: environment
+  id_column: id
+  ability: read_environment
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the environment."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Project that owns this environment. Retained on the node row so redaction can resolve project-level permissions without an edge lookup."
+
+  name:
+    type: string
+    source: name
+    nullable: false
+    description: "Environment name (e.g. 'production', 'staging', 'review/feature-x')."
+
+  slug:
+    type: string
+    source: slug
+    nullable: false
+    description: "Slug derived from the environment name, safe for URLs and resource names."
+
+  external_url:
+    type: string
+    source: external_url
+    nullable: true
+    description: "External URL where the environment can be reached."
+
+  environment_type:
+    type: string
+    source: environment_type
+    nullable: true
+    description: "Free-form category derived from the name prefix before the first '/' (e.g. 'review', 'staging'); null for environments without a '/'."
+
+  state:
+    type: enum
+    source: state
+    nullable: false
+    description: "Lifecycle state of the environment."
+    enum_type: string
+    values:
+      0: available
+      1: stopping
+      2: stopped
+
+  tier:
+    type: enum
+    source: tier
+    nullable: true
+    description: "Environment tier within the deployment pipeline."
+    values:
+      0: production
+      1: staging
+      2: testing
+      3: development
+      4: other
+
+  auto_stop_at:
+    type: timestamp
+    source: auto_stop_at
+    nullable: true
+    description: "Timestamp at which the environment will be auto-stopped."
+
+  auto_delete_at:
+    type: timestamp
+    source: auto_delete_at
+    nullable: true
+    description: "Timestamp at which the environment will be auto-deleted."
+
+  auto_stop_setting:
+    type: enum
+    source: auto_stop_setting
+    nullable: false
+    description: "How auto-stop is applied to this environment."
+    values:
+      0: always
+      1: with_action
+
+  cluster_agent_id:
+    type: int64
+    source: cluster_agent_id
+    nullable: true
+    description: "ID of the associated Kubernetes cluster agent, if any."
+
+  kubernetes_namespace:
+    type: string
+    source: kubernetes_namespace
+    nullable: true
+    description: "Kubernetes namespace this environment is deployed into."
+
+  flux_resource_path:
+    type: string
+    source: flux_resource_path
+    nullable: true
+    description: "Flux resource path for GitOps-driven environments."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Free-form description of the environment."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the environment was created."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the environment was last updated."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_environments
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    merge_request_id:
+      to: MergeRequest
+      as: CREATED_FOR_MR
+      direction: outgoing
+
+storage:
+  primary_key: [traversal_path, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: slug, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: external_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: environment_type, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: state, type: "LowCardinality(String)", default: "'available'", codec: ["LZ4"]}
+    - {name: tier, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: auto_stop_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: auto_delete_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: auto_stop_setting, type: "LowCardinality(String)", default: "'always'", codec: ["LZ4"]}
+    - {name: cluster_agent_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: kubernetes_namespace, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: flux_resource_path, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_state, column: state, type: "set(4)", granularity: 2}
+    - {name: idx_tier, column: tier, type: "set(8)", granularity: 2}
+    - {name: idx_environment_type, column: environment_type, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_tier_state, order_by: [tier, state, id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
