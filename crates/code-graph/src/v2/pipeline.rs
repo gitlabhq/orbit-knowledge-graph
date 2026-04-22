@@ -5,9 +5,34 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::Mutex;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use crate::v2::linker::CodeGraph;
+use crate::v2::trace::Tracer;
+
+/// Cooperative cancellation token. Clone-cheap (`Arc`).
+/// Set `cancel()` from any thread to request pipeline shutdown.
+#[derive(Clone, Default)]
+pub struct CancellationToken(Arc<AtomicBool>);
+
+impl CancellationToken {
+    pub fn new() -> Self {
+        Self(Arc::new(AtomicBool::new(false)))
+    }
+
+    /// Signal cancellation. All pipeline phases will exit at their
+    /// next check point (per-file granularity).
+    pub fn cancel(&self) {
+        self.0.store(true, Ordering::Relaxed);
+    }
+
+    /// Check if cancellation has been requested.
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.0.load(Ordering::Relaxed)
+    }
+}
 
 /// A chain reference that failed resolution in Phase 2,
 /// stored for re-resolution in Phase 3 after return types are merged.
@@ -53,6 +78,55 @@ pub enum PipelineOutput {
     Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
 }
 
+/// Immutable context shared across the entire pipeline run.
+/// Bundles config, tracer, root path, and cancellation — everything
+/// that doesn't change per-language or per-file.
+///
+/// Owned so it can be stored in `Arc` and shared across threads
+/// and into structs like `CodeGraph`.
+pub struct PipelineContext {
+    pub config: PipelineConfig,
+    pub tracer: crate::v2::trace::Tracer,
+    pub root_path: String,
+}
+
+impl PipelineContext {
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.config.cancel.is_cancelled()
+    }
+}
+
+/// Per-language context built inside `process_files`. Bundles the
+/// pipeline-wide context with the language-specific spec and rules.
+pub struct LanguageContext {
+    pub pipeline: Arc<PipelineContext>,
+    pub spec: crate::v2::dsl::types::LanguageSpec,
+    pub rules: Arc<crate::v2::linker::rules::ResolutionRules>,
+}
+
+impl LanguageContext {
+    #[inline]
+    pub fn is_cancelled(&self) -> bool {
+        self.pipeline.is_cancelled()
+    }
+
+    #[inline]
+    pub fn tracer(&self) -> &crate::v2::trace::Tracer {
+        &self.pipeline.tracer
+    }
+
+    #[inline]
+    pub fn root_path(&self) -> &str {
+        &self.pipeline.root_path
+    }
+
+    #[inline]
+    pub fn sep(&self) -> &str {
+        self.rules.fqn_separator
+    }
+}
+
 /// Trait for language-specific graph production.
 ///
 /// Two strategies:
@@ -64,16 +138,14 @@ pub enum PipelineOutput {
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
-    pub worker_threads: usize,
+    pub cancel: CancellationToken,
 }
 
 impl Default for PipelineConfig {
@@ -81,7 +153,7 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             respect_gitignore: true,
-            worker_threads: 0,
+            cancel: CancellationToken::new(),
         }
     }
 }
@@ -91,6 +163,8 @@ pub struct PipelineResult {
     pub batches: Vec<(String, arrow::record_batch::RecordBatch)>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
+    /// The pipeline context, including the tracer with accumulated events.
+    pub ctx: Arc<PipelineContext>,
 }
 
 /// Aggregate stats from the pipeline run.
@@ -114,29 +188,19 @@ pub struct PipelineError {
     pub error: String,
 }
 
-pub struct Pipeline {
-    config: PipelineConfig,
-}
+pub struct Pipeline;
 
 impl Pipeline {
-    pub fn new(config: PipelineConfig) -> Self {
-        Self { config }
+    pub fn run(root: &Path, config: PipelineConfig) -> PipelineResult {
+        Self::run_with_tracer(root, config, Tracer::new(false))
     }
 
-    pub fn run(&self, root: &Path) -> PipelineResult {
-        self.run_with_tracer(root, crate::v2::trace::leaked_noop_tracer())
-    }
-
-    pub fn run_with_tracer(
-        &self,
-        root: &Path,
-        tracer: &crate::v2::trace::Tracer,
-    ) -> PipelineResult {
+    pub fn run_with_tracer(root: &Path, config: PipelineConfig, tracer: Tracer) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
         let pb_discover = spinner("Discovering files...");
-        let files_by_language = self.walk_and_group(root);
+        let files_by_language = Self::walk_and_group(root, &config);
         let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_language
             .iter()
@@ -147,6 +211,12 @@ impl Pipeline {
             lang_summary.join(", ")
         ));
 
+        let ctx = Arc::new(PipelineContext {
+            config,
+            tracer,
+            root_path: root_str,
+        });
+
         // 2. Process each language through its pipeline
         let mut all_graphs: Vec<CodeGraph> = Vec::new();
         let mut all_batches: Vec<(String, arrow::record_batch::RecordBatch)> = Vec::new();
@@ -155,17 +225,14 @@ impl Pipeline {
         let mut files_skipped = 0usize;
 
         for (language, files) in &files_by_language {
+            if ctx.is_cancelled() {
+                break;
+            }
             let file_count = files.len();
             eprintln!("[v2] processing {language}: {file_count} files");
             let t_lang = std::time::Instant::now();
 
-            match crate::v2::registry::dispatch_language(
-                *language,
-                files,
-                &root_str,
-                &self.config,
-                tracer,
-            ) {
+            match crate::v2::registry::dispatch_language(*language, files, &ctx) {
                 Some(Ok(PipelineOutput::Graph(graph))) => {
                     eprintln!(
                         "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
@@ -216,14 +283,15 @@ impl Pipeline {
                 edges_count,
             },
             errors: all_errors,
+            ctx,
         }
     }
 
-    fn walk_and_group(&self, root: &Path) -> FxHashMap<Language, Vec<FileInput>> {
+    fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
         let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
 
         let walker = WalkBuilder::new(root)
-            .git_ignore(self.config.respect_gitignore)
+            .git_ignore(config.respect_gitignore)
             .hidden(true)
             .build();
 
@@ -235,7 +303,7 @@ impl Pipeline {
             let path = entry.path();
 
             if let Ok(metadata) = path.metadata()
-                && metadata.len() > self.config.max_file_size
+                && metadata.len() > config.max_file_size
             {
                 continue;
             }
@@ -281,27 +349,41 @@ where
 {
     fn process_files(
         files: &[FileInput],
-        root_path: &str,
-        _config: &PipelineConfig,
-        tracer: &crate::v2::trace::Tracer,
+        ctx: &Arc<PipelineContext>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
-        let spec = P::spec();
-        let rules = R::rules();
+        let lang_ctx = Arc::new(LanguageContext {
+            pipeline: ctx.clone(),
+            spec: P::spec(),
+            rules: Arc::new(R::rules()),
+        });
         let language = P::language();
         let file_count = files.len();
+        let root_path = lang_ctx.root_path();
+        let tracer = lang_ctx.tracer();
+        let spec = &lang_ctx.spec;
+        let rules = &lang_ctx.rules;
         let t0 = std::time::Instant::now();
 
-        eprintln!(
-            "[v2-sp] {file_count} files, {} threads",
-            rayon::current_num_threads()
-        );
+        // Spawn sentinel watchdog if per_file_timeout is configured
+        let sentinel = rules
+            .settings
+            .per_file_timeout
+            .map(crate::v2::sentinel::spawn_sentinel);
 
-        // ── Phase 1: parallel parse_defs_only + graph build ─────
-        let graph = Mutex::new(CodeGraph::new_with_root(root_path.to_string()));
+        // ── Pre-phase: bulk file read into memory ───────────────
+        // Read all files once upfront. Both Phase 1 and Phase 2
+        // index into the same buffer — no per-file I/O in the hot loop.
+        let sources: Vec<Option<Vec<u8>>> = files
+            .par_iter()
+            .map(|path| {
+                let abs_path = format!("{root_path}/{path}");
+                std::fs::read(&abs_path).ok()
+            })
+            .collect();
+
+        // ── Phase 1: parallel parse, sequential graph build ─────
         let pb = progress_bar(file_count as u64, "parse + graph");
-        let errors = Mutex::new(Vec::new());
-        let total_defs = std::sync::atomic::AtomicUsize::new(0);
-        let total_imports = std::sync::atomic::AtomicUsize::new(0);
+        let all_errors: Vec<PipelineError> = Vec::new();
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
@@ -309,78 +391,93 @@ where
             import_nodes: Vec<petgraph::graph::NodeIndex>,
         }
 
-        let file_infos: Vec<Option<FileInfo>> = files
+        // Phase 1a: parse all files in parallel (no locks, no graph)
+        use crate::v2::dsl::engine::ParsedDefs;
+        struct ParsedFile {
+            path_idx: usize,
+            result: ParsedDefs,
+            ext: String,
+            file_size: u64,
+        }
+
+        let parsed: Vec<Option<ParsedFile>> = files
             .par_iter()
+            .zip(sources.par_iter())
             .enumerate()
-            .map(|(_, path)| {
-                let abs_path = format!("{root_path}/{path}");
-                let source = match std::fs::read(&abs_path) {
-                    Ok(s) => s,
-                    Err(e) => {
-                        errors.lock().unwrap().push(PipelineError {
-                            file_path: path.clone(),
-                            error: format!("Read error: {e}"),
-                        });
+            .map(|(idx, (path, source_opt))| {
+                if ctx.is_cancelled() {
+                    pb.inc(1);
+                    return None;
+                }
+                let source = match source_opt {
+                    Some(s) => s,
+                    None => {
                         pb.inc(1);
                         return None;
                     }
                 };
 
-                let result = match spec.parse_defs_only(&source, path, language) {
+                let result = match spec.parse_defs_only(source, path, language) {
                     Ok(r) => r,
-                    Err(e) => {
-                        errors.lock().unwrap().push(PipelineError {
-                            file_path: path.clone(),
-                            error: format!("Parse error: {e}"),
-                        });
+                    Err(_) => {
                         pb.inc(1);
                         return None;
                     }
                 };
 
-                total_defs.fetch_add(
-                    result.definitions.len(),
-                    std::sync::atomic::Ordering::Relaxed,
-                );
-                total_imports.fetch_add(result.imports.len(), std::sync::atomic::Ordering::Relaxed);
-
-                let ext = path.rsplit_once('.').map(|(_, e)| e).unwrap_or("");
+                let ext = path
+                    .rsplit_once('.')
+                    .map(|(_, e)| e)
+                    .unwrap_or("")
+                    .to_string();
                 let file_size = source.len() as u64;
-
-                let (file_node, def_nodes, import_nodes) = {
-                    let mut g = graph.lock().unwrap();
-                    g.add_file(
-                        path,
-                        ext,
-                        language,
-                        file_size,
-                        &result.definitions,
-                        &result.imports,
-                    )
-                };
-
                 pb.inc(1);
-                Some(FileInfo {
-                    file_node,
-                    def_nodes,
-                    import_nodes,
+                Some(ParsedFile {
+                    path_idx: idx,
+                    result,
+                    ext,
+                    file_size,
                 })
             })
             .collect();
 
+        // Phase 1b: add to graph sequentially (no lock contention)
+        let mut graph =
+            CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
+        let mut total_defs = 0usize;
+        let mut total_imports = 0usize;
+        let mut file_infos: Vec<Option<FileInfo>> = (0..file_count).map(|_| None).collect();
+
+        for parsed_file in parsed.into_iter().flatten() {
+            let path = &files[parsed_file.path_idx];
+            total_defs += parsed_file.result.definitions.len();
+            total_imports += parsed_file.result.imports.len();
+
+            let (file_node, def_nodes, import_nodes) = graph.add_file(
+                path,
+                &parsed_file.ext,
+                language,
+                parsed_file.file_size,
+                &parsed_file.result.definitions,
+                &parsed_file.result.imports,
+            );
+
+            file_infos[parsed_file.path_idx] = Some(FileInfo {
+                file_node,
+                def_nodes,
+                import_nodes,
+            });
+        }
+
         pb.finish_with_message(format!(
-            "{} defs, {} imports in {:.2?}",
-            total_defs.load(std::sync::atomic::Ordering::Relaxed),
-            total_imports.load(std::sync::atomic::Ordering::Relaxed),
+            "{total_defs} defs, {total_imports} imports in {:.2?}",
             t0.elapsed()
         ));
 
-        let errors = errors.into_inner().unwrap();
-        if !errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
-            return Err(errors);
+        if !all_errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
+            return Err(all_errors);
         }
 
-        let mut graph = graph.into_inner().unwrap();
         graph.finalize(tracer);
 
         // ── Phase 2: parallel parse_full + resolve (callback) ──
@@ -406,37 +503,33 @@ where
 
         let resolve_results: Vec<Phase2Result> = file_infos
             .into_par_iter()
+            .zip(sources.par_iter())
             .zip(files.par_iter())
-            .map(|(info_opt, path)| -> Phase2Result {
-                let Some(info) = info_opt else {
+            .map(|((info_opt, source_opt), path)| -> Phase2Result {
+                if ctx.is_cancelled() {
+                    pb2.inc(1);
+                    return Default::default();
+                }
+                let (Some(info), Some(source)) = (info_opt, source_opt) else {
                     pb2.inc(1);
                     return Default::default();
                 };
 
-                let abs_path = format!("{root_path}/{path}");
-                let source = match std::fs::read(&abs_path) {
-                    Ok(s) => s,
-                    Err(_) => {
-                        pb2.inc(1);
-                        return Default::default();
-                    }
-                };
-
+                let guard = sentinel.as_ref().map(|(handle, _)| handle.file_start(path));
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     info.file_node,
                     &info.def_nodes,
                     &info.import_nodes,
-                    &rules,
-                    &rules.settings,
-                    tracer,
+                    &lang_ctx,
+                    guard,
                 );
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
                 let mut inferred_set = false;
 
                 let inferred_result = spec.parse_full_and_resolve(
-                    &source,
+                    source,
                     path,
                     language,
                     &mut |name, chain, reaching, enclosing_def, inferred| {
@@ -445,7 +538,12 @@ where
                             inferred_set = true;
                         }
                         let before = edges.len();
-                        resolver.resolve(name, chain, reaching, enclosing_def, &mut edges);
+                        if resolver
+                            .resolve(name, chain, reaching, enclosing_def, &mut edges)
+                            .is_err()
+                        {
+                            return; // file killed by sentinel
+                        }
                         // Store failed chain refs for Phase 3 re-resolution
                         if edges.len() == before && chain.is_some_and(|c| c.len() >= 2) {
                             failed_chains.push((
@@ -513,24 +611,25 @@ where
                 let phase3_results: Vec<_> = all_failed
                     .par_iter()
                     .map(|(info, failed_chains)| {
+                        let guard = sentinel
+                            .as_ref()
+                            .map(|(handle, _)| handle.file_start("phase3"));
                         let mut resolver = crate::v2::linker::FileResolver::new(
                             &graph,
                             info.file_node,
                             &info.def_nodes,
                             &info.import_nodes,
-                            &rules,
-                            &rules.settings,
-                            tracer,
+                            &lang_ctx,
+                            guard,
                         );
                         let mut edges = Vec::new();
                         for (name, chain, reaching, enclosing_def) in failed_chains {
-                            resolver.resolve(
-                                name,
-                                Some(chain),
-                                reaching,
-                                *enclosing_def,
-                                &mut edges,
-                            );
+                            if resolver
+                                .resolve(name, Some(chain), reaching, *enclosing_def, &mut edges)
+                                .is_err()
+                            {
+                                break; // file killed by sentinel
+                            }
                         }
                         edges
                     })
@@ -547,6 +646,12 @@ where
                     eprintln!("[v2-sp] phase 3: {phase3_edges} cross-file edges resolved");
                 }
             }
+        }
+
+        // Shut down sentinel
+        if let Some((handle, join)) = sentinel {
+            handle.shutdown();
+            let _ = join.join();
         }
 
         eprintln!(
@@ -573,15 +678,14 @@ mod tests {
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
-        let output = crate::v2::registry::dispatch_language(
-            language,
-            &[path.to_string()],
-            "/",
-            &PipelineConfig::default(),
-            crate::v2::trace::leaked_noop_tracer(),
-        )
-        .unwrap_or_else(|| panic!("Language {language} not supported"))
-        .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
+        let ctx = Arc::new(PipelineContext {
+            config: PipelineConfig::default(),
+            tracer: crate::v2::trace::Tracer::new(false),
+            root_path: "/".to_string(),
+        });
+        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx)
+            .unwrap_or_else(|| panic!("Language {language} not supported"))
+            .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
         match output {
             PipelineOutput::Graph(g) => *g,
             PipelineOutput::Batches(_) => panic!("expected Graph output"),
@@ -741,9 +845,11 @@ namespace MyApp {
         )
         .unwrap();
 
-        let pipeline = Pipeline::new(PipelineConfig::default());
-        let tracer = crate::v2::trace::Tracer::new(false);
-        let result = pipeline.run_with_tracer(root, &tracer);
+        let result = Pipeline::run_with_tracer(
+            root,
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+        );
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");

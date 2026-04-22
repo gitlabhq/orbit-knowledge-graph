@@ -690,7 +690,6 @@ async fn index_repo_v2(
         respect_gitignore: config.respect_gitignore,
         ..Default::default()
     };
-    let pipeline = code_graph::v2::Pipeline::new(pipeline_config);
     let tracer = code_graph::v2::trace::Tracer::new(false);
 
     let v2_result = if config.worker_threads > 0 {
@@ -698,9 +697,19 @@ async fn index_repo_v2(
             .num_threads(config.worker_threads)
             .build()
             .context("failed to build thread pool")?;
-        pool.install(|| pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer))
+        pool.install(|| {
+            code_graph::v2::Pipeline::run_with_tracer(
+                std::path::Path::new(&root_path),
+                pipeline_config,
+                tracer,
+            )
+        })
     } else {
-        pipeline.run_with_tracer(std::path::Path::new(&root_path), &tracer)
+        code_graph::v2::Pipeline::run_with_tracer(
+            std::path::Path::new(&root_path),
+            pipeline_config,
+            tracer,
+        )
     };
 
     if !v2_result.errors.is_empty() {
