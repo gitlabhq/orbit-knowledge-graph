@@ -851,12 +851,12 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Per-entity role scoping: aggregation target nodes (work item 347)
+// Per-entity role scoping: aggregation target nodes
 //
-// Vulnerability declares `required_role: developer` in its ontology, and the
-// seed places 3 vulnerabilities, one per project across three namespaces.
-// These tests exercise the aggregation-query oracle flagged in work item 347:
-// a user with Reporter-only access on a path should no longer be able to
+// Vulnerability declares `required_role: security_manager` in its ontology,
+// and the seed places 3 vulnerabilities -- one per project across three
+// namespaces. These tests exercise the aggregation-query oracle pattern:
+// a user with Reporter-only access on a path should not be able to
 // observe Vulnerability rows by grouping on Project and counting on
 // Vulnerability. The compiler drops Reporter paths from the Vulnerability
 // startsWith predicate, so the count comes back as zero (or excludes the
@@ -865,6 +865,10 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
 
 fn reporter_path(path: &str) -> TraversalPath {
     TraversalPath::new(path, 20)
+}
+
+fn security_manager_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, 25)
 }
 
 fn developer_path(path: &str) -> TraversalPath {
@@ -941,6 +945,40 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
     resp.assert_node_absent("Project", 1004);
 }
 
+/// Security Manager (25) on a path hits the exact floor required by
+/// Vulnerability's `required_role`. Before the fix, this scenario would
+/// have required Developer (30) and any SM-only user would have been
+/// over-redacted. After the fix, an SM-only user sees their own vuln
+/// counts without needing to escalate to Developer.
+pub(super) async fn aggregation_vulnerability_security_manager_meets_the_required_floor(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/101/")]).unwrap(),
+    )
+    .await;
+
+    // Project 1001 lives under 1/101/ and has vuln 8001. Security Manager
+    // is the declared floor (25), so the Vulnerability alias keeps this
+    // path in its startsWith predicate.
+    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    // Projects outside 1/101/ are not in the user's scope.
+    resp.assert_node_absent("Project", 1000);
+    resp.assert_node_absent("Project", 1004);
+}
+
 /// Developer on all paths: classic aggregation baseline showing the
 /// role-scoping change doesn't over-restrict legitimate access.
 pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_counts(
@@ -998,10 +1036,10 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
     resp.assert_node_count(0);
 }
 
-/// The filter-based oracle from the work-item-347 PoC: even a
-/// filter-with-count targeting a specific vuln ID must not leak,
-/// because the Vulnerability scan is filtered to zero paths before
-/// any WHERE clause evaluates.
+/// The filter-based oracle (severity filter + count on a single
+/// project) must not leak: even a count-with-filter targeting a
+/// specific vuln is neutralized because the Vulnerability scan is
+/// filtered to zero paths before any WHERE clause evaluates.
 pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,

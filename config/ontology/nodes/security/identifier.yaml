@@ -15,7 +15,7 @@ redaction:
   resource_type: vulnerability_identifier
   id_column: id
   ability: read_vulnerability
-  required_role: developer
+  required_role: security_manager
 
 properties:
   id:

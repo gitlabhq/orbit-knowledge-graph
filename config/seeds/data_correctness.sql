@@ -159,7 +159,7 @@ INSERT INTO gl_label (id, title, color, traversal_path) VALUES
     (7001, 'feature', '#0075ca', '1/100/'),
     (7002, 'urgent', '#e4e669', '1/101/');
 
--- Vulnerabilities for role-scoped aggregation tests (work item 347).
+-- Vulnerabilities for role-scoped aggregation tests.
 -- Each vuln lives under a project's traversal path so the compiler's
 -- security pass filters them exactly like any other namespaced entity.
 -- read_vulnerability is granted at Developer+, which is why Vulnerability's

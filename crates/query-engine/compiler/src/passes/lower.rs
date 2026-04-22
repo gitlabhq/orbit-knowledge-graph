@@ -478,10 +478,9 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             // compiler's security pass has no alias to hang a role filter on.
             // For entities whose ontology requires a stricter role than the
             // default (Reporter), that would let a Reporter-only user count
-            // e.g. Vulnerability rows via an IN_PROJECT edge group-by — the
-            // work-item-347 bypass. Keep the node scan so the security pass
-            // can emit `Bool(false)` for the target alias when the user lacks
-            // the required role.
+            // e.g. Vulnerability rows via an IN_PROJECT edge group-by. Keep
+            // the node scan so the security pass can emit `Bool(false)` for
+            // the target alias when the user lacks the required role.
             let requires_node_scan_for_role = node
                 .entity
                 .as_deref()

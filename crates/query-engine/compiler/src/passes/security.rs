@@ -7,7 +7,7 @@
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
 //!
-//! # Per-entity role scoping (work item 347 fix)
+//! # Per-entity role scoping
 //!
 //! Each entity's ontology can declare a `required_role`. Before injecting
 //! the `startsWith` predicate for an alias we look up the entity attached
@@ -360,7 +360,7 @@ mod tests {
         ));
     }
 
-    // ── Per-entity role scoping (work item 347 fix) ─────────────────
+    // ── Per-entity role scoping ─────────────────
 
     /// Paths at or above the required role pass through unfiltered.
     #[test]
@@ -378,22 +378,23 @@ mod tests {
         assert!(sc.paths_at_least(50).is_empty());
     }
 
-    /// apply_security_context with a table requiring Developer drops any
-    /// Reporter-only paths from that alias's filter while leaving other
-    /// aliases untouched.
+    /// apply_security_context with a table requiring Security Manager drops
+    /// any Reporter-only paths from that alias's filter while leaving other
+    /// aliases untouched. Paths tagged at Developer (30) still qualify
+    /// because 30 >= 25.
     #[test]
     fn per_entity_role_scoping_filters_vulnerability_alias() {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
                 TraversalPath::new("1/100/", 20), // Reporter
-                TraversalPath::new("1/101/", 30), // Developer
+                TraversalPath::new("1/101/", 30), // Developer (covers SM)
             ],
         )
         .unwrap();
 
         let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 30); // Developer
+        table_min_role.insert("gl_vulnerability".to_string(), 25); // SecurityManager
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -450,7 +451,7 @@ mod tests {
         .unwrap();
 
         let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 30);
+        table_min_role.insert("gl_vulnerability".to_string(), 25);
 
         let mut node = Node::Query(Box::new(Query {
             select: vec![SelectExpr {
@@ -487,18 +488,18 @@ mod tests {
     #[test]
     fn required_role_resolves_schema_prefixed_tables() {
         let mut table_min_role = HashMap::new();
-        table_min_role.insert("gl_vulnerability".to_string(), 30);
+        table_min_role.insert("gl_vulnerability".to_string(), 25);
         assert_eq!(
             required_role_for_table("gl_vulnerability", &table_min_role),
-            30
+            25
         );
         assert_eq!(
             required_role_for_table("v1_gl_vulnerability", &table_min_role),
-            30
+            25
         );
         assert_eq!(
             required_role_for_table("v42_gl_vulnerability", &table_min_role),
-            30
+            25
         );
         // Unknown tables fall back to the default Reporter.
         assert_eq!(
