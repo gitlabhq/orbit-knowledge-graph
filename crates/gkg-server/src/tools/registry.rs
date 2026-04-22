@@ -39,19 +39,17 @@ mod params {
         })
     }
 
-    pub fn include_query_dsl() -> Value {
-        json!({
-            "type": "boolean",
-            "description": "Include the query DSL schema in the response. Shows how to write queries."
-        })
-    }
 }
 
 pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![Self::query_graph(), Self::get_graph_schema()]
+        vec![
+            Self::query_graph(),
+            Self::get_graph_schema(),
+            Self::get_query_dsl_schema(),
+        ]
     }
 
     fn query_graph() -> ToolDefinition {
@@ -87,14 +85,30 @@ impl ToolRegistry {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types. Use include_query_dsl to also \
-                          return the query DSL schema showing how to write queries."
+                          property details for specific types."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "expand_nodes": params::expand_nodes(),
-                    "include_query_dsl": params::include_query_dsl(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_query_dsl_schema() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_query_dsl_schema".into(),
+            description: "Get the query DSL schema. Returns the JSON Schema describing how to \
+                          write graph queries (traversal, search, aggregation, neighbors, \
+                          path_finding). Use this to learn the query format before calling \
+                          query_graph."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
                     "format": params::format()
                 },
                 "additionalProperties": false
@@ -122,7 +136,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -145,6 +159,7 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
+        assert!(names.contains(&"get_query_dsl_schema".into()));
     }
 
     #[test]
