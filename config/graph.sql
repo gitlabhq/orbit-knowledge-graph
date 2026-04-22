@@ -76,6 +76,37 @@ CREATE TABLE IF NOT EXISTS gl_definition (
 ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
+CREATE TABLE IF NOT EXISTS gl_deployment (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    iid Int64 CODEC(ZSTD(1)),
+    project_id Int64 CODEC(ZSTD(1)),
+    ref String DEFAULT '' CODEC(ZSTD(1)),
+    tag Bool DEFAULT false,
+    sha String DEFAULT '' CODEC(ZSTD(1)),
+    status LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    deployable_type String DEFAULT '' CODEC(ZSTD(1)),
+    deployable_id Nullable(Int64) CODEC(ZSTD(1)),
+    on_stop Nullable(String) CODEC(ZSTD(1)),
+    archived Bool DEFAULT false,
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_status status TYPE set(8) GRANULARITY 2,
+    INDEX idx_archived archived TYPE minmax GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
 CREATE TABLE IF NOT EXISTS gl_directory (
     id Int64 CODEC(Delta(8), ZSTD(1)),
     traversal_path String CODEC(ZSTD(1)),
@@ -94,6 +125,41 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     )
 ) ENGINE = ReplacingMergeTree(_version)
 ORDER BY (traversal_path, project_id, branch, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_environment (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(ZSTD(1)),
+    name String DEFAULT '' CODEC(ZSTD(1)),
+    slug String DEFAULT '' CODEC(ZSTD(1)),
+    external_url Nullable(String) CODEC(ZSTD(1)),
+    environment_type Nullable(String) CODEC(ZSTD(1)),
+    state LowCardinality(String) DEFAULT 'available' CODEC(LZ4),
+    tier LowCardinality(Nullable(String)) CODEC(LZ4),
+    auto_stop_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    auto_delete_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    auto_stop_setting LowCardinality(String) DEFAULT 'always' CODEC(LZ4),
+    cluster_agent_id Nullable(Int64) CODEC(ZSTD(1)),
+    kubernetes_namespace Nullable(String) CODEC(ZSTD(1)),
+    flux_resource_path Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(3)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_state state TYPE set(4) GRANULARITY 2,
+    INDEX idx_tier tier TYPE set(8) GRANULARITY 2,
+    INDEX idx_environment_type environment_type TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_tier_state (SELECT * ORDER BY (tier, state, id)),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_file (

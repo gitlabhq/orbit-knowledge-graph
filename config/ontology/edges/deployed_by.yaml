@@ -1,0 +1,8 @@
+# config/ontology/edges/deployed_by.yaml
+
+description: User who triggered a deployment
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: Deployment, id: id }
+    description: "User triggered deployment."
