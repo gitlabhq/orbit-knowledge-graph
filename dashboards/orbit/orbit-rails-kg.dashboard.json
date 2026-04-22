@@ -1,0 +1,1438 @@
+{
+  "annotations": {
+    "list": []
+  },
+  "editable": true,
+  "fiscalYearStartMonth": 0,
+  "graphTooltip": 1,
+  "id": null,
+  "uid": "orbit-rails-kg",
+  "title": "Orbit \u2014 Rails KG integration",
+  "description": "Rails monolith gitlab_knowledge_graph_* metrics: Rails \u2192 GKG gRPC client, redaction, JWT build, auth-context, traversal-ID compaction.",
+  "tags": [
+    "orbit",
+    "rails",
+    "gkg"
+  ],
+  "schemaVersion": 39,
+  "version": 1,
+  "time": {
+    "from": "now-3h",
+    "to": "now"
+  },
+  "timezone": "utc",
+  "refresh": "1m",
+  "templating": {
+    "list": [
+      {
+        "name": "ORBIT_DS",
+        "label": "Orbit datasource (analytics-eventsdot tenant)",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Mimir - Analytics Eventsdot",
+          "value": "mimir-analytics-eventsdot"
+        },
+        "regex": "/Analytics Eventsdot/",
+        "hide": 0,
+        "refresh": 1
+      },
+      {
+        "name": "RAILS_DS",
+        "label": "Rails datasource (gitlab tenant)",
+        "type": "datasource",
+        "query": "prometheus",
+        "current": {
+          "text": "Mimir - Gitlab Gstg",
+          "value": "mimir-gitlab-gstg"
+        },
+        "regex": "/Gitlab Gstg|Gitlab Gprd/",
+        "hide": 0,
+        "refresh": 1
+      },
+      {
+        "name": "cluster",
+        "label": "Orbit cluster",
+        "type": "custom",
+        "query": "orbit-stg,orbit-prd,orbit-.*",
+        "current": {
+          "text": "orbit-stg",
+          "value": "orbit-stg"
+        },
+        "options": [
+          {
+            "text": "orbit-stg",
+            "value": "orbit-stg",
+            "selected": true
+          },
+          {
+            "text": "orbit-prd",
+            "value": "orbit-prd",
+            "selected": false
+          },
+          {
+            "text": "all",
+            "value": "orbit-.*",
+            "selected": false
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      },
+      {
+        "name": "rails_env",
+        "label": "Rails env",
+        "type": "custom",
+        "query": "gstg,gprd,gstg|gprd",
+        "current": {
+          "text": "gstg",
+          "value": "gstg"
+        },
+        "options": [
+          {
+            "text": "gstg",
+            "value": "gstg",
+            "selected": true
+          },
+          {
+            "text": "gprd",
+            "value": "gprd",
+            "selected": false
+          },
+          {
+            "text": "both",
+            "value": "gstg|gprd",
+            "selected": false
+          }
+        ],
+        "includeAll": false,
+        "multi": false,
+        "hide": 0
+      }
+    ]
+  },
+  "links": [
+    {
+      "type": "dashboards",
+      "asDropdown": true,
+      "includeVars": true,
+      "keepTime": true,
+      "tags": [
+        "orbit"
+      ],
+      "title": "Orbit"
+    }
+  ],
+  "panels": [
+    {
+      "id": 1,
+      "type": "row",
+      "title": "Overview",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "panels": []
+    },
+    {
+      "id": 2,
+      "type": "stat",
+      "title": "gRPC calls / min",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 0,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]) * 60)",
+          "legendFormat": "calls/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 3,
+      "type": "stat",
+      "title": "gRPC errors / min",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 8,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]) * 60)",
+          "legendFormat": "errors/min",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "short",
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 4,
+      "type": "stat",
+      "title": "gRPC p95 (s)",
+      "description": "",
+      "gridPos": {
+        "h": 4,
+        "w": 8,
+        "x": 16,
+        "y": 1
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "s",
+          "noValue": "\u2014"
+        },
+        "overrides": []
+      },
+      "options": {
+        "reduceOptions": {
+          "calcs": [
+            "lastNotNull"
+          ],
+          "fields": "",
+          "values": false
+        },
+        "colorMode": "value",
+        "graphMode": "area",
+        "textMode": "value_and_name"
+      }
+    },
+    {
+      "id": 5,
+      "type": "row",
+      "title": "gRPC / redaction / JWT / auth context",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 5
+      },
+      "panels": []
+    },
+    {
+      "id": 6,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_grpc_duration_seconds \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_grpc_duration_seconds_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{method}} / {{status}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{method}} / {{status}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le, method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{method}} / {{status}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 7,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_grpc_duration_seconds \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_grpc_duration_seconds_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum by (method, status) (rate(gitlab_knowledge_graph_grpc_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{method}} / {{status}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 8,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_grpc_errors_total \u2014 rate",
+      "description": "5m rate of `gitlab_knowledge_graph_grpc_errors_total` grouped by ['method', 'code'].",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 6
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum by (method, code) (rate(gitlab_knowledge_graph_grpc_errors_total{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{method}} / {{code}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 9,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_duration_seconds \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_redaction_duration_seconds_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 10,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_duration_seconds \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_redaction_duration_seconds_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 11,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_batch_size \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_redaction_batch_size_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 14
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_batch_size_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 12,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_batch_size \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_redaction_batch_size_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_batch_size_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 13,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_filtered_count \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_redaction_filtered_count_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_redaction_filtered_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 14,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_redaction_filtered_count \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_redaction_filtered_count_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 22
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_redaction_filtered_count_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 15,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_jwt_build_duration_seconds \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_jwt_build_duration_seconds_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 30
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_jwt_build_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 16,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_jwt_build_duration_seconds \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_jwt_build_duration_seconds_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 30
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_jwt_build_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 17,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_auth_context_duration_seconds \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_auth_context_duration_seconds_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 30
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_auth_context_duration_seconds_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "s"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 18,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_auth_context_duration_seconds \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_auth_context_duration_seconds_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 38
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_auth_context_duration_seconds_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 19,
+      "type": "row",
+      "title": "Traversal IDs / JWT compaction",
+      "collapsed": false,
+      "gridPos": {
+        "h": 1,
+        "w": 24,
+        "x": 0,
+        "y": 46
+      },
+      "panels": []
+    },
+    {
+      "id": 20,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_traversal_ids_count \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_traversal_ids_count_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_traversal_ids_count_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 21,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_traversal_ids_count \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_traversal_ids_count_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_count_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 22,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_compaction_ratio \u2014 p50/p95/p99",
+      "description": "Quantiles from `gitlab_knowledge_graph_compaction_ratio_bucket` over 5m.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 47
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.50, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p50 {{instance}}",
+          "refId": "A"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.95, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p95 {{instance}}",
+          "refId": "B"
+        },
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "histogram_quantile(0.99, sum by (le) (rate(gitlab_knowledge_graph_compaction_ratio_bucket{env=~\"$rails_env\"}[5m])))",
+          "legendFormat": "p99 {{instance}}",
+          "refId": "C"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 23,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_compaction_ratio \u2014 observation rate",
+      "description": "Observations per second from `gitlab_knowledge_graph_compaction_ratio_count`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 0,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_compaction_ratio_count{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 24,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_compaction_fallback_total \u2014 rate",
+      "description": "5m rate of `gitlab_knowledge_graph_compaction_fallback_total`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 8,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_compaction_fallback_total{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    },
+    {
+      "id": 25,
+      "type": "timeseries",
+      "title": "gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total \u2014 rate",
+      "description": "5m rate of `gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total`.",
+      "gridPos": {
+        "h": 8,
+        "w": 8,
+        "x": 16,
+        "y": 55
+      },
+      "datasource": {
+        "type": "prometheus",
+        "uid": "$RAILS_DS"
+      },
+      "targets": [
+        {
+          "datasource": {
+            "type": "prometheus",
+            "uid": "$RAILS_DS"
+          },
+          "expr": "sum(rate(gitlab_knowledge_graph_traversal_ids_threshold_exceeded_total{env=~\"$rails_env\"}[5m]))",
+          "legendFormat": "{{instance}}",
+          "refId": "A"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "custom": {
+            "drawStyle": "line",
+            "lineInterpolation": "smooth",
+            "fillOpacity": 10,
+            "showPoints": "auto"
+          },
+          "unit": "short"
+        },
+        "overrides": []
+      },
+      "options": {
+        "legend": {
+          "displayMode": "table",
+          "placement": "bottom",
+          "calcs": [
+            "lastNotNull",
+            "max"
+          ]
+        },
+        "tooltip": {
+          "mode": "multi"
+        }
+      }
+    }
+  ]
+}
