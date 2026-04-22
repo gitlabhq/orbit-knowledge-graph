@@ -347,13 +347,14 @@ fn run_schema_introspect(
 }
 
 fn run_query_dsl_schema(raw: bool) -> Result<()> {
+    let condensed = ontology::query_dsl::condensed_query_schema()
+        .map_err(|e| anyhow::anyhow!("{e}"))?;
+
     if raw {
-        let json = ontology::query_dsl::condensed_query_schema_json()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
-        println!("{json}");
+        println!("{}", serde_json::to_string_pretty(&condensed)?);
     } else {
-        let toon = ontology::query_dsl::condensed_query_schema()
-            .map_err(|e| anyhow::anyhow!("{e}"))?;
+        let toon = toon_format::encode(&condensed, &toon_format::EncodeOptions::default())
+            .map_err(|e| anyhow::anyhow!("failed to encode TOON: {e}"))?;
         println!("{toon}");
     }
     Ok(())
