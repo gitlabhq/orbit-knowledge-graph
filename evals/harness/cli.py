@@ -26,12 +26,16 @@ from harness.config import EvalConfig, load_config
 
 
 def _setup_logging(verbose: bool) -> None:
-    level = logging.DEBUG if verbose else logging.INFO
-    logging.basicConfig(
-        level=level,
-        format="%(asctime)s %(levelname)-8s %(name)s: %(message)s",
-        datefmt="%H:%M:%S",
-    )
+    """Minimal fallback for non-run commands. run_eval calls log.setup() itself."""
+    if not logging.root.handlers:
+        level = logging.DEBUG if verbose else logging.INFO
+        logging.basicConfig(
+            level=level,
+            format="%(asctime)s %(levelname)-5s %(message)s",
+            datefmt="%H:%M:%S",
+        )
+        logging.getLogger("httpx").setLevel(logging.WARNING)
+        logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
 @click.group()

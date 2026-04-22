@@ -17,7 +17,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -26,6 +25,7 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+import harness.log as log
 from harness.config import ArmConfig, EvalConfig
 from harness.opencode import OpenCodeClient
 from harness.session import EventDemuxer, capture_snapshot
@@ -33,8 +33,6 @@ from harness.store import ResultStore, SessionSummary, TaskResult, TaskStatus, s
 
 if TYPE_CHECKING:
     from harness.server import ServerManager
-
-logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -128,14 +126,18 @@ async def execute_task(
     session_id: str | None = None
     event_queue = None
 
+    log.event("task", "starting", arm=arm.name, task_id=task.id,
+              data={"category": task.category, "timeout": timeout})
+
     try:
-        session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
-        session_id = session.id
+        with log.timed("session", "create", arm=arm.name, task_id=task.id) as ctx:
+            session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
+            session_id = session.id
+            ctx["session_id"] = session_id
         event_queue = demuxer.subscribe(session_id)
 
         prompt = render_prompt(task, config.run.scoring.fixtures_path)
 
-        # Load agent instructions as system prompt
         system_prompt: str | None = None
         agent_path = Path(arm.agent)
         if agent_path.exists():
@@ -143,50 +145,58 @@ async def execute_task(
 
         # Send prompt with timeout -- NOT retried
         try:
-            await asyncio.wait_for(
-                client.send_message(
-                    session_id,
-                    prompt,
-                    system=system_prompt,
-                    model={"providerID": arm.model.provider, "modelID": arm.model.model},
-                ),
-                timeout=timeout,
-            )
+            with log.timed("llm", "prompt", arm=arm.name, task_id=task.id) as ctx:
+                await asyncio.wait_for(
+                    client.send_message(
+                        session_id,
+                        prompt,
+                        system=system_prompt,
+                        model={"providerID": arm.model.provider, "modelID": arm.model.model},
+                    ),
+                    timeout=timeout,
+                )
+                ctx["status"] = "ok"
         except asyncio.TimeoutError:
+            log.event("llm", "timeout", arm=arm.name, task_id=task.id, level="warn",
+                      data={"timeout": timeout})
             await client.abort_session(session_id)
-            snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
+            with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
+                snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
             snap_path = store.write_snapshot(task.id, snapshot)
+            summary = summarize_snapshot(snapshot)
+            log.event("task", "timeout", arm=arm.name, task_id=task.id, level="warn",
+                      data={"steps": summary.steps, "tool_calls": summary.tool_calls})
             return TaskResult(
-                task_id=task.id,
-                arm=arm.name,
-                status=TaskStatus.TIMEOUT,
+                task_id=task.id, arm=arm.name, status=TaskStatus.TIMEOUT,
                 timestamp=started_at.isoformat(),
-                error=f"task timed out after {timeout}s",
-                error_type="TimeoutError",
-                session_summary=summarize_snapshot(snapshot),
-                snapshot_path=snap_path,
+                error=f"task timed out after {timeout}s", error_type="TimeoutError",
+                session_summary=summary, snapshot_path=snap_path,
             )
 
-        # Capture full snapshot
-        snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
+        with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
+            snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
         snap_path = store.write_snapshot(task.id, snapshot)
 
-        # Extract structured output from the last assistant message
         structured = _extract_structured_output(snapshot)
+        summary = summarize_snapshot(snapshot)
+
+        log.event("task", "success", arm=arm.name, task_id=task.id,
+                  duration_ms=summary.duration_ms,
+                  data={
+                      "steps": summary.steps, "tool_calls": summary.tool_calls,
+                      "cost": summary.cost, "tokens": summary.tokens,
+                  })
 
         return TaskResult(
-            task_id=task.id,
-            arm=arm.name,
-            status=TaskStatus.SUCCESS,
-            timestamp=started_at.isoformat(),
-            structured_output=structured,
-            session_summary=summarize_snapshot(snapshot),
-            snapshot_path=snap_path,
+            task_id=task.id, arm=arm.name, status=TaskStatus.SUCCESS,
+            timestamp=started_at.isoformat(), structured_output=structured,
+            session_summary=summary, snapshot_path=snap_path,
         )
 
     except Exception as e:
         error_type = type(e).__name__
-        logger.error("task %s/%s failed: %s: %s", arm.name, task.id, error_type, e)
+        log.event("task", f"failed: {error_type}: {e}", arm=arm.name, task_id=task.id,
+                  level="error", data={"error_type": error_type})
 
         snapshot_path = None
         summary = None
@@ -198,7 +208,8 @@ async def execute_task(
                 snapshot_path = store.write_snapshot(task.id, snapshot)
                 summary = summarize_snapshot(snapshot)
             except Exception:
-                logger.warning("failed to capture snapshot for %s/%s", arm.name, task.id)
+                log.event("snapshot", "capture failed", arm=arm.name, task_id=task.id,
+                          level="warn")
 
         status = (
             TaskStatus.AGENT_ERROR
@@ -207,14 +218,10 @@ async def execute_task(
         )
 
         return TaskResult(
-            task_id=task.id,
-            arm=arm.name,
-            status=status,
+            task_id=task.id, arm=arm.name, status=status,
             timestamp=started_at.isoformat(),
-            error=str(e),
-            error_type=error_type,
-            session_summary=summary,
-            snapshot_path=snapshot_path,
+            error=str(e), error_type=error_type,
+            session_summary=summary, snapshot_path=snapshot_path,
         )
 
     finally:
@@ -232,7 +239,7 @@ def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
         if msg.info.role != "assistant":
             continue
         for part in msg.parts:
-            if part.type == "tool-invocation" and part.tool == "StructuredOutput":
+            if part.type in ("tool-invocation", "tool") and part.tool == "StructuredOutput":
                 if isinstance(part.input, dict):
                     return part.input
             if part.type == "text" and part.text:
@@ -258,22 +265,21 @@ async def run_arm(
     """Run all tasks for a single arm."""
     from harness.server import ServerManager
 
-    # Skip already-completed tasks (resume support)
     completed = store.completed_task_ids(arm.name)
     remaining = [t for t in tasks if t.id not in completed]
     if not remaining:
-        logger.info("arm %s: all %d tasks already completed", arm.name, len(tasks))
+        log.event("arm", "all tasks already completed", arm=arm.name,
+                  data={"total": len(tasks)})
         return store.read_results(arm.name)
 
-    logger.info(
-        "arm %s: %d tasks remaining (%d already done)",
-        arm.name, len(remaining), len(completed),
-    )
+    log.event("arm", "starting", arm=arm.name,
+              data={"remaining": len(remaining), "done": len(completed)})
 
     if mgr is None:
         mgr = ServerManager()
 
-    handle = await mgr.start(arm, work_dir, timeout=config.run.timeouts.server_start)
+    with log.timed("server", "start", arm=arm.name):
+        handle = await mgr.start(arm, work_dir, timeout=config.run.timeouts.server_start)
     client = handle.client
     demuxer = EventDemuxer(base_url=f"http://localhost:{arm.port}")
     await demuxer.start()
@@ -283,7 +289,7 @@ async def run_arm(
     consecutive_failures = 0
 
     try:
-        for task in remaining:
+        for i, task in enumerate(remaining):
             async with sem:
                 result = await execute_task(client, demuxer, task, arm, config, store)
                 store.write_result(result)
@@ -295,20 +301,14 @@ async def run_arm(
                     consecutive_failures += 1
 
                 if consecutive_failures >= 10:
-                    logger.error(
-                        "arm %s: %d consecutive failures, aborting arm",
-                        arm.name, consecutive_failures,
-                    )
+                    log.event("arm", "aborting: 10 consecutive failures",
+                              arm=arm.name, level="error")
                     break
 
-                logger.info(
-                    "arm %s: %s [%s] (%.1fs, $%.4f)",
-                    arm.name,
-                    task.id,
-                    result.status.value,
-                    (result.session_summary.duration_ms / 1000) if result.session_summary else 0,
-                    result.session_summary.cost if result.session_summary else 0,
-                )
+                log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name,
+                          task_id=task.id,
+                          data={"status": result.status.value,
+                                "cost": result.session_summary.cost if result.session_summary else 0})
     finally:
         await demuxer.stop()
         await mgr.stop(arm.name)
@@ -325,11 +325,17 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
     store = ResultStore(config.run.output_dir, run_id)
     tasks = load_tasks(config)
 
+    log.setup(run_id)
+
     if not tasks:
-        logger.warning("no tasks matched filters")
+        log.event("run", "no tasks matched filters", level="warn")
         return {}
 
-    logger.info("starting eval run %s: %d tasks, %d arms", run_id, len(tasks), len(config.arms))
+    log.event("run", "starting", data={
+        "run_id": run_id, "tasks": len(tasks),
+        "arms": [a.name for a in config.arms],
+        "model": config.arms[0].model.model if config.arms else "?",
+    })
 
     mgr = ServerManager()
     mgr.begin_run(run_id, config.arms, len(tasks))
@@ -337,8 +343,12 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
     all_results: dict[str, list[TaskResult]] = {}
     try:
         for arm in config.arms:
-            results = await run_arm(arm, tasks, config, store, work_dir, mgr)
-            all_results[arm.name] = results
+            with log.timed("arm", "completed", arm=arm.name) as ctx:
+                results = await run_arm(arm, tasks, config, store, work_dir, mgr)
+                all_results[arm.name] = results
+                successes = sum(1 for r in results if r.status == TaskStatus.SUCCESS)
+                ctx["successes"] = successes
+                ctx["total"] = len(results)
         mgr.end_run(run_id, "completed")
     except Exception:
         mgr.end_run(run_id, "failed")
@@ -347,5 +357,14 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
         await mgr.stop_all()
         mgr.close()
 
-    logger.info("eval run %s complete", run_id)
+    total = sum(len(v) for v in all_results.values())
+    successes = sum(1 for rs in all_results.values() for r in rs if r.status == TaskStatus.SUCCESS)
+    total_cost = sum(
+        r.session_summary.cost for rs in all_results.values()
+        for r in rs if r.session_summary
+    )
+    log.event("run", "complete", data={
+        "run_id": run_id, "successes": successes, "total": total,
+        "cost": round(total_cost, 4),
+    })
     return all_results

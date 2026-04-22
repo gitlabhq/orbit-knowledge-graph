@@ -64,7 +64,7 @@ class BehaviorEvaluator(Evaluator):
 def _check_skill_loaded(messages: list[dict[str, Any]]) -> bool:
     for msg in messages:
         for part in msg.get("parts", []):
-            if part.get("type") == "tool-invocation" and part.get("tool") == "skill":
+            if part.get("type") in ("tool-invocation", "tool") and part.get("tool") == "skill":
                 return True
     return False
 
@@ -77,7 +77,7 @@ def _skill_load_position(messages: list[dict[str, Any]]) -> int:
         if info.get("role") != "assistant":
             continue
         for part in msg.get("parts", []):
-            if part.get("type") == "tool-invocation" and part.get("tool") == "skill":
+            if part.get("type") in ("tool-invocation", "tool") and part.get("tool") == "skill":
                 return pos
         pos += 1
     return -1
@@ -87,11 +87,15 @@ def _count_query_calls(messages: list[dict[str, Any]]) -> int:
     count = 0
     for msg in messages:
         for part in msg.get("parts", []):
-            if part.get("type") == "tool-invocation" and part.get("tool") == "bash":
+            if part.get("type") in ("tool-invocation", "tool") and part.get("tool") == "bash":
                 cmd = ""
                 inp = part.get("input", {})
                 if isinstance(inp, dict):
                     cmd = inp.get("command", "")
+                # also check state.input for the OpenCode part format
+                state = part.get("state", {})
+                if isinstance(state, dict) and isinstance(state.get("input"), dict):
+                    cmd = cmd or state["input"].get("command", "")
                 if "orbit_query" in cmd or "glab" in cmd:
                     count += 1
     return count
@@ -102,7 +106,7 @@ def _detect_doom_loop(messages: list[dict[str, Any]], threshold: int = 3) -> boo
     recent_calls: list[str] = []
     for msg in messages:
         for part in msg.get("parts", []):
-            if part.get("type") != "tool-invocation":
+            if part.get("type") not in ("tool-invocation", "tool"):
                 continue
             inp = part.get("input", {})
             call_sig = f"{part.get('tool')}:{str(inp)}"
@@ -132,6 +136,6 @@ def _extract_tool_sequence(messages: list[dict[str, Any]]) -> list[str]:
     sequence = []
     for msg in messages:
         for part in msg.get("parts", []):
-            if part.get("type") == "tool-invocation":
+            if part.get("type") in ("tool-invocation", "tool"):
                 sequence.append(part.get("tool", "unknown"))
     return sequence

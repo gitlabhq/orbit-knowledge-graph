@@ -57,7 +57,7 @@ def _count_tool_types(snapshot: dict[str, Any]) -> dict[str, int]:
     counts: dict[str, int] = {}
     for msg in snapshot.get("messages", []):
         for part in msg.get("parts", []):
-            if part.get("type") == "tool-invocation":
+            if part.get("type") in ("tool-invocation", "tool"):
                 tool = part.get("tool", "unknown")
                 counts[tool] = counts.get(tool, 0) + 1
     return counts

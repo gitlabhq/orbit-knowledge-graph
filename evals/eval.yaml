@@ -32,7 +32,7 @@ arms:
   - name: orbit
     agent: agents/orbit.md
     skills:
-      - skills/orbit-query
+      - .opencode/skills/orbit-query
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}
@@ -55,7 +55,7 @@ arms:
   - name: glab
     agent: agents/glab.md
     skills:
-      - skills/glab-data
+      - .opencode/skills/glab-data
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}

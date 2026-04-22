@@ -87,8 +87,7 @@ class EventDemuxer:
                             "ts": datetime.now(timezone.utc).isoformat(),
                         }
 
-                        # Route to the right session queue.
-                        # Events may contain session_id at various nesting levels.
+                        # Route to the right session queue
                         sid = _extract_session_id(data)
                         if sid and sid in self._subscriptions:
                             try:

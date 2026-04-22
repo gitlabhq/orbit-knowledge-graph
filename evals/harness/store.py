@@ -71,7 +71,7 @@ def summarize_snapshot(snapshot: SessionSnapshot) -> SessionSummary:
             for k in total_tokens:
                 total_tokens[k] += msg.info.tokens.get(k, 0)
             for part in msg.parts:
-                if part.type == "tool-invocation":
+                if part.type in ("tool-invocation", "tool"):
                     total_tool_calls += 1
 
     return SessionSummary(
