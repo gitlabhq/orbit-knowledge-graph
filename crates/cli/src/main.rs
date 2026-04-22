@@ -347,8 +347,8 @@ fn run_schema_introspect(
 }
 
 fn run_query_dsl_schema(raw: bool) -> Result<()> {
-    let condensed = ontology::query_dsl::condensed_query_schema()
-        .map_err(|e| anyhow::anyhow!("{e}"))?;
+    let condensed =
+        ontology::query_dsl::condensed_query_schema().map_err(|e| anyhow::anyhow!("{e}"))?;
 
     if raw {
         println!("{}", serde_json::to_string_pretty(&condensed)?);

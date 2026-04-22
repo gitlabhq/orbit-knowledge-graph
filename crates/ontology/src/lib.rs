@@ -16,13 +16,13 @@
 //! let user = ontology.get_node("User").expect("User node exists");
 //! ```
 
-mod entities;
 pub mod constants;
+mod entities;
 pub mod etl;
 pub mod introspection;
-pub mod query_dsl;
 mod json_schema;
 mod loading;
+pub mod query_dsl;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
