@@ -171,8 +171,8 @@ fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> 
 
     for (fk_column, mapping) in etl.edges() {
         columns.push(fk_column.clone());
-        if let EdgeTarget::Column(type_column) = &mapping.target {
-            columns.push(type_column.clone());
+        if let EdgeTarget::Column { column, .. } = &mapping.target {
+            columns.push(column.clone());
         }
     }
 
@@ -226,21 +226,40 @@ fn resolve_fk_edges(
 
             let (fk_kind, type_filter) = match &mapping.target {
                 EdgeTarget::Literal(target_type) => (EdgeKind::Literal(target_type.clone()), None),
-                EdgeTarget::Column(type_column) => {
+                EdgeTarget::Column {
+                    column: type_column,
+                    type_mapping,
+                } => {
                     let allowed = ontology.get_edge_target_types(
                         &mapping.relationship_kind,
                         node_name,
                         mapping.direction,
                     );
-                    let filter = if allowed.is_empty() {
+                    // Raw legacy values (e.g. "Issue") must survive the extract
+                    // filter; the CASE below maps them to ontology names.
+                    let mut filter_types = allowed;
+                    for raw in type_mapping.keys() {
+                        if !filter_types.iter().any(|t| t == raw) {
+                            filter_types.push(raw.clone());
+                        }
+                    }
+                    let filter = if filter_types.is_empty() {
                         None
                     } else {
                         Some(EdgeFilter::TypeIn {
                             column: type_column.clone(),
-                            types: allowed,
+                            types: filter_types,
                         })
                     };
-                    (EdgeKind::Column(type_column.clone()), filter)
+                    let kind = if type_mapping.is_empty() {
+                        EdgeKind::Column(type_column.clone())
+                    } else {
+                        EdgeKind::TypeMapping {
+                            column: type_column.clone(),
+                            mapping: type_mapping.clone(),
+                        }
+                    };
+                    (kind, filter)
                 }
             };
 

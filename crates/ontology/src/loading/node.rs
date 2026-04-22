@@ -80,6 +80,8 @@ struct EdgeMappingYaml {
     target_literal: Option<String>,
     #[serde(rename = "to_column")]
     target_column: Option<String>,
+    #[serde(default)]
+    type_mapping: BTreeMap<String, String>,
     #[serde(rename = "as")]
     relationship_kind: String,
     #[serde(default)]
@@ -341,8 +343,19 @@ fn convert_edge_mappings(
     raw.into_iter()
         .map(|(column, mapping)| {
             let target = match (mapping.target_literal, mapping.target_column) {
-                (Some(lit), None) => EdgeTarget::Literal(lit),
-                (None, Some(col)) => EdgeTarget::Column(col),
+                (Some(lit), None) => {
+                    if !mapping.type_mapping.is_empty() {
+                        return Err(OntologyError::Validation(format!(
+                            "edge '{}': 'type_mapping' requires 'to_column'",
+                            column
+                        )));
+                    }
+                    EdgeTarget::Literal(lit)
+                }
+                (None, Some(col)) => EdgeTarget::Column {
+                    column: col,
+                    type_mapping: mapping.type_mapping,
+                },
                 (Some(_), Some(_)) => {
                     return Err(OntologyError::Validation(format!(
                         "edge '{}': use 'to' or 'to_column', not both",
