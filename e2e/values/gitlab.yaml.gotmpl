@@ -9,6 +9,11 @@ global:
   extraEnv:
     GITLAB_LICENSE_MODE: "test"
     CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
+    # Skip post-deployment migrations in the dependencies init check so
+    # webservice/sidekiq pods can start even when the migrations job applied
+    # regular migrations but left PDMs for the async background runner. Only
+    # safe in ephemeral test environments; production must leave this unset.
+    BYPASS_POST_DEPLOYMENT: "true"
   hosts:
     domain: e2e.local
     https: false
