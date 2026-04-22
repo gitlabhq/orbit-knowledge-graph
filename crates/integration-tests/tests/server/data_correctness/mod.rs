@@ -175,6 +175,13 @@ async fn data_correctness() {
         security::aggregation_sql_contains_traversal_path_filter,
         security::aggregation_multi_path_sql_contains_both_filters,
         security::aggregation_multi_path_returns_union_of_scopes,
+        // security: per-entity role scoping (work item 347)
+        security::aggregation_vulnerability_reporter_only_sees_zero_counts,
+        security::aggregation_vulnerability_mixed_roles_only_surfaces_developer_paths,
+        security::aggregation_vulnerability_developer_everywhere_sees_all_counts,
+        security::search_vulnerability_reporter_only_returns_empty,
+        security::aggregation_vulnerability_filter_oracle_is_neutralized,
+        security::aggregation_vulnerability_sql_drops_reporter_paths,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

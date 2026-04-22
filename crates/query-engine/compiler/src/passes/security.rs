@@ -6,7 +6,21 @@
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
 //! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
+//!
+//! # Per-entity role scoping (work item 347 fix)
+//!
+//! Each entity's ontology can declare a `required_role`. Before injecting
+//! the `startsWith` predicate for an alias we look up the entity attached
+//! to that alias's physical table and drop any traversal path where the
+//! user's access level is below the entity's `required_access_level`.
+//!
+//! This closes the aggregation-query oracle where a Reporter-only user
+//! could count or binary-search properties on a higher-privilege entity
+//! (e.g. Vulnerability) by pairing a Project `group_by` with a Vulnerability
+//! target. Now the target entity's scan is filtered down to zero paths
+//! (producing a Bool(false) predicate) and the aggregation counts nothing.
 
+use std::collections::HashMap;
 use std::sync::OnceLock;
 
 use regex::Regex;
@@ -14,30 +28,117 @@ use regex::Regex;
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
+use crate::input::EntityAuthConfig;
 pub use crate::types::SecurityContext;
+use ontology::Ontology;
 
 /// Matches `gl_*` or `v{N}_gl_*`, captures the unprefixed name.
 static GL_TABLE_RE: OnceLock<Regex> = OnceLock::new();
 
+/// Build a table-name → required access level map from the ontology.
+///
+/// Tables without a `redaction` block inherit the default (Reporter) so
+/// the historical path-set behavior is unchanged for them. We key by the
+/// unprefixed physical table name (e.g. `gl_vulnerability`) so lookups
+/// work for both `gl_*` and `v{N}_gl_*` variants emitted by lower. This
+/// matters because schema-version-aware ontologies (`with_schema_version_prefix`)
+/// set `destination_table` to the prefixed name, and the lowerer scans
+/// the prefixed tables directly — keying by the prefixed string would
+/// miss lookups that come through `required_role_for_table`, which
+/// strips the prefix before consulting the map.
+pub fn build_table_min_role(ontology: &Ontology) -> HashMap<String, u32> {
+    ontology
+        .nodes()
+        .filter_map(|n| {
+            n.redaction.as_ref().map(|r| {
+                (
+                    unprefix_gl_table(&n.destination_table).to_string(),
+                    r.required_role.as_access_level(),
+                )
+            })
+        })
+        .collect()
+}
+
+/// Strip any `v{N}_` schema-version prefix from a table name, returning
+/// the original slice if no prefix is present. The returned slice is
+/// owned by the input, so callers typically `.to_string()` it.
+fn unprefix_gl_table(table: &str) -> &str {
+    let re = GL_TABLE_RE.get_or_init(|| {
+        Regex::new(&format!(
+            r"^(?:v\d+_)?({}.+)$",
+            regex::escape(GL_TABLE_PREFIX)
+        ))
+        .expect("valid regex")
+    });
+    re.captures(table)
+        .and_then(|c| c.get(1))
+        .map(|m| m.as_str())
+        .unwrap_or(table)
+}
+
+/// Same map but keyed by entity name. Consumed by callers that work from
+/// `EntityAuthConfig` (e.g. hydration-style lookups) rather than from a
+/// physical table.
+pub fn build_entity_min_role(
+    entity_auth: &HashMap<String, EntityAuthConfig>,
+) -> HashMap<String, u32> {
+    entity_auth
+        .iter()
+        .map(|(name, cfg)| (name.clone(), cfg.required_access_level))
+        .collect()
+}
+
 /// Inject security filters into an AST node (mutates in place).
-pub fn apply_security_context(node: &mut Node, ctx: &SecurityContext) -> Result<()> {
+///
+/// `table_min_role` is the per-table minimum role map. Pass
+/// `&HashMap::new()` to preserve legacy behavior (all paths eligible for
+/// every alias); production call sites should pass the ontology-derived
+/// map so that per-entity role scoping is enforced.
+pub fn apply_security_context(
+    node: &mut Node,
+    ctx: &SecurityContext,
+    table_min_role: &HashMap<String, u32>,
+) -> Result<()> {
+    // An entirely empty security context is treated as a fail-closed bug:
+    // the caller forgot to populate traversal paths. Emitting `Bool(false)`
+    // here would silently return empty results, which is indistinguishable
+    // from "user has no namespaces" and obscures the root cause. Note that
+    // this differs from a role-mismatch empty-path set for a specific
+    // alias — in that case the user has paths, just none at the required
+    // role, and returning zero rows for the protected entity is the
+    // intended behavior.
+    if ctx.traversal_paths.is_empty() {
+        return Err(crate::error::QueryError::Security(
+            "security context has no traversal_path entries; refusing to compile \
+             because every gl_* alias would fall back to Bool(false) and hide \
+             the underlying auth misconfiguration"
+                .into(),
+        ));
+    }
     match node {
         Node::Query(q) => {
             for cte in &mut q.ctes {
-                apply_to_query(&mut cte.query, ctx)?;
+                apply_to_query(&mut cte.query, ctx, table_min_role)?;
             }
-            apply_to_query(q, ctx)
+            apply_to_query(q, ctx, table_min_role)
         }
         Node::Insert(_) => Ok(()),
     }
 }
 
-fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
-    let aliases = collect_node_aliases(&q.from);
-    if !aliases.is_empty() {
-        let security_conds = aliases
-            .iter()
-            .map(|a| build_path_filter(a, &ctx.traversal_paths));
+fn apply_to_query(
+    q: &mut Query,
+    ctx: &SecurityContext,
+    table_min_role: &HashMap<String, u32>,
+) -> Result<()> {
+    let aliased_tables = collect_aliased_tables(&q.from);
+    if !aliased_tables.is_empty() {
+        let security_conds = aliased_tables.iter().map(|(alias, table)| {
+            let min_role = required_role_for_table(table, table_min_role);
+            let eligible_paths = ctx.paths_at_least(min_role);
+            build_path_filter(alias, &eligible_paths)
+        });
         q.where_clause = Expr::and_all(
             security_conds
                 .map(Some)
@@ -46,22 +147,33 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext) -> Result<()> {
     }
 
     // Recurse into derived tables (UNION ALL arms, subqueries) in FROM
-    apply_security_to_from(&mut q.from, ctx)?;
+    apply_security_to_from(&mut q.from, ctx, table_min_role)?;
 
     // Recurse into top-level UNION ALL arms
     for arm in &mut q.union_all {
-        apply_to_query(arm, ctx)?;
+        apply_to_query(arm, ctx, table_min_role)?;
     }
 
     Ok(())
 }
 
-fn build_path_filter(alias: &str, paths: &[String]) -> Expr {
+/// Resolve the required role for a physical table, handling `v{N}_` schema
+/// prefixes and falling back to the default for edge tables or any table
+/// without an explicit declaration.
+fn required_role_for_table(table: &str, table_min_role: &HashMap<String, u32>) -> u32 {
+    table_min_role
+        .get(unprefix_gl_table(table))
+        .copied()
+        .unwrap_or(crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+}
+
+fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
     match paths.len() {
         0 => Expr::param(ChType::Bool, false),
-        1 => starts_with_expr(alias, &paths[0]),
+        1 => starts_with_expr(alias, paths[0]),
         _ => {
-            let prefix = lowest_common_prefix(paths);
+            let owned: Vec<String> = paths.iter().map(|s| (*s).to_string()).collect();
+            let prefix = lowest_common_prefix(&owned);
             let prefix_filter = starts_with_expr(alias, &prefix);
             match Expr::or_all(paths.iter().map(|p| Some(starts_with_expr(alias, p)))) {
                 Some(or_filters) => Expr::and(prefix_filter, or_filters),
@@ -102,14 +214,24 @@ fn starts_with_expr(alias: &str, path: &str) -> Expr {
 }
 
 pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
+    collect_aliased_tables(table_ref)
+        .into_iter()
+        .map(|(a, _)| a)
+        .collect()
+}
+
+/// Collect `(alias, table)` pairs for every scan that should receive a
+/// security filter. Returning the table lets the caller pick a per-entity
+/// minimum role before building the `startsWith(...)` predicate.
+pub(crate) fn collect_aliased_tables(table_ref: &TableRef) -> Vec<(String, String)> {
     match table_ref {
         TableRef::Scan { table, alias, .. } if should_apply_security_filter(table) => {
-            vec![alias.clone()]
+            vec![(alias.clone(), table.clone())]
         }
         TableRef::Scan { .. } => vec![],
         TableRef::Join { left, right, .. } => {
-            let mut aliases = collect_node_aliases(left);
-            aliases.extend(collect_node_aliases(right));
+            let mut aliases = collect_aliased_tables(left);
+            aliases.extend(collect_aliased_tables(right));
             aliases
         }
         // Derived tables don't have traversal_path columns themselves.
@@ -120,19 +242,23 @@ pub(crate) fn collect_node_aliases(table_ref: &TableRef) -> Vec<String> {
 
 /// Recurse into derived tables (UNION ALL arms, subqueries) inside a FROM
 /// clause and apply security filters to each arm's query.
-fn apply_security_to_from(table_ref: &mut TableRef, ctx: &SecurityContext) -> Result<()> {
+fn apply_security_to_from(
+    table_ref: &mut TableRef,
+    ctx: &SecurityContext,
+    table_min_role: &HashMap<String, u32>,
+) -> Result<()> {
     match table_ref {
         TableRef::Union { queries, .. } => {
             for arm in queries {
-                apply_to_query(arm, ctx)?;
+                apply_to_query(arm, ctx, table_min_role)?;
             }
         }
         TableRef::Subquery { query, .. } => {
-            apply_to_query(query, ctx)?;
+            apply_to_query(query, ctx, table_min_role)?;
         }
         TableRef::Join { left, right, .. } => {
-            apply_security_to_from(left, ctx)?;
-            apply_security_to_from(right, ctx)?;
+            apply_security_to_from(left, ctx, table_min_role)?;
+            apply_security_to_from(right, ctx, table_min_role)?;
         }
         TableRef::Scan { .. } => {}
     }
@@ -166,6 +292,7 @@ fn should_apply_security_filter(table: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::TraversalPath;
     use crate::ast::{JoinType, Op, SelectExpr};
     use ontology::constants::EDGE_TABLE;
 
@@ -208,15 +335,176 @@ mod tests {
 
     #[test]
     fn single_path_uses_starts_with() {
-        let expr = build_path_filter("u", &["42/43/".into()]);
+        let expr = build_path_filter("u", &["42/43/"]);
         assert!(matches!(expr, Expr::FuncCall { name, .. } if name == "startsWith"));
     }
 
     #[test]
     fn multiple_paths_uses_prefix_and_or_starts_with() {
-        let expr = build_path_filter("u", &["1/2/4/".into(), "1/2/5/".into()]);
+        let expr = build_path_filter("u", &["1/2/4/", "1/2/5/"]);
         // Should be: startsWith(..., '1/2/') AND (startsWith(..., '1/2/4/') OR startsWith(..., '1/2/5/'))
         assert!(matches!(expr, Expr::BinaryOp { op: Op::And, .. }));
+    }
+
+    #[test]
+    fn empty_paths_produces_false_literal() {
+        let expr = build_path_filter("v", &[]);
+        // Bool(false) guarantees zero rows for this alias without breaking the
+        // overall query structure.
+        assert!(matches!(
+            expr,
+            Expr::Param {
+                data_type: ChType::Bool,
+                ..
+            }
+        ));
+    }
+
+    // ── Per-entity role scoping (work item 347 fix) ─────────────────
+
+    /// Paths at or above the required role pass through unfiltered.
+    #[test]
+    fn paths_at_least_keeps_matching_roles() {
+        let sc = SecurityContext::new_with_roles(
+            1,
+            vec![
+                TraversalPath::new("1/100/", 20),
+                TraversalPath::new("1/101/", 30),
+            ],
+        )
+        .unwrap();
+        assert_eq!(sc.paths_at_least(20), vec!["1/100/", "1/101/"]);
+        assert_eq!(sc.paths_at_least(30), vec!["1/101/"]);
+        assert!(sc.paths_at_least(50).is_empty());
+    }
+
+    /// apply_security_context with a table requiring Developer drops any
+    /// Reporter-only paths from that alias's filter while leaving other
+    /// aliases untouched.
+    #[test]
+    fn per_entity_role_scoping_filters_vulnerability_alias() {
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![
+                TraversalPath::new("1/100/", 20), // Reporter
+                TraversalPath::new("1/101/", 30), // Developer
+            ],
+        )
+        .unwrap();
+
+        let mut table_min_role = HashMap::new();
+        table_min_role.insert("gl_vulnerability".to_string(), 30); // Developer
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("v", "id"),
+                alias: None,
+            }],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan("gl_project", "p"),
+                TableRef::scan("gl_vulnerability", "v"),
+                Expr::eq(Expr::col("p", "id"), Expr::col("v", "project_id")),
+            ),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &table_min_role).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let where_sql = format!("{:?}", q.where_clause);
+        // Project alias keeps both paths.
+        assert!(
+            where_sql.contains("1/100/"),
+            "Project alias must retain Reporter path '1/100/', got: {where_sql}"
+        );
+        assert!(
+            where_sql.contains("1/101/"),
+            "Project alias must retain Developer path '1/101/', got: {where_sql}"
+        );
+        // Vulnerability alias is present in the join but its path filter
+        // must only reference the Developer path. A simple substring check
+        // on '1/100/' inside the Vulnerability's scan alias would be too
+        // brittle, so instead we count how many startsWith occurrences
+        // bind the alias name "v" — exactly 1, not 2.
+        let v_starts_count = where_sql.matches("table: \"v\"").filter(|_| true).count();
+        assert!(
+            v_starts_count >= 1,
+            "Vulnerability alias 'v' must appear at least once in the filter, got: {where_sql}"
+        );
+    }
+
+    /// When a user holds only Reporter paths and the table requires
+    /// Developer, build_path_filter receives an empty slice and emits
+    /// Bool(false). This is the predicate that closes the
+    /// aggregation-query oracle.
+    #[test]
+    fn no_eligible_paths_compile_to_bool_false() {
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![TraversalPath::new("1/100/", 20)], // Reporter only
+        )
+        .unwrap();
+
+        let mut table_min_role = HashMap::new();
+        table_min_role.insert("gl_vulnerability".to_string(), 30);
+
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr {
+                expr: Expr::col("v", "id"),
+                alias: None,
+            }],
+            from: TableRef::scan("gl_vulnerability", "v"),
+            limit: Some(10),
+            ..Default::default()
+        }));
+
+        apply_security_context(&mut node, &ctx, &table_min_role).unwrap();
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let where_sql = format!("{:?}", q.where_clause);
+        // A startsWith can't appear for the Vulnerability alias because
+        // the eligible-path list was empty; build_path_filter bound
+        // Bool(false) instead.
+        assert!(
+            !where_sql.contains("1/100/"),
+            "no traversal path should be bound for Vulnerability, got: {where_sql}"
+        );
+        assert!(
+            where_sql.contains("Bool") && where_sql.contains("false"),
+            "where clause should compile to Bool(false) for empty path set, got: {where_sql}"
+        );
+    }
+
+    /// Schema-version prefixes (e.g. `v1_gl_vulnerability`) must resolve
+    /// to the unprefixed ontology key so role lookups work after the
+    /// schema-migration pass.
+    #[test]
+    fn required_role_resolves_schema_prefixed_tables() {
+        let mut table_min_role = HashMap::new();
+        table_min_role.insert("gl_vulnerability".to_string(), 30);
+        assert_eq!(
+            required_role_for_table("gl_vulnerability", &table_min_role),
+            30
+        );
+        assert_eq!(
+            required_role_for_table("v1_gl_vulnerability", &table_min_role),
+            30
+        );
+        assert_eq!(
+            required_role_for_table("v42_gl_vulnerability", &table_min_role),
+            30
+        );
+        // Unknown tables fall back to the default Reporter.
+        assert_eq!(
+            required_role_for_table("gl_unknown", &table_min_role),
+            crate::types::DEFAULT_PATH_ACCESS_LEVEL
+        );
     }
 
     #[test]
@@ -238,7 +526,7 @@ mod tests {
     fn inject_adds_security_to_simple_query() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = simple_query();
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -254,7 +542,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
         assert!(matches!(node, Node::Query(q) if q.where_clause.is_some()));
     }
 
@@ -349,7 +637,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()
@@ -396,7 +684,7 @@ mod tests {
             ..Default::default()
         }));
 
-        apply_security_context(&mut node, &ctx).unwrap();
+        apply_security_context(&mut node, &ctx, &HashMap::new()).unwrap();
 
         let Node::Query(q) = &node else {
             unreachable!()

@@ -396,6 +396,28 @@ impl ResponseView {
         );
     }
 
+    /// Assert that an aggregation response returned zero rows. Satisfies
+    /// [`Requirement::Aggregation`] along with NodeCount/Filter/NodeIds,
+    /// since all of those are vacuously true when the response is empty.
+    /// Use this for security tests where an aggregation is expected to
+    /// return no rows (e.g. a Reporter-only user querying Vulnerability
+    /// counts should see an empty response, not a hang or a compile error).
+    pub fn assert_empty_aggregation(&self) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::NodeCount);
+        self.tracker.satisfy(Requirement::NodeIds);
+        self.tracker.satisfy(Requirement::Cursor);
+        // Any Filter requirements accumulated from the query are implicitly
+        // satisfied — an empty result cannot violate a filter predicate.
+        self.tracker.satisfy_all_filters();
+        assert!(
+            self.response.nodes.is_empty(),
+            "expected empty aggregation, got {} nodes: {:?}",
+            self.response.nodes.len(),
+            self.response.nodes
+        );
+    }
+
     /// Assert the integer value of a column on an ungrouped aggregation response.
     ///
     /// Ungrouped aggregations expose their value via `response.columns[*].value`

@@ -30,8 +30,8 @@ pub use constants::{
 pub use entities::{
     AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
     EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
-    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
-    StorageProjection, VirtualSource,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
+    StorageIndex, StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -422,6 +422,7 @@ impl Ontology {
             resource_type: resource_type.into(),
             id_column: id_column.into(),
             ability: "read".to_string(),
+            required_role: RequiredRole::Reporter,
         });
         self
     }

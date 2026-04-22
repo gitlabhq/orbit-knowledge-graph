@@ -30,6 +30,19 @@ pub fn check_ast(node: &Node, ctx: &SecurityContext) -> Result<()> {
 
 fn check_query(q: &Query, ctx: &SecurityContext) -> Result<()> {
     let aliases = collect_node_aliases(&q.from);
+    // A WHERE clause that contains a literal `Bool(false)` anywhere in its
+    // AND-chain is provably empty: the security pass emits exactly that
+    // literal when an alias has zero eligible traversal paths (e.g. a
+    // Reporter-only user querying Vulnerability, which requires Developer).
+    // Skipping the per-alias traversal_path check in that case is safe —
+    // the query returns no rows — and preserves the failure-closed
+    // property of CheckPass for the normal traversal-path path.
+    if dead_where(q.where_clause.as_ref()) {
+        for arm in &q.union_all {
+            check_query(arm, ctx)?;
+        }
+        return check_derived_tables_in_from(&q.from, ctx);
+    }
     for alias in &aliases {
         if !has_valid_path_filter(q.where_clause.as_ref(), alias, ctx) {
             return Err(QueryError::Security(format!(
@@ -66,6 +79,27 @@ fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> 
     }
 }
 
+/// Return true if `expr` contains a literal `Bool(false)` in its top-level
+/// AND-chain. Only `And` binary ops are descended into — OR-ing in a
+/// `Bool(false)` does not make the whole predicate dead, so we must not
+/// short-circuit there.
+fn dead_where(expr: Option<&Expr>) -> bool {
+    let Some(expr) = expr else { return false };
+    match expr {
+        Expr::Literal(Value::Bool(false))
+        | Expr::Param {
+            value: Value::Bool(false),
+            ..
+        } => true,
+        Expr::BinaryOp {
+            op: crate::ast::Op::And,
+            left,
+            right,
+        } => dead_where(Some(left)) || dead_where(Some(right)),
+        _ => false,
+    }
+}
+
 /// Recursively checks whether `expr` contains a `startsWith(alias.traversal_path, path)`
 /// call where `path` is a prefix of (or equal to) at least one path in the security context.
 fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
@@ -89,7 +123,7 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
                 } => ctx
                     .traversal_paths
                     .iter()
-                    .any(|tp| tp.starts_with(path.as_str())),
+                    .any(|tp| tp.path.starts_with(path.as_str())),
                 _ => false,
             })
         }
@@ -123,7 +157,12 @@ mod tests {
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
@@ -158,7 +197,12 @@ mod tests {
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
@@ -219,6 +263,7 @@ mod tests {
         crate::passes::security::apply_security_context(
             &mut Node::Query(Box::new(inner.clone())),
             &ctx,
+            &std::collections::HashMap::new(),
         )
         .unwrap();
         // Re-extract the filtered query from the node
@@ -359,7 +404,12 @@ mod tests {
             }],
             ..Default::default()
         }));
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &std::collections::HashMap::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
