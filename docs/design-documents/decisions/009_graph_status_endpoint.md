@@ -64,6 +64,8 @@ The value is the same shape for both: `last_started_at`, `last_completed_at`, `l
 
 Reads are O(1) lookups — no extra ClickHouse queries for indexing metadata. The `projects.indexed` / `projects.total_known` counts still come from ClickHouse since they require aggregation.
 
+Schema migrations trigger a full re-index, but the previous progress entry stays valid until the re-index completes. The data is stale but still accurate for the old schema version, so the endpoint keeps serving it rather than showing nothing.
+
 ### Phase 3: Rename to GetGraphStatus, wire indexing metadata into the response
 
 Rename the RPC to `GetGraphStatus`.
