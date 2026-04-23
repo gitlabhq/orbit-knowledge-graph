@@ -138,7 +138,7 @@ def score(ctx: click.Context, run_id: str | None) -> None:
         for result in results:
             if result.status.value != "success":
                 continue
-            snapshot_data = store.read_snapshot(result.task_id)
+            snapshot_data = store.read_snapshot(arm_cfg.name, result.task_id)
 
             fixture_path = Path(config.run.scoring.fixtures_path) / result.task_id / "expected.json"
             fixture = json.loads(fixture_path.read_text()) if fixture_path.exists() else None

@@ -144,6 +144,20 @@ async def execute_task(
         if agent_path.exists():
             system_prompt = agent_path.read_text()
 
+        # Pre-load skill content into system prompt so the agent doesn't
+        # waste a turn calling the skill tool.
+        for skill_path in arm.skills:
+            skill_file = Path(skill_path) / "SKILL.md"
+            if skill_file.exists():
+                skill_name = Path(skill_path).name
+                content = skill_file.read_text()
+                skill_block = (
+                    f"\n<skill_content name=\"{skill_name}\">\n"
+                    f"{content}\n"
+                    f"</skill_content>\n"
+                )
+                system_prompt = (system_prompt or "") + skill_block
+
         # Send prompt with timeout -- NOT retried
         try:
             with log.timed("llm", "prompt", arm=arm.name, task_id=task.id) as ctx:
@@ -163,7 +177,7 @@ async def execute_task(
             await client.abort_session(session_id)
             with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
                 snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-            store.write_snapshot(task.id, snapshot)
+            store.write_snapshot(arm.name, task.id, snapshot)
             summary = summarize_snapshot(snapshot)
             log.event("task", "timeout", arm=arm.name, task_id=task.id, level="warn",
                       data={"steps": summary.steps, "tool_calls": summary.tool_calls})
@@ -176,7 +190,7 @@ async def execute_task(
 
         with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
             snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-        store.write_snapshot(task.id, snapshot)
+        store.write_snapshot(arm.name, task.id, snapshot)
 
         structured = _extract_structured_output(snapshot)
         summary = summarize_snapshot(snapshot)
@@ -205,7 +219,7 @@ async def execute_task(
                 snapshot = await capture_snapshot(
                     client, session_id, event_queue, started_at
                 )
-                store.write_snapshot(task.id, snapshot)
+                store.write_snapshot(arm.name, task.id, snapshot)
                 summary = summarize_snapshot(snapshot)
             except Exception:
                 log.event("snapshot", "capture failed", arm=arm.name, task_id=task.id,

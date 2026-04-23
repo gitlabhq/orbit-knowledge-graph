@@ -227,9 +227,9 @@ class TestStore:
                 events=[{"type": "test", "data": {}}],
                 timing={"duration_ms": 1000},
             )
-            store.write_snapshot("task-1", snapshot)
+            store.write_snapshot("orbit", "task-1", snapshot)
 
-            loaded = store.read_snapshot("task-1")
+            loaded = store.read_snapshot("orbit", "task-1")
             assert loaded is not None
             assert loaded["timing"]["duration_ms"] == 1000
 

@@ -43,9 +43,10 @@ CREATE TABLE IF NOT EXISTS task_results (
 
 CREATE TABLE IF NOT EXISTS snapshots (
     run_id VARCHAR NOT NULL,
+    arm VARCHAR NOT NULL,
     task_id VARCHAR NOT NULL,
     data JSON NOT NULL,
-    PRIMARY KEY (run_id, task_id)
+    PRIMARY KEY (run_id, arm, task_id)
 );
 
 CREATE TABLE IF NOT EXISTS scores (

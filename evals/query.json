@@ -1,0 +1,24 @@
+{
+  "query_type": "traversal",
+  "nodes": [
+    {
+      "id": "u",
+      "entity": "User",
+      "filters": {
+        "username": "root"
+      }
+    },
+    {
+      "id": "mr",
+      "entity": "MergeRequest"
+    }
+  ],
+  "relationships": [
+    {
+      "from": "u",
+      "to": "mr",
+      "type": "AUTHORED"
+    }
+  ],
+  "limit": 100
+}

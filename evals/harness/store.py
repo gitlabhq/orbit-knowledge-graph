@@ -124,19 +124,19 @@ class ResultStore:
                 ],
             )
 
-    def write_snapshot(self, task_id: str, snapshot: SessionSnapshot) -> None:
+    def write_snapshot(self, arm: str, task_id: str, snapshot: SessionSnapshot) -> None:
         data = json.dumps(snapshot.to_dict(), default=str)
         with connect(self._db_path) as db:
             db.execute(
-                "INSERT OR REPLACE INTO snapshots (run_id, task_id, data) VALUES (?, ?, ?)",
-                [self.run_id, task_id, data],
+                "INSERT OR REPLACE INTO snapshots (run_id, arm, task_id, data) VALUES (?, ?, ?, ?)",
+                [self.run_id, arm, task_id, data],
             )
 
-    def read_snapshot(self, task_id: str) -> dict[str, Any] | None:
+    def read_snapshot(self, arm: str, task_id: str) -> dict[str, Any] | None:
         with connect(self._db_path, read_only=True) as db:
             row = db.execute(
-                "SELECT data FROM snapshots WHERE run_id = ? AND task_id = ?",
-                [self.run_id, task_id],
+                "SELECT data FROM snapshots WHERE run_id = ? AND arm = ? AND task_id = ?",
+                [self.run_id, arm, task_id],
             ).fetchone()
         if not row:
             return None
