@@ -2,12 +2,16 @@
 //!
 //! Uses the shared row types from code-graph with an `IndexerEnvelope`
 //! that adds `traversal_path`, `_version`, and `_deleted` columns.
+//! Column schemas are driven by the ontology — the source of truth
+//! for what columns each entity table has.
 
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, ImportRow};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use ontology::DataType as OntDataType;
+use ontology::Ontology;
 use std::hash::{Hash, Hasher};
 
 /// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
@@ -52,43 +56,8 @@ impl RowEnvelope for IndexerEnvelope {
     }
 
     fn header_specs(&self) -> Vec<ColumnSpec> {
-        vec![
-            ColumnSpec {
-                name: "id".into(),
-                col_type: ColumnType::Int,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "traversal_path".into(),
-                col_type: ColumnType::Str,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "project_id".into(),
-                col_type: ColumnType::Int,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "branch".into(),
-                col_type: ColumnType::Str,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "commit_sha".into(),
-                col_type: ColumnType::Str,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "_version".into(),
-                col_type: ColumnType::TimestampMicros,
-                nullable: false,
-            },
-            ColumnSpec {
-                name: "_deleted".into(),
-                col_type: ColumnType::Bool,
-                nullable: false,
-            },
-        ]
+        // Not used — specs come from the ontology. Kept for trait compliance.
+        vec![]
     }
 }
 
@@ -103,24 +72,119 @@ pub struct ConvertedGraphData {
 }
 
 /// Convert a v2 `CodeGraph` to Arrow batches with ClickHouse envelope columns.
+/// Column schemas are derived from the ontology.
 pub fn convert_code_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     envelope: &IndexerEnvelope,
+    ontology: &Ontology,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
 
     Ok(ConvertedGraphData {
         branch: convert_branch(envelope)?,
-        directories: convert_directories(graph, &ids, envelope)?,
-        files: convert_files(graph, &ids, envelope)?,
-        definitions: convert_definitions(graph, &ids, envelope)?,
-        imported_symbols: convert_imported_symbols(graph, &ids, envelope)?,
-        edges: convert_edges(graph, &ids, envelope)?,
+        directories: convert_entity(graph, &ids, envelope, ontology, "Directory", |g, ids| {
+            g.directories()
+                .map(|(idx, dir)| DirectoryRow {
+                    dir,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        files: convert_entity(graph, &ids, envelope, ontology, "File", |g, ids| {
+            g.files()
+                .map(|(idx, file)| FileRow {
+                    file,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        definitions: convert_entity(graph, &ids, envelope, ontology, "Definition", |g, ids| {
+            g.definitions()
+                .map(|(idx, file_path, def)| DefinitionRow {
+                    file_path,
+                    def,
+                    pool: &g.strings,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        imported_symbols: convert_entity(
+            graph,
+            &ids,
+            envelope,
+            ontology,
+            "ImportedSymbol",
+            |g, ids| {
+                g.imports_iter()
+                    .map(|(idx, file_path, import)| ImportRow {
+                        file_path,
+                        import,
+                        pool: &g.strings,
+                        id: ids[idx.index()],
+                    })
+                    .collect()
+            },
+        )?,
+        edges: convert_edges(graph, &ids, envelope, ontology)?,
     })
+}
+
+/// Ontology-driven specs for a node entity.
+fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
+    let node = ontology
+        .get_node(entity_name)
+        .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
+    node.fields
+        .iter()
+        .map(|f| ColumnSpec {
+            name: f.name.clone(),
+            col_type: match f.data_type {
+                OntDataType::Int => ColumnType::Int,
+                OntDataType::Bool => ColumnType::Bool,
+                OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ => ColumnType::Str,
+            },
+            nullable: f.nullable,
+        })
+        .collect()
+}
+
+/// Ontology-driven specs for edges.
+fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+    ontology
+        .edge_columns()
+        .iter()
+        .map(|c| ColumnSpec {
+            name: c.name.clone(),
+            col_type: match c.data_type {
+                OntDataType::Int => ColumnType::Int,
+                OntDataType::Bool => ColumnType::Bool,
+                OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ => ColumnType::Str,
+            },
+            nullable: false,
+        })
+        .collect()
+}
+
+/// Generic entity converter. Gets specs from the ontology, builds rows
+/// via the provided closure, and produces a RecordBatch.
+fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+    entity_name: &str,
+    build_rows: impl FnOnce(&'a code_graph::v2::linker::CodeGraph, &[i64]) -> Vec<R>,
+) -> Result<RecordBatch, ArrowError> {
+    let specs = entity_specs(ontology, entity_name);
+    let rows = build_rows(graph, ids);
+    R::to_record_batch(&rows, &specs, env)
 }
 
 fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
+    // Branch has a fixed schema (not driven by row types).
     let specs = vec![
         ColumnSpec {
             name: "id".into(),
@@ -181,117 +245,13 @@ fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
     BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
 }
 
-fn convert_directories(
-    graph: &code_graph::v2::linker::CodeGraph,
-    ids: &[i64],
-    env: &IndexerEnvelope,
-) -> Result<RecordBatch, ArrowError> {
-    let rows: Vec<_> = graph
-        .directories()
-        .map(|(idx, dir)| DirectoryRow {
-            dir,
-            id: ids[idx.index()],
-        })
-        .collect();
-    DirectoryRow::to_batch(&rows, env)
-}
-
-fn convert_files(
-    graph: &code_graph::v2::linker::CodeGraph,
-    ids: &[i64],
-    env: &IndexerEnvelope,
-) -> Result<RecordBatch, ArrowError> {
-    let rows: Vec<_> = graph
-        .files()
-        .map(|(idx, file)| FileRow {
-            file,
-            id: ids[idx.index()],
-        })
-        .collect();
-    FileRow::to_batch(&rows, env)
-}
-
-fn convert_definitions(
-    graph: &code_graph::v2::linker::CodeGraph,
-    ids: &[i64],
-    env: &IndexerEnvelope,
-) -> Result<RecordBatch, ArrowError> {
-    let rows: Vec<_> = graph
-        .definitions()
-        .map(|(idx, file_path, def)| DefinitionRow {
-            file_path,
-            def,
-            pool: &graph.strings,
-            id: ids[idx.index()],
-        })
-        .collect();
-    DefinitionRow::to_batch(&rows, env)
-}
-
-fn convert_imported_symbols(
-    graph: &code_graph::v2::linker::CodeGraph,
-    ids: &[i64],
-    env: &IndexerEnvelope,
-) -> Result<RecordBatch, ArrowError> {
-    let rows: Vec<_> = graph
-        .imports_iter()
-        .map(|(idx, file_path, import)| ImportRow {
-            file_path,
-            import,
-            pool: &graph.strings,
-            id: ids[idx.index()],
-        })
-        .collect();
-    ImportRow::to_batch(&rows, env)
-}
-
 fn convert_edges(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
+    ontology: &Ontology,
 ) -> Result<RecordBatch, ArrowError> {
-    let specs = vec![
-        ColumnSpec {
-            name: "traversal_path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "source_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "source_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "relationship_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_id".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "target_kind".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_version".into(),
-            col_type: ColumnType::TimestampMicros,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "_deleted".into(),
-            col_type: ColumnType::Bool,
-            nullable: false,
-        },
-    ];
+    let specs = edge_specs(ontology);
 
     struct IndexerEdgeRow<'a> {
         env: &'a IndexerEnvelope,

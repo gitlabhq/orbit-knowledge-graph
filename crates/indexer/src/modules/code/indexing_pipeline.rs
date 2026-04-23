@@ -42,6 +42,7 @@ pub struct CodeIndexingPipeline {
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
+    ontology: Arc<ontology::Ontology>,
 }
 
 impl CodeIndexingPipeline {
@@ -51,6 +52,7 @@ impl CodeIndexingPipeline {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
+        ontology: Arc<ontology::Ontology>,
     ) -> Self {
         Self {
             resolver,
@@ -58,6 +60,7 @@ impl CodeIndexingPipeline {
             stale_data_cleaner,
             metrics,
             table_names,
+            ontology,
         }
     }
 
@@ -253,7 +256,7 @@ impl CodeIndexingPipeline {
             self.metrics
                 .record_files_processed(graph.files().count() as u64, "parsed");
 
-            let converted = arrow_converter::convert_code_graph(graph, &envelope)
+            let converted = arrow_converter::convert_code_graph(graph, &envelope, &self.ontology)
                 .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
                 .record_error_stage(&self.metrics, "arrow_conversion")?;
 
