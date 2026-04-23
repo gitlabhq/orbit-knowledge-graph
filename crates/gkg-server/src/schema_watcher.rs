@@ -148,7 +148,7 @@ async fn poll_once(
                         active_version = active_v,
                         "active version is ahead but our tables still exist — serving in rollback mode"
                     );
-                    return (SchemaState::Ready, active);
+                    return (SchemaState::Ready, Some(embedded_version));
                 }
                 false => return (SchemaState::Outdated, active),
             }
@@ -164,7 +164,10 @@ async fn poll_once(
 async fn version_exists(graph: &ArrowClickHouseClient, version: u32) -> bool {
     match read_all_versions(graph).await {
         Ok(entries) => entries.iter().any(|e| e.version == version),
-        Err(_) => false,
+        Err(e) => {
+            warn!(error = %e, version, "failed to check version existence");
+            false
+        }
     }
 }
 
