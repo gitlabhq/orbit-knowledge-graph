@@ -49,6 +49,25 @@ pub struct EntityAuthConfig {
     /// owns this resource, used to resolve the auth ID from edge columns for
     /// dynamic (path/neighbor) nodes.
     pub owner_entity: Option<String>,
+    /// Minimum GitLab role required on a traversal path for rows of this entity
+    /// to survive the security pass. Stored as an access-level integer so the
+    /// compiler can compare against per-path roles carried by `SecurityContext`
+    /// without pulling the ontology crate into `types.rs`.
+    pub required_access_level: u32,
+}
+
+impl Default for EntityAuthConfig {
+    fn default() -> Self {
+        Self {
+            resource_type: String::new(),
+            ability: String::new(),
+            auth_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
+            owner_entity: None,
+            // Reporter mirrors the pre-fix access gate and is the right
+            // default for tests that do not care about role scoping.
+            required_access_level: crate::types::DEFAULT_PATH_ACCESS_LEVEL,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
