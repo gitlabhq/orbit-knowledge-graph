@@ -417,8 +417,7 @@ mod tests {
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                &tracer,
-                None,
+                &tracer
             )
             .unwrap();
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();

@@ -665,7 +665,6 @@ impl LanguageSpec {
         file_path: &str,
         language: Language,
         tracer: &Tracer,
-        graph: Option<&crate::v2::linker::graph::CodeGraph>,
     ) -> crate::legacy::parser::Result<ParseFullResult> {
         let source_str = std::str::from_utf8(source)
             .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
@@ -1888,8 +1887,7 @@ mod tests {
                 b"def foo(): pass\nfoo()",
                 "test.py",
                 Language::Python,
-                &tracer,
-                None,
+                &tracer
             )
             .unwrap();
 

@@ -408,7 +408,7 @@ where
                     }
                 };
 
-                let result = match spec.parse_full_collect(&source, path, language, tracer, None) {
+                let result = match spec.parse_full_collect(&source, path, language, tracer) {
                     Ok(r) => r,
                     Err(_) => {
                         pb.inc(1);

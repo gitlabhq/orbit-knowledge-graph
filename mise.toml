@@ -92,6 +92,10 @@ description = "Fuzz indexer message deserialization"
 run = "cargo build --release"
 description = "Build the crates"
 
+[tasks."build:cli"]
+run = "cargo build --bin orbit --release --features duckdb-client/bundled"
+description = "Build the CLI"
+
 [tasks.test]
 run = "./scripts/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
