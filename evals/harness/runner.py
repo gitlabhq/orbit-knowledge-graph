@@ -135,7 +135,11 @@ async def execute_task(
             session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
             session_id = session.id
             ctx["session_id"] = session_id
-        event_queue = demuxer.subscribe(session_id)
+
+        def _on_event(_sid: str, evt: dict) -> None:
+            store.write_live_event(arm.name, task.id, evt)
+
+        event_queue = demuxer.subscribe(session_id, on_event=_on_event)
 
         prompt = render_prompt(task, config.run.scoring.fixtures_path)
 

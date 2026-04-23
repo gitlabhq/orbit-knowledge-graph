@@ -30,12 +30,18 @@ logger = logging.getLogger(__name__)
 # Event Demuxer
 # ---------------------------------------------------------------------------
 
+EventCallback = Any  # Callable[[str, dict], None] but avoiding complex type
+
+
 @dataclass
 class EventDemuxer:
     """Single SSE connection, demuxes events to per-session queues."""
 
     base_url: str
     _subscriptions: dict[str, asyncio.Queue[dict[str, Any]]] = field(
+        default_factory=dict, init=False
+    )
+    _callbacks: dict[str, EventCallback] = field(
         default_factory=dict, init=False
     )
     _task: asyncio.Task[None] | None = field(default=None, init=False)
@@ -60,13 +66,20 @@ class EventDemuxer:
             await self._http.aclose()
             self._http = None
 
-    def subscribe(self, session_id: str) -> asyncio.Queue[dict[str, Any]]:
+    def subscribe(
+        self,
+        session_id: str,
+        on_event: EventCallback | None = None,
+    ) -> asyncio.Queue[dict[str, Any]]:
         q: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
         self._subscriptions[session_id] = q
+        if on_event is not None:
+            self._callbacks[session_id] = on_event
         return q
 
     def unsubscribe(self, session_id: str) -> None:
         self._subscriptions.pop(session_id, None)
+        self._callbacks.pop(session_id, None)
 
     async def _listen(self) -> None:
         assert self._http is not None
@@ -94,6 +107,13 @@ class EventDemuxer:
                                 self._subscriptions[sid].put_nowait(evt)
                             except asyncio.QueueFull:
                                 logger.warning("event queue full for session %s", sid)
+
+                            cb = self._callbacks.get(sid)
+                            if cb is not None:
+                                try:
+                                    cb(sid, evt)
+                                except Exception:
+                                    logger.debug("event callback error for %s", sid, exc_info=True)
             except httpx.HTTPError as e:
                 if self._running:
                     logger.warning("SSE connection error, reconnecting: %s", e)

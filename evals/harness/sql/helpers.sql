@@ -91,6 +91,26 @@ CREATE OR REPLACE MACRO compare_arms(rid, arm_a, arm_b) AS TABLE (
     ORDER BY task_id
 );
 
+-- Table: live event stream for a run+arm+task (or all tasks)
+CREATE OR REPLACE MACRO live(rid, a) AS TABLE (
+    SELECT
+        arm,
+        task_id,
+        seq,
+        event_type,
+        timestamp,
+        json_extract_string(data, '$.type') AS detail_type,
+        substr(data::VARCHAR, 1, 200) AS data_preview
+    FROM live_events
+    WHERE run_id = rid AND arm = a
+    ORDER BY task_id, seq
+);
+
+-- Scalar: count live events for a run (quick progress check)
+CREATE OR REPLACE MACRO event_count(rid) AS (
+    SELECT count(*) FROM live_events WHERE run_id = rid
+);
+
 -- Table: task results with their scores for a run+arm
 CREATE OR REPLACE MACRO task_detail(rid, a) AS TABLE (
     SELECT

@@ -58,6 +58,17 @@ CREATE TABLE IF NOT EXISTS scores (
     PRIMARY KEY (run_id, arm, task_id, evaluator)
 );
 
+CREATE TABLE IF NOT EXISTS live_events (
+    run_id VARCHAR NOT NULL,
+    arm VARCHAR NOT NULL,
+    task_id VARCHAR NOT NULL,
+    seq INTEGER NOT NULL,
+    event_type VARCHAR NOT NULL,
+    timestamp VARCHAR NOT NULL,
+    data JSON NOT NULL,
+    PRIMARY KEY (run_id, arm, task_id, seq)
+);
+
 CREATE TABLE IF NOT EXISTS run_configs (
     run_id VARCHAR NOT NULL,
     config_name VARCHAR NOT NULL,

@@ -84,11 +84,30 @@ class ResultStore:
     def __init__(self, db_path: Path | None = None, run_id: str | None = None) -> None:
         self._db_path = db_path or default_db_path()
         self.run_id = run_id or self.make_run_id()
+        self._event_seqs: dict[str, int] = {}
         ensure_schema(self._db_path)
 
     @property
     def db_path(self) -> Path:
         return self._db_path
+
+    def write_live_event(self, arm: str, task_id: str, event: dict[str, Any]) -> None:
+        """Write a single SSE event to DuckDB as it arrives."""
+        key = f"{arm}:{task_id}"
+        seq = self._event_seqs.get(key, 0)
+        self._event_seqs[key] = seq + 1
+
+        event_type = event.get("type", "unknown")
+        timestamp = event.get("ts", "")
+        data = json.dumps(event.get("data", {}), default=str)
+
+        with connect(self._db_path) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO live_events "
+                "(run_id, arm, task_id, seq, event_type, timestamp, data) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?)",
+                [self.run_id, arm, task_id, seq, event_type, timestamp, data],
+            )
 
     def write_result(self, result: TaskResult) -> None:
         s = result.session_summary
