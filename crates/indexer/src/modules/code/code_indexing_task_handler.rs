@@ -115,7 +115,7 @@ impl CodeIndexingTaskHandler {
             self.metrics
                 .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
             self.metrics.record_outcome("empty_repository");
-            self.record_handler_duration(started_at);
+            self.metrics.record_handler_duration(started_at);
             return Ok(());
         };
 
@@ -142,16 +142,9 @@ impl CodeIndexingTaskHandler {
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        self.record_handler_duration(started_at);
+        self.metrics.record_handler_duration(started_at);
 
         result.map(|_| ())
-    }
-
-    fn record_handler_duration(&self, started_at: DateTime<Utc>) {
-        let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
-        self.metrics
-            .handler_duration
-            .record(elapsed.as_secs_f64(), &[]);
     }
 
     async fn index_with_lock(

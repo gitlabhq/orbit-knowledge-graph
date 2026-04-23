@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
@@ -56,6 +57,11 @@ impl CodeMetrics {
     pub(super) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed
             .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
+    }
+
+    pub(super) fn record_handler_duration(&self, started_at: DateTime<Utc>) {
+        let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
+        self.handler_duration.record(elapsed.as_secs_f64(), &[]);
     }
 
     pub(super) fn record_empty_repository(&self, reason: &'static str) {
