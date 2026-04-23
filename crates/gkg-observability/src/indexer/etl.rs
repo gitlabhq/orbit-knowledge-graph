@@ -10,6 +10,8 @@ pub mod labels {
     pub const HANDLER: &str = "handler";
     pub const ERROR_KIND: &str = "error_kind";
     pub const TABLE: &str = "table";
+    pub const PERMIT_KIND: &str = "permit_kind";
+    pub const GROUP: &str = "group";
 }
 
 const DOMAIN: &str = "indexer.etl";
@@ -42,18 +44,18 @@ pub const HANDLER_DURATION: MetricSpec = MetricSpec::histogram_f64(
 
 pub const PERMIT_WAIT_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.etl.permit.wait.duration",
-    "Time waiting for a worker pool permit.",
+    "Time waiting for a worker pool permit, labelled by permit kind (global|group) and group.",
     Some("s"),
-    &[],
+    &[labels::PERMIT_KIND, labels::GROUP],
     LATENCY,
     DOMAIN,
 );
 
 pub const ACTIVE_PERMITS: MetricSpec = MetricSpec::up_down_counter(
     "gkg.etl.permits.active",
-    "Number of worker permits currently held.",
+    "Number of worker permits currently held, labelled by permit kind (global or concurrency-group name).",
     None,
-    &[],
+    &[labels::PERMIT_KIND],
     DOMAIN,
 );
 

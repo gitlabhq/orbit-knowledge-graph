@@ -184,12 +184,7 @@ metrics-catalog-check:
     - .mr-and-main-rules
   needs: []
   script:
-    - mise run metrics:catalog
-    - git diff --exit-code crates/gkg-observability/orbit-dashboards/gkg-metrics.json || (echo "crates/gkg-observability/orbit-dashboards/gkg-metrics.json is out of date. Run 'mise run metrics:catalog' and commit." && exit 1)
-  artifacts:
-    paths:
-      - crates/gkg-observability/orbit-dashboards/gkg-metrics.json
-    expire_in: 24 hours
+    - mise run metrics:catalog:check
 
 ddl-freshness-check:
   stage: lint

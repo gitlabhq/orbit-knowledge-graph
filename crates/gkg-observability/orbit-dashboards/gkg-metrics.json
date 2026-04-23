@@ -259,10 +259,13 @@
     {
       "otel_name": "gkg.etl.permit.wait.duration",
       "prom_name": "gkg_etl_permit_wait_duration_seconds",
-      "description": "Time waiting for a worker pool permit.",
+      "description": "Time waiting for a worker pool permit, labelled by permit kind (global|group) and group.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [],
+      "labels": [
+        "permit_kind",
+        "group"
+      ],
       "buckets": [
         0.005,
         0.01,
@@ -285,9 +288,11 @@
     {
       "otel_name": "gkg.etl.permits.active",
       "prom_name": "gkg_etl_permits_active",
-      "description": "Number of worker permits currently held.",
+      "description": "Number of worker permits currently held, labelled by permit kind (global or concurrency-group name).",
       "kind": "up_down_counter",
-      "labels": [],
+      "labels": [
+        "permit_kind"
+      ],
       "stability": "stable",
       "domain": "indexer.etl"
     },
