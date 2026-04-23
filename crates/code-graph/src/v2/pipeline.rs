@@ -495,12 +495,12 @@ where
             }
             for (ref_idx, alias_target) in &fwr.unresolved_aliases {
                 let nodes = graph.resolve_scope_nodes(alias_target);
-                if let Some(&n) = nodes.first() {
-                    if graph.def_kind(n).is_type_container() {
-                        let fqn = graph.def_fqn(n).to_string();
-                        if let Some(r) = fwr.refs.get_mut(*ref_idx) {
-                            r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn)];
-                        }
+                if let Some(&n) = nodes.first()
+                    && graph.def_kind(n).is_type_container()
+                {
+                    let fqn = graph.def_fqn(n).to_string();
+                    if let Some(r) = fwr.refs.get_mut(*ref_idx) {
+                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn)];
                     }
                 }
             }

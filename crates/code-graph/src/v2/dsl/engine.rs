@@ -633,15 +633,15 @@ impl LanguageSpec {
                     .ssa
                     .read_variable_stateless(pending.ssa_key, pending.block);
                 for v in &reaching.values {
-                    if let super::ssa::SsaValue::Alias(target) = v {
-                        if needed.contains(target) {
-                            let resolved_name = state
-                                .import_map
-                                .get(*target)
-                                .cloned()
-                                .unwrap_or_else(|| target.to_string());
-                            unresolved_aliases.push((ref_idx, resolved_name));
-                        }
+                    if let super::ssa::SsaValue::Alias(target) = v
+                        && needed.contains(target)
+                    {
+                        let resolved_name = state
+                            .import_map
+                            .get(*target)
+                            .cloned()
+                            .unwrap_or_else(|| (*target).to_string());
+                        unresolved_aliases.push((ref_idx, resolved_name));
                     }
                 }
             }
