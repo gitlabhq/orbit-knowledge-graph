@@ -32,7 +32,7 @@ impl GraphStatsService {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        let input = GraphStatsInput::from_ontology(&self.ontology, traversal_path.to_string());
+        let input = GraphStatsInput::from_ontology(&self.ontology, traversal_path.to_string())?;
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {

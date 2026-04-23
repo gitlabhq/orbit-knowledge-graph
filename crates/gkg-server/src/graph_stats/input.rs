@@ -1,4 +1,5 @@
 use ontology::Ontology;
+use tonic::Status;
 
 const PROJECT_NODE: &str = "Project";
 const CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
@@ -20,7 +21,7 @@ pub struct ProjectTables {
 }
 
 impl GraphStatsInput {
-    pub fn from_ontology(ontology: &Ontology, traversal_path: String) -> Self {
+    pub fn from_ontology(ontology: &Ontology, traversal_path: String) -> Result<Self, Status> {
         let nodes = ontology
             .nodes()
             .filter(|node| node.has_traversal_path)
@@ -32,7 +33,9 @@ impl GraphStatsInput {
 
         let project = ontology
             .get_node(PROJECT_NODE)
-            .expect("ontology must have Project node")
+            .ok_or_else(|| {
+                Status::internal(format!("ontology missing required node: {PROJECT_NODE}"))
+            })?
             .destination_table
             .clone();
 
@@ -40,17 +43,21 @@ impl GraphStatsInput {
             .auxiliary_tables()
             .iter()
             .find(|t| t.name.ends_with(CHECKPOINT_TABLE_SUFFIX))
-            .expect("ontology must have code_indexing_checkpoint auxiliary table")
+            .ok_or_else(|| {
+                Status::internal(format!(
+                    "ontology missing auxiliary table ending with: {CHECKPOINT_TABLE_SUFFIX}"
+                ))
+            })?
             .name
             .clone();
 
-        Self {
+        Ok(Self {
             traversal_path,
             nodes,
             project_tables: ProjectTables {
                 project,
                 code_checkpoint,
             },
-        }
+        })
     }
 }
