@@ -13,7 +13,7 @@ use gkg_observability::{MetricSpec, catalog};
 use serde::Serialize;
 
 /// Default output path relative to the workspace root.
-pub const DEFAULT_OUTPUT: &str = "crates/gkg-observability/orbit-dashboards/gkg-metrics.json";
+const DEFAULT_OUTPUT: &str = "crates/gkg-observability/orbit-dashboards/gkg-metrics.json";
 
 /// Hand-authored note prepended to the generated file via a `$generated_by` key.
 const GENERATED_BY: &str = "cargo xtask metrics-catalog - do not edit";
