@@ -12,15 +12,15 @@ Usage:
     # Execute a graph query from a file
     python tools/orbit_query.py query --file query.json
 
-    # Get the graph schema
+    # Get the graph ontology (entities, edges, properties)
     python tools/orbit_query.py schema
     python tools/orbit_query.py schema --expand User,Project
 
+    # Get the query DSL schema (query format, operators, types)
+    python tools/orbit_query.py query-schema
+
     # Get cluster status
     python tools/orbit_query.py status
-
-    # Get available tools
-    python tools/orbit_query.py tools
 
 Environment variables:
     GITLAB_TOKEN    (required) GitLab personal access token
@@ -151,11 +151,24 @@ def cmd_status(args: argparse.Namespace) -> None:
     print(json.dumps(result, indent=2))
 
 
-def cmd_tools(args: argparse.Namespace) -> None:
+def cmd_query_schema(args: argparse.Namespace) -> None:
     host, token = _get_config()
     url = f"https://{host}/api/v4/orbit/tools"
-    result = _request("GET", url, token)
-    print(json.dumps(result, indent=2))
+    tools = _request("GET", url, token)
+    for tool in tools:
+        if tool.get("name") == "query_graph":
+            desc = tool.get("description", "")
+            # Extract the TOON schema block from the description
+            start = desc.find("<toon>")
+            end = desc.find("</toon>")
+            if start != -1 and end != -1:
+                schema_text = desc[start + len("<toon>\n"):end]
+                print(schema_text)
+            else:
+                print(desc)
+            return
+    print(json.dumps({"error": "not_found", "message": "query_graph tool not found"}))
+    sys.exit(1)
 
 
 def main() -> None:
@@ -173,11 +186,11 @@ def main() -> None:
     p_schema.add_argument("--format", default="raw", choices=["raw", "llm"])
     p_schema.set_defaults(func=cmd_schema)
 
+    p_qschema = sub.add_parser("query-schema", help="Get query DSL schema (format, operators, types)")
+    p_qschema.set_defaults(func=cmd_query_schema)
+
     p_status = sub.add_parser("status", help="Get cluster status")
     p_status.set_defaults(func=cmd_status)
-
-    p_tools = sub.add_parser("tools", help="List available tools")
-    p_tools.set_defaults(func=cmd_tools)
 
     args = parser.parse_args()
     args.func(args)
