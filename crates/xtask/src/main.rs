@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod metrics_catalog;
 mod schema;
 mod synth;
 
@@ -27,6 +28,16 @@ enum Command {
         /// Write schema to a file instead of stdout.
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
+    },
+    /// Generate the shared metrics catalog consumed by runbooks dashboards.
+    MetricsCatalog {
+        /// Write catalog JSON to this path instead of the default.
+        #[arg(short, long)]
+        output: Option<std::path::PathBuf>,
+        /// Diff the regenerated catalog against the committed file and
+        /// return a non-zero exit if they differ.
+        #[arg(long)]
+        check: bool,
     },
 }
 
@@ -118,5 +129,6 @@ async fn main() -> Result<()> {
             }
         },
         Command::Schema { output } => schema::run(output),
+        Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
     }
 }

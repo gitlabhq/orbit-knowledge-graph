@@ -328,6 +328,14 @@ description = "Validate ontology YAML files against JSON schema"
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
 
+[tasks."metrics:catalog"]
+run = "cargo xtask metrics-catalog"
+description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+
+[tasks."metrics:catalog:check"]
+run = "cargo xtask metrics-catalog --check"
+description = "Fail if the committed metrics catalog is out of date"
+
 [tasks."schema:generate:ddl"]
 run = """
 cargo run --bin orbit -- debug ddl 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql

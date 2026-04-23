@@ -37,3 +37,9 @@ pre-commit:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/lib.rs"
         - "crates/gkg-server/schemas/query_response.json"
+    - name: metrics-catalog-check
+      run: mise run metrics:catalog:check
+      glob:
+        - "crates/gkg-observability/**/*.rs"
+        - "crates/xtask/src/metrics_catalog.rs"
+        - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
