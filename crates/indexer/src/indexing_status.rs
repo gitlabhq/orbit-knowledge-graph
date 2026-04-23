@@ -8,7 +8,7 @@ use tracing::warn;
 
 use crate::nats::{KvPutOptions, NatsServices};
 
-pub const INDEXING_PROGRESS_BUCKET: &str = "indexing_progress";
+pub const INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
 const KEY_PREFIX: &str = "status";
 
 #[derive(Debug, Error)]
