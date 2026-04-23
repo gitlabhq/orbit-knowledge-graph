@@ -118,26 +118,25 @@ tests:
     assert:
       - { row_count: 5 }
 
-  # ── FQN separator: instance methods use # ─────────────────────
-  - name: "Instance method uses # separator"
+  # ── FQN separator: all scopes use :: ────────────────────────────
+  - name: "Instance method FQN uses :: separator"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'WeatherApp::Forecast#temperature_f'
+      WHERE d.fqn = 'WeatherApp::Forecast::temperature_f'
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
 
-  - name: "Instance method run uses # separator"
+  - name: "Instance method run uses :: separator"
     query: |
       MATCH (d:Definition)
-      WHERE d.fqn = 'WeatherApp::CLI#run'
+      WHERE d.fqn = 'WeatherApp::CLI::run'
         AND d.definition_type = 'Method'
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 1 }
 
-  # ── FQN separator: singleton methods use :: ────────────────────
   - name: "Singleton method uses :: separator"
     query: |
       MATCH (d:Definition)
@@ -162,21 +161,21 @@ tests:
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::Forecast'
-        AND child.fqn = 'WeatherApp::Forecast#temperature_f'
+        AND child.fqn = 'WeatherApp::Forecast::temperature_f'
         AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
-  - name: "Class defines instance method (CLI#run)"
+  - name: "Class defines methods named run (instance + singleton)"
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'WeatherApp::CLI'
-        AND child.fqn = 'WeatherApp::CLI#run'
+        AND child.fqn = 'WeatherApp::CLI::run'
         AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
-      - { row_count: 1 }
+      - { row_count: 2 }
 
   - name: "File defines top-level module"
     query: |
@@ -193,10 +192,10 @@ tests:
     query: |
       MATCH (d:Definition)
       WHERE d.definition_type = 'Attribute'
-        AND d.fqn IN ['WeatherApp::Forecast#city',
-                       'WeatherApp::Forecast#temperature_c',
-                       'WeatherApp::Forecast#condition',
-                       'WeatherApp::Forecast#humidity']
+        AND d.fqn IN ['WeatherApp::Forecast::city',
+                       'WeatherApp::Forecast::temperature_c',
+                       'WeatherApp::Forecast::condition',
+                       'WeatherApp::Forecast::humidity']
       RETURN d.fqn AS fqn
     assert:
       - { row_count: 4 }

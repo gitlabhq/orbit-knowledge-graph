@@ -55,8 +55,8 @@ Ruby Project Code Graph Has Expected Files And Definitions
     Definition Exists In Project    ${pid}    WeatherApp::Formatter                   Class
     Definition Exists In Project    ${pid}    WeatherApp::WeatherService              Class
     Definition Exists In Project    ${pid}    WeatherApp::UnknownCityError            Class
-    Definition Exists In Project    ${pid}    WeatherApp::Forecast#temperature_f      Method
-    Definition Exists In Project    ${pid}    WeatherApp::CLI#run                     Method
+    Definition Exists In Project    ${pid}    WeatherApp::Forecast::temperature_f     Method
+    Definition Exists In Project    ${pid}    WeatherApp::CLI::run                    Method
     Definition Exists In Project    ${pid}    WeatherApp::CLI::run                    SingletonMethod
 
 Ruby Project Code Graph Has Expected Containment Edges
@@ -69,9 +69,9 @@ Ruby Project Code Graph Has Expected Containment Edges
     Defines Edge Exists Between Definitions    ${pid}
     ...    WeatherApp                                  WeatherApp::CLI
     Defines Edge Exists Between Definitions    ${pid}
-    ...    WeatherApp::Forecast                        WeatherApp::Forecast#temperature_f
+    ...    WeatherApp::Forecast                        WeatherApp::Forecast::temperature_f
     Defines Edge Exists Between Definitions    ${pid}
-    ...    WeatherApp::CLI                             WeatherApp::CLI#run
+    ...    WeatherApp::CLI                             WeatherApp::CLI::run
     Defines Edge Exists Between File And Definition    ${pid}
     ...    lib/weather_app.rb                          WeatherApp
     Defines Edge Exists Between File And Definition    ${pid}
