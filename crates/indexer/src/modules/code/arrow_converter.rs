@@ -129,12 +129,15 @@ pub fn convert_code_graph(
     })
 }
 
-/// Ontology-driven specs for a node entity.
+/// Ontology-driven specs for a node entity, plus ClickHouse
+/// infrastructure columns (_version, _deleted) that aren't in
+/// the ontology but are required by the ReplacingMergeTree schema.
 fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
         .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
-    node.fields
+    let mut specs: Vec<ColumnSpec> = node
+        .fields
         .iter()
         .map(|f| ColumnSpec {
             name: f.name.clone(),
@@ -146,12 +149,23 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
             },
             nullable: f.nullable,
         })
-        .collect()
+        .collect();
+    specs.push(ColumnSpec {
+        name: "_version".into(),
+        col_type: ColumnType::TimestampMicros,
+        nullable: false,
+    });
+    specs.push(ColumnSpec {
+        name: "_deleted".into(),
+        col_type: ColumnType::Bool,
+        nullable: false,
+    });
+    specs
 }
 
-/// Ontology-driven specs for edges.
+/// Ontology-driven specs for edges, plus infrastructure columns.
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
-    ontology
+    let mut specs: Vec<ColumnSpec> = ontology
         .edge_columns()
         .iter()
         .map(|c| ColumnSpec {
@@ -164,7 +178,18 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
             },
             nullable: false,
         })
-        .collect()
+        .collect();
+    specs.push(ColumnSpec {
+        name: "_version".into(),
+        col_type: ColumnType::TimestampMicros,
+        nullable: false,
+    });
+    specs.push(ColumnSpec {
+        name: "_deleted".into(),
+        col_type: ColumnType::Bool,
+        nullable: false,
+    });
+    specs
 }
 
 /// Generic entity converter. Gets specs from the ontology, builds rows
