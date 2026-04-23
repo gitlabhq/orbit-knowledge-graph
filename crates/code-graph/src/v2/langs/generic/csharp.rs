@@ -69,9 +69,12 @@ mod tests {
                 code.as_bytes(),
                 "Test.cs",
                 crate::v2::config::Language::CSharp,
-                &Tracer::new(false)
+                &Tracer::new(false),
             )
-            .map(|r| crate::v2::dsl::engine::ParsedDefs { definitions: r.definitions, imports: r.imports })
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
             .unwrap()
     }
 

@@ -334,16 +334,24 @@ mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         JavaDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
                 "Test.java",
                 crate::v2::config::Language::Java,
-                &Tracer::new(false)
+                &Tracer::new(false),
             )
-            .map_err(|e| crate::v2::pipeline::PipelineError { file_path: "Test.java".to_string(), error: format!("Invalid UTF-8: {:?}", e) })
-            .map(|r| crate::v2::dsl::engine::ParsedDefs { definitions: r.definitions, imports: r.imports })
+            .map_err(|e| crate::v2::pipeline::PipelineError {
+                file_path: "Test.java".to_string(),
+                error: format!("Invalid UTF-8: {:?}", e),
+            })
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
     }
 
     #[test]
@@ -361,7 +369,8 @@ mod tests {
     #[test]
     fn package_scoping() {
         let result =
-            parse("package com.example;\n\npublic class Service {\n    public void run() {}\n}\n").unwrap();
+            parse("package com.example;\n\npublic class Service {\n    public void run() {}\n}\n")
+                .unwrap();
         let service = result
             .definitions
             .iter()
@@ -372,7 +381,8 @@ mod tests {
 
     #[test]
     fn super_types_extracted() {
-        let result = parse("public class Dog extends Animal implements Serializable {\n}\n").unwrap();
+        let result =
+            parse("public class Dog extends Animal implements Serializable {\n}\n").unwrap();
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("Dog should have metadata");
         assert!(!meta.super_types.is_empty());
@@ -380,7 +390,8 @@ mod tests {
 
     #[test]
     fn imports_extracted() {
-        let result = parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n").unwrap();
+        let result =
+            parse("import java.util.List;\nimport java.util.*;\n\npublic class Test {}\n").unwrap();
         assert!(result.imports.len() >= 2);
     }
 }

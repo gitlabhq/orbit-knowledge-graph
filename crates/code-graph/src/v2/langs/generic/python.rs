@@ -365,21 +365,30 @@ mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         PythonDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
                 "test.py",
                 crate::v2::config::Language::Python,
-                &Tracer::new(false)
+                &Tracer::new(false),
             )
-            .map(|r| crate::v2::dsl::engine::ParsedDefs { definitions: r.definitions, imports: r.imports })
-            .map_err(|e| crate::v2::pipeline::PipelineError { file_path: "test.py".to_string(), error: format!("Invalid UTF-8: {:?}", e) })
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
+            .map_err(|e| crate::v2::pipeline::PipelineError {
+                file_path: "test.py".to_string(),
+                error: format!("Invalid UTF-8: {:?}", e),
+            })
     }
 
     #[test]
     fn classes_and_methods() {
-        let result = parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n").unwrap();
+        let result =
+            parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n").unwrap();
 
         assert_eq!(result.definitions.len(), 2);
         assert_eq!(result.definitions[0].name, "Calculator");
@@ -420,7 +429,7 @@ mod tests {
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                &tracer
+                &tracer,
             )
             .unwrap();
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();

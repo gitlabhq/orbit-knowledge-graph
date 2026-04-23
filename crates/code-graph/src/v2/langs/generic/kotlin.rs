@@ -370,21 +370,30 @@ mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         KotlinDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
                 "Test.kt",
                 crate::v2::config::Language::Kotlin,
-                &Tracer::new(false)
+                &Tracer::new(false),
             )
-            .map(|r| crate::v2::dsl::engine::ParsedDefs { definitions: r.definitions, imports: r.imports })
-            .map_err(|e| crate::v2::pipeline::PipelineError { file_path: "Test.kt".to_string(), error: format!("Invalid UTF-8: {:?}", e) })
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
+            .map_err(|e| crate::v2::pipeline::PipelineError {
+                file_path: "Test.kt".to_string(),
+                error: format!("Invalid UTF-8: {:?}", e),
+            })
     }
 
     #[test]
     fn class_with_methods() {
-        let result = parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n").unwrap();
+        let result =
+            parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n").unwrap();
         assert_eq!(result.definitions.len(), 2);
         assert_eq!(result.definitions[0].name, "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
@@ -392,7 +401,8 @@ mod tests {
 
     #[test]
     fn package_scoping() {
-        let result = parse("package com.example\n\nclass Service {\n    fun run() {}\n}\n").unwrap();
+        let result =
+            parse("package com.example\n\nclass Service {\n    fun run() {}\n}\n").unwrap();
         let service = result
             .definitions
             .iter()

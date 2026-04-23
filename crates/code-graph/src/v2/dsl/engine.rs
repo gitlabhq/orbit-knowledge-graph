@@ -56,7 +56,6 @@ struct ScopeMatch {
 }
 
 impl LanguageSpec {
- 
     fn evaluate_scope(
         &self,
         node: &Node<StrDoc<SupportLang>>,
@@ -509,8 +508,11 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
     ) -> Result<ParseFullResult, crate::v2::pipeline::PipelineError> {
-        let source_str = std::str::from_utf8(source)
-            .map_err(|e| crate::v2::pipeline::PipelineError { file_path: file_path.to_string(), error: format!("Invalid UTF-8: {e}") })?;
+        let source_str =
+            std::str::from_utf8(source).map_err(|e| crate::v2::pipeline::PipelineError {
+                file_path: file_path.to_string(),
+                error: format!("Invalid UTF-8: {e}"),
+            })?;
 
         let ast = language.parse_ast(source_str);
         let root = ast.root();
@@ -670,7 +672,6 @@ impl LanguageSpec {
             unresolved_aliases,
         })
     }
-
 
     fn walk_full<'a>(
         &self,
@@ -1471,9 +1472,20 @@ mod tests {
     use treesitter_visit::extract::field;
     use treesitter_visit::predicate::*;
 
-    fn parse_with(spec: &LanguageSpec, code: &str) -> Result<ParsedDefs, crate::v2::pipeline::PipelineError> {
-        spec.parse_full_collect(code.as_bytes(), "test.py", Language::Python, &Tracer::new(false))
-            .map(|r| ParsedDefs { definitions: r.definitions, imports: r.imports })
+    fn parse_with(
+        spec: &LanguageSpec,
+        code: &str,
+    ) -> Result<ParsedDefs, crate::v2::pipeline::PipelineError> {
+        spec.parse_full_collect(
+            code.as_bytes(),
+            "test.py",
+            Language::Python,
+            &Tracer::new(false),
+        )
+        .map(|r| ParsedDefs {
+            definitions: r.definitions,
+            imports: r.imports,
+        })
     }
 
     #[test]
@@ -1515,7 +1527,7 @@ mod tests {
                 b"def foo(): pass\nfoo()",
                 "test.py",
                 Language::Python,
-                &tracer
+                &tracer,
             )
             .unwrap();
 
