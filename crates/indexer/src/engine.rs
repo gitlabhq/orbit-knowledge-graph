@@ -452,12 +452,13 @@ mod tests {
     use gkg_server_config::HandlerConfiguration;
 
     fn test_context() -> HandlerContext {
+        let nats: Arc<dyn crate::nats::NatsServices> = Arc::new(MockNatsServices::new());
         HandlerContext::new(
             Arc::new(MockDestination::new()),
-            Arc::new(MockNatsServices::new()),
+            nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
-            Arc::new(IndexingStatusStore::noop()),
+            Arc::new(IndexingStatusStore::new(nats)),
         )
     }
 

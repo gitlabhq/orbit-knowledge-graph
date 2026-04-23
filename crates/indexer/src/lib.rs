@@ -61,7 +61,7 @@ use gkg_server_config::{
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
-use indexing_status::IndexingStatusStore;
+use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
 use modules::namespace_deletion::{
@@ -121,9 +121,6 @@ impl Default for IndexerConfig {
 pub enum IndexerError {
     #[error("NATS connection failed: {0}")]
     NatsConnection(#[from] nats::NatsError),
-
-    #[error("Indexing status store failed: {0}")]
-    IndexingStatus(#[from] indexing_status::Error),
 
     #[error("ClickHouse connection failed: {0}")]
     ClickHouseConnection(#[from] destination::DestinationError),
@@ -191,16 +188,18 @@ pub async fn run(
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
-
-    info!("opening indexing status KV bucket");
-    let indexing_status = Arc::new(IndexingStatusStore::connect(&config.nats).await?);
+    broker
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await?;
 
     // Run the migration orchestrator before the engine starts consuming messages.
     // This ensures no in-flight NATS messages exist during the drain phase.
     let migration_metrics = metrics::MigrationMetrics::new();
-    let lock_service: Arc<dyn locking::LockService> = Arc::new(locking::NatsLockService::new(
-        Arc::new(nats::NatsServicesImpl::new(broker.clone())),
-    ));
+    let nats_services: Arc<dyn nats::NatsServices> =
+        Arc::new(nats::NatsServicesImpl::new(broker.clone()));
+    let lock_service: Arc<dyn locking::LockService> =
+        Arc::new(locking::NatsLockService::new(nats_services.clone()));
+    let indexing_status = Arc::new(IndexingStatusStore::new(nats_services));
     info!("running schema migration check");
     schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;

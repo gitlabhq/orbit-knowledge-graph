@@ -337,7 +337,9 @@ mod tests {
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
-                Arc::new(crate::indexing_status::IndexingStatusStore::noop()),
+                Arc::new(crate::indexing_status::IndexingStatusStore::new(
+                    self.mock_nats.clone(),
+                )),
             )
         }
 
