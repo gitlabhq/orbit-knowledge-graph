@@ -1,0 +1,11 @@
+[package]
+name = "gkg-observability"
+version.workspace = true
+edition = "2024"
+
+[lints]
+workspace = true
+
+[dependencies]
+opentelemetry = { workspace = true }
+serde = { workspace = true }
