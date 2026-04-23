@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayBuilder, ArrayRef, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array,
-    Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray,
-    StringBuilder, StructArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
-    UInt64Array,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Int8Array,
+    Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray,
+    StringArray, StringBuilder, StructArray, TimestampMicrosecondArray,
+    TimestampMicrosecondBuilder, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -285,6 +285,9 @@ impl ArrowUtils {
 pub enum ColumnType {
     Str,
     Int,
+    Bool,
+    /// Microsecond-precision UTC timestamp.
+    TimestampMicros,
 }
 
 /// Column definition for [`NodeBatch`] builder.
@@ -299,6 +302,8 @@ pub struct ColumnSpec {
 enum Col {
     Str(StringBuilder, bool),
     Int(Int64Builder, bool),
+    Bool(BooleanBuilder, bool),
+    Timestamp(TimestampMicrosecondBuilder, bool),
 }
 
 impl Col {
@@ -306,6 +311,8 @@ impl Col {
         match self {
             Self::Str(b, _) => b.len(),
             Self::Int(b, _) => b.len(),
+            Self::Bool(b, _) => b.len(),
+            Self::Timestamp(b, _) => b.len(),
         }
     }
 
@@ -313,6 +320,8 @@ impl Col {
         match self {
             Self::Str(..) => "Str",
             Self::Int(..) => "Int",
+            Self::Bool(..) => "Bool",
+            Self::Timestamp(..) => "Timestamp",
         }
     }
 
@@ -320,6 +329,12 @@ impl Col {
         match self {
             Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
             Self::Int(mut b, nullable) => (DataType::Int64, nullable, Arc::new(b.finish())),
+            Self::Bool(mut b, nullable) => (DataType::Boolean, nullable, Arc::new(b.finish())),
+            Self::Timestamp(mut b, nullable) => (
+                DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, Some("UTC".into())),
+                nullable,
+                Arc::new(b.finish().with_timezone("UTC")),
+            ),
         }
     }
 }
@@ -366,6 +381,34 @@ impl ColRef<'_> {
             }
             other => Err(batch_err(format!(
                 "push_int on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
+    pub fn push_bool(&mut self, v: bool) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::Bool(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_bool on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
+    pub fn push_timestamp_micros(&mut self, v: i64) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::Timestamp(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_timestamp_micros on {} column '{}'",
                 other.kind(),
                 self.name
             ))),
@@ -435,6 +478,11 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
+                ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
+                ColumnType::TimestampMicros => Col::Timestamp(
+                    TimestampMicrosecondBuilder::with_capacity(cap),
+                    spec.nullable,
+                ),
             };
             index.insert(spec.name.clone(), names.len());
             names.push(spec.name.clone());
