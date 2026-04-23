@@ -65,6 +65,33 @@ properties:
     nullable: true
     description: "Number of files changed in this diff."
 
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Project that owns the merge request this diff belongs to."
+
+  diff_type:
+    type: enum
+    source: diff_type
+    nullable: false
+    description: "Whether this diff represents the source branch (regular) or the merge-head state."
+    values:
+      1: regular
+      2: merge_head
+
+  real_size:
+    type: string
+    source: real_size
+    nullable: true
+    description: "Actual (non-truncated) diff size reported by Gitaly, as a stringified integer."
+
+  stored_externally:
+    type: boolean
+    source: stored_externally
+    nullable: false
+    description: "Whether the diff content is offloaded to external object storage."
+
   created_at:
     type: timestamp
     source: created_at
@@ -94,6 +121,10 @@ etl:
       to: MergeRequest
       as: HAS_DIFF
       direction: incoming
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
 
 storage:
   primary_key: [traversal_path, id]
@@ -106,6 +137,10 @@ storage:
     - {name: start_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: files_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: diff_type, type: "LowCardinality(String)", default: "'regular'", codec: ["LZ4"]}
+    - {name: real_size, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: stored_externally, type: "Bool", default: "false"}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}

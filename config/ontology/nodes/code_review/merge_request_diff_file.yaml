@@ -77,6 +77,24 @@ properties:
     nullable: true
     description: "Whether this is a binary file."
 
+  generated:
+    type: boolean
+    source: generated
+    nullable: true
+    description: "Whether this file is considered auto-generated (e.g. lockfiles, minified bundles)."
+
+  a_mode:
+    type: string
+    source: a_mode
+    nullable: false
+    description: "File mode before the change (Git mode bits, e.g. 100644)."
+
+  b_mode:
+    type: string
+    source: b_mode
+    nullable: false
+    description: "File mode after the change (Git mode bits, e.g. 100755)."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -94,7 +112,9 @@ etl:
     file.too_large AS too_large, file.new_path AS new_path,
     file.old_path AS old_path, file.new_file AS new_file,
     file.renamed_file AS renamed_file, file.deleted_file AS deleted_file,
-    file.binary AS binary, 
+    file.binary AS binary,
+    file.generated AS generated,
+    file.a_mode AS a_mode, file.b_mode AS b_mode,
     file.traversal_path AS traversal_path,
     file.relative_order AS relative_order
   from: >-
@@ -124,6 +144,9 @@ storage:
     - {name: renamed_file, type: "Bool", default: "false"}
     - {name: deleted_file, type: "Bool", default: "false"}
     - {name: binary, type: "Nullable(Bool)"}
+    - {name: generated, type: "Nullable(Bool)"}
+    - {name: a_mode, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: b_mode, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_too_large, column: too_large, type: "minmax", granularity: 1}

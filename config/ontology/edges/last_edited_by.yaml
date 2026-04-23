@@ -1,0 +1,8 @@
+# config/ontology/edges/last_edited_by.yaml
+
+description: User who most recently edited an entity's content (title/description)
+
+variants:
+  - from_node: { type: User, id: id }
+    to_node: { type: MergeRequest, id: id }
+    description: "User last edited merge request content."
