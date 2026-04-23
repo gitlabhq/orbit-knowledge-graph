@@ -1,5 +1,5 @@
 ---
-title: "GKG ADR 009: Evolving GetGraphStats into GetGraphStatus"
+title: "GKG ADR 010: Evolving GetGraphStats into GetGraphStatus"
 creation-date: "2026-04-21"
 authors: [ "@jgdoyon1" ]
 toc_hide: true
@@ -39,7 +39,7 @@ The GKG proto is the source of truth for the response schema. The Rails REST end
 
 Four phases, each a standalone MR.
 
-### Phase 1: Accurate counts with `uniq(id)`
+### Phase 1: Accurate counts, `source_type`, and project coverage
 
 The request includes a `scope` field so Rails tells GKG whether this is a group or project request. Rails already knows the scope from the request context, so there is no reason for GKG to spend extra ClickHouse queries looking it up:
 
@@ -76,6 +76,15 @@ The stats endpoint uses the same check. Before including a node type in the `UNI
 
 Entities the user cannot access at any path are excluded from the query entirely. A Reporter-only user sees zero Vulnerability rows in query results and zero Vulnerability counts in stats.
 
+#### Project coverage counts
+
+The response includes a `projects` object with `indexed` (how many projects have been code-indexed) and `total_known` (how many projects exist under the traversal path). These counts are pulled forward from Phase 3 into Phase 1 because they only require ClickHouse queries and are useful even without the indexing metadata from NATS KV.
+
+- `total_known`: `uniq(id)` on `gl_project`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`.
+- `indexed`: `uniq(project_id)` on `code_indexing_checkpoint`, filtered by `startsWith(traversal_path, ...)` and `_deleted = 0`. Namespace deletion soft-deletes checkpoint rows via `INSERT INTO ... SELECT` with `_deleted = true`.
+
+The entity count and project count queries run concurrently.
+
 ### Phase 2: Indexing progress via NATS KV
 
 The indexer writes indexing metadata to a NATS KV bucket (`indexing_progress`) after each run completes. Each key maps to a project or namespace:
@@ -100,9 +109,7 @@ message GetGraphStatusRequest {
 }
 ```
 
-The response is flat: indexing metadata at the top level, a `projects` object, then `stats` (entity counts by ontology domain). Same fields regardless of scope.
-
-The `projects` counts use `startsWith(traversal_path, ...)` on both `gl_project` (for `total_known`) and `code_indexing_checkpoint` (for `indexed`). Both tables are ordered by `traversal_path`, so prefix filtering is efficient.
+The response is flat: indexing metadata at the top level, a `projects` object (already shipped in Phase 1), then `stats` (entity counts by ontology domain). Same fields regardless of scope.
 
 ### Phase 4: Response caching via NATS KV
 

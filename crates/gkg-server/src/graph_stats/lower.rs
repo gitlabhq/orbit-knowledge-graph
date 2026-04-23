@@ -1,8 +1,8 @@
 use query_engine::compiler::{Expr, Node, Query, SelectExpr, TableRef};
 
-use super::input::{GraphStatsInput, NodeStatsTarget};
+use super::input::{GraphStatsInput, NodeTable, ProjectTables};
 
-pub fn lower(input: &GraphStatsInput) -> Node {
+pub fn lower_entity_counts(input: &GraphStatsInput) -> Node {
     let mut queries = input
         .nodes
         .iter()
@@ -14,12 +14,64 @@ pub fn lower(input: &GraphStatsInput) -> Node {
     Node::Query(Box::new(first))
 }
 
-fn build_node_query(node: &NodeStatsTarget, traversal_path: &str) -> Query {
+pub fn lower_projects(tables: &ProjectTables, traversal_path: &str) -> Node {
+    let total_known = build_projects_query("total_known", &tables.project, "id", traversal_path);
+
+    let mut indexed = build_projects_query(
+        "indexed",
+        &tables.code_checkpoint,
+        "project_id",
+        traversal_path,
+    );
+
+    indexed.union_all = vec![total_known];
+
+    Node::Query(Box::new(indexed))
+}
+
+fn build_projects_query(
+    label: &str,
+    table: &str,
+    count_column: &str,
+    traversal_path: &str,
+) -> Query {
+    let alias = "t";
+
+    let select = vec![
+        SelectExpr::new(Expr::string(label), "metric"),
+        SelectExpr::new(
+            Expr::func("uniq", vec![Expr::col(alias, count_column)]),
+            "cnt",
+        ),
+    ];
+
+    let from = TableRef::scan(table, alias);
+
+    let where_clause = Expr::and(
+        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, "traversal_path"),
+                Expr::string(traversal_path),
+            ],
+        ),
+    );
+
+    Query {
+        select,
+        from,
+        where_clause: Some(where_clause),
+        ..Default::default()
+    }
+}
+
+fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
     let alias = "t";
 
     let select = vec![
         SelectExpr::new(Expr::string(&node.name), "entity"),
-        SelectExpr::new(Expr::func("count", vec![]), "cnt"),
+        SelectExpr::new(Expr::func("uniq", vec![Expr::col(alias, "id")]), "cnt"),
     ];
 
     let from = TableRef::scan(&node.table, alias);
@@ -48,46 +100,54 @@ mod tests {
 
     use super::*;
 
+    fn test_tables() -> ProjectTables {
+        ProjectTables {
+            project: "v1_gl_project".to_string(),
+            code_checkpoint: "v1_code_indexing_checkpoint".to_string(),
+        }
+    }
+
     fn test_input() -> GraphStatsInput {
         GraphStatsInput {
             traversal_path: "1/2/".to_string(),
             nodes: vec![
-                NodeStatsTarget {
+                NodeTable {
                     name: "Project".to_string(),
-                    table: "gl_project".to_string(),
+                    table: "v1_gl_project".to_string(),
                 },
-                NodeStatsTarget {
+                NodeTable {
                     name: "Group".to_string(),
-                    table: "gl_group".to_string(),
+                    table: "v1_gl_group".to_string(),
                 },
-                NodeStatsTarget {
+                NodeTable {
                     name: "MergeRequest".to_string(),
-                    table: "gl_merge_request".to_string(),
+                    table: "v1_gl_merge_request".to_string(),
                 },
             ],
+            project_tables: test_tables(),
         }
     }
 
     #[test]
-    fn lower_produces_union_all() {
+    fn entity_counts_produces_union_all() {
         let input = test_input();
-        let ast = lower(&input);
+        let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
         assert!(result.sql.contains("UNION ALL"), "SQL: {}", result.sql);
-        assert!(result.sql.contains("gl_project"), "SQL: {}", result.sql);
-        assert!(result.sql.contains("gl_group"), "SQL: {}", result.sql);
+        assert!(result.sql.contains("v1_gl_project"), "SQL: {}", result.sql);
+        assert!(result.sql.contains("v1_gl_group"), "SQL: {}", result.sql);
         assert!(
-            result.sql.contains("gl_merge_request"),
+            result.sql.contains("v1_gl_merge_request"),
             "SQL: {}",
             result.sql
         );
     }
 
     #[test]
-    fn every_subquery_has_starts_with_filter() {
+    fn entity_counts_has_starts_with_filter() {
         let input = test_input();
-        let ast = lower(&input);
+        let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
         let starts_with_count = result.sql.matches("startsWith").count();
@@ -100,9 +160,29 @@ mod tests {
     }
 
     #[test]
-    fn every_subquery_has_deleted_filter() {
+    fn entity_counts_uses_uniq_id() {
         let input = test_input();
-        let ast = lower(&input);
+        let ast = lower_entity_counts(&input);
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        let uniq_count = result.sql.matches("uniq(").count();
+        assert_eq!(
+            uniq_count,
+            input.nodes.len(),
+            "Each subquery should use uniq(id). SQL: {}",
+            result.sql
+        );
+        assert!(
+            !result.sql.contains("count()"),
+            "Should not use count(). SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn entity_counts_has_deleted_filter() {
+        let input = test_input();
+        let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
         let deleted_count = result.sql.matches("_deleted").count();
@@ -110,6 +190,46 @@ mod tests {
             deleted_count,
             input.nodes.len(),
             "Each subquery should have _deleted filter. SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn projects_query_includes_both_tables() {
+        let tables = test_tables();
+        let ast = lower_projects(&tables, "1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        assert!(result.sql.contains(&tables.project), "SQL: {}", result.sql);
+        assert!(
+            result.sql.contains(&tables.code_checkpoint),
+            "SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn projects_query_uses_uniq() {
+        let ast = lower_projects(&test_tables(), "1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        assert_eq!(
+            result.sql.matches("uniq(").count(),
+            2,
+            "Should have two uniq() calls. SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn projects_query_filters_deleted_on_both_tables() {
+        let ast = lower_projects(&test_tables(), "1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        assert_eq!(
+            result.sql.matches("_deleted").count(),
+            2,
+            "Both subqueries should have _deleted filter. SQL: {}",
             result.sql
         );
     }
