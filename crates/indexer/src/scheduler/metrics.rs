@@ -1,5 +1,4 @@
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
 use gkg_observability::indexer::scheduler;
@@ -16,7 +15,7 @@ pub struct ScheduledTaskMetrics {
 
 impl ScheduledTaskMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 

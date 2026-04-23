@@ -2,7 +2,6 @@ use std::sync::LazyLock;
 use std::time::Instant;
 
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
 use gkg_observability::server::content;
@@ -19,7 +18,7 @@ struct ContentResolutionMetrics {
 
 impl ContentResolutionMetrics {
     fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             resolve_duration: content::RESOLVE_DURATION.build_histogram_f64(&meter),
             resolve_total: content::RESOLVE_TOTAL.build_counter_u64(&meter),

@@ -1,6 +1,5 @@
 use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
 use gkg_observability::indexer::sdlc;
@@ -19,7 +18,7 @@ pub struct SdlcMetrics {
 
 impl SdlcMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 

@@ -48,6 +48,138 @@ pub enum Stability {
 }
 
 impl MetricSpec {
+    /// Build a non-histogram spec with the given kind. Histograms must go
+    /// through [`histogram_f64`](Self::histogram_f64) or
+    /// [`histogram_u64`](Self::histogram_u64) because they require a bucket
+    /// set.
+    const fn instrument(
+        otel_name: &'static str,
+        description: &'static str,
+        kind: MetricKind,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        domain: &'static str,
+    ) -> Self {
+        Self {
+            otel_name,
+            description,
+            kind,
+            unit,
+            labels,
+            buckets: None,
+            stability: Stability::Stable,
+            domain,
+        }
+    }
+
+    pub const fn counter(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        domain: &'static str,
+    ) -> Self {
+        Self::instrument(
+            otel_name,
+            description,
+            MetricKind::Counter,
+            unit,
+            labels,
+            domain,
+        )
+    }
+
+    pub const fn up_down_counter(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        domain: &'static str,
+    ) -> Self {
+        Self::instrument(
+            otel_name,
+            description,
+            MetricKind::UpDownCounter,
+            unit,
+            labels,
+            domain,
+        )
+    }
+
+    pub const fn gauge(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        domain: &'static str,
+    ) -> Self {
+        Self::instrument(
+            otel_name,
+            description,
+            MetricKind::Gauge,
+            unit,
+            labels,
+            domain,
+        )
+    }
+
+    pub const fn observable_gauge(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        domain: &'static str,
+    ) -> Self {
+        Self::instrument(
+            otel_name,
+            description,
+            MetricKind::ObservableGauge,
+            unit,
+            labels,
+            domain,
+        )
+    }
+
+    pub const fn histogram_f64(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        buckets: &'static [f64],
+        domain: &'static str,
+    ) -> Self {
+        Self {
+            otel_name,
+            description,
+            kind: MetricKind::HistogramF64,
+            unit,
+            labels,
+            buckets: Some(buckets),
+            stability: Stability::Stable,
+            domain,
+        }
+    }
+
+    pub const fn histogram_u64(
+        otel_name: &'static str,
+        description: &'static str,
+        unit: Option<&'static str>,
+        labels: &'static [&'static str],
+        buckets: &'static [f64],
+        domain: &'static str,
+    ) -> Self {
+        Self {
+            otel_name,
+            description,
+            kind: MetricKind::HistogramU64,
+            unit,
+            labels,
+            buckets: Some(buckets),
+            stability: Stability::Stable,
+            domain,
+        }
+    }
+
     /// Prometheus-exposed metric name that `opentelemetry-prometheus` would
     /// produce for this spec.
     ///

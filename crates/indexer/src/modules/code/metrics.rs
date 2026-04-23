@@ -1,5 +1,4 @@
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
 use gkg_observability::indexer::code;
@@ -22,7 +21,7 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 

@@ -4,7 +4,7 @@
 //! the OTel names were hand-shaped in Prometheus style. The OTel names here
 //! drop the `_total` suffix so the exporter can append it exactly once.
 
-use crate::{MetricKind, MetricSpec, Stability};
+use crate::MetricSpec;
 
 pub mod labels {
     pub const PHASE: &str = "phase";
@@ -14,37 +14,28 @@ pub mod labels {
 
 const DOMAIN: &str = "indexer.migration";
 
-pub const PHASE: MetricSpec = MetricSpec {
-    otel_name: "gkg.schema.migration.phase",
-    description: "Total schema migration phase executions, labelled by phase and result.",
-    kind: MetricKind::Counter,
-    unit: None,
-    labels: &[labels::PHASE, labels::RESULT],
-    buckets: None,
-    stability: Stability::Stable,
-    domain: DOMAIN,
-};
+pub const PHASE: MetricSpec = MetricSpec::counter(
+    "gkg.schema.migration.phase",
+    "Total schema migration phase executions, labelled by phase and result.",
+    None,
+    &[labels::PHASE, labels::RESULT],
+    DOMAIN,
+);
 
-pub const COMPLETED: MetricSpec = MetricSpec {
-    otel_name: "gkg.schema.migration.completed",
-    description: "Total successful schema migration completions.",
-    kind: MetricKind::Counter,
-    unit: None,
-    labels: &[],
-    buckets: None,
-    stability: Stability::Stable,
-    domain: DOMAIN,
-};
+pub const COMPLETED: MetricSpec = MetricSpec::counter(
+    "gkg.schema.migration.completed",
+    "Total successful schema migration completions.",
+    None,
+    &[],
+    DOMAIN,
+);
 
-pub const CLEANUP: MetricSpec = MetricSpec {
-    otel_name: "gkg.schema.cleanup",
-    description: "Schema table cleanup operations, labelled by version band and result.",
-    kind: MetricKind::Counter,
-    unit: None,
-    labels: &[labels::VERSION_BAND, labels::RESULT],
-    buckets: None,
-    stability: Stability::Stable,
-    domain: DOMAIN,
-};
+pub const CLEANUP: MetricSpec = MetricSpec::counter(
+    "gkg.schema.cleanup",
+    "Schema table cleanup operations, labelled by version band and result.",
+    None,
+    &[labels::VERSION_BAND, labels::RESULT],
+    DOMAIN,
+);
 
 pub const CATALOG: &[&MetricSpec] = &[&PHASE, &COMPLETED, &CLEANUP];

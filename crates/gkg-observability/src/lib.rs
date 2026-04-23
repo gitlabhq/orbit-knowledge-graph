@@ -19,6 +19,14 @@ mod types;
 
 pub use types::{MetricKind, MetricSpec, Stability};
 
+/// Shared OTel meter name for every instrument built from this catalog.
+///
+/// Returning the same `Meter` instance means every `Metrics::new()` across
+/// the workspace reports under a single instrumentation scope.
+pub fn meter() -> opentelemetry::metrics::Meter {
+    opentelemetry::global::meter("gkg")
+}
+
 /// Flat catalog of every `MetricSpec` emitted by the service.
 ///
 /// The order is deterministic: modules are concatenated in a fixed order and

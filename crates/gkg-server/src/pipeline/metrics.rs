@@ -2,7 +2,6 @@ use std::sync::LazyLock;
 use std::time::{Duration, Instant};
 
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
 use gkg_observability::query::pipeline as spec;
@@ -32,7 +31,7 @@ struct QueryPipelineMetrics {
 
 impl QueryPipelineMetrics {
     fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             queries: spec::QUERIES.build_counter_u64(&meter),
             compile_duration: spec::COMPILE_DURATION.build_histogram_f64(&meter),

@@ -15,7 +15,6 @@
 use std::sync::LazyLock;
 
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::Counter;
 
 use gkg_observability::query::engine as spec;
@@ -38,7 +37,7 @@ pub struct QueryEngineMetrics {
 
 impl QueryEngineMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             validation_failed: spec::THREAT_VALIDATION_FAILED.build_counter_u64(&meter),
             allowlist_rejected: spec::THREAT_ALLOWLIST_REJECTED.build_counter_u64(&meter),

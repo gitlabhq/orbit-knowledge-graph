@@ -5,7 +5,6 @@ use std::time::Duration;
 use clickhouse_client::ArrowClickHouseClient;
 use indexer::schema::version::read_active_version;
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 use tracing::{error, info, warn};
@@ -154,7 +153,7 @@ fn transition(state: &Arc<AtomicU8>, next: SchemaState) {
 
 fn register_state_gauge(state: Arc<AtomicU8>) {
     use gkg_observability::server::schema_watcher as spec;
-    let meter = global::meter("gkg");
+    let meter = gkg_observability::meter();
     spec::STATE.build_observable_gauge_i64(&meter, move |observer| {
         let raw = state.load(Ordering::Relaxed);
         for s in [

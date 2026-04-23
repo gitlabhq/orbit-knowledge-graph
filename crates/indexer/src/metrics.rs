@@ -11,7 +11,6 @@
 //! `opentelemetry::global::set_meter_provider()`.
 
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
 
 use gkg_observability::indexer::etl;
@@ -36,7 +35,7 @@ pub struct EngineMetrics {
 
 impl EngineMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 
@@ -125,7 +124,7 @@ pub struct MigrationMetrics {
 
 impl MigrationMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             phase: migration::PHASE.build_counter_u64(&meter),
         }
@@ -163,7 +162,7 @@ pub struct CompletionMetrics {
 
 impl CompletionMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             migration_completed: migration::COMPLETED.build_counter_u64(&meter),
             cleanup: migration::CLEANUP.build_counter_u64(&meter),

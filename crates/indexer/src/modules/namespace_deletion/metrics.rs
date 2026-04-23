@@ -1,5 +1,4 @@
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
 use gkg_observability::indexer::deletion;
@@ -12,7 +11,7 @@ pub struct DeletionMetrics {
 
 impl DeletionMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg");
+        let meter = gkg_observability::meter();
         Self {
             table_deletion_duration: deletion::TABLE_DELETION_DURATION.build_histogram_f64(&meter),
             table_deletion_errors: deletion::TABLE_DELETION_ERRORS.build_counter_u64(&meter),
