@@ -288,6 +288,7 @@ These settings are used by the Webserver mode.
 | `grpc.stream_window_size` | `1048576` (1 MB) | HTTP/2 stream flow control window |
 | `grpc.concurrency_limit` | `256` | Max concurrent requests |
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
+| `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 
 ### Query settings

@@ -95,6 +95,7 @@ grpc:
   stream_window_size: 1048576       # 1MB
   concurrency_limit: 256
   max_connection_age_secs: 300      # 5 min, for L4 ILB rebalancing
+  max_connection_age_grace_secs: 30 # graceful drain window; paired with max_connection_age_secs to avoid tonic 0.14.5 panic (hyperium/tonic#2522)
   stream_timeout_secs: 60
 
 query:
