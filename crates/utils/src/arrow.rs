@@ -514,6 +514,20 @@ impl BatchBuilder {
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
 /// ```
+/// Trait for row envelope columns that surround entity-specific data.
+/// Each consumer (DuckDB, ClickHouse) implements this with their own
+/// header columns (id, project_id, branch, traversal_path, _version, etc).
+///
+/// Row types call `ctx.write_header(b, id)` to emit the envelope,
+/// then write their own entity columns.
+pub trait RowEnvelope {
+    /// Write envelope columns for a node row.
+    fn write_header(&self, b: &mut BatchBuilder, id: i64) -> BatchResult<()>;
+
+    /// Column specs for the envelope (prepended to entity specs).
+    fn header_specs(&self) -> Vec<ColumnSpec>;
+}
+
 pub trait AsRecordBatch<Ctx = ()>: Sized {
     /// Whether this item should be included in the batch.
     /// Default: always include.
