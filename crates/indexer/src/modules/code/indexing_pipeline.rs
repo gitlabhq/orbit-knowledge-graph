@@ -6,12 +6,12 @@ use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
 use tracing::{debug, info, warn};
 
+use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
-use super::v2_converter::{self, IndexerEnvelope};
 use crate::handler::{HandlerContext, HandlerError};
 use opentelemetry::KeyValue;
 
@@ -253,11 +253,11 @@ impl CodeIndexingPipeline {
             self.metrics
                 .record_files_processed(graph.files().count() as u64, "parsed");
 
-            let converted = v2_converter::convert_code_graph(graph, &envelope)
+            let converted = arrow_converter::convert_code_graph(graph, &envelope)
                 .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
                 .record_error_stage(&self.metrics, "arrow_conversion")?;
 
-            self.write_v2_data(context, &converted).await?;
+            self.write_data(context, &converted).await?;
         }
 
         if let Err(error) = self
@@ -276,10 +276,10 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    async fn write_v2_data(
+    async fn write_data(
         &self,
         ctx: &HandlerContext,
-        data: &v2_converter::ConvertedV2Data,
+        data: &arrow_converter::ConvertedGraphData,
     ) -> Result<(), HandlerError> {
         self.write_batch(ctx, &self.table_names.branch, &data.branch)
             .await?;

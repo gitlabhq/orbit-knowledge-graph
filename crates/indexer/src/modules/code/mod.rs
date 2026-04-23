@@ -19,7 +19,6 @@ mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
 mod test_helpers;
-pub(crate) mod v2_converter;
 
 use std::sync::Arc;
 
