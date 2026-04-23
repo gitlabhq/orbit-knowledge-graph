@@ -3,7 +3,7 @@ use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use clickhouse_client::ArrowClickHouseClient;
-use indexer::schema::version::read_active_version;
+use indexer::schema::version::{read_active_version, read_all_versions};
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use tokio::time::sleep;
@@ -122,22 +122,49 @@ async fn poll_once(
     embedded_version: u32,
     state: &Arc<AtomicU8>,
 ) -> (SchemaState, Option<u32>) {
-    match read_active_version(graph).await {
-        Ok(Some(active)) => (classify(active, embedded_version), Some(active)),
-        Ok(None) => (SchemaState::Pending, None),
+    let active = match read_active_version(graph).await {
+        Ok(v) => v,
         Err(e) => {
             warn!(error = %e, "failed to read active schema version — keeping previous state");
-            (SchemaState::from_raw(state.load(Ordering::Relaxed)), None)
+            return (SchemaState::from_raw(state.load(Ordering::Relaxed)), None);
+        }
+    };
+
+    // If our version is the active one, we're ready (common case).
+    if active == Some(embedded_version) {
+        return (SchemaState::Ready, active);
+    }
+
+    // If active is ahead of us, check whether our tables still exist
+    // (retained from a previous migration). This enables emergency
+    // rollback: deploy an older binary and it serves from its own tables
+    // without requiring manual gkg_schema_version changes.
+    if let Some(active_v) = active {
+        if active_v > embedded_version {
+            match version_exists(graph, embedded_version).await {
+                true => {
+                    info!(
+                        embedded_version,
+                        active_version = active_v,
+                        "active version is ahead but our tables still exist — serving in rollback mode"
+                    );
+                    return (SchemaState::Ready, active);
+                }
+                false => return (SchemaState::Outdated, active),
+            }
         }
     }
+
+    // Active is behind us — migration hasn't promoted yet.
+    (SchemaState::Pending, active)
 }
 
-fn classify(active: u32, embedded: u32) -> SchemaState {
-    use std::cmp::Ordering::*;
-    match active.cmp(&embedded) {
-        Equal => SchemaState::Ready,
-        Less => SchemaState::Pending,
-        Greater => SchemaState::Outdated,
+/// Check if a version's tables exist by looking for it in gkg_schema_version
+/// with any status (active, migrating, or retired — all mean tables exist).
+async fn version_exists(graph: &ArrowClickHouseClient, version: u32) -> bool {
+    match read_all_versions(graph).await {
+        Ok(entries) => entries.iter().any(|e| e.version == version),
+        Err(_) => false,
     }
 }
 
@@ -176,21 +203,6 @@ fn register_state_gauge(state: Arc<AtomicU8>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn classify_equal_is_ready() {
-        assert_eq!(classify(2, 2), SchemaState::Ready);
-    }
-
-    #[test]
-    fn classify_active_lower_is_pending() {
-        assert_eq!(classify(1, 2), SchemaState::Pending);
-    }
-
-    #[test]
-    fn classify_active_higher_is_outdated() {
-        assert_eq!(classify(3, 2), SchemaState::Outdated);
-    }
 
     #[test]
     fn from_raw_round_trip() {
