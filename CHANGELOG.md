@@ -1,3 +1,24 @@
+## [0.30.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.29.1...v0.30.0) (2026-04-23)
+
+### Features
+
+* **graph-stats:** add source_type, project coverage and replace count() with uniq(id) for graph stats ([afc2885](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afc2885169db68983c66b26eecf0b7036120a034)) by Jean-Gabriel Doyon
+* **ontology:** activate gl_code_edge table for code-domain edges ([db8f638](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/db8f638a6275093445a4d64cdf6ad83e7eabdf18)) by Michael Usachenko
+* **ontology:** add Deployment and Environment nodes ([6260ba1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6260ba133b2c46989dff6b6dee9c61b83382d1af)) by Jean-Gabriel Doyon
+* **ontology:** add disabled diff and patch virtual fields for MR resolvers ([491eae8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/491eae80c4eeb30fee513dffd61222f3ca890160)) by Jean-Gabriel Doyon
+* **ontology:** expand merge request entities coverage + note st_diff ([9262ccb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9262ccb8e9420daa5aa29e056f0d641069da68e4)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **ci:** stop triggering code-indexing benchmarks on ontology YAML changes ([13c8df0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13c8df0c34fcae68c884f1b60d80c2f0b0508f47)) by Jean-Gabriel Doyon
+* **compiler:** reject aggregation on globally-scoped entities ([13abdd2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13abdd2d96ce8582cda2eac5cbec50a0b00bbaa2)) by Michael Angelo Rivera
+* **ontology:** expose query dsl schema via cli for use by agents ([ea01604](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ea0160497876e022e38fb83281419db4826e4c5a)) by Michael Usachenko
+
+### Other
+
+* add ADR 009 for evolving GetGraphStats into GetGraphStatus ([b2c6fdb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2c6fdb65cee3cc375fa45bc3e84d14ed8a33a60)) by Jean-Gabriel Doyon
+* **graph-status:** rename GetGraphStats to GetGraphStatus ([345099b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/345099b74344a061cf8631dd421f738c4d114bda)) by Jean-Gabriel Doyon
+
 ## [0.29.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.29.0...v0.29.1) (2026-04-22)
 
 ### Fixes
