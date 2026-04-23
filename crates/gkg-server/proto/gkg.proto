@@ -281,14 +281,27 @@ message ReplicaStatus {
 // GetGraphStats — unary, returns entity counts grouped by domain
 // ---------------------------------------------------------------------------
 
+enum SourceType {
+  SOURCE_TYPE_GROUP = 0;
+  SOURCE_TYPE_PROJECT = 1;
+}
+
 // Request for graph entity counts scoped by traversal_path prefix.
 message GetGraphStatsRequest {
   string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
+  SourceType source_type = 2;
 }
 
-// Response containing entity counts grouped by domain.
+// Response containing project coverage and entity counts grouped by domain.
 message GetGraphStatsResponse {
-  repeated GraphStatsDomain domains = 1;
+  ProjectsStatus projects = 1;
+  repeated GraphStatsDomain domains = 2;
+}
+
+// How many projects under this scope have been code-indexed.
+message ProjectsStatus {
+  int64 indexed = 1;
+  int64 total_known = 2;
 }
 
 // Entity counts for a single domain (e.g. "ci", "core", "plan").

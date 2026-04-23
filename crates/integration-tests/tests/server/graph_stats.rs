@@ -31,6 +31,14 @@ async fn setup(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) VALUES
+         ('1/100/1000/', 1000, 'main', 1, now()),
+         ('1/101/1001/', 1001, 'main', 2, now())",
+        t("code_indexing_checkpoint")
+    ))
+    .await;
+
+    ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 2, 'Fix bug B', 'opened', 'fix-b', 'main', '1/101/1001/')",
@@ -78,6 +86,8 @@ async fn graph_stats() {
         empty_traversal_path_rejected,
         non_matching_traversal_path_returns_zeros,
         all_domains_present_in_response,
+        projects_status_at_root,
+        projects_status_scoped_by_traversal_path,
     );
 }
 
@@ -142,4 +152,25 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
             "missing domain: {expected}"
         );
     }
+}
+
+async fn projects_status_at_root(ctx: &TestContext) {
+    let service = build_service(ctx);
+    let response = service.get_stats("1/").await.expect("should succeed");
+
+    let projects = response.projects.expect("projects should be present");
+    assert_eq!(projects.total_known, 3, "3 projects under 1/");
+    assert_eq!(projects.indexed, 2, "2 projects with checkpoints");
+}
+
+async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
+    let service = build_service(ctx);
+    let response = service.get_stats("1/100/").await.expect("should succeed");
+
+    let projects = response.projects.expect("projects should be present");
+    assert_eq!(projects.total_known, 2, "2 projects under 1/100/");
+    assert_eq!(
+        projects.indexed, 1,
+        "1 project with checkpoint under 1/100/"
+    );
 }
