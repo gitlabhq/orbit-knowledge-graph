@@ -193,6 +193,8 @@ pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
     pub cancel: CancellationToken,
+    /// Rayon threads per language. 0 = use all available cores.
+    pub worker_threads: usize,
 }
 
 impl Default for PipelineConfig {
@@ -201,6 +203,7 @@ impl Default for PipelineConfig {
             max_file_size: 1_000_000,
             respect_gitignore: true,
             cancel: CancellationToken::new(),
+            worker_threads: 0,
         }
     }
 }
@@ -306,14 +309,23 @@ impl Pipeline {
                     }
                 });
 
-                // CPU thread: parse + resolve, stream batches at phase boundaries
+                // CPU thread: build per-language rayon pool, parse + resolve,
+                // stream batches at phase boundaries
+                let worker_threads = ctx.config.worker_threads;
                 s.spawn(move || {
                     if ctx.is_cancelled() {
                         return;
                     }
                     let file_count = files.len();
-                    eprintln!("[v2] processing {language}: {file_count} files");
                     let t_lang = std::time::Instant::now();
+
+                    let mut pool_builder = rayon::ThreadPoolBuilder::new();
+                    if worker_threads > 0 {
+                        pool_builder = pool_builder.num_threads(worker_threads);
+                    }
+                    let pool = pool_builder
+                        .build()
+                        .expect("failed to build per-language rayon pool");
 
                     let btx = BatchTx {
                         tx: &tx,
@@ -323,7 +335,16 @@ impl Pipeline {
                         edges: edges_count,
                     };
 
-                    match crate::v2::registry::dispatch_language(*language, files, ctx, &btx) {
+                    eprintln!(
+                        "[v2] processing {language}: {file_count} files ({} threads)",
+                        pool.current_num_threads()
+                    );
+
+                    let result = pool.install(|| {
+                        crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                    });
+
+                    match result {
                         Some(Ok(())) => {
                             eprintln!("[v2] {language}: done in {:.2?}", t_lang.elapsed());
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);

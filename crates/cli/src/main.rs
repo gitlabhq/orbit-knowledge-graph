@@ -749,6 +749,7 @@ async fn index_repo_v2(
     let pipeline_config = code_graph::v2::PipelineConfig {
         max_file_size: config.max_file_size as u64,
         respect_gitignore: config.respect_gitignore,
+        worker_threads: config.worker_threads,
         ..Default::default()
     };
     let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -786,29 +787,13 @@ async fn index_repo_v2(
     let sink: std::sync::Arc<dyn code_graph::v2::BatchSink> =
         std::sync::Arc::new(duckdb_client::DuckDbSink::new(client));
 
-    let v2_result = if config.worker_threads > 0 {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(config.worker_threads)
-            .build()
-            .context("failed to build thread pool")?;
-        pool.install(|| {
-            code_graph::v2::Pipeline::run_with_tracer(
-                std::path::Path::new(&root_path),
-                pipeline_config,
-                tracer,
-                converter.clone(),
-                sink.clone(),
-            )
-        })
-    } else {
-        code_graph::v2::Pipeline::run_with_tracer(
-            std::path::Path::new(&root_path),
-            pipeline_config,
-            tracer,
-            converter,
-            sink,
-        )
-    };
+    let v2_result = code_graph::v2::Pipeline::run_with_tracer(
+        std::path::Path::new(&root_path),
+        pipeline_config,
+        tracer,
+        converter,
+        sink,
+    );
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {
