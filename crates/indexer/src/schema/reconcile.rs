@@ -237,36 +237,26 @@ async fn query_columns(
     client: &ArrowClickHouseClient,
     table: &str,
 ) -> Result<Vec<LiveColumn>, ReconcileError> {
-    use arrow::array::AsArray;
+    use arrow::array::StringArray;
+    use gkg_utils::arrow::ArrowUtils;
 
-    let sql = format!(
-        "SELECT name, type, default_expression, codec_expression \
-         FROM system.columns WHERE table = '{table}'"
-    );
     let batches = client
-        .query(&sql)
+        .query(&format!(
+            "SELECT name, type, default_expression, codec_expression \
+             FROM system.columns WHERE table = '{table}'"
+        ))
         .fetch_arrow()
         .await
         .map_err(|e| ReconcileError(format!("querying system.columns for {table}: {e}")))?;
 
     let mut cols = Vec::new();
     for batch in &batches {
-        let names = batch
-            .column_by_name("name")
-            .expect("name")
-            .as_string::<i32>();
-        let types = batch
-            .column_by_name("type")
-            .expect("type")
-            .as_string::<i32>();
-        let defaults = batch
-            .column_by_name("default_expression")
-            .expect("default_expression")
-            .as_string::<i32>();
-        let codecs = batch
-            .column_by_name("codec_expression")
-            .expect("codec_expression")
-            .as_string::<i32>();
+        let names: &StringArray = ArrowUtils::get_column_by_name(batch, "name").expect("name");
+        let types: &StringArray = ArrowUtils::get_column_by_name(batch, "type").expect("type");
+        let defaults: &StringArray = ArrowUtils::get_column_by_name(batch, "default_expression")
+            .expect("default_expression");
+        let codecs: &StringArray =
+            ArrowUtils::get_column_by_name(batch, "codec_expression").expect("codec_expression");
 
         for i in 0..batch.num_rows() {
             cols.push(LiveColumn {
@@ -289,7 +279,8 @@ async fn query_names(
     system_table: &str,
     table: &str,
 ) -> Result<HashSet<String>, ReconcileError> {
-    use arrow::array::AsArray;
+    use arrow::array::StringArray;
+    use gkg_utils::arrow::ArrowUtils;
 
     let batches = client
         .query(&format!(
@@ -301,10 +292,7 @@ async fn query_names(
 
     let mut names = HashSet::new();
     for batch in &batches {
-        let arr = batch
-            .column_by_name("name")
-            .expect("name")
-            .as_string::<i32>();
+        let arr: &StringArray = ArrowUtils::get_column_by_name(batch, "name").expect("name column");
         for i in 0..arr.len() {
             names.insert(arr.value(i).to_string());
         }
