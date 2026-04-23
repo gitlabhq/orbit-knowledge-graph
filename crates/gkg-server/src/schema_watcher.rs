@@ -153,24 +153,19 @@ fn transition(state: &Arc<AtomicU8>, next: SchemaState) {
 }
 
 fn register_state_gauge(state: Arc<AtomicU8>) {
-    let meter = global::meter("gkg_webserver_schema");
-    meter
-        .i64_observable_gauge("gkg.webserver.schema.state")
-        .with_description(
-            "Webserver readiness gate state; 1 indicates the active state per `state` label",
-        )
-        .with_callback(move |observer| {
-            let raw = state.load(Ordering::Relaxed);
-            for s in [
-                SchemaState::Pending,
-                SchemaState::Ready,
-                SchemaState::Outdated,
-            ] {
-                let value = i64::from(s as u8 == raw);
-                observer.observe(value, &[KeyValue::new("state", s.as_label())]);
-            }
-        })
-        .build();
+    use gkg_observability::server::schema_watcher as spec;
+    let meter = global::meter("gkg");
+    spec::STATE.build_observable_gauge_i64(&meter, move |observer| {
+        let raw = state.load(Ordering::Relaxed);
+        for s in [
+            SchemaState::Pending,
+            SchemaState::Ready,
+            SchemaState::Outdated,
+        ] {
+            let value = i64::from(s as u8 == raw);
+            observer.observe(value, &[KeyValue::new(spec::labels::STATE, s.as_label())]);
+        }
+    });
 }
 
 #[cfg(test)]

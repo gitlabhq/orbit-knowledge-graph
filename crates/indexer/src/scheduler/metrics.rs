@@ -2,7 +2,7 @@ use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
-use crate::metrics::DURATION_BUCKETS;
+use gkg_observability::indexer::scheduler;
 
 #[derive(Clone)]
 pub struct ScheduledTaskMetrics {
@@ -16,86 +16,60 @@ pub struct ScheduledTaskMetrics {
 
 impl ScheduledTaskMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg_scheduler");
+        let meter = global::meter("gkg");
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
-        let runs = meter
-            .u64_counter("gkg.scheduler.task.runs")
-            .with_description("Total scheduled task runs")
-            .build();
-
-        let duration = meter
-            .f64_histogram("gkg.scheduler.task.duration")
-            .with_unit("s")
-            .with_description("End-to-end duration of a scheduled task run")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let requests_published = meter
-            .u64_counter("gkg.scheduler.task.requests.published")
-            .with_description("Requests successfully published")
-            .build();
-
-        let requests_skipped = meter
-            .u64_counter("gkg.scheduler.task.requests.skipped")
-            .with_description("Requests skipped because already in-flight")
-            .build();
-
-        let query_duration = meter
-            .f64_histogram("gkg.scheduler.task.query.duration")
-            .with_unit("s")
-            .with_description("Duration of a scheduled task ClickHouse query")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let errors = meter
-            .u64_counter("gkg.scheduler.task.errors")
-            .with_description("Scheduled task errors by stage")
-            .build();
-
         Self {
-            runs,
-            duration,
-            requests_published,
-            requests_skipped,
-            query_duration,
-            errors,
+            runs: scheduler::RUNS.build_counter_u64(meter),
+            duration: scheduler::DURATION.build_histogram_f64(meter),
+            requests_published: scheduler::REQUESTS_PUBLISHED.build_counter_u64(meter),
+            requests_skipped: scheduler::REQUESTS_SKIPPED.build_counter_u64(meter),
+            query_duration: scheduler::QUERY_DURATION.build_histogram_f64(meter),
+            errors: scheduler::ERRORS.build_counter_u64(meter),
         }
     }
 
     pub fn record_run(&self, task: &str, outcome: &str, duration: f64) {
         let labels = [
-            KeyValue::new("task", task.to_owned()),
-            KeyValue::new("outcome", outcome.to_owned()),
+            KeyValue::new(scheduler::labels::TASK, task.to_owned()),
+            KeyValue::new(scheduler::labels::OUTCOME, outcome.to_owned()),
         ];
         self.runs.add(1, &labels);
-        self.duration
-            .record(duration, &[KeyValue::new("task", task.to_owned())]);
+        self.duration.record(
+            duration,
+            &[KeyValue::new(scheduler::labels::TASK, task.to_owned())],
+        );
     }
 
     pub fn record_requests_published(&self, task: &str, count: u64) {
-        self.requests_published
-            .add(count, &[KeyValue::new("task", task.to_owned())]);
+        self.requests_published.add(
+            count,
+            &[KeyValue::new(scheduler::labels::TASK, task.to_owned())],
+        );
     }
 
     pub fn record_requests_skipped(&self, task: &str, count: u64) {
-        self.requests_skipped
-            .add(count, &[KeyValue::new("task", task.to_owned())]);
+        self.requests_skipped.add(
+            count,
+            &[KeyValue::new(scheduler::labels::TASK, task.to_owned())],
+        );
     }
 
     pub fn record_query_duration(&self, query: &str, duration: f64) {
-        self.query_duration
-            .record(duration, &[KeyValue::new("query", query.to_owned())]);
+        self.query_duration.record(
+            duration,
+            &[KeyValue::new(scheduler::labels::QUERY, query.to_owned())],
+        );
     }
 
     pub fn record_error(&self, task: &str, stage: &str) {
         self.errors.add(
             1,
             &[
-                KeyValue::new("task", task.to_owned()),
-                KeyValue::new("stage", stage.to_owned()),
+                KeyValue::new(scheduler::labels::TASK, task.to_owned()),
+                KeyValue::new(scheduler::labels::STAGE, stage.to_owned()),
             ],
         );
     }

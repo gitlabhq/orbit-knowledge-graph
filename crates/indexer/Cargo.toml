@@ -19,6 +19,7 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
+gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }

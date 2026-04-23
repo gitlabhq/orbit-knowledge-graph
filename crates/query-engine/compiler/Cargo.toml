@@ -4,6 +4,7 @@ version.workspace = true
 edition = "2024"
 
 [dependencies]
+gkg-observability = { workspace = true }
 gkg-server-config = { path = "../../gkg-server-config" }
 gkg-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
