@@ -1,0 +1,202 @@
+name: "Ruby e2e parity — weather app definitions and edges"
+
+fixtures:
+  - path: lib/weather_app.rb
+    content: |
+      require_relative "weather_app/forecast"
+      require_relative "weather_app/cli"
+      require_relative "weather_app/formatter"
+      require_relative "weather_app/weather_service"
+
+      module WeatherApp
+        class UnknownCityError < StandardError; end
+      end
+
+  - path: lib/weather_app/forecast.rb
+    content: |
+      module WeatherApp
+        class Forecast
+          attr_reader :city, :temperature_c, :condition, :humidity
+
+          def initialize(city:, temperature_c:, condition:, humidity:)
+            @city = city
+            @temperature_c = temperature_c
+            @condition = condition
+            @humidity = humidity
+          end
+
+          def temperature_f
+            (@temperature_c * 9.0 / 5.0) + 32.0
+          end
+
+          def to_h
+            { city: city, temperature_c: temperature_c, temperature_f: temperature_f,
+              condition: condition, humidity: humidity }
+          end
+        end
+      end
+
+  - path: lib/weather_app/cli.rb
+    content: |
+      require "optparse"
+
+      module WeatherApp
+        class CLI
+          def self.run(argv, stdout: $stdout, stderr: $stderr)
+            new.run(argv, stdout: stdout, stderr: stderr)
+          end
+
+          def run(argv, stdout:, stderr:)
+            options = parse(argv)
+            city = options[:city]
+            forecast = WeatherService.new.fetch(city)
+            stdout.puts Formatter.new(format: options[:format]).render(forecast)
+            0
+          end
+
+          private
+
+          def parse(argv)
+            options = { format: :text }
+            OptionParser.new do |o|
+              o.on("-c", "--city CITY") { |v| options[:city] = v }
+            end.parse!(argv)
+            options
+          end
+        end
+      end
+
+  - path: lib/weather_app/formatter.rb
+    content: |
+      module WeatherApp
+        class Formatter
+          FORMATS = [:text, :json].freeze
+
+          def initialize(format: :text)
+            @format = format
+          end
+
+          def render(forecast)
+            forecast.to_h.to_s
+          end
+        end
+      end
+
+  - path: lib/weather_app/weather_service.rb
+    content: |
+      module WeatherApp
+        class WeatherService
+          def fetch(city)
+            Forecast.new(city: city, temperature_c: 20.0, condition: "Sunny", humidity: 50)
+          end
+
+          def known_cities
+            ["London", "Paris", "Tokyo"]
+          end
+        end
+      end
+
+tests:
+  # ── Definition types ──────────────────────────────────────────
+  - name: "Module definitions exist (reopened across files)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'WeatherApp'
+        AND d.definition_type = 'Module'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+
+  - name: "Class definitions exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+        AND d.fqn IN ['WeatherApp::Forecast', 'WeatherApp::CLI',
+                       'WeatherApp::Formatter', 'WeatherApp::WeatherService',
+                       'WeatherApp::UnknownCityError']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+
+  # ── FQN separator: instance methods use # ─────────────────────
+  - name: "Instance method uses # separator"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'WeatherApp::Forecast#temperature_f'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Instance method run uses # separator"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'WeatherApp::CLI#run'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── FQN separator: singleton methods use :: ────────────────────
+  - name: "Singleton method uses :: separator"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'WeatherApp::CLI::run'
+        AND d.definition_type = 'SingletonMethod'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  # ── Containment edges ─────────────────────────────────────────
+  - name: "Module defines Class"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'WeatherApp'
+        AND child.fqn = 'WeatherApp::Forecast'
+        AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Class defines instance method"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'WeatherApp::Forecast'
+        AND child.fqn = 'WeatherApp::Forecast#temperature_f'
+        AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Class defines instance method (CLI#run)"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'WeatherApp::CLI'
+        AND child.fqn = 'WeatherApp::CLI#run'
+        AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines top-level module"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'lib/weather_app/forecast.rb'
+        AND d.fqn = 'WeatherApp::Forecast'
+        AND e.edge_kind = 'Defines'
+      RETURN f.path AS file, d.fqn AS def
+    assert:
+      - { row_count: 1 }
+
+  # ── attr_reader generates Attribute definitions ────────────────
+  - name: "attr_reader generates Attribute definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Attribute'
+        AND d.fqn IN ['WeatherApp::Forecast#city',
+                       'WeatherApp::Forecast#temperature_c',
+                       'WeatherApp::Forecast#condition',
+                       'WeatherApp::Forecast#humidity']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
