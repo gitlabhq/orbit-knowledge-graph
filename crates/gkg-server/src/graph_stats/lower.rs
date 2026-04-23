@@ -15,24 +15,13 @@ pub fn lower_entity_counts(input: &GraphStatsInput) -> Node {
 }
 
 pub fn lower_projects(tables: &ProjectTables, traversal_path: &str) -> Node {
-    let alias = "t";
-
-    let total_known = build_projects_query(
-        "total_known",
-        &tables.project,
-        "id",
-        alias,
-        traversal_path,
-        true,
-    );
+    let total_known = build_projects_query("total_known", &tables.project, "id", traversal_path);
 
     let mut indexed = build_projects_query(
         "indexed",
         &tables.code_checkpoint,
         "project_id",
-        alias,
         traversal_path,
-        true,
     );
 
     indexed.union_all = vec![total_known];
@@ -44,10 +33,10 @@ fn build_projects_query(
     label: &str,
     table: &str,
     count_column: &str,
-    alias: &str,
     traversal_path: &str,
-    filter_deleted: bool,
 ) -> Query {
+    let alias = "t";
+
     let select = vec![
         SelectExpr::new(Expr::string(label), "metric"),
         SelectExpr::new(
@@ -58,22 +47,16 @@ fn build_projects_query(
 
     let from = TableRef::scan(table, alias);
 
-    let traversal_filter = Expr::func(
-        "startsWith",
-        vec![
-            Expr::col(alias, "traversal_path"),
-            Expr::string(traversal_path),
-        ],
+    let where_clause = Expr::and(
+        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, "traversal_path"),
+                Expr::string(traversal_path),
+            ],
+        ),
     );
-
-    let where_clause = if filter_deleted {
-        Expr::and(
-            Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
-            traversal_filter,
-        )
-    } else {
-        traversal_filter
-    };
 
     Query {
         select,
