@@ -2042,7 +2042,7 @@ func (x *ReplicaStatus) GetDesired() int32 {
 }
 
 // Request for graph entity counts scoped by traversal_path prefix.
-type GetGraphStatsRequest struct {
+type GetGraphStatusRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	TraversalPath string                 `protobuf:"bytes,1,opt,name=traversal_path,json=traversalPath,proto3" json:"traversal_path,omitempty"` // traversal_path prefix to scope counts (e.g. "1/2/")
 	SourceType    SourceType             `protobuf:"varint,2,opt,name=source_type,json=sourceType,proto3,enum=gkg.v1.SourceType" json:"source_type,omitempty"`
@@ -2050,20 +2050,20 @@ type GetGraphStatsRequest struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetGraphStatsRequest) Reset() {
-	*x = GetGraphStatsRequest{}
+func (x *GetGraphStatusRequest) Reset() {
+	*x = GetGraphStatusRequest{}
 	mi := &file_gkg_proto_msgTypes[27]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetGraphStatsRequest) String() string {
+func (x *GetGraphStatusRequest) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetGraphStatsRequest) ProtoMessage() {}
+func (*GetGraphStatusRequest) ProtoMessage() {}
 
-func (x *GetGraphStatsRequest) ProtoReflect() protoreflect.Message {
+func (x *GetGraphStatusRequest) ProtoReflect() protoreflect.Message {
 	mi := &file_gkg_proto_msgTypes[27]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2075,19 +2075,19 @@ func (x *GetGraphStatsRequest) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetGraphStatsRequest.ProtoReflect.Descriptor instead.
-func (*GetGraphStatsRequest) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetGraphStatusRequest.ProtoReflect.Descriptor instead.
+func (*GetGraphStatusRequest) Descriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{27}
 }
 
-func (x *GetGraphStatsRequest) GetTraversalPath() string {
+func (x *GetGraphStatusRequest) GetTraversalPath() string {
 	if x != nil {
 		return x.TraversalPath
 	}
 	return ""
 }
 
-func (x *GetGraphStatsRequest) GetSourceType() SourceType {
+func (x *GetGraphStatusRequest) GetSourceType() SourceType {
 	if x != nil {
 		return x.SourceType
 	}
@@ -2095,28 +2095,28 @@ func (x *GetGraphStatsRequest) GetSourceType() SourceType {
 }
 
 // Response containing project coverage and entity counts grouped by domain.
-type GetGraphStatsResponse struct {
+type GetGraphStatusResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Projects      *ProjectsStatus        `protobuf:"bytes,1,opt,name=projects,proto3" json:"projects,omitempty"`
-	Domains       []*GraphStatsDomain    `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
+	Domains       []*GraphStatusDomain   `protobuf:"bytes,2,rep,name=domains,proto3" json:"domains,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GetGraphStatsResponse) Reset() {
-	*x = GetGraphStatsResponse{}
+func (x *GetGraphStatusResponse) Reset() {
+	*x = GetGraphStatusResponse{}
 	mi := &file_gkg_proto_msgTypes[28]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GetGraphStatsResponse) String() string {
+func (x *GetGraphStatusResponse) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GetGraphStatsResponse) ProtoMessage() {}
+func (*GetGraphStatusResponse) ProtoMessage() {}
 
-func (x *GetGraphStatsResponse) ProtoReflect() protoreflect.Message {
+func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
 	mi := &file_gkg_proto_msgTypes[28]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2128,19 +2128,19 @@ func (x *GetGraphStatsResponse) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GetGraphStatsResponse.ProtoReflect.Descriptor instead.
-func (*GetGraphStatsResponse) Descriptor() ([]byte, []int) {
+// Deprecated: Use GetGraphStatusResponse.ProtoReflect.Descriptor instead.
+func (*GetGraphStatusResponse) Descriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{28}
 }
 
-func (x *GetGraphStatsResponse) GetProjects() *ProjectsStatus {
+func (x *GetGraphStatusResponse) GetProjects() *ProjectsStatus {
 	if x != nil {
 		return x.Projects
 	}
 	return nil
 }
 
-func (x *GetGraphStatsResponse) GetDomains() []*GraphStatsDomain {
+func (x *GetGraphStatusResponse) GetDomains() []*GraphStatusDomain {
 	if x != nil {
 		return x.Domains
 	}
@@ -2201,28 +2201,28 @@ func (x *ProjectsStatus) GetTotalKnown() int64 {
 }
 
 // Entity counts for a single domain (e.g. "ci", "core", "plan").
-type GraphStatsDomain struct {
+type GraphStatusDomain struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
-	Items         []*GraphStatsItem      `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
+	Items         []*GraphStatusItem     `protobuf:"bytes,2,rep,name=items,proto3" json:"items,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GraphStatsDomain) Reset() {
-	*x = GraphStatsDomain{}
+func (x *GraphStatusDomain) Reset() {
+	*x = GraphStatusDomain{}
 	mi := &file_gkg_proto_msgTypes[30]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GraphStatsDomain) String() string {
+func (x *GraphStatusDomain) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GraphStatsDomain) ProtoMessage() {}
+func (*GraphStatusDomain) ProtoMessage() {}
 
-func (x *GraphStatsDomain) ProtoReflect() protoreflect.Message {
+func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
 	mi := &file_gkg_proto_msgTypes[30]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2234,19 +2234,19 @@ func (x *GraphStatsDomain) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GraphStatsDomain.ProtoReflect.Descriptor instead.
-func (*GraphStatsDomain) Descriptor() ([]byte, []int) {
+// Deprecated: Use GraphStatusDomain.ProtoReflect.Descriptor instead.
+func (*GraphStatusDomain) Descriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{30}
 }
 
-func (x *GraphStatsDomain) GetName() string {
+func (x *GraphStatusDomain) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *GraphStatsDomain) GetItems() []*GraphStatsItem {
+func (x *GraphStatusDomain) GetItems() []*GraphStatusItem {
 	if x != nil {
 		return x.Items
 	}
@@ -2254,7 +2254,7 @@ func (x *GraphStatsDomain) GetItems() []*GraphStatsItem {
 }
 
 // Count for a single entity type (e.g. "Project": 42).
-type GraphStatsItem struct {
+type GraphStatusItem struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Name          string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`
 	Count         int64                  `protobuf:"varint,2,opt,name=count,proto3" json:"count,omitempty"`
@@ -2262,20 +2262,20 @@ type GraphStatsItem struct {
 	sizeCache     protoimpl.SizeCache
 }
 
-func (x *GraphStatsItem) Reset() {
-	*x = GraphStatsItem{}
+func (x *GraphStatusItem) Reset() {
+	*x = GraphStatusItem{}
 	mi := &file_gkg_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
 
-func (x *GraphStatsItem) String() string {
+func (x *GraphStatusItem) String() string {
 	return protoimpl.X.MessageStringOf(x)
 }
 
-func (*GraphStatsItem) ProtoMessage() {}
+func (*GraphStatusItem) ProtoMessage() {}
 
-func (x *GraphStatsItem) ProtoReflect() protoreflect.Message {
+func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
 	mi := &file_gkg_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
@@ -2287,19 +2287,19 @@ func (x *GraphStatsItem) ProtoReflect() protoreflect.Message {
 	return mi.MessageOf(x)
 }
 
-// Deprecated: Use GraphStatsItem.ProtoReflect.Descriptor instead.
-func (*GraphStatsItem) Descriptor() ([]byte, []int) {
+// Deprecated: Use GraphStatusItem.ProtoReflect.Descriptor instead.
+func (*GraphStatusItem) Descriptor() ([]byte, []int) {
 	return file_gkg_proto_rawDescGZIP(), []int{31}
 }
 
-func (x *GraphStatsItem) GetName() string {
+func (x *GraphStatusItem) GetName() string {
 	if x != nil {
 		return x.Name
 	}
 	return ""
 }
 
-func (x *GraphStatsItem) GetCount() int64 {
+func (x *GraphStatusItem) GetCount() int64 {
 	if x != nil {
 		return x.Count
 	}
@@ -2446,22 +2446,22 @@ const file_gkg_proto_rawDesc = "" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"?\n" +
 	"\rReplicaStatus\x12\x14\n" +
 	"\x05ready\x18\x01 \x01(\x05R\x05ready\x12\x18\n" +
-	"\adesired\x18\x02 \x01(\x05R\adesired\"r\n" +
-	"\x14GetGraphStatsRequest\x12%\n" +
+	"\adesired\x18\x02 \x01(\x05R\adesired\"s\n" +
+	"\x15GetGraphStatusRequest\x12%\n" +
 	"\x0etraversal_path\x18\x01 \x01(\tR\rtraversalPath\x123\n" +
 	"\vsource_type\x18\x02 \x01(\x0e2\x12.gkg.v1.SourceTypeR\n" +
-	"sourceType\"\x7f\n" +
-	"\x15GetGraphStatsResponse\x122\n" +
-	"\bprojects\x18\x01 \x01(\v2\x16.gkg.v1.ProjectsStatusR\bprojects\x122\n" +
-	"\adomains\x18\x02 \x03(\v2\x18.gkg.v1.GraphStatsDomainR\adomains\"K\n" +
+	"sourceType\"\x81\x01\n" +
+	"\x16GetGraphStatusResponse\x122\n" +
+	"\bprojects\x18\x01 \x01(\v2\x16.gkg.v1.ProjectsStatusR\bprojects\x123\n" +
+	"\adomains\x18\x02 \x03(\v2\x19.gkg.v1.GraphStatusDomainR\adomains\"K\n" +
 	"\x0eProjectsStatus\x12\x18\n" +
 	"\aindexed\x18\x01 \x01(\x03R\aindexed\x12\x1f\n" +
 	"\vtotal_known\x18\x02 \x01(\x03R\n" +
-	"totalKnown\"T\n" +
-	"\x10GraphStatsDomain\x12\x12\n" +
-	"\x04name\x18\x01 \x01(\tR\x04name\x12,\n" +
-	"\x05items\x18\x02 \x03(\v2\x16.gkg.v1.GraphStatsItemR\x05items\":\n" +
-	"\x0eGraphStatsItem\x12\x12\n" +
+	"totalKnown\"V\n" +
+	"\x11GraphStatusDomain\x12\x12\n" +
+	"\x04name\x18\x01 \x01(\tR\x04name\x12-\n" +
+	"\x05items\x18\x02 \x03(\v2\x17.gkg.v1.GraphStatusItemR\x05items\";\n" +
+	"\x0fGraphStatusItem\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12\x14\n" +
 	"\x05count\x18\x02 \x01(\x03R\x05count*B\n" +
 	"\x0eResponseFormat\x12\x17\n" +
@@ -2481,13 +2481,13 @@ const file_gkg_proto_rawDesc = "" +
 	"\n" +
 	"SourceType\x12\x15\n" +
 	"\x11SOURCE_TYPE_GROUP\x10\x00\x12\x17\n" +
-	"\x13SOURCE_TYPE_PROJECT\x10\x012\x9d\x03\n" +
+	"\x13SOURCE_TYPE_PROJECT\x10\x012\xa0\x03\n" +
 	"\x15KnowledgeGraphService\x12@\n" +
 	"\tListTools\x12\x18.gkg.v1.ListToolsRequest\x1a\x19.gkg.v1.ListToolsResponse\x12L\n" +
 	"\fExecuteQuery\x12\x1b.gkg.v1.ExecuteQueryMessage\x1a\x1b.gkg.v1.ExecuteQueryMessage(\x010\x01\x12O\n" +
 	"\x0eGetGraphSchema\x12\x1d.gkg.v1.GetGraphSchemaRequest\x1a\x1e.gkg.v1.GetGraphSchemaResponse\x12U\n" +
-	"\x10GetClusterHealth\x12\x1f.gkg.v1.GetClusterHealthRequest\x1a .gkg.v1.GetClusterHealthResponse\x12L\n" +
-	"\rGetGraphStats\x12\x1c.gkg.v1.GetGraphStatsRequest\x1a\x1d.gkg.v1.GetGraphStatsResponseb\x06proto3"
+	"\x10GetClusterHealth\x12\x1f.gkg.v1.GetClusterHealthRequest\x1a .gkg.v1.GetClusterHealthResponse\x12O\n" +
+	"\x0eGetGraphStatus\x12\x1d.gkg.v1.GetGraphStatusRequest\x1a\x1e.gkg.v1.GetGraphStatusResponseb\x06proto3"
 
 var (
 	file_gkg_proto_rawDescOnce sync.Once
@@ -2536,11 +2536,11 @@ var file_gkg_proto_goTypes = []any{
 	(*StructuredClusterHealth)(nil),  // 29: gkg.v1.StructuredClusterHealth
 	(*ComponentHealth)(nil),          // 30: gkg.v1.ComponentHealth
 	(*ReplicaStatus)(nil),            // 31: gkg.v1.ReplicaStatus
-	(*GetGraphStatsRequest)(nil),     // 32: gkg.v1.GetGraphStatsRequest
-	(*GetGraphStatsResponse)(nil),    // 33: gkg.v1.GetGraphStatsResponse
+	(*GetGraphStatusRequest)(nil),    // 32: gkg.v1.GetGraphStatusRequest
+	(*GetGraphStatusResponse)(nil),   // 33: gkg.v1.GetGraphStatusResponse
 	(*ProjectsStatus)(nil),           // 34: gkg.v1.ProjectsStatus
-	(*GraphStatsDomain)(nil),         // 35: gkg.v1.GraphStatsDomain
-	(*GraphStatsItem)(nil),           // 36: gkg.v1.GraphStatsItem
+	(*GraphStatusDomain)(nil),        // 35: gkg.v1.GraphStatusDomain
+	(*GraphStatusItem)(nil),          // 36: gkg.v1.GraphStatusItem
 	nil,                              // 37: gkg.v1.ResourceAuthorization.AuthorizedEntry
 	nil,                              // 38: gkg.v1.ComponentHealth.MetricsEntry
 }
@@ -2574,20 +2574,20 @@ var file_gkg_proto_depIdxs = []int32{
 	3,  // 26: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
 	31, // 27: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
 	38, // 28: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
-	4,  // 29: gkg.v1.GetGraphStatsRequest.source_type:type_name -> gkg.v1.SourceType
-	34, // 30: gkg.v1.GetGraphStatsResponse.projects:type_name -> gkg.v1.ProjectsStatus
-	35, // 31: gkg.v1.GetGraphStatsResponse.domains:type_name -> gkg.v1.GraphStatsDomain
-	36, // 32: gkg.v1.GraphStatsDomain.items:type_name -> gkg.v1.GraphStatsItem
+	4,  // 29: gkg.v1.GetGraphStatusRequest.source_type:type_name -> gkg.v1.SourceType
+	34, // 30: gkg.v1.GetGraphStatusResponse.projects:type_name -> gkg.v1.ProjectsStatus
+	35, // 31: gkg.v1.GetGraphStatusResponse.domains:type_name -> gkg.v1.GraphStatusDomain
+	36, // 32: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
 	24, // 33: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
 	5,  // 34: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
 	10, // 35: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
 	27, // 36: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	32, // 37: gkg.v1.KnowledgeGraphService.GetGraphStats:input_type -> gkg.v1.GetGraphStatsRequest
+	32, // 37: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
 	25, // 38: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
 	5,  // 39: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
 	11, // 40: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
 	28, // 41: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	33, // 42: gkg.v1.KnowledgeGraphService.GetGraphStats:output_type -> gkg.v1.GetGraphStatsResponse
+	33, // 42: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
 	38, // [38:43] is the sub-list for method output_type
 	33, // [33:38] is the sub-list for method input_type
 	33, // [33:33] is the sub-list for extension type_name

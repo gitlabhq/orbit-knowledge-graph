@@ -339,7 +339,7 @@ pub struct ReplicaStatus {
 }
 /// Request for graph entity counts scoped by traversal_path prefix.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GetGraphStatsRequest {
+pub struct GetGraphStatusRequest {
     /// traversal_path prefix to scope counts (e.g. "1/2/")
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
@@ -348,11 +348,11 @@ pub struct GetGraphStatsRequest {
 }
 /// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GetGraphStatsResponse {
+pub struct GetGraphStatusResponse {
     #[prost(message, optional, tag = "1")]
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
-    pub domains: ::prost::alloc::vec::Vec<GraphStatsDomain>,
+    pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
 }
 /// How many projects under this scope have been code-indexed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -364,15 +364,15 @@ pub struct ProjectsStatus {
 }
 /// Entity counts for a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
-pub struct GraphStatsDomain {
+pub struct GraphStatusDomain {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(message, repeated, tag = "2")]
-    pub items: ::prost::alloc::vec::Vec<GraphStatsItem>,
+    pub items: ::prost::alloc::vec::Vec<GraphStatusItem>,
 }
 /// Count for a single entity type (e.g. "Project": 42).
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct GraphStatsItem {
+pub struct GraphStatusItem {
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
     #[prost(int64, tag = "2")]
@@ -726,11 +726,11 @@ pub mod knowledge_graph_service_client {
         }
         /// Returns entity counts per domain, scoped by traversal_path prefix.
         /// Used by admin dashboards to inspect graph coverage.
-        pub async fn get_graph_stats(
+        pub async fn get_graph_status(
             &mut self,
-            request: impl tonic::IntoRequest<super::GetGraphStatsRequest>,
+            request: impl tonic::IntoRequest<super::GetGraphStatusRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Response<super::GetGraphStatusResponse>,
             tonic::Status,
         > {
             self.inner
@@ -743,12 +743,12 @@ pub mod knowledge_graph_service_client {
                 })?;
             let codec = tonic_prost::ProstCodec::default();
             let path = http::uri::PathAndQuery::from_static(
-                "/gkg.v1.KnowledgeGraphService/GetGraphStats",
+                "/gkg.v1.KnowledgeGraphService/GetGraphStatus",
             );
             let mut req = request.into_request();
             req.extensions_mut()
                 .insert(
-                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStats"),
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetGraphStatus"),
                 );
             self.inner.unary(req, path, codec).await
         }
@@ -814,11 +814,11 @@ pub mod knowledge_graph_service_server {
         >;
         /// Returns entity counts per domain, scoped by traversal_path prefix.
         /// Used by admin dashboards to inspect graph coverage.
-        async fn get_graph_stats(
+        async fn get_graph_status(
             &self,
-            request: tonic::Request<super::GetGraphStatsRequest>,
+            request: tonic::Request<super::GetGraphStatusRequest>,
         ) -> std::result::Result<
-            tonic::Response<super::GetGraphStatsResponse>,
+            tonic::Response<super::GetGraphStatusResponse>,
             tonic::Status,
         >;
     }
@@ -1094,25 +1094,25 @@ pub mod knowledge_graph_service_server {
                     };
                     Box::pin(fut)
                 }
-                "/gkg.v1.KnowledgeGraphService/GetGraphStats" => {
+                "/gkg.v1.KnowledgeGraphService/GetGraphStatus" => {
                     #[allow(non_camel_case_types)]
-                    struct GetGraphStatsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    struct GetGraphStatusSvc<T: KnowledgeGraphService>(pub Arc<T>);
                     impl<
                         T: KnowledgeGraphService,
-                    > tonic::server::UnaryService<super::GetGraphStatsRequest>
-                    for GetGraphStatsSvc<T> {
-                        type Response = super::GetGraphStatsResponse;
+                    > tonic::server::UnaryService<super::GetGraphStatusRequest>
+                    for GetGraphStatusSvc<T> {
+                        type Response = super::GetGraphStatusResponse;
                         type Future = BoxFuture<
                             tonic::Response<Self::Response>,
                             tonic::Status,
                         >;
                         fn call(
                             &mut self,
-                            request: tonic::Request<super::GetGraphStatsRequest>,
+                            request: tonic::Request<super::GetGraphStatusRequest>,
                         ) -> Self::Future {
                             let inner = Arc::clone(&self.0);
                             let fut = async move {
-                                <T as KnowledgeGraphService>::get_graph_stats(
+                                <T as KnowledgeGraphService>::get_graph_status(
                                         &inner,
                                         request,
                                     )
@@ -1127,7 +1127,7 @@ pub mod knowledge_graph_service_server {
                     let max_encoding_message_size = self.max_encoding_message_size;
                     let inner = self.inner.clone();
                     let fut = async move {
-                        let method = GetGraphStatsSvc(inner);
+                        let method = GetGraphStatusSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

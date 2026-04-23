@@ -4,7 +4,7 @@ use tonic::Status;
 const PROJECT_NODE: &str = "Project";
 const CHECKPOINT_TABLE_SUFFIX: &str = "code_indexing_checkpoint";
 
-pub struct GraphStatsInput {
+pub struct GraphStatusInput {
     pub traversal_path: String,
     pub nodes: Vec<NodeTable>,
     pub project_tables: ProjectTables,
@@ -20,7 +20,7 @@ pub struct ProjectTables {
     pub code_checkpoint: String,
 }
 
-impl GraphStatsInput {
+impl GraphStatusInput {
     pub fn from_ontology(ontology: &Ontology, traversal_path: String) -> Result<Self, Status> {
         let nodes = ontology
             .nodes()

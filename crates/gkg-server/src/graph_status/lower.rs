@@ -1,8 +1,8 @@
 use query_engine::compiler::{Expr, Node, Query, SelectExpr, TableRef};
 
-use super::input::{GraphStatsInput, NodeTable, ProjectTables};
+use super::input::{GraphStatusInput, NodeTable, ProjectTables};
 
-pub fn lower_entity_counts(input: &GraphStatsInput) -> Node {
+pub fn lower_entity_counts(input: &GraphStatusInput) -> Node {
     let mut queries = input
         .nodes
         .iter()
@@ -107,8 +107,8 @@ mod tests {
         }
     }
 
-    fn test_input() -> GraphStatsInput {
-        GraphStatsInput {
+    fn test_input() -> GraphStatusInput {
+        GraphStatusInput {
             traversal_path: "1/2/".to_string(),
             nodes: vec![
                 NodeTable {
