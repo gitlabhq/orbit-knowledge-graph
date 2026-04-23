@@ -20,9 +20,14 @@ use tracing::{debug, info};
 
 use super::version::{SCHEMA_VERSION, table_prefix};
 
-#[derive(Debug, thiserror::Error)]
-#[error("schema reconciliation failed: {0}")]
-pub struct ReconcileError(String);
+use arrow::array::{Array, StringArray};
+use gkg_utils::arrow::ArrowUtils;
+
+use crate::schema::error::ReconcileError;
+
+const SYSTEM_COLUMNS_TABLE: &str = "system.columns";
+const SYSTEM_DATA_SKIPPING_INDICES_TABLE: &str = "system.data_skipping_indices";
+const SYSTEM_PROJECTIONS_TABLE: &str = "system.projections";
 
 /// Reconcile all ontology tables against ClickHouse.
 pub async fn reconcile(
@@ -67,7 +72,7 @@ async fn reconcile_indexes(
     table: &str,
     desired: &[StorageIndex],
 ) -> Result<usize, ReconcileError> {
-    let existing = query_names(client, "system.data_skipping_indices", table).await?;
+    let existing = query_names(client, SYSTEM_DATA_SKIPPING_INDICES_TABLE, table).await?;
     let desired_names: HashSet<&str> = desired.iter().map(|i| i.name.as_str()).collect();
     let mut count = 0;
 
@@ -111,7 +116,7 @@ async fn reconcile_projections(
     table: &str,
     desired: &[StorageProjection],
 ) -> Result<usize, ReconcileError> {
-    let existing = query_names(client, "system.projections", table).await?;
+    let existing = query_names(client, SYSTEM_PROJECTIONS_TABLE, table).await?;
     let desired_names: HashSet<&str> = desired.iter().map(|p| proj_name(p)).collect();
     let mut count = 0;
 
@@ -158,7 +163,7 @@ async fn reconcile_projections(
 /// Column metadata from system.columns.
 struct LiveColumn {
     name: String,
-    ch_type: String,
+    _ch_type: String,
     default_expression: String,
     codec_expression: String,
 }
@@ -237,13 +242,10 @@ async fn query_columns(
     client: &ArrowClickHouseClient,
     table: &str,
 ) -> Result<Vec<LiveColumn>, ReconcileError> {
-    use arrow::array::StringArray;
-    use gkg_utils::arrow::ArrowUtils;
-
     let batches = client
         .query(&format!(
             "SELECT name, type, default_expression, codec_expression \
-             FROM system.columns WHERE table = '{table}'"
+             FROM {SYSTEM_COLUMNS_TABLE} WHERE table = '{table}'"
         ))
         .fetch_arrow()
         .await
@@ -261,7 +263,7 @@ async fn query_columns(
         for i in 0..batch.num_rows() {
             cols.push(LiveColumn {
                 name: names.value(i).to_string(),
-                ch_type: types.value(i).to_string(),
+                _ch_type: types.value(i).to_string(),
                 default_expression: defaults.value(i).to_string(),
                 codec_expression: codecs.value(i).to_string(),
             });
@@ -279,9 +281,6 @@ async fn query_names(
     system_table: &str,
     table: &str,
 ) -> Result<HashSet<String>, ReconcileError> {
-    use arrow::array::StringArray;
-    use gkg_utils::arrow::ArrowUtils;
-
     let batches = client
         .query(&format!(
             "SELECT name FROM {system_table} WHERE table = '{table}'"

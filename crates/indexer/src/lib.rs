@@ -133,10 +133,10 @@ pub enum IndexerError {
     Health(#[from] std::io::Error),
 
     #[error("Schema version error: {0}")]
-    SchemaVersion(#[from] schema::version::SchemaVersionError),
+    SchemaVersion(#[from] schema::error::SchemaVersionError),
 
     #[error("Schema migration error: {0}")]
-    SchemaMigration(#[from] schema::migration::MigrationError),
+    SchemaMigration(#[from] schema::error::MigrationError),
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),

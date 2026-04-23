@@ -22,16 +22,16 @@
 use std::sync::Arc;
 use std::time::Duration;
 
+use crate::schema::error::MigrationError;
 use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
-use thiserror::Error;
 use tracing::{info, warn};
 
 use crate::metrics::MigrationMetrics;
 
 use crate::clickhouse::ArrowClickHouseClient;
-use crate::locking::{LockError, LockService};
+use crate::locking::LockService;
 use crate::schema::version::{
-    SCHEMA_VERSION, SchemaVersionError, read_active_version, table_prefix, write_migrating_version,
+    SCHEMA_VERSION, read_active_version, table_prefix, write_migrating_version,
     write_schema_version,
 };
 
@@ -46,21 +46,6 @@ const LOCK_POLL_INTERVAL: Duration = Duration::from_secs(5);
 
 /// Maximum number of lock-poll iterations before giving up.
 const MAX_LOCK_WAIT_ITERATIONS: u32 = 60;
-
-#[derive(Debug, Error)]
-pub enum MigrationError {
-    #[error("schema version error: {0}")]
-    SchemaVersion(#[from] SchemaVersionError),
-
-    #[error("lock error: {0}")]
-    Lock(#[from] LockError),
-
-    #[error("ClickHouse DDL error for table '{table}': {reason}")]
-    Ddl { table: String, reason: String },
-
-    #[error("migration lock held by another pod after {seconds}s; giving up")]
-    LockTimeout { seconds: u64 },
-}
 
 /// Runs the pre-engine migration check.
 ///

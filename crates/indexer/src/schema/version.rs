@@ -8,8 +8,7 @@
 //! graph table names. Version 0 uses no prefix (backward compatible); version N
 //! uses `vN_`.
 
-use std::sync::LazyLock;
-
+use crate::schema::error::SchemaVersionError;
 use arrow::datatypes::UInt32Type;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_utils::arrow::ArrowUtils;
@@ -17,7 +16,7 @@ use query_engine::compiler::ast::ddl::{ColumnDef, ColumnType, CreateTable, Engin
 use query_engine::compiler::emit_create_table;
 use query_engine::compiler::emit_simple_query;
 use query_engine::compiler::{Expr, Insert, Node, OrderExpr, Query, SelectExpr, TableRef};
-use thiserror::Error;
+use std::sync::LazyLock;
 
 const VERSION_TABLE: &str = "gkg_schema_version";
 
@@ -115,15 +114,6 @@ fn write_migrating_version_query(
     );
     emit_simple_query(&Node::Insert(Box::new(insert)))
         .expect("write_migrating_version query must be valid")
-}
-
-#[derive(Debug, Error)]
-pub enum SchemaVersionError {
-    #[error("ClickHouse error: {0}")]
-    ClickHouse(#[from] clickhouse_client::ClickHouseError),
-
-    #[error("unexpected query result: {0}")]
-    UnexpectedResult(String),
 }
 
 /// Returns the table prefix for a given schema version.
