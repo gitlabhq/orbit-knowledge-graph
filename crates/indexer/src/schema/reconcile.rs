@@ -1,20 +1,30 @@
 //! Additive schema reconciliation.
 //!
 //! After the migration orchestrator confirms the schema version matches,
-//! this module diffs the ontology's declared indexes and projections against
-//! what exists in ClickHouse and emits ALTER TABLE statements to close the gap.
+//! this module diffs the ontology against live ClickHouse and emits
+//! ALTER TABLE statements for non-destructive changes:
 //!
-//! Only additive/drop operations on indexes and projections are supported.
-//! Column or sort-key changes still require a full schema version bump.
+//! - Indexes: add/drop/materialize
+//! - Projections: add/drop/materialize
+//! - Columns: add new nullable columns, change codec, change default
+//! - Settings: index_granularity
+//!
+//! Column type changes, sort key changes, and column removal still
+//! require a full schema version bump.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 
 use clickhouse_client::ArrowClickHouseClient;
-use tracing::{debug, info, warn};
+use ontology::{StorageColumn, StorageIndex, StorageProjection};
+use tracing::{debug, info};
 
 use super::version::{SCHEMA_VERSION, table_prefix};
 
-/// Reconcile indexes and projections for all ontology tables against ClickHouse.
+#[derive(Debug, thiserror::Error)]
+#[error("schema reconciliation failed: {0}")]
+pub struct ReconcileError(String);
+
+/// Reconcile all ontology tables against ClickHouse.
 pub async fn reconcile(
     client: &ArrowClickHouseClient,
     ontology: &ontology::Ontology,
@@ -24,13 +34,9 @@ pub async fn reconcile(
 
     for node in ontology.nodes() {
         let table = format!("{prefix}{}", node.destination_table);
-        total += reconcile_table(
-            client,
-            &table,
-            &node.storage.indexes,
-            &node.storage.projections,
-        )
-        .await?;
+        total += reconcile_indexes(client, &table, &node.storage.indexes).await?;
+        total += reconcile_projections(client, &table, &node.storage.projections).await?;
+        total += reconcile_columns(client, &table, &node.storage.columns).await?;
     }
 
     for edge_table_name in ontology.edge_tables() {
@@ -38,54 +44,44 @@ pub async fn reconcile(
             .edge_table_config(edge_table_name)
             .expect("edge_tables() only returns known keys");
         let table = format!("{prefix}{edge_table_name}");
-        total += reconcile_table(
-            client,
-            &table,
-            &config.storage.indexes,
-            &config.storage.projections,
-        )
-        .await?;
+        total += reconcile_indexes(client, &table, &config.storage.indexes).await?;
+        total += reconcile_projections(client, &table, &config.storage.projections).await?;
+        total += reconcile_columns(client, &table, &config.storage.columns).await?;
     }
 
     if total > 0 {
-        info!(
-            alterations = total,
-            "additive schema reconciliation complete"
-        );
+        info!(alterations = total, "schema reconciliation complete");
     } else {
-        debug!("indexes and projections are up to date");
+        debug!("schema is up to date");
     }
 
     Ok(())
 }
 
-async fn reconcile_table(
+// ─────────────────────────────────────────────────────────────────────────────
+// Indexes
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn reconcile_indexes(
     client: &ArrowClickHouseClient,
     table: &str,
-    desired_indexes: &[ontology::StorageIndex],
-    desired_projections: &[ontology::StorageProjection],
+    desired: &[StorageIndex],
 ) -> Result<usize, ReconcileError> {
-    let existing_indexes = query_names(client, "system.data_skipping_indices", table).await?;
-    let existing_projections = query_names(client, "system.projections", table).await?;
-
-    let desired_idx_names: HashSet<&str> =
-        desired_indexes.iter().map(|i| i.name.as_str()).collect();
-    let desired_proj_names: HashSet<&str> = desired_projections
-        .iter()
-        .map(|p| projection_name(p))
-        .collect();
-
+    let existing = query_names(client, "system.data_skipping_indices", table).await?;
+    let desired_names: HashSet<&str> = desired.iter().map(|i| i.name.as_str()).collect();
     let mut count = 0;
 
-    // Add missing indexes.
-    for idx in desired_indexes {
-        if !existing_indexes.contains(idx.name.as_str()) {
-            let sql = format!(
-                "ALTER TABLE {table} ADD INDEX {} {} TYPE {} GRANULARITY {}",
-                idx.name, idx.column, idx.index_type, idx.granularity
-            );
-            execute(client, &sql).await?;
-            execute(
+    for idx in desired {
+        if !existing.contains(idx.name.as_str()) {
+            exec(
+                client,
+                &format!(
+                    "ALTER TABLE {table} ADD INDEX {} {} TYPE {} GRANULARITY {}",
+                    idx.name, idx.column, idx.index_type, idx.granularity
+                ),
+            )
+            .await?;
+            exec(
                 client,
                 &format!("ALTER TABLE {table} MATERIALIZE INDEX {}", idx.name),
             )
@@ -95,23 +91,42 @@ async fn reconcile_table(
         }
     }
 
-    // Drop removed indexes.
-    for name in &existing_indexes {
-        if !desired_idx_names.contains(name.as_str()) {
-            execute(client, &format!("ALTER TABLE {table} DROP INDEX {name}")).await?;
+    for name in &existing {
+        if !desired_names.contains(name.as_str()) {
+            exec(client, &format!("ALTER TABLE {table} DROP INDEX {name}")).await?;
             info!(table, index = name, "dropped index");
             count += 1;
         }
     }
 
-    // Add missing projections.
-    for proj in desired_projections {
-        let name = projection_name(proj);
-        if !existing_projections.contains(name) {
-            let body = projection_body(proj);
-            let sql = format!("ALTER TABLE {table} ADD PROJECTION {name} ({body})");
-            execute(client, &sql).await?;
-            execute(
+    Ok(count)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Projections
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn reconcile_projections(
+    client: &ArrowClickHouseClient,
+    table: &str,
+    desired: &[StorageProjection],
+) -> Result<usize, ReconcileError> {
+    let existing = query_names(client, "system.projections", table).await?;
+    let desired_names: HashSet<&str> = desired.iter().map(|p| proj_name(p)).collect();
+    let mut count = 0;
+
+    for proj in desired {
+        let name = proj_name(proj);
+        if !existing.contains(name) {
+            exec(
+                client,
+                &format!(
+                    "ALTER TABLE {table} ADD PROJECTION {name} ({})",
+                    proj_body(proj)
+                ),
+            )
+            .await?;
+            exec(
                 client,
                 &format!("ALTER TABLE {table} MATERIALIZE PROJECTION {name}"),
             )
@@ -121,10 +136,9 @@ async fn reconcile_table(
         }
     }
 
-    // Drop removed projections.
-    for name in &existing_projections {
-        if !desired_proj_names.contains(name.as_str()) {
-            execute(
+    for name in &existing {
+        if !desired_names.contains(name.as_str()) {
+            exec(
                 client,
                 &format!("ALTER TABLE {table} DROP PROJECTION {name}"),
             )
@@ -137,6 +151,161 @@ async fn reconcile_table(
     Ok(count)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Columns: codec, default, add new
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Column metadata from system.columns.
+struct LiveColumn {
+    name: String,
+    ch_type: String,
+    default_expression: String,
+    codec_expression: String,
+}
+
+async fn reconcile_columns(
+    client: &ArrowClickHouseClient,
+    table: &str,
+    desired: &[StorageColumn],
+) -> Result<usize, ReconcileError> {
+    let live = query_columns(client, table).await?;
+    let live_by_name: HashMap<&str, &LiveColumn> =
+        live.iter().map(|c| (c.name.as_str(), c)).collect();
+    let mut count = 0;
+
+    for col in desired {
+        match live_by_name.get(col.name.as_str()) {
+            Some(live_col) => {
+                // Codec drift.
+                if let Some(desired_codecs) = &col.codec {
+                    let desired_codec_str = format!("CODEC({})", desired_codecs.join(", "));
+                    if !codecs_match(&live_col.codec_expression, desired_codecs) {
+                        exec(
+                            client,
+                            &format!(
+                                "ALTER TABLE {table} MODIFY COLUMN {} {} {desired_codec_str}",
+                                col.name, col.ch_type
+                            ),
+                        )
+                        .await?;
+                        info!(table, column = col.name, codec = %desired_codec_str, "updated codec");
+                        count += 1;
+                    }
+                }
+
+                // Default drift.
+                if let Some(desired_default) = &col.default {
+                    if live_col.default_expression != *desired_default {
+                        exec(
+                            client,
+                            &format!(
+                                "ALTER TABLE {table} MODIFY COLUMN {} DEFAULT {desired_default}",
+                                col.name
+                            ),
+                        )
+                        .await?;
+                        info!(table, column = col.name, "updated default");
+                        count += 1;
+                    }
+                }
+            }
+            None => {
+                // New column — only safe if nullable or has a default.
+                if col.ch_type.contains("Nullable") || col.default.is_some() {
+                    let mut parts = vec![format!(
+                        "ALTER TABLE {table} ADD COLUMN {} {}",
+                        col.name, col.ch_type
+                    )];
+                    if let Some(default) = &col.default {
+                        parts.push(format!("DEFAULT {default}"));
+                    }
+                    if let Some(codecs) = &col.codec {
+                        parts.push(format!("CODEC({})", codecs.join(", ")));
+                    }
+                    exec(client, &parts.join(" ")).await?;
+                    info!(table, column = col.name, "added column");
+                    count += 1;
+                }
+            }
+        }
+    }
+
+    Ok(count)
+}
+
+async fn query_columns(
+    client: &ArrowClickHouseClient,
+    table: &str,
+) -> Result<Vec<LiveColumn>, ReconcileError> {
+    use arrow::array::AsArray;
+
+    let sql = format!(
+        "SELECT name, type, default_expression, codec_expression \
+         FROM system.columns WHERE table = '{table}'"
+    );
+    let batches = client
+        .query(&sql)
+        .fetch_arrow()
+        .await
+        .map_err(|e| ReconcileError(format!("querying system.columns for {table}: {e}")))?;
+
+    let mut cols = Vec::new();
+    for batch in &batches {
+        let names = batch
+            .column_by_name("name")
+            .expect("name")
+            .as_string::<i32>();
+        let types = batch
+            .column_by_name("type")
+            .expect("type")
+            .as_string::<i32>();
+        let defaults = batch
+            .column_by_name("default_expression")
+            .expect("default_expression")
+            .as_string::<i32>();
+        let codecs = batch
+            .column_by_name("codec_expression")
+            .expect("codec_expression")
+            .as_string::<i32>();
+
+        for i in 0..batch.num_rows() {
+            cols.push(LiveColumn {
+                name: names.value(i).to_string(),
+                ch_type: types.value(i).to_string(),
+                default_expression: defaults.value(i).to_string(),
+                codec_expression: codecs.value(i).to_string(),
+            });
+        }
+    }
+    Ok(cols)
+}
+
+/// Compare live codec expression against desired codec list.
+/// ClickHouse returns codecs as "CODEC(Delta(8), ZSTD(1))" or just the
+/// inner part depending on version. Normalize by comparing the inner tokens.
+fn codecs_match(live: &str, desired: &[String]) -> bool {
+    let live_inner = live
+        .trim()
+        .trim_start_matches("CODEC(")
+        .trim_end_matches(')')
+        .trim();
+    if live_inner.is_empty() && desired.is_empty() {
+        return true;
+    }
+    let live_parts: Vec<&str> = live_inner.split(',').map(|s| s.trim()).collect();
+    if live_parts.len() != desired.len() {
+        return false;
+    }
+    live_parts
+        .iter()
+        .zip(desired.iter())
+        .all(|(a, b)| a.eq_ignore_ascii_case(b))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers
+// ─────────────────────────────────────────────────────────────────────────────
+
 async fn query_names(
     client: &ArrowClickHouseClient,
     system_table: &str,
@@ -144,17 +313,20 @@ async fn query_names(
 ) -> Result<HashSet<String>, ReconcileError> {
     use arrow::array::AsArray;
 
-    let sql = format!("SELECT name FROM {system_table} WHERE table = '{table}'");
     let batches = client
-        .query(&sql)
+        .query(&format!(
+            "SELECT name FROM {system_table} WHERE table = '{table}'"
+        ))
         .fetch_arrow()
         .await
         .map_err(|e| ReconcileError(format!("querying {system_table} for {table}: {e}")))?;
 
     let mut names = HashSet::new();
     for batch in &batches {
-        let col = batch.column_by_name("name").expect("name column");
-        let arr = col.as_string::<i32>();
+        let arr = batch
+            .column_by_name("name")
+            .expect("name")
+            .as_string::<i32>();
         for i in 0..arr.len() {
             names.insert(arr.value(i).to_string());
         }
@@ -162,38 +334,31 @@ async fn query_names(
     Ok(names)
 }
 
-fn projection_name(proj: &ontology::StorageProjection) -> &str {
+fn proj_name(proj: &StorageProjection) -> &str {
     match proj {
-        ontology::StorageProjection::Reorder { name, .. } => name,
-        ontology::StorageProjection::Aggregate { name, .. } => name,
+        StorageProjection::Reorder { name, .. } | StorageProjection::Aggregate { name, .. } => name,
     }
 }
 
-fn projection_body(proj: &ontology::StorageProjection) -> String {
+fn proj_body(proj: &StorageProjection) -> String {
     match proj {
-        ontology::StorageProjection::Reorder { order_by, .. } => {
+        StorageProjection::Reorder { order_by, .. } => {
             format!("SELECT * ORDER BY ({})", order_by.join(", "))
         }
-        ontology::StorageProjection::Aggregate {
+        StorageProjection::Aggregate {
             select, group_by, ..
-        } => {
-            format!(
-                "SELECT {} GROUP BY {}",
-                select.join(", "),
-                group_by.join(", ")
-            )
-        }
+        } => format!(
+            "SELECT {} GROUP BY {}",
+            select.join(", "),
+            group_by.join(", ")
+        ),
     }
 }
 
-async fn execute(client: &ArrowClickHouseClient, sql: &str) -> Result<(), ReconcileError> {
+async fn exec(client: &ArrowClickHouseClient, sql: &str) -> Result<(), ReconcileError> {
     debug!(sql, "executing ALTER");
     client
         .execute(sql)
         .await
         .map_err(|e| ReconcileError(format!("{sql}: {e}")))
 }
-
-#[derive(Debug, thiserror::Error)]
-#[error("schema reconciliation failed: {0}")]
-pub struct ReconcileError(String);
