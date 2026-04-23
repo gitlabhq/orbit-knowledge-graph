@@ -13,7 +13,7 @@ use query_engine::compiler::{ResultContext, codegen};
 use tonic::Status;
 use tracing::{debug, info};
 
-use crate::proto::{GetGraphStatsResponse, GraphStatsDomain, GraphStatsItem};
+use crate::proto::{GetGraphStatsResponse, GraphStatsDomain, GraphStatsItem, ProjectsStatus};
 
 use self::input::GraphStatsInput;
 
@@ -34,53 +34,117 @@ impl GraphStatsService {
 
         let input = GraphStatsInput::from_ontology(&self.ontology, traversal_path.to_string());
 
-        if input.nodes.is_empty() {
-            return Ok(GetGraphStatsResponse { domains: vec![] });
+        let entity_counts_future = async {
+            if input.nodes.is_empty() {
+                return Ok(HashMap::new());
+            }
+            let ast = lower::lower_entity_counts(&input);
+            self.execute_count_query(&ast, "entity counts").await
+        };
+
+        let projects_future = async {
+            let ast = lower::lower_projects(&input.project_tables, traversal_path);
+            self.execute_projects_query(&ast).await
+        };
+
+        let (entity_counts, projects) = tokio::try_join!(entity_counts_future, projects_future)?;
+
+        info!(
+            entity_count = entity_counts.len(),
+            projects_indexed = projects.indexed,
+            projects_total = projects.total_known,
+            "Graph stats fetched"
+        );
+
+        let domains = present_domain_response(&self.ontology, &entity_counts);
+        Ok(GetGraphStatsResponse {
+            projects: Some(projects),
+            domains,
+        })
+    }
+
+    async fn execute_count_query(
+        &self,
+        ast: &query_engine::compiler::Node,
+        label: &str,
+    ) -> Result<HashMap<String, i64>, Status> {
+        let batches = self.execute_query(ast, label).await?;
+
+        let mut counts: HashMap<String, i64> = HashMap::new();
+        for batch in &batches {
+            let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity")
+            else {
+                continue;
+            };
+            let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
+                continue;
+            };
+            for row in 0..batch.num_rows() {
+                if labels.is_null(row) || values.is_null(row) {
+                    continue;
+                }
+                let name = labels.value(row);
+                let count = values.value(row) as i64;
+                *counts.entry(name.to_string()).or_default() += count;
+            }
         }
 
-        let ast = lower::lower(&input);
-        let parameterized = codegen(&ast, ResultContext::new(), QueryConfig::default())
+        Ok(counts)
+    }
+
+    async fn execute_projects_query(
+        &self,
+        ast: &query_engine::compiler::Node,
+    ) -> Result<ProjectsStatus, Status> {
+        let batches = self.execute_query(ast, "projects").await?;
+
+        let mut indexed = 0i64;
+        let mut total_known = 0i64;
+        for batch in &batches {
+            let Some(labels) = ArrowUtils::get_column_by_name::<StringArray>(batch, "metric")
+            else {
+                continue;
+            };
+            let Some(values) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
+                continue;
+            };
+            for row in 0..batch.num_rows() {
+                if labels.is_null(row) || values.is_null(row) {
+                    continue;
+                }
+                match labels.value(row) {
+                    "indexed" => indexed += values.value(row) as i64,
+                    "total_known" => total_known += values.value(row) as i64,
+                    _ => {}
+                }
+            }
+        }
+
+        Ok(ProjectsStatus {
+            indexed,
+            total_known,
+        })
+    }
+
+    async fn execute_query(
+        &self,
+        ast: &query_engine::compiler::Node,
+        label: &str,
+    ) -> Result<Vec<arrow::record_batch::RecordBatch>, Status> {
+        let parameterized = codegen(ast, ResultContext::new(), QueryConfig::default())
             .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
 
-        debug!(sql = %parameterized.sql, "Graph stats query compiled");
+        debug!(sql = %parameterized.sql, label, "Graph stats query compiled");
 
         let mut query = self.client.query(&parameterized.sql);
         for (key, param) in &parameterized.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
 
-        let batches = query
+        query
             .fetch_arrow()
             .await
-            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))?;
-
-        let mut entity_counts: HashMap<String, i64> = HashMap::new();
-        for batch in &batches {
-            let Some(entities) = ArrowUtils::get_column_by_name::<StringArray>(batch, "entity")
-            else {
-                continue;
-            };
-            let Some(counts) = ArrowUtils::get_column_by_name::<UInt64Array>(batch, "cnt") else {
-                continue;
-            };
-            for row in 0..batch.num_rows() {
-                if entities.is_null(row) || counts.is_null(row) {
-                    continue;
-                }
-                let entity = entities.value(row);
-                let count = counts.value(row) as i64;
-                if let Some(existing) = entity_counts.get_mut(entity) {
-                    *existing += count;
-                } else {
-                    entity_counts.insert(entity.to_string(), count);
-                }
-            }
-        }
-
-        info!(entity_count = entity_counts.len(), "Graph stats fetched");
-
-        let domains = present_domain_response(&self.ontology, &entity_counts);
-        Ok(GetGraphStatsResponse { domains })
+            .map_err(|e| Status::internal(format!("ClickHouse error: {e}")))
     }
 }
 

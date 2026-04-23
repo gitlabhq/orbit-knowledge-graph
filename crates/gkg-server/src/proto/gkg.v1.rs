@@ -343,12 +343,24 @@ pub struct GetGraphStatsRequest {
     /// traversal_path prefix to scope counts (e.g. "1/2/")
     #[prost(string, tag = "1")]
     pub traversal_path: ::prost::alloc::string::String,
+    #[prost(enumeration = "SourceType", tag = "2")]
+    pub source_type: i32,
 }
-/// Response containing entity counts grouped by domain.
+/// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetGraphStatsResponse {
-    #[prost(message, repeated, tag = "1")]
+    #[prost(message, optional, tag = "1")]
+    pub projects: ::core::option::Option<ProjectsStatus>,
+    #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<GraphStatsDomain>,
+}
+/// How many projects under this scope have been code-indexed.
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ProjectsStatus {
+    #[prost(int64, tag = "1")]
+    pub indexed: i64,
+    #[prost(int64, tag = "2")]
+    pub total_known: i64,
 }
 /// Entity counts for a single domain (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -476,6 +488,32 @@ impl ClusterStatus {
             "CLUSTER_STATUS_HEALTHY" => Some(Self::Healthy),
             "CLUSTER_STATUS_DEGRADED" => Some(Self::Degraded),
             "CLUSTER_STATUS_UNHEALTHY" => Some(Self::Unhealthy),
+            _ => None,
+        }
+    }
+}
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum SourceType {
+    Group = 0,
+    Project = 1,
+}
+impl SourceType {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::Group => "SOURCE_TYPE_GROUP",
+            Self::Project => "SOURCE_TYPE_PROJECT",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "SOURCE_TYPE_GROUP" => Some(Self::Group),
+            "SOURCE_TYPE_PROJECT" => Some(Self::Project),
             _ => None,
         }
     }
