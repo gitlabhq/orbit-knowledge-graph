@@ -111,6 +111,61 @@ CREATE OR REPLACE MACRO event_count(rid) AS (
     SELECT count(*) FROM live_events WHERE run_id = rid
 );
 
+-- Table: task results for a run+arm (used by ResultStore.read_results)
+CREATE OR REPLACE MACRO results_for_arm(rid, a) AS TABLE (
+    SELECT
+        task_id, arm, status, timestamp, structured_output,
+        error, error_type, session_id, steps, tool_calls,
+        tokens_input, tokens_output, tokens_cache_read, cost, duration_ms
+    FROM task_results
+    WHERE run_id = rid AND arm = a
+    ORDER BY timestamp
+);
+
+-- Table: completed task IDs for a run+arm (used by ResultStore.completed_task_ids)
+CREATE OR REPLACE MACRO completed_tasks(rid, a) AS TABLE (
+    SELECT task_id
+    FROM task_results
+    WHERE run_id = rid AND arm = a
+);
+
+-- Table: all scores for a run (used by ResultStore.read_scores)
+CREATE OR REPLACE MACRO scores_for_run(rid) AS TABLE (
+    SELECT arm, task_id, evaluator, score
+    FROM scores
+    WHERE run_id = rid
+    ORDER BY arm, task_id, evaluator
+);
+
+-- Table: snapshot data for a run+arm+task
+CREATE OR REPLACE MACRO snapshot(rid, a, tid) AS TABLE (
+    SELECT data
+    FROM snapshots
+    WHERE run_id = rid AND arm = a AND task_id = tid
+);
+
+-- Table: all run IDs with task results, most recent first
+CREATE OR REPLACE MACRO all_run_ids() AS TABLE (
+    SELECT DISTINCT run_id
+    FROM task_results
+    ORDER BY run_id DESC
+);
+
+-- Table: config snapshot for a run
+CREATE OR REPLACE MACRO run_config(rid) AS TABLE (
+    SELECT config_name, config_version, config_hash, config, files
+    FROM run_configs
+    WHERE run_id = rid
+);
+
+-- Table: run IDs sharing a config hash (lightweight, no join with runs)
+CREATE OR REPLACE MACRO run_ids_by_config(h) AS TABLE (
+    SELECT run_id
+    FROM run_configs
+    WHERE config_hash = h
+    ORDER BY run_id DESC
+);
+
 -- Table: task results with their scores for a run+arm
 CREATE OR REPLACE MACRO task_detail(rid, a) AS TABLE (
     SELECT

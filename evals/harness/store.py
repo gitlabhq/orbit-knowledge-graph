@@ -154,8 +154,7 @@ class ResultStore:
     def read_snapshot(self, arm: str, task_id: str) -> dict[str, Any] | None:
         with connect(self._db_path, read_only=True) as db:
             row = db.execute(
-                "SELECT data FROM snapshots WHERE run_id = ? AND arm = ? AND task_id = ?",
-                [self.run_id, arm, task_id],
+                "FROM snapshot(?, ?, ?)", [self.run_id, arm, task_id]
             ).fetchone()
         if not row:
             return None
@@ -164,12 +163,7 @@ class ResultStore:
     def read_results(self, arm: str) -> list[TaskResult]:
         with connect(self._db_path, read_only=True) as db:
             rows = db.execute(
-                "SELECT task_id, arm, status, timestamp, structured_output, "
-                "  error, error_type, session_id, steps, tool_calls, "
-                "  tokens_input, tokens_output, tokens_cache_read, cost, duration_ms "
-                "FROM task_results WHERE run_id = ? AND arm = ? "
-                "ORDER BY timestamp",
-                [self.run_id, arm],
+                "FROM results_for_arm(?, ?)", [self.run_id, arm]
             ).fetchall()
 
         results = []
@@ -203,8 +197,7 @@ class ResultStore:
     def completed_task_ids(self, arm: str) -> set[str]:
         with connect(self._db_path, read_only=True) as db:
             rows = db.execute(
-                "SELECT task_id FROM task_results WHERE run_id = ? AND arm = ?",
-                [self.run_id, arm],
+                "FROM completed_tasks(?, ?)", [self.run_id, arm]
             ).fetchall()
         return {r[0] for r in rows}
 
@@ -230,9 +223,7 @@ class ResultStore:
         """
         with connect(self._db_path, read_only=True) as db:
             rows = db.execute(
-                "SELECT arm, task_id, evaluator, score "
-                "FROM scores WHERE run_id = ? ORDER BY arm, task_id, evaluator",
-                [self.run_id],
+                "FROM scores_for_run(?)", [self.run_id]
             ).fetchall()
 
         by_arm: dict[str, dict[str, dict[str, Any]]] = {}
@@ -247,9 +238,7 @@ class ResultStore:
     def list_run_ids(self) -> list[str]:
         """List all run IDs that have task results, most recent first."""
         with connect(self._db_path, read_only=True) as db:
-            rows = db.execute(
-                "SELECT DISTINCT run_id FROM task_results ORDER BY run_id DESC"
-            ).fetchall()
+            rows = db.execute("FROM all_run_ids()").fetchall()
         return [r[0] for r in rows]
 
     def snapshot_config(self, config: Any, base_dir: Path | None = None) -> str:
@@ -301,9 +290,7 @@ class ResultStore:
         """Read the snapshotted config for the current run."""
         with connect(self._db_path, read_only=True) as db:
             row = db.execute(
-                "SELECT config_name, config_version, config_hash, config, files "
-                "FROM run_configs WHERE run_id = ?",
-                [self.run_id],
+                "FROM run_config(?)", [self.run_id]
             ).fetchone()
         if not row:
             return None
@@ -319,8 +306,7 @@ class ResultStore:
         """Find all run IDs that used the same config hash."""
         with connect(self._db_path, read_only=True) as db:
             rows = db.execute(
-                "SELECT run_id FROM run_configs WHERE config_hash = ? ORDER BY run_id DESC",
-                [config_hash],
+                "FROM run_ids_by_config(?)", [config_hash]
             ).fetchall()
         return [r[0] for r in rows]
 
