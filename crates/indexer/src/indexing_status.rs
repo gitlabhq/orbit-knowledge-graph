@@ -46,6 +46,9 @@ impl IndexingStatusStore {
         Self { nats }
     }
 
+    /// Read-modify-write — a concurrent call on the same path could lose the
+    /// previous completion fields. Safe here because NATS message deduping and
+    /// per-path locks already serialize runs for a given traversal path.
     pub async fn record_start(&self, traversal_path: &str, started_at: DateTime<Utc>) {
         let previous = self.get(traversal_path).await.unwrap_or_else(|error| {
             warn!(traversal_path, %error, "failed to read previous progress; starting from scratch");
