@@ -73,45 +73,11 @@ impl BatchSink for CollectSink {
     }
 }
 
-/// A no-op converter that produces no batches.
-pub struct NullConverter;
-
-impl GraphConverter for NullConverter {
-    fn convert(&self, _graph: CodeGraph) -> Vec<(String, RecordBatch)> {
-        Vec::new()
-    }
-}
-
 /// A no-op sink that discards all batches.
 pub struct NullSink;
 
 impl BatchSink for NullSink {
     fn write_batch(&self, _table: &str, _batch: &RecordBatch) -> Result<(), SinkError> {
         Ok(())
-    }
-}
-
-/// A converter that captures the CodeGraph for test inspection.
-/// Takes ownership of the graph, no cloning needed.
-pub struct GraphCapture {
-    graphs: std::sync::Mutex<Vec<CodeGraph>>,
-}
-
-impl GraphCapture {
-    pub fn new() -> Self {
-        Self {
-            graphs: std::sync::Mutex::new(Vec::new()),
-        }
-    }
-
-    pub fn take(&self) -> Vec<CodeGraph> {
-        std::mem::take(&mut *self.graphs.lock().unwrap())
-    }
-}
-
-impl GraphConverter for GraphCapture {
-    fn convert(&self, graph: CodeGraph) -> Vec<(String, RecordBatch)> {
-        self.graphs.lock().unwrap().push(graph);
-        Vec::new()
     }
 }

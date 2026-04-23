@@ -11,9 +11,7 @@ pub mod types;
 
 pub use pipeline::{
     BatchTx, CancellationToken, GenericPipeline, LanguageContext, LanguagePipeline, Pipeline,
-    PipelineConfig, PipelineContext, PipelineOutput, PipelineResult,
+    PipelineConfig, PipelineContext, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_language};
-pub use sink::{
-    BatchSink, CollectSink, GraphCapture, GraphConverter, NullConverter, NullSink, SinkError,
-};
+pub use sink::{BatchSink, CollectSink, GraphConverter, NullSink, SinkError};

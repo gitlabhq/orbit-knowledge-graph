@@ -11,7 +11,7 @@ code-graph = { path = "../code-graph" }
 lance-graph = { workspace = true }
 arrow_56 = { workspace = true }
 
-# arrow 58 for reading PipelineOutput::Batches via IPC bridge
+# arrow 58 for IPC bridge (arrow 58 → arrow 56 conversion)
 arrow = { workspace = true }
 arrow-ipc = { workspace = true }
 

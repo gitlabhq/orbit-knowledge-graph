@@ -4,7 +4,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
-use tracing::{debug, info, warn};
+use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
@@ -276,89 +276,5 @@ impl CodeIndexingPipeline {
         }
 
         Ok(())
-    }
-
-    async fn write_data(
-        &self,
-        ctx: &HandlerContext,
-        data: &arrow_converter::ConvertedGraphData,
-    ) -> Result<(), HandlerError> {
-        self.write_batch(ctx, &self.table_names.branch, &data.branch)
-            .await?;
-        self.write_batch(ctx, &self.table_names.directory, &data.directories)
-            .await?;
-        self.write_batch(ctx, &self.table_names.file, &data.files)
-            .await?;
-        self.write_batch(ctx, &self.table_names.definition, &data.definitions)
-            .await?;
-        self.write_batch(
-            ctx,
-            &self.table_names.imported_symbol,
-            &data.imported_symbols,
-        )
-        .await?;
-        self.write_edge_batches(ctx, &data.edges).await?;
-        Ok(())
-    }
-
-    /// Split an edges RecordBatch by `relationship_kind` and write each
-    /// group to the ontology-resolved table.
-    async fn write_edge_batches(
-        &self,
-        ctx: &HandlerContext,
-        edges: &arrow::record_batch::RecordBatch,
-    ) -> Result<(), HandlerError> {
-        use arrow::array::AsArray;
-        use std::collections::HashMap;
-
-        if edges.num_rows() == 0 {
-            return Ok(());
-        }
-
-        let rel_col = edges
-            .column_by_name("relationship_kind")
-            .expect("edges batch must have relationship_kind column");
-        let rel_array = rel_col.as_string::<i32>();
-
-        // Group row indices by destination table.
-        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-        for i in 0..edges.num_rows() {
-            let rel_kind = rel_array.value(i);
-            let table = self.table_names.edge_table_for(rel_kind);
-            table_rows.entry(table).or_default().push(i as u32);
-        }
-
-        for (table, indices) in &table_rows {
-            let idx_array = arrow::array::UInt32Array::from(indices.clone());
-            let batch = arrow::compute::take_record_batch(edges, &idx_array)
-                .map_err(|e| HandlerError::Processing(format!("edge batch split failed: {e}")))?;
-            self.write_batch(ctx, table, &batch).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_batch(
-        &self,
-        ctx: &HandlerContext,
-        table: &str,
-        batch: &arrow::record_batch::RecordBatch,
-    ) -> Result<(), HandlerError> {
-        if batch.num_rows() == 0 {
-            return Ok(());
-        }
-
-        let writer = ctx
-            .destination
-            .new_batch_writer(table)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("writer creation failed: {e}")))
-            .record_error_stage(&self.metrics, "write")?;
-
-        writer
-            .write_batch(std::slice::from_ref(batch))
-            .await
-            .map_err(|e| HandlerError::Processing(format!("write to {table} failed: {e}")))
-            .record_error_stage(&self.metrics, "write")
     }
 }

@@ -2,9 +2,7 @@ use std::path::Path;
 
 use std::sync::Arc;
 
-use crate::v2::pipeline::{
-    BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
-};
+use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use rustc_hash::FxHashMap;
 
 use super::extract::{ResolvedJsFile, analyze_files};
@@ -18,11 +16,11 @@ impl LanguagePipeline for JsPipeline {
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+    ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         if files.is_empty() {
-            return Ok(PipelineOutput::Streamed);
+            return Ok(());
         }
 
         let (analyzed_files, errors) = analyze_files(files, root_path);
@@ -65,6 +63,6 @@ impl LanguagePipeline for JsPipeline {
                 log::warn!("[v2-js] skipped {}: {}", error.file_path, error.error);
             }
         }
-        Ok(PipelineOutput::Streamed)
+        Ok(())
     }
 }
