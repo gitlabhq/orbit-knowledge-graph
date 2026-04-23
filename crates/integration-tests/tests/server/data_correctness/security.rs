@@ -269,7 +269,11 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
     let result = compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"]}],
+            "nodes": [
+                {"id": "g", "entity": "Group"},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{
                 "function": "max",
                 "target": "u",
@@ -298,7 +302,11 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
     let result = compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "columns": ["username"]}],
+            "nodes": [
+                {"id": "g", "entity": "Group"},
+                {"id": "u", "entity": "User", "columns": ["username"]}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{
                 "function": "count",
                 "target": "u",
@@ -875,4 +883,159 @@ pub(super) async fn aggregation_multi_path_returns_union_of_scopes(ctx: &TestCon
     resp.assert_node("Group", 102, |n| n.prop_i64("member_count") == Some(2));
     // Group 101 is outside both paths.
     resp.assert_node_absent("Group", 101);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregation: globally-scoped entity guard (work_items/347)
+//
+// The User entity has no traversal_path column and is listed in
+// skip_security_filter_for_entities, so direct aggregation on User alone
+// would bypass both the traversal_path filter and the post-query Rails
+// redaction layer (aggregation results are row-less). Reject at compile
+// time unless the query contains at least one traversal_path-scoped node.
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub(super) async fn aggregation_user_only_rejects_at_compile(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"]}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    );
+
+    let err = result.expect_err("aggregation on User alone must reject");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("traversal_path") && msg.contains("aggregation"),
+        "error should reference traversal_path scoping and aggregation, got: {msg}"
+    );
+}
+
+pub(super) async fn aggregation_user_only_with_pii_filter_rejects_at_compile(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{
+                "id": "u", "entity": "User", "columns": ["username"],
+                "filters": {"email": "target@example.com"}
+            }],
+            "aggregations": [{"function": "count", "target": "u", "alias": "hit"}],
+            "limit": 1
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    );
+
+    let err = result.expect_err("User-only aggregation with email filter must reject");
+    assert!(err.to_string().contains("traversal_path"));
+}
+
+pub(super) async fn aggregation_user_joined_to_scoped_group_compiles(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    )
+    .expect("aggregation joined to Group (scoped) must compile for non-admin");
+}
+
+pub(super) async fn aggregation_user_only_admin_still_compiles(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User", "columns": ["username"]}],
+            "aggregations": [{"function": "count", "target": "u", "alias": "cnt"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &admin_ctx(),
+    )
+    .expect("admin caller bypasses User-only aggregation guard");
+}
+
+pub(super) async fn aggregation_user_only_rejection_happens_before_sql_compile(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{
+                "id": "u", "entity": "User",
+                "filters": {"email": "victim@example.com"}
+            }],
+            "aggregations": [{"function": "count", "target": "u", "alias": "oracle"}],
+            "limit": 1
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    );
+
+    let err = result.expect_err("must reject before producing SQL that leaks the email filter");
+    let msg = err.to_string();
+    assert!(
+        !msg.contains("v2_gl_user") && !msg.contains("victim@example.com"),
+        "rejection message must not echo the backing table or filter value, got: {msg}"
+    );
+}
+
+pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    compile(
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
+            "limit": 10
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    )
+    .expect("non-aggregation query on User must not be blocked by the aggregation guard");
+}
+
+pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "member_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
+    )
+    .await;
+
+    // Group 100: 3 members under the allowlisted path.
+    resp.assert_node("Group", 100, |n| n.prop_i64("member_count") == Some(3));
+    // Groups outside 1/100/ must not surface.
+    resp.assert_node_absent("Group", 101);
+    resp.assert_node_absent("Group", 102);
 }

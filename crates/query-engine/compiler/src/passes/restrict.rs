@@ -2,11 +2,13 @@
 //!
 //! Strips `admin_only` columns from column selections and rejects filters,
 //! ordering, and aggregations on `admin_only` fields when the caller is not
-//! an instance administrator. Runs after normalization (columns are expanded)
-//! and before lowering.
+//! an instance administrator. Also rejects aggregation queries whose node set
+//! contains no `traversal_path`-scoped entity, since aggregation bypasses the
+//! Rails redaction layer that protects other query types. Runs after
+//! normalization (columns are expanded) and before lowering.
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, Input};
+use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::SecurityContext;
 use ontology::Ontology;
 
@@ -25,6 +27,23 @@ pub fn restrict(
 ) -> Result<()> {
     if security_ctx.admin {
         return Ok(());
+    }
+
+    if matches!(input.query_type, QueryType::Aggregation) {
+        let any_scoped = input.nodes.iter().any(|n| {
+            n.entity
+                .as_deref()
+                .and_then(|e| ontology.get_node(e))
+                .is_some_and(|ne| ne.has_traversal_path)
+        });
+        if !any_scoped {
+            return Err(QueryError::Validation(
+                "aggregation requires at least one node scoped by traversal_path \
+                 (e.g. Group, Project, Note); aggregating on globally-scoped entities \
+                 such as User alone is not permitted"
+                    .into(),
+            ));
+        }
     }
 
     for node in &mut input.nodes {
@@ -91,7 +110,7 @@ mod tests {
 
     fn ontology() -> Ontology {
         Ontology::new()
-            .with_nodes(["User"])
+            .with_nodes(["User", "Group"])
             .with_fields(
                 "User",
                 [
@@ -101,10 +120,19 @@ mod tests {
                     ("state", DataType::String),
                 ],
             )
+            .with_fields("Group", [("traversal_path", DataType::String)])
             .modify_field("User", "is_admin", |f| f.admin_only = true)
             .unwrap()
             .modify_field("User", "is_auditor", |f| f.admin_only = true)
             .unwrap()
+    }
+
+    fn scoped_node() -> InputNode {
+        InputNode {
+            id: "_g".into(),
+            entity: Some("Group".into()),
+            ..Default::default()
+        }
     }
 
     fn non_admin_ctx() -> SecurityContext {
@@ -264,6 +292,29 @@ mod tests {
     fn input_with_aggregation(function: AggFunction, property: Option<&str>) -> Input {
         Input {
             query_type: QueryType::Aggregation,
+            nodes: vec![
+                InputNode {
+                    id: "_u".into(),
+                    entity: Some("User".into()),
+                    columns: Some(ColumnSelection::List(vec!["username".into()])),
+                    ..Default::default()
+                },
+                scoped_node(),
+            ],
+            aggregations: vec![InputAggregation {
+                function,
+                target: Some("_u".into()),
+                group_by: None,
+                property: property.map(String::from),
+                alias: Some("_agg".into()),
+            }],
+            ..Input::default()
+        }
+    }
+
+    fn user_only_aggregation(function: AggFunction, property: Option<&str>) -> Input {
+        Input {
+            query_type: QueryType::Aggregation,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -369,6 +420,69 @@ mod tests {
         let ctx = admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Max, Some("is_admin"));
         assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_rejects_aggregation_on_user_only() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = user_only_aggregation(AggFunction::Count, None);
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("traversal_path"),
+            "error should reference traversal_path scoping: {msg}"
+        );
+        assert!(
+            msg.contains("aggregation"),
+            "error should mention aggregation: {msg}"
+        );
+    }
+
+    #[test]
+    fn non_admin_rejects_aggregation_on_user_only_with_email_filter() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = user_only_aggregation(AggFunction::Count, None);
+        input.nodes[0].filters.insert(
+            "username".into(),
+            InputFilter {
+                op: Some(FilterOp::Eq),
+                value: Some(Value::String("bob".into())),
+            },
+        );
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        assert!(err.to_string().contains("traversal_path"));
+    }
+
+    #[test]
+    fn non_admin_accepts_aggregation_when_scoped_node_present() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = input_with_aggregation(AggFunction::Count, None);
+        assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn admin_bypasses_user_only_aggregation_guard() {
+        let ont = ontology();
+        let ctx = admin_ctx();
+        let mut input = user_only_aggregation(AggFunction::Count, None);
+        assert!(
+            restrict(&mut input, &ont, &ctx).is_ok(),
+            "admin should bypass traversal_path scoping guard"
+        );
+    }
+
+    #[test]
+    fn non_admin_search_on_user_is_not_rejected() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = input_with_filter("username", Value::String("bob".into()));
+        assert!(
+            restrict(&mut input, &ont, &ctx).is_ok(),
+            "search queries are redacted by the Rails layer and must not be blocked here"
+        );
     }
 
     #[test]

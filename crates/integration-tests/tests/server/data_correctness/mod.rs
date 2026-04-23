@@ -175,6 +175,14 @@ async fn data_correctness() {
         security::aggregation_sql_contains_traversal_path_filter,
         security::aggregation_multi_path_sql_contains_both_filters,
         security::aggregation_multi_path_returns_union_of_scopes,
+        // security: globally-scoped entity guard (work_items/347)
+        security::aggregation_user_only_rejects_at_compile,
+        security::aggregation_user_only_with_pii_filter_rejects_at_compile,
+        security::aggregation_user_joined_to_scoped_group_compiles,
+        security::aggregation_user_only_admin_still_compiles,
+        security::aggregation_user_only_rejection_happens_before_sql_compile,
+        security::aggregation_user_only_neighbors_query_is_not_blocked,
+        security::aggregation_user_joined_runtime_returns_expected_counts,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

@@ -24,10 +24,23 @@ pub fn test_ontology() -> Ontology {
             [
                 ("confidential", DataType::Bool),
                 ("created_at", DataType::DateTime),
+                ("traversal_path", DataType::String),
             ],
         )
-        .with_fields("Project", [("name", DataType::String)])
-        .with_fields("Group", [("name", DataType::String)])
+        .with_fields(
+            "Project",
+            [
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        )
+        .with_fields(
+            "Group",
+            [
+                ("name", DataType::String),
+                ("traversal_path", DataType::String),
+            ],
+        )
 }
 
 pub fn embedded_ontology() -> Ontology {
