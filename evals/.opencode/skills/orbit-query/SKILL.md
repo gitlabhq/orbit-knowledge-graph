@@ -7,12 +7,26 @@ description: Query the GitLab Knowledge Graph via the Orbit REST API. Covers sea
 
 The Orbit Knowledge Graph exposes a JSON query DSL via `POST /api/v4/orbit/query`. You interact with it through `tools/orbit_query.py`.
 
-## Commands
+## Step 1: Discover the schema
+
+Always start by fetching the live schema. This gives you the exact query DSL format, all entity types, available fields, edges, and filter syntax:
 
 ```bash
-# Get schema (do this first to discover entities, fields, and edges)
-python tools/orbit_query.py schema --expand User,Project,MergeRequest
+# Get the condensed query DSL schema (query format, types, operators)
+orbit schema --query
 
+# Get ontology (entities, fields, edges) -- expand specific entities for detail
+orbit schema --ontology -e User,Project,MergeRequest
+
+# Get full ontology (all entities expanded)
+orbit schema --ontology --all
+```
+
+Use `--raw` on either command for unformatted JSON output.
+
+## Step 2: Build and run queries
+
+```bash
 # Execute a query (JSON on stdin)
 echo '<json>' | python tools/orbit_query.py query
 
@@ -20,9 +34,9 @@ echo '<json>' | python tools/orbit_query.py query
 python tools/orbit_query.py query --file query.json
 ```
 
-## Query Format
+## Quick reference (examples)
 
-All queries are JSON piped to stdin. The top-level fields vary by query type.
+These are examples. Always verify field names and edges against `orbit schema --query` and `orbit schema --ontology`.
 
 ### Search (find entities by filters)
 
@@ -80,5 +94,5 @@ Responses are wrapped in `result`:
 - Edge names are UPPER_SNAKE_CASE: `AUTHORED`, `IN_PROJECT`, `ASSIGNED`, `APPROVED`, `REVIEWED`
 - The edge connecting MRs to Projects is `IN_PROJECT` (not `BELONGS_TO`)
 - Filter values: use strings for usernames, integers for IDs
-- Use `schema --expand <Entity>` to discover available filter fields and edges
+- Always run `orbit schema --query` first to get the live DSL spec -- don't guess at field names or operators
 - If a query returns 400, read the error message -- it tells you what's wrong
