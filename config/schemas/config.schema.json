@@ -103,6 +103,7 @@
         "connection_window_size": 2097152,
         "keepalive_interval_secs": 20,
         "keepalive_timeout_secs": 20,
+        "max_connection_age_grace_secs": 30,
         "max_connection_age_secs": 300,
         "stream_timeout_secs": 60,
         "stream_window_size": 1048576,
@@ -509,6 +510,12 @@
           "type": "integer",
           "format": "uint64",
           "default": 20,
+          "minimum": 0
+        },
+        "max_connection_age_grace_secs": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 30,
           "minimum": 0
         },
         "max_connection_age_secs": {
