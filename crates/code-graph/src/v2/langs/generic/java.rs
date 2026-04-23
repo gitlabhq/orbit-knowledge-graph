@@ -79,16 +79,15 @@ impl DslLanguage for JavaDsl {
         let class_meta = || metadata().super_types(java_super_types);
 
         vec![
-            scopes(
-                &[
-                    "class_declaration",
-                    "enum_declaration",
-                    "record_declaration",
-                ],
-                "Class",
-            )
-            .def_kind(DefKind::Class)
-            .metadata(class_meta()),
+            scope("class_declaration", "Class")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
+            scope("enum_declaration", "Enum")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
+            scope("record_declaration", "Record")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
             scope("interface_declaration", "Interface")
                 .def_kind(DefKind::Interface)
                 .metadata(class_meta()),
