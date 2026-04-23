@@ -23,9 +23,6 @@ pub enum Error {
     Deserialize(#[from] serde_json::Error),
 }
 
-/// A run is considered in progress when `last_started_at > last_completed_at`
-/// (or `last_completed_at` is absent). A failure still records a completion —
-/// `last_error` carries the failure message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexingProgress {
     pub last_started_at: DateTime<Utc>,
