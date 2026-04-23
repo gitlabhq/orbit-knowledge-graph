@@ -1,4 +1,5 @@
 use super::helpers::*;
+use query_engine::compiler::TraversalPath;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Search: traversal path scoping
@@ -855,6 +856,273 @@ pub(super) async fn aggregation_multi_path_sql_contains_both_filters(ctx: &TestC
     assert!(
         all_text.contains("1/102/"),
         "compiled output must contain '1/102/', got:\n{all_text}"
+    );
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Per-entity role scoping: aggregation target nodes
+//
+// Vulnerability declares `required_role: security_manager` in its ontology,
+// and the seed places 3 vulnerabilities -- one per project across three
+// namespaces. These tests exercise the aggregation-query oracle pattern:
+// a user with Reporter-only access on a path should not be able to
+// observe Vulnerability rows by grouping on Project and counting on
+// Vulnerability. The compiler drops Reporter paths from the Vulnerability
+// startsWith predicate, so the count comes back as zero (or excludes the
+// project entirely) no matter what filters the attacker attaches.
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn reporter_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, 20)
+}
+
+fn security_manager_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, 25)
+}
+
+fn developer_path(path: &str) -> TraversalPath {
+    TraversalPath::new(path, 30)
+}
+
+/// Reporter on 1/100/ but no Security Manager access anywhere. Counting
+/// vulnerabilities per project must return no rows for Project 1000 — the
+/// Vulnerability scan is filtered to zero traversal paths and produces
+/// `Bool(false)`, so the aggregation sees an empty Vulnerability set.
+pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    // Reporter on 1/100/ cannot see any vulnerability — even though Project
+    // 1000 lives in 1/100/1000/ (which is within the Reporter scope), the
+    // Vulnerability scan is dropped to zero eligible paths because Reporter
+    // is below Vulnerability's Security Manager requirement. INNER JOIN against an
+    // empty Vulnerability set produces no rows at all.
+    resp.assert_empty_aggregation();
+    resp.assert_node_absent("Vulnerability", 8000);
+    resp.assert_node_absent("Vulnerability", 8001);
+    resp.assert_node_absent("Vulnerability", 8002);
+}
+
+/// Reporter on 1/100/, Developer on 1/101/. The compiler keeps only
+/// 1/101/ in the Vulnerability predicate, so the aggregation surfaces
+/// Project 1001 (vuln 8001) but not Project 1000 (vuln 8000).
+pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_developer_paths(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(
+            1,
+            vec![reporter_path("1/100/"), developer_path("1/101/")],
+        )
+        .unwrap(),
+    )
+    .await;
+
+    // Project 1001 (Developer path, which clears the Security Manager floor)
+    // surfaces with count=1.
+    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    // Project 1000 (Reporter-only path) must not appear — the Vulnerability
+    // scan was filtered to paths where the user clears Security Manager, leaving
+    // Project 1000 without any matching vuln row in the INNER JOIN.
+    resp.assert_node_absent("Project", 1000);
+    // Project 1004 is outside the user's scope entirely.
+    resp.assert_node_absent("Project", 1004);
+}
+
+/// Security Manager (25) on a path hits the exact floor required by
+/// Vulnerability's `required_role`. This guards the exact floor: an SM-only
+/// user sees their own vuln counts without needing to escalate to Developer.
+pub(super) async fn aggregation_vulnerability_security_manager_meets_the_required_floor(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/101/")]).unwrap(),
+    )
+    .await;
+
+    // Project 1001 lives under 1/101/ and has vuln 8001. Security Manager
+    // is the declared floor (25), so the Vulnerability alias keeps this
+    // path in its startsWith predicate.
+    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    // Projects outside 1/101/ are not in the user's scope.
+    resp.assert_node_absent("Project", 1000);
+    resp.assert_node_absent("Project", 1004);
+}
+
+/// Developer on all paths: classic aggregation baseline showing the
+/// role-scoping change doesn't over-restrict legitimate access.
+pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_counts(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(
+            1,
+            vec![
+                developer_path("1/100/"),
+                developer_path("1/101/"),
+                developer_path("1/102/"),
+            ],
+        )
+        .unwrap(),
+    )
+    .await;
+
+    // All three vuln-bearing projects appear, each with count=1.
+    resp.assert_node("Project", 1000, |n| n.prop_i64("vuln_count") == Some(1));
+    resp.assert_node("Project", 1001, |n| n.prop_i64("vuln_count") == Some(1));
+    resp.assert_node("Project", 1004, |n| n.prop_i64("vuln_count") == Some(1));
+}
+
+/// Search on Vulnerability directly as a Reporter: the base-case read
+/// path (not aggregation) must also drop rows when the required role is
+/// not met, otherwise an attacker can bypass the fix by querying via
+/// search instead of aggregation.
+pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "search",
+            "node": {"id": "v", "entity": "Vulnerability", "columns": ["title", "severity"]},
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/"), reporter_path("1/101/")])
+            .unwrap(),
+    )
+    .await;
+
+    resp.assert_node_count(0);
+}
+
+/// The filter-based oracle (severity filter + count on a single
+/// project) must not leak: even a count-with-filter targeting a
+/// specific vuln is neutralized because the Vulnerability scan is
+/// filtered to zero paths before any WHERE clause evaluates.
+pub(super) async fn aggregation_vulnerability_filter_oracle_is_neutralized(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]},
+                {"id": "v", "entity": "Vulnerability", "filters": {"severity": "critical"}}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "c"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    // Without the fix, this would have returned count=1 (vuln 8000 is
+    // critical in Project 1000) and the attacker could binary-search
+    // severity values. With role scoping, Project 1000 drops out of the
+    // result set entirely.
+    resp.assert_empty_aggregation();
+    resp.assert_node_absent("Project", 1000);
+}
+
+/// Compiled SQL must bind `Bool(false)` (no paths) for the Vulnerability
+/// alias when the user has only Reporter access. Asserting the compiled
+/// output directly guards against future passes that might re-introduce
+/// the path list.
+pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let security_ctx = SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap();
+
+    let compiled = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &security_ctx,
+    )
+    .unwrap();
+
+    let sql = &compiled.base.sql;
+    // Project alias still gets the `1/100/` prefix because Project's
+    // required_role defaults to Reporter.
+    let all_text = format!("{sql} {:?}", compiled.base.params);
+    assert!(
+        all_text.contains("1/100/"),
+        "Project predicate must still reference 1/100/, got:\n{all_text}"
+    );
+    // At least one parameter bound to the literal boolean `false` — that's
+    // what `build_path_filter(&[])` produces when the Vulnerability alias
+    // has zero eligible paths.
+    let has_false_bool = compiled.base.params.iter().any(|(_, p)| {
+        matches!(
+            (&p.ch_type, &p.value),
+            (
+                gkg_utils::clickhouse::ChType::Bool,
+                serde_json::Value::Bool(false)
+            )
+        )
+    });
+    assert!(
+        has_false_bool,
+        "Vulnerability alias must compile to Bool(false) when no Security Manager paths exist, params: {:?}",
+        compiled.base.params
     );
 }
 
