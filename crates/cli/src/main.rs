@@ -838,46 +838,6 @@ async fn index_repo_v2(
     })
 }
 
-fn summarize_v2_graphs(graphs: &[code_graph::v2::linker::CodeGraph]) -> IndexGraphStats {
-    let mut relationship_types = HashMap::new();
-    let mut definition_types = HashMap::new();
-    let mut directories = 0;
-    let mut files = 0;
-    let mut definitions = 0;
-    let mut imported_symbols = 0;
-    let mut relationships = 0;
-
-    for graph in graphs {
-        directories += graph.directories().count();
-        files += graph.files().count();
-        imported_symbols += graph.imports_iter().count();
-        relationships += graph.edge_count();
-
-        for (_, _, def) in graph.definitions() {
-            definitions += 1;
-            *definition_types
-                .entry(format!("{:?}", def.kind))
-                .or_insert(0) += 1;
-        }
-
-        for (_, _, edge) in graph.edges() {
-            *relationship_types
-                .entry(edge.relationship.label())
-                .or_insert(0) += 1;
-        }
-    }
-
-    IndexGraphStats {
-        directories,
-        files,
-        definitions,
-        imported_symbols,
-        relationships,
-        relationship_types,
-        definition_types,
-    }
-}
-
 fn build_index_output(
     repo_name: &str,
     path: &str,
