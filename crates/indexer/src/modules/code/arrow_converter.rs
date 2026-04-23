@@ -305,22 +305,59 @@ fn convert_edges(
         }
     }
 
-    let edge_rows: Vec<_> = graph
-        .graph
-        .edge_indices()
-        .map(|ei| {
-            let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
-            let edge = &graph.graph[ei];
-            IndexerEdgeRow {
+    let branch_id = compute_branch_id(env.project_id, &env.branch);
+
+    let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
+
+    // Branch --IN_PROJECT--> Project
+    edge_rows.push(IndexerEdgeRow {
+        env,
+        source_id: branch_id,
+        target_id: env.project_id,
+        edge_kind: "IN_PROJECT",
+        source_node_kind: "Branch",
+        target_node_kind: "Project",
+    });
+
+    // Branch --CONTAINS--> root-level directories and files
+    for (idx, dir) in graph.directories() {
+        if dir.path != "." && !dir.path.contains('/') {
+            edge_rows.push(IndexerEdgeRow {
                 env,
-                source_id: ids[src.index()],
-                target_id: ids[tgt.index()],
-                edge_kind: edge.relationship.edge_kind.as_ref(),
-                source_node_kind: edge.relationship.source_node.as_ref(),
-                target_node_kind: edge.relationship.target_node.as_ref(),
-            }
-        })
-        .collect();
+                source_id: branch_id,
+                target_id: ids[idx.index()],
+                edge_kind: "CONTAINS",
+                source_node_kind: "Branch",
+                target_node_kind: "Directory",
+            });
+        }
+    }
+    for (idx, file) in graph.files() {
+        if !file.path.contains('/') {
+            edge_rows.push(IndexerEdgeRow {
+                env,
+                source_id: branch_id,
+                target_id: ids[idx.index()],
+                edge_kind: "CONTAINS",
+                source_node_kind: "Branch",
+                target_node_kind: "File",
+            });
+        }
+    }
+
+    // Graph edges (CONTAINS, DEFINES, CALLS, etc.)
+    for ei in graph.graph.edge_indices() {
+        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+        let edge = &graph.graph[ei];
+        edge_rows.push(IndexerEdgeRow {
+            env,
+            source_id: ids[src.index()],
+            target_id: ids[tgt.index()],
+            edge_kind: edge.relationship.edge_kind.as_ref(),
+            source_node_kind: edge.relationship.source_node.as_ref(),
+            target_node_kind: edge.relationship.target_node.as_ref(),
+        });
+    }
 
     IndexerEdgeRow::to_record_batch(&edge_rows, &specs, &())
 }
