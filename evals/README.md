@@ -48,15 +48,66 @@ harness/runner.py
     └── glab CLI                 glab arm: glab commands + GraphQL
     │
     ▼
-harness/store.py
-    ├── results/<run_id>/<arm>.jsonl        TaskResult per task
-    └── results/<run_id>/sessions/<id>.json Full SessionSnapshot
+harness/store.py  ──►  .eval-servers/eval.duckdb
+    │                     ├── task_results    per-task results + session stats
+    │                     ├── snapshots       full session traces (JSON)
+    │                     ├── scores          evaluator scores per task
+    │                     ├── run_configs     config snapshots + file content hashes
+    │                     ├── runs            run metadata
+    │                     └── servers         OpenCode server process state
     │
     ▼
 harness/evaluators/     per-task scoring (graph, efficiency, behavior)
 harness/aggregators/    cross-arm analysis (descriptive, comparative, distributional)
-harness/report.py       markdown + JSON report
+harness/report.py       markdown report
 ```
+
+## State management
+
+All harness state lives in a single DuckDB file at `.eval-servers/eval.duckdb`. Schema is defined in `harness/sql/ddl.sql`, reusable query macros in `harness/sql/helpers.sql`.
+
+You can connect directly for ad-hoc analysis:
+
+```bash
+duckdb .eval-servers/eval.duckdb
+```
+
+### Useful macros
+
+```sql
+-- Overview of all runs with config hash, cost, success count
+FROM run_overview();
+
+-- Per-arm summary for a run (successes, cost, avg duration, etc.)
+FROM arm_summary('20260423_120000');
+
+-- Head-to-head task comparison between two arms
+FROM compare_arms('20260423_120000', 'orbit', 'glab');
+
+-- Task results with evaluator scores
+FROM task_detail('20260423_120000', 'orbit');
+
+-- Find all runs that used the same config
+FROM runs_by_config('a1b2c3d4e5f6g7h8');
+
+-- Scalar helpers
+SELECT run_cost('20260423_120000');
+SELECT success_rate('20260423_120000', 'orbit');
+```
+
+### Config versioning
+
+Each run snapshots the full eval config (parsed YAML), all referenced files (agent prompts, skills, task YAMLs, fixtures), and a SHA256 hash of the bundle. This lets you detect config drift between runs:
+
+```sql
+-- Compare config hashes across runs
+SELECT run_id, config_name, config_version, config_hash FROM run_configs;
+
+-- See what files were used in a specific run
+SELECT json_keys(files) FROM run_configs WHERE run_id = '20260423_120000';
+```
+
+The `run.version` field in `eval.yaml` is a semver string you bump manually when making intentional config changes. The `config_hash` is computed automatically and catches any change (including file content).
 
 ## Key design decisions
 
@@ -64,23 +115,29 @@ harness/report.py       markdown + JSON report
 - **Full agent trace.** SessionSnapshot captures every message, tool call, event, diff, todo.
 - **Prompt not retried.** Non-deterministic; only session create + data extraction retried.
 - **Shared SSE.** One connection per arm, EventDemuxer routes events by session_id.
-- **Resume via JSONL.** Reads existing lines, skips completed task IDs.
+- **DuckDB for all state.** Results, snapshots, scores, config snapshots, server state -- single file, queryable with SQL macros.
+- **Resume via completed_task_ids.** Queries DuckDB for already-completed tasks, skips them on restart.
 - **4-state error model.** SUCCESS | TIMEOUT | AGENT_ERROR | INFRA_ERROR, raw error always stored.
 
 ## Directory layout
 
 ```
 evals/
-├── eval.yaml               SSOT config
+├── eval.yaml                SSOT config (name, version, arms, tasks, evaluators)
 ├── pyproject.toml           dependencies
 ├── mise.toml                task runner
 ├── .env                     secrets (not committed)
 ├── harness/                 core framework
 │   ├── config.py            pydantic models + env var resolution
+│   ├── db.py                shared DuckDB connection management
+│   ├── sql/
+│   │   ├── ddl.sql          table definitions
+│   │   └── helpers.sql      reusable scalar + table macros
 │   ├── opencode.py          httpx async client for OpenCode API
 │   ├── session.py           snapshot capture + SSE event demuxer
-│   ├── store.py             JSONL + snapshot writer
-│   ├── runner.py            orchestration loop + server lifecycle
+│   ├── store.py             DuckDB-backed result/snapshot/score storage
+│   ├── server.py            OpenCode server process manager (DuckDB-backed)
+│   ├── runner.py            orchestration loop
 │   ├── cli.py               CLI entry point
 │   ├── report.py            report generation
 │   ├── evaluators/          per-task scoring
@@ -88,11 +145,12 @@ evals/
 ├── tools/
 │   └── orbit_query.py       agent-callable REST wrapper
 ├── agents/                  agent system prompts per arm
-├── skills/                  SKILL.md files loaded by agents
 ├── tasks/                   task YAML definitions
 ├── fixtures/                expected results + params per task
 ├── tests/                   smoke tests
-└── results/                 output (gitignored)
+└── .eval-servers/           runtime state (gitignored)
+    ├── eval.duckdb          all harness state
+    └── logs/                server stdout/stderr
 ```
 
 ## Adding tasks
@@ -124,5 +182,5 @@ fixtures/my-task/
 ## Tests
 
 ```bash
-uv run pytest tests/ -v
+uv run --extra dev pytest tests/ -v
 ```
