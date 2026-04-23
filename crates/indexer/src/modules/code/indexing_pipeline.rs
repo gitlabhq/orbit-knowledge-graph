@@ -255,6 +255,7 @@ impl CodeIndexingPipeline {
         for graph in &result.graphs {
             self.metrics
                 .record_files_processed(graph.files().count() as u64, "parsed");
+            self.metrics.record_graph_counts(graph);
 
             let converted = arrow_converter::convert_code_graph(graph, &envelope, &self.ontology)
                 .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))

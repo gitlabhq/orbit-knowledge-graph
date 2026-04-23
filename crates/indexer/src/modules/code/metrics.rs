@@ -1,4 +1,3 @@
-use code_graph::legacy::linker::analysis::types::GraphData;
 use opentelemetry::KeyValue;
 use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
@@ -128,25 +127,25 @@ impl CodeMetrics {
             .add(count, &[KeyValue::new("outcome", outcome)]);
     }
 
-    pub(super) fn record_node_counts(&self, graph_data: &GraphData) {
+    pub(super) fn record_graph_counts(&self, graph: &code_graph::v2::linker::CodeGraph) {
         self.nodes_indexed.add(
-            graph_data.directory_nodes.len() as u64,
+            graph.directories().count() as u64,
             &[KeyValue::new("kind", "directory")],
         );
         self.nodes_indexed.add(
-            graph_data.file_nodes.len() as u64,
+            graph.files().count() as u64,
             &[KeyValue::new("kind", "file")],
         );
         self.nodes_indexed.add(
-            graph_data.definition_nodes.len() as u64,
+            graph.defs.len() as u64,
             &[KeyValue::new("kind", "definition")],
         );
         self.nodes_indexed.add(
-            graph_data.imported_symbol_nodes.len() as u64,
+            graph.imports.len() as u64,
             &[KeyValue::new("kind", "imported_symbol")],
         );
         self.nodes_indexed.add(
-            graph_data.relationships.len() as u64,
+            graph.graph.edge_count() as u64,
             &[KeyValue::new("kind", "edge")],
         );
     }
