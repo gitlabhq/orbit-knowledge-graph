@@ -61,14 +61,17 @@ impl DslLanguage for CSharpDsl {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::trace::Tracer;
 
     fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
         CSharpDsl::spec()
-            .parse_defs_only(
+            .parse_full_collect(
                 code.as_bytes(),
                 "Test.cs",
                 crate::v2::config::Language::CSharp,
+                &Tracer::new(false)
             )
+            .map(|r| crate::v2::dsl::engine::ParsedDefs { definitions: r.definitions, imports: r.imports })
             .unwrap()
     }
 
