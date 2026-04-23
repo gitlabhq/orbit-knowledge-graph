@@ -13,26 +13,26 @@ use query_engine::compiler::{ResultContext, codegen};
 use tonic::Status;
 use tracing::{debug, info};
 
-use crate::proto::{GetGraphStatsResponse, GraphStatsDomain, GraphStatsItem, ProjectsStatus};
+use crate::proto::{GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, ProjectsStatus};
 
-use self::input::GraphStatsInput;
+use self::input::GraphStatusInput;
 
-pub struct GraphStatsService {
+pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
 }
 
-impl GraphStatsService {
+impl GraphStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>, ontology: Arc<Ontology>) -> Self {
         Self { client, ontology }
     }
 
-    pub async fn get_stats(&self, traversal_path: &str) -> Result<GetGraphStatsResponse, Status> {
+    pub async fn get_status(&self, traversal_path: &str) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        let input = GraphStatsInput::from_ontology(&self.ontology, traversal_path.to_string())?;
+        let input = GraphStatusInput::from_ontology(&self.ontology, traversal_path.to_string())?;
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
@@ -53,11 +53,11 @@ impl GraphStatsService {
             entity_count = entity_counts.len(),
             projects_indexed = projects.indexed,
             projects_total = projects.total_known,
-            "Graph stats fetched"
+            "Graph status fetched"
         );
 
         let domains = present_domain_response(&self.ontology, &entity_counts);
-        Ok(GetGraphStatsResponse {
+        Ok(GetGraphStatusResponse {
             projects: Some(projects),
             domains,
         })
@@ -134,7 +134,7 @@ impl GraphStatsService {
         let parameterized = codegen(ast, ResultContext::new(), QueryConfig::default())
             .map_err(|e| Status::internal(format!("codegen error: {e}")))?;
 
-        debug!(sql = %parameterized.sql, label, "Graph stats query compiled");
+        debug!(sql = %parameterized.sql, label, "Graph status query compiled");
 
         let mut query = self.client.query(&parameterized.sql);
         for (key, param) in &parameterized.params {
@@ -151,20 +151,20 @@ impl GraphStatsService {
 fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
-) -> Vec<GraphStatsDomain> {
+) -> Vec<GraphStatusDomain> {
     ontology
         .domains()
         .map(|domain| {
             let items = domain
                 .node_names
                 .iter()
-                .map(|node_name| GraphStatsItem {
+                .map(|node_name| GraphStatusItem {
                     name: node_name.clone(),
                     count: entity_counts.get(node_name).copied().unwrap_or(0),
                 })
                 .collect();
 
-            GraphStatsDomain {
+            GraphStatusDomain {
                 name: domain.name.clone(),
                 items,
             }
@@ -237,9 +237,9 @@ mod tests {
     #[tokio::test]
     async fn empty_traversal_path_rejected() {
         let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
-        let service = GraphStatsService::new(client, test_ontology());
+        let service = GraphStatusService::new(client, test_ontology());
 
-        let result = service.get_stats("").await;
+        let result = service.get_status("").await;
 
         assert!(result.is_err());
         let status = result.unwrap_err();

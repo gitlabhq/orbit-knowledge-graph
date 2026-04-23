@@ -48,7 +48,7 @@ service KnowledgeGraphService {
 
   // Returns entity counts per domain, scoped by traversal_path prefix.
   // Used by admin dashboards to inspect graph coverage.
-  rpc GetGraphStats(GetGraphStatsRequest) returns (GetGraphStatsResponse);
+  rpc GetGraphStatus(GetGraphStatusRequest) returns (GetGraphStatusResponse);
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +278,7 @@ message ReplicaStatus {
 }
 
 // ---------------------------------------------------------------------------
-// GetGraphStats — unary, returns entity counts grouped by domain
+// GetGraphStatus — unary, returns entity counts grouped by domain
 // ---------------------------------------------------------------------------
 
 enum SourceType {
@@ -287,15 +287,15 @@ enum SourceType {
 }
 
 // Request for graph entity counts scoped by traversal_path prefix.
-message GetGraphStatsRequest {
+message GetGraphStatusRequest {
   string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
   SourceType source_type = 2;
 }
 
 // Response containing project coverage and entity counts grouped by domain.
-message GetGraphStatsResponse {
+message GetGraphStatusResponse {
   ProjectsStatus projects = 1;
-  repeated GraphStatsDomain domains = 2;
+  repeated GraphStatusDomain domains = 2;
 }
 
 // How many projects under this scope have been code-indexed.
@@ -305,13 +305,13 @@ message ProjectsStatus {
 }
 
 // Entity counts for a single domain (e.g. "ci", "core", "plan").
-message GraphStatsDomain {
+message GraphStatusDomain {
   string name = 1;
-  repeated GraphStatsItem items = 2;
+  repeated GraphStatusItem items = 2;
 }
 
 // Count for a single entity type (e.g. "Project": 42).
-message GraphStatsItem {
+message GraphStatusItem {
   string name = 1;
   int64 count = 2;
 }
