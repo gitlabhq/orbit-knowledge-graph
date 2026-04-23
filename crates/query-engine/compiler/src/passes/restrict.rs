@@ -12,7 +12,7 @@ use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::SecurityContext;
 use ontology::Ontology;
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
     input
@@ -22,27 +22,21 @@ fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
         .and_then(|n| n.entity.as_deref())
 }
 
-fn is_scoped(ontology: &Ontology, entity: &str) -> bool {
-    ontology
-        .get_node(entity)
-        .is_some_and(|ne| ne.has_traversal_path)
-}
-
 fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
-    let mut scoped: HashSet<&str> = HashSet::new();
-    let mut unscoped: Vec<&str> = Vec::new();
-    for n in &input.nodes {
-        let Some(entity) = n.entity.as_deref() else {
-            continue;
-        };
-        if is_scoped(ontology, entity) {
-            scoped.insert(n.id.as_str());
-        } else {
-            unscoped.push(n.id.as_str());
-        }
-    }
+    let is_scoped = |entity: &str| {
+        ontology
+            .get_node(entity)
+            .is_some_and(|n| n.has_traversal_path)
+    };
 
-    if scoped.is_empty() {
+    let mut reachable: HashSet<&str> = input
+        .nodes
+        .iter()
+        .filter(|n| n.entity.as_deref().is_some_and(is_scoped))
+        .map(|n| n.id.as_str())
+        .collect();
+
+    if reachable.is_empty() {
         return Err(QueryError::Validation(
             "aggregation requires at least one node scoped by traversal_path \
              (e.g. Group, Project, Note); aggregating on globally-scoped entities \
@@ -51,48 +45,42 @@ fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
         ));
     }
 
-    for origin in unscoped {
-        if !reaches_scoped(origin, &scoped, input) {
-            return Err(QueryError::Validation(format!(
-                "aggregation node \"{origin}\" is globally-scoped and must be \
-                 connected to a traversal_path-scoped node via \"relationships\" \
-                 or \"path\" before it can participate in an aggregation"
-            )));
+    let edges: Vec<(&str, &str)> = input
+        .relationships
+        .iter()
+        .map(|r| (r.from.as_str(), r.to.as_str()))
+        .chain(input.path.iter().map(|p| (p.from.as_str(), p.to.as_str())))
+        .collect();
+
+    // Flood-fill until no new node is reached.
+    loop {
+        let before = reachable.len();
+        for &(a, b) in &edges {
+            if reachable.contains(a) {
+                reachable.insert(b);
+            }
+            if reachable.contains(b) {
+                reachable.insert(a);
+            }
         }
+        if reachable.len() == before {
+            break;
+        }
+    }
+
+    if let Some(orphan) = input
+        .nodes
+        .iter()
+        .find(|n| !reachable.contains(n.id.as_str()))
+    {
+        return Err(QueryError::Validation(format!(
+            "aggregation node \"{}\" is globally-scoped and must be connected to a \
+             traversal_path-scoped node via \"relationships\" or \"path\"",
+            orphan.id
+        )));
     }
 
     Ok(())
-}
-
-fn reaches_scoped<'a>(origin: &'a str, scoped: &HashSet<&str>, input: &'a Input) -> bool {
-    let mut seen: HashSet<&'a str> = HashSet::new();
-    let mut queue: VecDeque<&'a str> = VecDeque::new();
-    seen.insert(origin);
-    queue.push_back(origin);
-
-    while let Some(id) = queue.pop_front() {
-        if scoped.contains(id) {
-            return true;
-        }
-        for r in &input.relationships {
-            if r.from == id && seen.insert(r.to.as_str()) {
-                queue.push_back(r.to.as_str());
-            }
-            if r.to == id && seen.insert(r.from.as_str()) {
-                queue.push_back(r.from.as_str());
-            }
-        }
-        if let Some(p) = &input.path {
-            if p.from == id && seen.insert(p.to.as_str()) {
-                queue.push_back(p.to.as_str());
-            }
-            if p.to == id && seen.insert(p.from.as_str()) {
-                queue.push_back(p.from.as_str());
-            }
-        }
-    }
-
-    false
 }
 
 pub fn restrict(
