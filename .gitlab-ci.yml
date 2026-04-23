@@ -176,6 +176,16 @@ generate-config-schema:
       - config/schemas/config.schema.json
     expire_in: 24 hours
 
+ddl-freshness-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - bash ./scripts/check-ddl-freshness.sh
+
 schema-version-check:
   stage: lint
   image: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/alpine:latest

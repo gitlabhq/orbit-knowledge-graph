@@ -1,6 +1,7 @@
 # config/ontology/edges/on_branch.yaml
 
 description: Code entities belong to a specific branch
+table: gl_code_edge
 
 variants:
   - from_node: { type: Directory, id: id }

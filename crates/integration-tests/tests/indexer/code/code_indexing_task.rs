@@ -362,12 +362,13 @@ async fn count_active_edges(
     project_id: i64,
     relationship_kind: &str,
 ) -> usize {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship(relationship_kind);
     let result = clickhouse
         .query(&format!(
-            "SELECT source_id FROM {} FINAL \
+            "SELECT source_id FROM {edge_table} FINAL \
              WHERE relationship_kind = '{relationship_kind}' AND _deleted = false \
              AND source_id IN (SELECT id FROM {} FINAL WHERE project_id = {project_id} AND _deleted = false)",
-            t("gl_edge"),
             t("gl_definition")
         ))
         .await;

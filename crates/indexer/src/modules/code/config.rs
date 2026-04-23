@@ -1,5 +1,6 @@
 //! Constants for the code indexing module.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use ontology::{Ontology, OntologyError};
@@ -21,11 +22,26 @@ pub struct CodeTableNames {
     pub file: String,
     pub definition: String,
     pub imported_symbol: String,
-    pub edge: String,
+    /// Maps relationship kind to prefixed edge table name.
+    /// The code indexer produces multiple edge types (IN_PROJECT, CONTAINS,
+    /// DEFINES, IMPORTS, ON_BRANCH) that may route to different tables.
+    pub edge_tables: HashMap<String, String>,
+    /// Default edge table for relationship kinds not in the map.
+    pub default_edge_table: String,
 }
 
 impl CodeTableNames {
     pub fn from_ontology(ontology: &Ontology) -> Result<Self, OntologyError> {
+        let mut edge_tables = HashMap::new();
+        for edge_name in ontology.edge_names() {
+            let table = ontology.edge_table_for_relationship(edge_name);
+            edge_tables.insert(
+                edge_name.to_string(),
+                prefixed_table_name(table, *SCHEMA_VERSION),
+            );
+        }
+        let default_edge_table = prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION);
+
         Ok(Self {
             branch: prefixed_table_name(ontology.table_name("Branch")?, *SCHEMA_VERSION),
             directory: prefixed_table_name(ontology.table_name("Directory")?, *SCHEMA_VERSION),
@@ -35,10 +51,25 @@ impl CodeTableNames {
                 ontology.table_name("ImportedSymbol")?,
                 *SCHEMA_VERSION,
             ),
-            // TODO(multi-edge-tables, #454): switch to
-            // ontology.edge_table_for_relationship("DEFINES") when gl_code_edge is declared
-            edge: prefixed_table_name(ontology.edge_table(), *SCHEMA_VERSION),
+            edge_tables,
+            default_edge_table,
         })
+    }
+
+    /// Resolve the prefixed table name for a given relationship kind.
+    pub fn edge_table_for(&self, relationship_kind: &str) -> &str {
+        self.edge_tables
+            .get(relationship_kind)
+            .map(|s| s.as_str())
+            .unwrap_or(&self.default_edge_table)
+    }
+
+    /// All distinct edge table names (for stale data cleanup).
+    pub fn edge_table_names(&self) -> Vec<&str> {
+        let mut tables: Vec<&str> = self.edge_tables.values().map(|s| s.as_str()).collect();
+        tables.sort();
+        tables.dedup();
+        tables
     }
 
     pub fn node_tables(&self) -> Vec<&str> {
