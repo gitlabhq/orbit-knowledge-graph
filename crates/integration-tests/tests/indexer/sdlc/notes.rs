@@ -1,4 +1,4 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -14,13 +14,13 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
     //   - Epic   → WorkItem (legacy Groups::Epics::NotesController path)
     //   - Commit → has no ontology node, must be filtered out
     ctx.execute(
-        "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, system, internal, traversal_path, created_at, updated_at, _siphon_replicated_at)
+        "INSERT INTO siphon_notes (id, note, noteable_type, noteable_id, author_id, system, internal, st_diff, traversal_path, created_at, updated_at, _siphon_replicated_at)
         VALUES
-        (1, 'MR comment', 'MergeRequest', 100, 1, false, false, '1/100/', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00'),
-        (2, 'Issue note', 'Issue', 200, 2, false, false, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
-        (3, 'Vuln comment', 'Vulnerability', 300, 1, false, true, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00'),
-        (4, 'Legacy epic note', 'Epic', 400, 1, false, false, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00'),
-        (5, 'Commit comment', 'Commit', 500, 1, false, false, '1/100/', '2024-01-19', '2024-01-19', '2024-01-20 12:00:00')",
+        (1, 'MR diff note', 'MergeRequest', 100, 1, false, false, '@@ -1 +1 @@\\n-old\\n+new', '1/100/', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00'),
+        (2, 'Issue note', 'Issue', 200, 2, false, false, NULL, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
+        (3, 'Vuln comment', 'Vulnerability', 300, 1, false, true, NULL, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00'),
+        (4, 'Legacy epic note', 'Epic', 400, 1, false, false, NULL, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00'),
+        (5, 'Commit comment', 'Commit', 500, 1, false, false, NULL, '1/100/', '2024-01-19', '2024-01-19', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -31,6 +31,20 @@ pub async fn processes_notes_with_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_node_count(ctx, "gl_note", 5).await;
+
+    // Only note 1 carries a st_diff payload; the rest are NULL.
+    let diff_rows = ctx
+        .query(&format!(
+            "SELECT id, st_diff FROM {} FINAL ORDER BY id",
+            t("gl_note")
+        ))
+        .await;
+    let st_diffs = ArrowUtils::get_column_by_name::<StringArray>(&diff_rows[0], "st_diff")
+        .expect("st_diff column");
+    assert!(st_diffs.value(0).contains("@@"));
+    for i in 1..st_diffs.len() {
+        assert!(st_diffs.is_null(i), "note {} expected NULL st_diff", i + 1);
+    }
 
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "Note", "1/100/", 5).await;
 

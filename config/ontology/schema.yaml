@@ -225,3 +225,8 @@ edges:
   DEPLOYED_TO: edges/deployed_to.yaml
   IN_ENVIRONMENT: edges/in_environment.yaml
   CREATED_FOR_MR: edges/created_for_mr.yaml
+  SOURCE_PROJECT: edges/source_project.yaml
+  HAS_HEAD_PIPELINE: edges/has_head_pipeline.yaml
+  HAS_LATEST_DIFF: edges/has_latest_diff.yaml
+  UPDATED_BY: edges/updated_by.yaml
+  LAST_EDITED_BY: edges/last_edited_by.yaml

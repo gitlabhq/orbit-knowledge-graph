@@ -1,4 +1,4 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, Int64Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -17,15 +17,27 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     ctx.execute(
         "INSERT INTO merge_requests
             (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
-             draft, squash, target_project_id, author_id, assignees, merge_user_id, milestone_id,
+             draft, squash, target_project_id, source_project_id, head_pipeline_id,
+             latest_merge_request_diff_id, merged_commit_sha, squash_commit_sha,
+             updated_by_id, last_edited_by_id,
+             metric_merged_at, metric_commits_count, metric_added_lines, metric_removed_lines,
+             author_id, assignees, merge_user_id, milestone_id,
              reviewers, approvals, traversal_path, _siphon_replicated_at)
         VALUES
             (1, 101, 'Add feature X', 'Implements feature X', 'feature-x', 'main', 1, 'can_be_merged',
-             false, true, 1000, 1, [(2, '2024-01-20 12:00:00'), (3, '2024-01-20 12:00:00')], NULL, 10,
+             false, true, 1000, 1001, 5001,
+             7001, NULL, NULL,
+             2, 3,
+             NULL, 3, 120, 40,
+             1, [(2, '2024-01-20 12:00:00'), (3, '2024-01-20 12:00:00')], NULL, 10,
              [(4, 0, '2024-01-20 12:00:00'), (5, 0, '2024-01-20 12:00:00')],
              [(5, '2024-01-20 12:00:00')], '1/100/', '2024-01-20 12:00:00'),
             (2, 102, 'Fix bug Y', 'Fixes critical bug', 'fix-y', 'main', 3, 'merged',
-             false, false, 1000, 2, [], 1, NULL,
+             false, false, 1000, 1000, 5002,
+             7002, 'abc123def456', 'squash789',
+             NULL, NULL,
+             '2024-01-18 09:30:00', 2, 15, 5,
+             2, [], 1, NULL,
              [(6, 0, '2024-01-20 12:00:00')],
              [(3, '2024-01-20 12:00:00'), (4, '2024-01-20 12:00:00')], '1/100/', '2024-01-20 12:00:00')",
     )
@@ -41,7 +53,9 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
 
     let result = ctx
         .query(&format!(
-            "SELECT title, state FROM {} FINAL ORDER BY id",
+            "SELECT title, state, project_id, \
+             merged_commit_sha, squash_commit_sha, commits_count, added_lines \
+             FROM {} FINAL ORDER BY id",
             t("gl_merge_request")
         ))
         .await;
@@ -56,7 +70,65 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     assert_eq!(states.value(0), "opened");
     assert_eq!(states.value(1), "merged");
 
+    let project_ids =
+        ArrowUtils::get_column_by_name::<Int64Array>(batch, "project_id").expect("project_id");
+    assert_eq!(project_ids.value(0), 1000);
+    assert_eq!(project_ids.value(1), 1000);
+
+    let merged_sha =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "merged_commit_sha").unwrap();
+    assert!(merged_sha.is_null(0));
+    assert_eq!(merged_sha.value(1), "abc123def456");
+
+    let squash_sha =
+        ArrowUtils::get_column_by_name::<StringArray>(batch, "squash_commit_sha").unwrap();
+    assert!(squash_sha.is_null(0));
+    assert_eq!(squash_sha.value(1), "squash789");
+
+    let commits = ArrowUtils::get_column_by_name::<Int64Array>(batch, "commits_count")
+        .expect("commits_count column");
+    assert_eq!(commits.value(0), 3);
+    assert_eq!(commits.value(1), 2);
+
+    let added = ArrowUtils::get_column_by_name::<Int64Array>(batch, "added_lines")
+        .expect("added_lines column");
+    assert_eq!(added.value(0), 120);
+    assert_eq!(added.value(1), 15);
+
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "MergeRequest", "Project", "1/100/", 2)
+        .await;
+    // target_project_id is 1000 for both; source_project_id is 1001 for MR 1 (fork) and
+    // 1000 for MR 2 (same project) -> two SOURCE_PROJECT edges.
+    assert_edges_have_traversal_path(
+        ctx,
+        "SOURCE_PROJECT",
+        "MergeRequest",
+        "Project",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "HAS_HEAD_PIPELINE",
+        "MergeRequest",
+        "Pipeline",
+        "1/100/",
+        2,
+    )
+    .await;
+    assert_edges_have_traversal_path(
+        ctx,
+        "HAS_LATEST_DIFF",
+        "MergeRequest",
+        "MergeRequestDiff",
+        "1/100/",
+        2,
+    )
+    .await;
+    // Only MR 1 has updated_by_id / last_edited_by_id set.
+    assert_edges_have_traversal_path(ctx, "UPDATED_BY", "User", "MergeRequest", "1/100/", 1).await;
+    assert_edges_have_traversal_path(ctx, "LAST_EDITED_BY", "User", "MergeRequest", "1/100/", 1)
         .await;
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "MergeRequest", "1/100/", 2).await;
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
