@@ -22,6 +22,30 @@ pub struct ParsedDefs {
     pub imports: Vec<CanonicalImport>,
 }
 
+/// A ref collected during the full AST walk, with SSA reaching values
+/// already resolved to owned `ParseValue`s. Ready for cross-file
+/// resolution without re-parsing the source.
+pub struct CollectedRef {
+    pub name: String,
+    pub chain: Option<Vec<ExpressionStep>>,
+    pub reaching: Vec<crate::v2::types::ssa::ParseValue>,
+    pub enclosing_def: Option<u32>,
+}
+
+/// Result of a full parse (defs + imports + refs). The refs have SSA
+/// reaching values resolved but NOT cross-file resolved.
+pub struct ParseFullResult {
+    pub definitions: Vec<CanonicalDefinition>,
+    pub imports: Vec<CanonicalImport>,
+    pub refs: Vec<CollectedRef>,
+    pub inferred_returns: Vec<(u32, String)>,
+    /// Refs whose SSA alias chain couldn't be resolved without the
+    /// cross-file graph. Each entry is (ref_index, alias_target_name).
+    /// After graph finalize, the pipeline resolves these targets and
+    /// patches the reaching values.
+    pub unresolved_aliases: Vec<(usize, String)>,
+}
+
 struct ScopeMatch {
     name: String,
     label: &'static str,
@@ -632,6 +656,179 @@ impl LanguageSpec {
     /// When `graph` is provided, constructor chains (e.g. `Parent.Child.Foo()`)
     /// are resolved eagerly after sealing, and the resolved types are written
     /// back to SSA so subsequent bindings can use them.
+    /// Parse the full AST: defs, imports, SSA, refs. Returns collected
+    /// refs with reaching values resolved from SSA, but NOT cross-file
+    /// resolved. Source bytes can be dropped after this returns.
+    pub fn parse_full_collect(
+        &self,
+        source: &[u8],
+        file_path: &str,
+        language: Language,
+        tracer: &Tracer,
+        graph: Option<&crate::v2::linker::graph::CodeGraph>,
+    ) -> crate::legacy::parser::Result<ParseFullResult> {
+        let source_str = std::str::from_utf8(source)
+            .map_err(|e| crate::legacy::parser::Error::Parse(format!("Invalid UTF-8: {e}")))?;
+
+        let ast = language.parse_ast(source_str);
+        let root = ast.root();
+        let sep = language.fqn_separator();
+
+        let arena = bumpalo::Bump::new();
+        let mut state = WalkFullState::new(&arena, tracer);
+
+        if let Some(f) = self.hooks.module_scope
+            && let Some(module) = f(file_path, sep)
+        {
+            state.scope_stack.push(Arc::from(module.as_str()));
+            trace!(
+                tracer,
+                PackageMatched {
+                    name: module.clone()
+                }
+            );
+        }
+        state.top_level_depth = state.scope_stack.len();
+
+        self.walk_full(&root, &mut state, sep);
+
+        state.ssa.seal_remaining();
+        state.ssa.remove_redundant_phi_sccs();
+
+        let pending_refs: Vec<_> = state.pending_refs.drain(..).collect();
+
+        // Pass 1: infer return types from bare-call / bare-identifier return refs.
+        for pending in &pending_refs {
+            if !pending.is_return || pending.chain.is_some() {
+                continue;
+            }
+            let Some(enclosing_idx) = pending.enclosing_def else {
+                continue;
+            };
+            if state.defs[enclosing_idx as usize]
+                .metadata
+                .as_ref()
+                .and_then(|m| m.return_type.as_ref())
+                .is_some()
+            {
+                continue;
+            }
+            let reaching = state
+                .ssa
+                .read_variable_stateless(pending.ssa_key, pending.block);
+            let inferred = reaching.values.iter().find_map(|v| {
+                let pv = v.to_parse_value()?;
+                match pv {
+                    crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn),
+                    crate::v2::types::ssa::ParseValue::LocalDef(i) => state
+                        .defs
+                        .get(i as usize)
+                        .map(|d| d.fqn.as_str().to_string()),
+                    crate::v2::types::ssa::ParseValue::ImportRef(i) => {
+                        state.imports.get(i as usize).and_then(|imp| {
+                            let name = imp.name.as_deref()?;
+                            state
+                                .import_map
+                                .get(name)
+                                .cloned()
+                                .or_else(|| Some(name.to_string()))
+                        })
+                    }
+                    crate::v2::types::ssa::ParseValue::Opaque => None,
+                }
+            });
+            if let Some(rt) = inferred {
+                trace!(
+                    tracer,
+                    ReturnTypeInferred {
+                        def_index: enclosing_idx,
+                        def_fqn: state.defs[enclosing_idx as usize].fqn.as_str().to_string(),
+                        return_type: rt.clone(),
+                    }
+                );
+                state.defs[enclosing_idx as usize]
+                    .metadata
+                    .get_or_insert_with(Box::default)
+                    .return_type = Some(rt);
+            }
+        }
+
+        // Pass 1.5: detect unresolved SSA aliases. These are alias
+        // targets that have no SSA value — they need the cross-file
+        // graph to resolve (e.g. `service = AuthService` where
+        // `AuthService` is defined in another file).
+        let mut needed: rustc_hash::FxHashSet<&str> = rustc_hash::FxHashSet::default();
+        for pending in &pending_refs {
+            let reaching = state
+                .ssa
+                .read_variable_stateless(pending.ssa_key, pending.block);
+            for v in &reaching.values {
+                if let super::ssa::SsaValue::Alias(target) = v {
+                    let target_vals = state.ssa.read_variable_stateless(target, pending.block);
+                    let unresolved = target_vals.values.is_empty()
+                        || target_vals.values.iter().all(|tv| {
+                            matches!(
+                                tv,
+                                super::ssa::SsaValue::Opaque | super::ssa::SsaValue::Alias(_)
+                            )
+                        });
+                    if unresolved {
+                        needed.insert(target);
+                    }
+                }
+            }
+        }
+
+        // Build the list of (ref_index, alias_target) for post-graph patching.
+        // Also map alias targets to the import-resolved name so the pipeline
+        // can look them up in the graph.
+        let mut unresolved_aliases: Vec<(usize, String)> = Vec::new();
+        if !needed.is_empty() {
+            for (ref_idx, pending) in pending_refs.iter().enumerate() {
+                let reaching = state
+                    .ssa
+                    .read_variable_stateless(pending.ssa_key, pending.block);
+                for v in &reaching.values {
+                    if let super::ssa::SsaValue::Alias(target) = v {
+                        if needed.contains(target) {
+                            let resolved_name = state
+                                .import_map
+                                .get(*target)
+                                .cloned()
+                                .unwrap_or_else(|| target.to_string());
+                            unresolved_aliases.push((ref_idx, resolved_name));
+                        }
+                    }
+                }
+            }
+        }
+
+        // Collect inferred return types
+        let inferred_returns: Vec<(u32, String)> = state
+            .defs
+            .iter()
+            .enumerate()
+            .filter_map(|(i, def)| {
+                def.metadata
+                    .as_ref()?
+                    .return_type
+                    .as_ref()
+                    .map(|rt| (i as u32, rt.clone()))
+            })
+            .collect();
+
+        // Pass 2: resolve SSA reaching values → CollectedRef (no callback)
+        let refs = state.collect_refs(&pending_refs);
+
+        Ok(ParseFullResult {
+            definitions: state.defs,
+            imports: state.imports,
+            refs,
+            inferred_returns,
+            unresolved_aliases,
+        })
+    }
+
     pub fn parse_full_and_resolve<F>(
         &self,
         source: &[u8],
@@ -833,88 +1030,14 @@ impl LanguageSpec {
             })
             .collect();
 
-        // Pass 2: dispatch refs to resolver
-        for pending in &pending_refs {
-            let reaching = state
-                .ssa
-                .read_variable_stateless(pending.ssa_key, pending.block);
-            let mut parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> =
-                reaching
-                    .values
-                    .iter()
-                    .filter_map(|v| v.to_parse_value())
-                    .collect();
-
-            // Instance attr rewrite: for chains like [This, Field("db"), Call("execute")],
-            // build compound SSA keys (e.g. "self.db") and check if they have a type.
-            // This handles languages where instance fields are dynamic assignments
-            // (Python self.x = ..., Ruby @x = ...) rather than explicit declarations.
-            let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
-            if let Some(chain) = chain_slice
-                && chain.len() >= 3
-                && parse_values
-                    .iter()
-                    .any(|v| matches!(v, crate::v2::types::ssa::ParseValue::Type(_)))
-            {
-                let field_steps: Vec<usize> = chain[1..]
-                    .iter()
-                    .enumerate()
-                    .filter_map(|(i, s)| {
-                        if matches!(s, ExpressionStep::Field(_)) {
-                            Some(i + 1)
-                        } else {
-                            None
-                        }
-                    })
-                    .collect();
-
-                for &field_idx in field_steps.iter().rev() {
-                    let mut compound = pending.ssa_key.to_string();
-                    for step in &chain[1..=field_idx] {
-                        if let ExpressionStep::Field(name) = step {
-                            compound.push('.');
-                            compound.push_str(name);
-                        }
-                    }
-                    let key = state.arena.alloc_str(&compound);
-                    let r = state.ssa.read_variable_stateless(key, pending.block);
-                    let compound_values: smallvec::SmallVec<
-                        [crate::v2::types::ssa::ParseValue; 2],
-                    > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
-                    let found = !compound_values.is_empty()
-                        && !compound_values
-                            .iter()
-                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque));
-                    trace!(
-                        tracer,
-                        InstanceAttrRewrite {
-                            original_key: pending.ssa_key.to_string(),
-                            compound_key: compound.clone(),
-                            found_values: compound_values
-                                .iter()
-                                .map(|v| format!("{v:?}"))
-                                .collect(),
-                            chain_trimmed: found,
-                        }
-                    );
-                    if found {
-                        parse_values = compound_values;
-                        let remaining = &chain[field_idx + 1..];
-                        chain_slice = if remaining.len() <= 1 {
-                            None
-                        } else {
-                            Some(remaining)
-                        };
-                        break;
-                    }
-                }
-            }
-
+        // Pass 2: resolve SSA reaching values and dispatch to callback
+        let collected = state.collect_refs(&pending_refs);
+        for r in &collected {
             on_ref(
-                &pending.name,
-                chain_slice,
-                &parse_values,
-                pending.enclosing_def,
+                &r.name,
+                r.chain.as_deref(),
+                &r.reaching,
+                r.enclosing_def,
                 &inferred_returns,
             );
         }
@@ -1637,6 +1760,81 @@ impl<'a> WalkFullState<'a> {
             tracer,
         }
     }
+
+    /// Resolve SSA reaching values for all pending refs and return
+    /// owned `CollectedRef`s. Handles compound key rewrite for
+    /// instance attribute chains (self.x, @x).
+    fn collect_refs(&mut self, pending_refs: &[PendingRef<'a>]) -> Vec<CollectedRef> {
+        let mut collected = Vec::with_capacity(pending_refs.len());
+        for pending in pending_refs {
+            let reaching = self
+                .ssa
+                .read_variable_stateless(pending.ssa_key, pending.block);
+            let mut parse_values: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]> =
+                reaching
+                    .values
+                    .iter()
+                    .filter_map(|v| v.to_parse_value())
+                    .collect();
+
+            let mut chain_slice: Option<&[ExpressionStep]> = pending.chain.as_deref();
+            if let Some(chain) = chain_slice
+                && chain.len() >= 3
+                && parse_values
+                    .iter()
+                    .any(|v| matches!(v, crate::v2::types::ssa::ParseValue::Type(_)))
+            {
+                let field_steps: Vec<usize> = chain[1..]
+                    .iter()
+                    .enumerate()
+                    .filter_map(|(i, s)| {
+                        if matches!(s, ExpressionStep::Field(_)) {
+                            Some(i + 1)
+                        } else {
+                            None
+                        }
+                    })
+                    .collect();
+
+                for &field_idx in field_steps.iter().rev() {
+                    let mut compound = pending.ssa_key.to_string();
+                    for step in &chain[1..=field_idx] {
+                        if let ExpressionStep::Field(name) = step {
+                            compound.push('.');
+                            compound.push_str(name);
+                        }
+                    }
+                    let key = self.arena.alloc_str(&compound);
+                    let r = self.ssa.read_variable_stateless(key, pending.block);
+                    let compound_values: smallvec::SmallVec<
+                        [crate::v2::types::ssa::ParseValue; 2],
+                    > = r.values.iter().filter_map(|v| v.to_parse_value()).collect();
+                    let found = !compound_values.is_empty()
+                        && !compound_values
+                            .iter()
+                            .all(|v| matches!(v, crate::v2::types::ssa::ParseValue::Opaque));
+                    if found {
+                        parse_values = compound_values;
+                        let remaining = &chain[field_idx + 1..];
+                        chain_slice = if remaining.len() <= 1 {
+                            None
+                        } else {
+                            Some(remaining)
+                        };
+                        break;
+                    }
+                }
+            }
+
+            collected.push(CollectedRef {
+                name: pending.name.clone(),
+                chain: chain_slice.map(|s| s.to_vec()),
+                reaching: parse_values.to_vec(),
+                enclosing_def: pending.enclosing_def,
+            });
+        }
+        collected
+    }
 }
 
 #[cfg(test)]
@@ -1684,20 +1882,18 @@ mod tests {
             vec![reference("call").name_from(field("function"))],
             vec![],
         );
-        let mut ref_names = Vec::new();
         let tracer = crate::v2::trace::Tracer::new(false);
-        spec.parse_full_and_resolve(
-            b"def foo(): pass\nfoo()",
-            "test.py",
-            Language::Python,
-            &mut |name: &str, _chain, _reaching, _enclosing, _inferred| {
-                ref_names.push(name.to_string());
-            },
-            &tracer,
-            None,
-        )
-        .unwrap();
+        let result = spec
+            .parse_full_collect(
+                b"def foo(): pass\nfoo()",
+                "test.py",
+                Language::Python,
+                &tracer,
+                None,
+            )
+            .unwrap();
 
+        let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert_eq!(ref_names.len(), 1);
         assert_eq!(ref_names[0], "foo");
     }

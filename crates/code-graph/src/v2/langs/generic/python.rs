@@ -411,20 +411,19 @@ mod tests {
 
     #[test]
     fn call_references() {
-        let mut ref_names = Vec::new();
         let tracer = crate::v2::trace::Tracer::new(false);
-        PythonDsl::spec()
-            .parse_full_and_resolve(
+        let result = PythonDsl::spec()
+            .parse_full_collect(
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                &mut |name: &str, _, _, _, _| ref_names.push(name.to_string()),
                 &tracer,
                 None,
             )
             .unwrap();
+        let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert!(!ref_names.is_empty());
-        assert!(ref_names.iter().any(|n| n == "bar"));
+        assert!(ref_names.iter().any(|n| *n == "bar"));
     }
 
     #[test]
