@@ -70,7 +70,7 @@ use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::info;
+use tracing::{info, warn};
 
 fn default_health_bind_address() -> SocketAddr {
     "0.0.0.0:4202".parse().unwrap()
@@ -264,7 +264,10 @@ pub async fn run(
                     guard_shutdown.cancel();
                     return;
                 }
-                _ => {}
+                Ok(_) => {}
+                Err(e) => {
+                    warn!(error = %e, "failed to check migrating schema version");
+                }
             }
         }
     });
