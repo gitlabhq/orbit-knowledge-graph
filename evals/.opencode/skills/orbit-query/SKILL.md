@@ -18,16 +18,27 @@ python tools/orbit_query.py schema --expand User,Project,MergeRequest
 
 ## Step 2: Build and run queries
 
+Output defaults to toon format (compact text). Use `--format raw` for JSON.
+
 ```bash
-# Pipe JSON on stdin
+# Pipe JSON on stdin (toon output by default)
 cat <<'EOF' | python tools/orbit_query.py query
 {"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":10}
 EOF
 
-# Use --format llm for large results (compact, readable output)
-cat <<'EOF' | python tools/orbit_query.py query --format llm
-{"query_type":"neighbors","node":{"id":"mr","entity":"MergeRequest","filters":{"iid":100}},"neighbors":{"node":"mr","direction":"both"},"limit":50}
+# Raw JSON output when you need structured data
+cat <<'EOF' | python tools/orbit_query.py query --format raw
+{"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":1}
 EOF
+```
+
+Toon output looks like:
+```
+query_type: search
+row_count: 1
+nodes[1]:
+  User#781 { username: root, state: active }
+edges[0]:
 ```
 
 ## Query patterns
@@ -137,7 +148,7 @@ Use this to find everything connected to a node. Do NOT manually traverse each e
 - Filter values: strings for usernames/state, integers for IDs and iids
 - `node_ids` takes an array of integers to filter by primary entity ID
 - `filters` takes key-value pairs for property filters (username, state, iid, etc.)
-- Use `--format llm` for large results instead of piping raw JSON through Python
+- Output defaults to toon format (compact text). Use `--format raw` only when you need structured JSON
 - If a query returns empty results, verify the edge direction is correct by checking the schema
 - If a query returns 400, read the error message and fix the query
 - Use `neighbors` query type when finding all connections to a node

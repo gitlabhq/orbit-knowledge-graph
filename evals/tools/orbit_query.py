@@ -102,6 +102,35 @@ def _request(method: str, url: str, token: str, data: bytes | None = None) -> di
         sys.exit(2)
 
 
+def _to_toon(result: dict) -> str:
+    """Format query result as toon (compact text for LLMs)."""
+    inner = result.get("result", result)
+    qtype = inner.get("query_type", "unknown")
+    nodes = inner.get("nodes", [])
+    edges = inner.get("edges", [])
+
+    lines = [f"query_type: {qtype}", f"row_count: {len(nodes)}"]
+
+    if nodes:
+        lines.append(f"nodes[{len(nodes)}]:")
+        for n in nodes:
+            ntype = n.get("type", "?")
+            nid = n.get("id", "?")
+            props = {k: v for k, v in n.items() if k not in ("type", "id", "_gkg_type")}
+            prop_str = ", ".join(f"{k}: {v}" for k, v in props.items())
+            lines.append(f"  {ntype}#{nid} {{ {prop_str} }}")
+
+    if edges:
+        lines.append(f"edges[{len(edges)}]:")
+        for e in edges:
+            etype = e.get("type", "?")
+            src = f"{e.get('from_type', '?')}#{e.get('from_id', '?')}"
+            dst = f"{e.get('to_type', '?')}#{e.get('to_id', '?')}"
+            lines.append(f"  {src} -[{etype}]-> {dst}")
+
+    return "\n".join(lines)
+
+
 def cmd_query(args: argparse.Namespace) -> None:
     host, token = _get_config()
 
@@ -118,17 +147,19 @@ def cmd_query(args: argparse.Namespace) -> None:
     body = {
         "query": query_dsl,
         "query_type": "json",
-        "format": args.format,
+        "format": "raw",
     }
 
     url = f"https://{host}/api/v4/orbit/query"
     result = _request("POST", url, token, json.dumps(body).encode())
 
     if args.format == "raw":
-        nodes = result.get("nodes", [])
-        result["row_count"] = len(nodes)
-
-    print(json.dumps(result, indent=2))
+        inner = result.get("result", result)
+        inner.pop("raw_query_strings", None)
+        inner["row_count"] = len(inner.get("nodes", []))
+        print(json.dumps(inner, indent=2))
+    else:
+        print(_to_toon(result))
 
 
 def cmd_schema(args: argparse.Namespace) -> None:
@@ -177,8 +208,8 @@ def main() -> None:
 
     p_query = sub.add_parser("query", help="Execute a graph query")
     p_query.add_argument("--file", "-f", help="Read query from file instead of stdin")
-    p_query.add_argument("--format", default="raw", choices=["raw", "llm"],
-                         help="Response format (default: raw)")
+    p_query.add_argument("--format", default="llm", choices=["raw", "llm"],
+                         help="Response format (default: llm)")
     p_query.set_defaults(func=cmd_query)
 
     p_schema = sub.add_parser("schema", help="Get graph schema")
