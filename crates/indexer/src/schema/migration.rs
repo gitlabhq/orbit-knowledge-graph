@@ -98,8 +98,11 @@ pub async fn run_if_needed(
         Some(v) if v == *SCHEMA_VERSION => {
             info!(
                 version = *SCHEMA_VERSION,
-                "schema version matches embedded version — no migration needed"
+                "schema version matches — reconciling indexes and projections"
             );
+            if let Err(e) = super::reconcile::reconcile(graph, ontology).await {
+                warn!(error = %e, "additive reconciliation failed (non-fatal)");
+            }
             metrics.record("complete", "skipped");
             Ok(())
         }
