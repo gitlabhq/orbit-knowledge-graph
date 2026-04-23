@@ -1,10 +1,9 @@
 // Panel helpers that consume the generated `gkg-metrics.json` catalog.
 //
-// Runbooks vendors this file via jsonnet-bundler (see docs in
-// `crates/gkg-observability/orbit-dashboards/README.md`). Dashboards then
-// build panels from typed metric handles instead of hardcoding PromQL
-// strings, so drift between the emitted metric names and dashboard queries
-// becomes a compile-time error in the jsonnet evaluator.
+// Dashboards built on these helpers reference typed metric handles from the
+// catalog instead of hardcoded PromQL strings, so drift between emitted
+// metric names and dashboard queries becomes a compile-time error in the
+// jsonnet evaluator.
 //
 // Usage:
 //   local gkg   = import 'orbit-dashboards/gkg-metrics.json';
