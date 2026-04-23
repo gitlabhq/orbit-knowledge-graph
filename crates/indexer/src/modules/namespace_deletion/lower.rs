@@ -156,12 +156,15 @@ mod tests {
             );
         }
 
-        assert!(
-            generated_tables.contains(&ontology.edge_table()),
-            "missing edge table: {generated_tables:?}"
-        );
+        for edge_table in ontology.edge_tables() {
+            assert!(
+                generated_tables.contains(&edge_table),
+                "missing edge table {edge_table}: {generated_tables:?}"
+            );
+        }
 
-        let expected_count = expected_namespaced.len() + 1;
+        let edge_table_count = ontology.edge_tables().len();
+        let expected_count = expected_namespaced.len() + edge_table_count;
         assert_eq!(
             statements.len(),
             expected_count,
@@ -242,25 +245,23 @@ mod tests {
     }
 
     #[test]
-    fn edge_statement_selects_edge_sort_key_columns() {
+    fn edge_statements_select_sort_key_columns_for_all_tables() {
         let ontology = load_ontology();
         let statements = build_deletion_statements(&ontology);
-        let statement = find_statement(&statements, ontology.edge_table());
 
-        let expected_columns = [
-            "traversal_path",
-            "source_id",
-            "source_kind",
-            "relationship_kind",
-            "target_id",
-            "target_kind",
-        ];
-        for column in &expected_columns {
-            assert!(
-                statement.sql.contains(column),
-                "edge statement should include {column}: {}",
-                statement.sql
-            );
+        for edge_table in ontology.edge_tables() {
+            let config = ontology
+                .edge_table_config(edge_table)
+                .expect("edge table config must exist");
+
+            let statement = find_statement(&statements, edge_table);
+            for column in &config.sort_key {
+                assert!(
+                    statement.sql.contains(column.as_str()),
+                    "{edge_table} deletion should include sort key column {column}: {}",
+                    statement.sql
+                );
+            }
         }
     }
 }

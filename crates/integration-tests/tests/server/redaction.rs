@@ -30,6 +30,14 @@ fn table_edges() -> String {
     t("gl_edge")
 }
 
+fn edge_table_for(relationship: &str) -> String {
+    let ontology = load_ontology();
+    // load_ontology() already applies the schema version prefix.
+    ontology
+        .edge_table_for_relationship(relationship)
+        .to_string()
+}
+
 const ALL_USER_IDS: &[i64] = &[1, 2, 3, 4, 5];
 const ALL_GROUP_IDS: &[i64] = &[100, 101, 102];
 const ALL_PROJECT_IDS: &[i64] = &[1000, 1001, 1002, 1003, 1004];
@@ -3058,14 +3066,14 @@ async fn setup_indirect_auth_data(ctx: &TestContext) {
     ))
     .await;
 
-    // Edges: File --DEFINES--> Definition
+    // Edges: File --DEFINES--> Definition (table derived from ontology)
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5000, 'Definition'),
          ('1/100/1000/', 3000, 'File', 'DEFINES', 5001, 'Definition'),
          ('1/100/1000/', 3001, 'File', 'DEFINES', 5002, 'Definition'),
          ('1/101/1001/', 3002, 'File', 'DEFINES', 5003, 'Definition')",
-        table_edges()
+        edge_table_for("DEFINES")
     ))
     .await;
 }
