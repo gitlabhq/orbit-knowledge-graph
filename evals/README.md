@@ -50,7 +50,10 @@ harness/runner.py
     ▼
 harness/store.py  ──►  .eval-servers/eval.duckdb
     │                     ├── task_results    per-task results + session stats
-    │                     ├── snapshots       full session traces (JSON)
+    │                     ├── snapshots       full session traces (JSON, end-of-task)
+    │                     ├── live_events     raw SSE events (real-time)
+    │                     ├── live_messages   message info extracted from SSE (real-time)
+    │                     ├── live_parts      tool calls + text extracted from SSE (real-time)
     │                     ├── scores          evaluator scores per task
     │                     ├── run_configs     config snapshots + file content hashes
     │                     ├── runs            run metadata
@@ -95,6 +98,32 @@ SELECT run_cost('20260423_120000');
 SELECT success_rate('20260423_120000', 'orbit');
 ```
 
+### Real-time observability
+
+SSE events are streamed to DuckDB as they arrive. Message and tool-call data is extracted into queryable tables so you can observe agent behavior mid-task:
+
+```sql
+-- Per-task progress (messages, tool calls, last activity)
+FROM task_progress('20260423_120000');
+
+-- Watch tool calls for a specific task as they happen
+FROM live_parts('20260423_120000', 'orbit', 'mr-neighbors');
+
+-- See message costs accumulating live
+FROM live_messages('20260423_120000', 'orbit', 'mr-neighbors');
+
+-- Raw event stream
+FROM live('20260423_120000', 'orbit');
+
+-- Quick event count (is anything happening?)
+SELECT event_count('20260423_120000');
+```
+
+Data flows in three tiers:
+1. **Real-time** -- `live_events`, `live_messages`, `live_parts` written per-SSE-event
+2. **Per-task** -- `task_results` written when each task completes
+3. **End-of-task** -- `snapshots` captured via API call after task finishes (full trace for scoring/replay)
+
 ### Config versioning
 
 Each run snapshots the full eval config (parsed YAML), all referenced files (agent prompts, skills, task YAMLs, fixtures), and a SHA256 hash of the bundle. This lets you detect config drift between runs:
@@ -113,9 +142,11 @@ The `run.version` field in `eval.yaml` is a semver string you bump manually when
 
 - **All Python.** OpenCode SDK is 10 HTTP endpoints; hand-written httpx client.
 - **Full agent trace.** SessionSnapshot captures every message, tool call, event, diff, todo.
+- **Incremental snapshots.** SSE events write message/part data to DuckDB in real-time; full snapshot captured at task end for scoring.
+- **Skill pre-loading.** Skill content is inlined into the system prompt so agents don't waste a turn calling the skill tool.
 - **Prompt not retried.** Non-deterministic; only session create + data extraction retried.
-- **Shared SSE.** One connection per arm, EventDemuxer routes events by session_id.
-- **DuckDB for all state.** Results, snapshots, scores, config snapshots, server state -- single file, queryable with SQL macros.
+- **Shared SSE.** One connection per arm, EventDemuxer routes events by session_id with per-session callbacks.
+- **DuckDB for all state.** Results, snapshots, scores, config snapshots, server state -- single file, queryable with SQL macros. Read queries use macros from `helpers.sql`.
 - **Resume via completed_task_ids.** Queries DuckDB for already-completed tasks, skips them on restart.
 - **4-state error model.** SUCCESS | TIMEOUT | AGENT_ERROR | INFRA_ERROR, raw error always stored.
 
