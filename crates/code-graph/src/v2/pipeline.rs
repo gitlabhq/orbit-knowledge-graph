@@ -195,6 +195,10 @@ pub struct PipelineConfig {
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
+    /// Max languages processing concurrently. Limits peak memory
+    /// (at most N CodeGraphs + N rayon pools alive at once).
+    /// 0 = default (2).
+    pub max_concurrent_languages: usize,
 }
 
 impl Default for PipelineConfig {
@@ -204,6 +208,7 @@ impl Default for PipelineConfig {
             respect_gitignore: true,
             cancel: CancellationToken::new(),
             worker_threads: 0,
+            max_concurrent_languages: 0,
         }
     }
 }
@@ -276,8 +281,14 @@ impl Pipeline {
             root_path: root_str,
         });
 
-        // 2. Process all languages concurrently. Each language gets
-        //    a CPU thread (parse + resolve) and a writer thread (I/O).
+        // 2. Process languages with bounded concurrency. At most
+        //    max_concurrent_languages run at once (default 2), each
+        //    with its own rayon pool and writer thread. Limits peak
+        //    memory to N CodeGraphs + N rayon pools.
+        let max_langs = match ctx.config.max_concurrent_languages {
+            0 => 2,
+            n => n,
+        };
         let files_parsed = AtomicUsize::new(0);
         let files_skipped = AtomicUsize::new(0);
         let definitions_count = AtomicUsize::new(0);
@@ -285,11 +296,21 @@ impl Pipeline {
         let edges_count = AtomicUsize::new(0);
         let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
 
+        // Bounded channel as a semaphore: N permits = N concurrent languages
+        let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
+        for _ in 0..max_langs {
+            sem_tx.send(()).unwrap();
+        }
+
         std::thread::scope(|s| {
             for (language, files) in &files_by_language {
+                // Block until a slot opens
+                sem_rx.recv().unwrap();
+
                 let ctx = &ctx;
                 let converter = &converter;
                 let sink = &sink;
+                let sem_tx = &sem_tx;
                 let files_parsed = &files_parsed;
                 let files_skipped = &files_skipped;
                 let definitions_count = &definitions_count;
@@ -297,8 +318,9 @@ impl Pipeline {
                 let edges_count = &edges_count;
                 let all_errors = &all_errors;
 
-                // Per-language channel: CPU thread → writer thread
-                let (tx, rx) = crossbeam_channel::unbounded::<(String, RecordBatch)>();
+                // Per-language channel: CPU thread → writer thread.
+                // Bounded to cap memory if the writer is slower than the converter.
+                let (tx, rx) = crossbeam_channel::bounded::<(String, RecordBatch)>(8);
 
                 // Writer thread: drain channel, write each batch to sink
                 s.spawn(move || {
@@ -309,17 +331,19 @@ impl Pipeline {
                     }
                 });
 
-                // CPU thread: build per-language rayon pool, parse + resolve,
-                // stream batches at phase boundaries
+                // CPU thread: acquire permit, build rayon pool, process,
+                // release permit when done
                 let worker_threads = ctx.config.worker_threads;
                 s.spawn(move || {
                     if ctx.is_cancelled() {
+                        sem_tx.send(()).ok();
                         return;
                     }
                     let file_count = files.len();
                     let t_lang = std::time::Instant::now();
 
-                    let mut pool_builder = rayon::ThreadPoolBuilder::new();
+                    let mut pool_builder =
+                        rayon::ThreadPoolBuilder::new().stack_size(2 * 1024 * 1024); // 2MB per worker (vs 8MB default)
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
@@ -344,6 +368,9 @@ impl Pipeline {
                         crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
                     });
 
+                    // Pool dropped here — rayon threads freed
+                    drop(pool);
+
                     match result {
                         Some(Ok(())) => {
                             eprintln!("[v2] {language}: done in {:.2?}", t_lang.elapsed());
@@ -361,6 +388,8 @@ impl Pipeline {
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
                     }
+                    // Release permit — next language can start
+                    sem_tx.send(()).ok();
                     // tx dropped here — writer thread exits
                 });
             }
