@@ -92,6 +92,10 @@ description = "Fuzz indexer message deserialization"
 run = "cargo build --release"
 description = "Build the crates"
 
+[tasks."build:cli"]
+run = "cargo build --bin orbit --release --features duckdb-client/bundled"
+description = "Build the CLI"
+
 [tasks.test]
 run = "./scripts/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
@@ -131,6 +135,11 @@ description = "Run data correctness integration tests"
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
+
+[tasks."test:integration:indexer:code"]
+run = "cargo nextest run -p integration-tests --retries 0 -E 'test(code_indexing_task)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run indexer integration tests (code indexing)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]

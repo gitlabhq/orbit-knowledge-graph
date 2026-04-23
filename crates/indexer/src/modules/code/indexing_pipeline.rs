@@ -3,12 +3,10 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::legacy::linker::analysis::types::GraphData;
-use code_graph::legacy::linker::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::legacy::linker::loading::DirectoryFileSource;
+use code_graph::v2::{Pipeline, PipelineConfig};
 use tracing::{debug, info, warn};
 
-use super::arrow_converter::ArrowConverter;
+use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -44,6 +42,7 @@ pub struct CodeIndexingPipeline {
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
+    ontology: Arc<ontology::Ontology>,
 }
 
 impl CodeIndexingPipeline {
@@ -53,6 +52,7 @@ impl CodeIndexingPipeline {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
+        ontology: Arc<ontology::Ontology>,
     ) -> Self {
         Self {
             resolver,
@@ -60,6 +60,7 @@ impl CodeIndexingPipeline {
             stale_data_cleaner,
             metrics,
             table_names,
+            ontology,
         }
     }
 
@@ -211,60 +212,57 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
     ) -> Result<(), HandlerError> {
-        let repo_path = repo_dir.to_string_lossy().to_string();
-        let indexer = RepositoryIndexer::with_graph_identity(
-            format!("project-{project_id}"),
-            repo_path.clone(),
-            project_id,
-            branch.to_string(),
-        );
-        let file_source = DirectoryFileSource::new(repo_path);
-
         let indexing_start = Instant::now();
-        let result = indexer
-            .index_files(file_source, &IndexingConfig::default())
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))
-            .record_error_stage(&self.metrics, "indexing")?;
+        let config = PipelineConfig {
+            max_file_size: 5_000_000,
+            ..Default::default()
+        };
+        let tracer = code_graph::v2::trace::Tracer::new(false);
+        let result = Pipeline::run_with_tracer(repo_dir, config, tracer);
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
         self.metrics
-            .record_files_processed(result.skipped_files.len() as u64, "skipped");
-        self.metrics
-            .record_files_processed(result.errored_files.len() as u64, "errored");
+            .record_files_processed(result.stats.files_skipped as u64, "skipped");
 
-        if !result.errored_files.is_empty() {
+        if !result.errors.is_empty() {
             warn!(
                 project_id,
                 branch = %branch,
-                count = result.errored_files.len(),
+                count = result.errors.len(),
                 "some files failed to parse during code indexing"
             );
+            self.metrics
+                .record_files_processed(result.errors.len() as u64, "errored");
         }
 
         context.progress.notify_in_progress().await;
 
-        let Some(graph_data) = result.graph_data else {
+        if result.graphs.is_empty() {
             debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
             return Ok(());
-        };
+        }
 
-        self.metrics
-            .record_files_processed(graph_data.file_nodes.len() as u64, "parsed");
-        self.metrics.record_node_counts(&graph_data);
-
-        self.write_graph_data(
-            context,
+        let envelope = IndexerEnvelope::new(
+            traversal_path.to_string(),
             project_id,
-            branch,
-            commit_sha,
-            traversal_path,
+            branch.to_string(),
+            commit_sha.to_string(),
             indexed_at,
-            &graph_data,
-        )
-        .await?;
+        );
+
+        for graph in &result.graphs {
+            self.metrics
+                .record_files_processed(graph.files().count() as u64, "parsed");
+            self.metrics.record_graph_counts(graph);
+
+            let converted = arrow_converter::convert_code_graph(graph, &envelope, &self.ontology)
+                .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
+                .record_error_stage(&self.metrics, "arrow_conversion")?;
+
+            self.write_data(context, &converted).await?;
+        }
 
         if let Err(error) = self
             .stale_data_cleaner
@@ -282,46 +280,26 @@ impl CodeIndexingPipeline {
         Ok(())
     }
 
-    #[allow(clippy::too_many_arguments)]
-    async fn write_graph_data(
+    async fn write_data(
         &self,
         ctx: &HandlerContext,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        traversal_path: &str,
-        indexed_at: DateTime<Utc>,
-        graph_data: &GraphData,
+        data: &arrow_converter::ConvertedGraphData,
     ) -> Result<(), HandlerError> {
-        let converter = ArrowConverter::new(
-            traversal_path.to_string(),
-            project_id,
-            branch.to_string(),
-            commit_sha.to_string(),
-            indexed_at,
-        );
-
-        let converted = converter
-            .convert_all(graph_data)
-            .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
-            .record_error_stage(&self.metrics, "arrow_conversion")?;
-
-        self.write_batch(ctx, &self.table_names.branch, &converted.branch)
+        self.write_batch(ctx, &self.table_names.branch, &data.branch)
             .await?;
-        self.write_batch(ctx, &self.table_names.directory, &converted.directories)
+        self.write_batch(ctx, &self.table_names.directory, &data.directories)
             .await?;
-        self.write_batch(ctx, &self.table_names.file, &converted.files)
+        self.write_batch(ctx, &self.table_names.file, &data.files)
             .await?;
-        self.write_batch(ctx, &self.table_names.definition, &converted.definitions)
+        self.write_batch(ctx, &self.table_names.definition, &data.definitions)
             .await?;
         self.write_batch(
             ctx,
             &self.table_names.imported_symbol,
-            &converted.imported_symbols,
+            &data.imported_symbols,
         )
         .await?;
-        self.write_edge_batches(ctx, &converted.edges).await?;
-
+        self.write_edge_batches(ctx, &data.edges).await?;
         Ok(())
     }
 

@@ -1,577 +1,67 @@
-//! Arrow conversion for code graph data.
+//! Convert a v2 `CodeGraph` directly to Arrow batches for ClickHouse.
+//!
+//! Uses the shared row types from code-graph with an `IndexerEnvelope`
+//! that adds `traversal_path`, `_version`, and `_deleted` columns.
+//! Column schemas are driven by the ontology — the source of truth
+//! for what columns each entity table has.
 
-use std::hash::{Hash, Hasher};
-use std::sync::Arc;
-
-use arrow::array::{
-    ArrayRef, BooleanBuilder, Int64Builder, StringBuilder, TimestampMicrosecondBuilder,
-};
-use arrow::datatypes::{DataType, Field, Schema, TimeUnit};
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use code_graph::legacy::linker::analysis::types::{
-    DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode,
-};
-use rustc_hash::FxHasher;
+use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, ImportRow};
+use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
+use ontology::DataType as OntDataType;
+use ontology::Ontology;
+use std::hash::{Hash, Hasher};
 
-pub struct ArrowConverter {
-    traversal_path: String,
-    project_id: i64,
-    branch: String,
-    commit_sha: String,
-    version_micros: i64,
+/// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
+/// around the core node columns.
+pub struct IndexerEnvelope {
+    pub traversal_path: String,
+    pub project_id: i64,
+    pub branch: String,
+    pub commit_sha: String,
+    pub version_micros: i64,
 }
 
-impl ArrowConverter {
+impl IndexerEnvelope {
     pub fn new(
         traversal_path: String,
         project_id: i64,
         branch: String,
         commit_sha: String,
-        version_timestamp: DateTime<Utc>,
+        indexed_at: DateTime<Utc>,
     ) -> Self {
         Self {
             traversal_path,
             project_id,
             branch,
             commit_sha,
-            version_micros: version_timestamp.timestamp_micros(),
-        }
-    }
-
-    pub fn convert_all(&self, graph_data: &GraphData) -> Result<ConvertedGraphData, ArrowError> {
-        Ok(ConvertedGraphData {
-            branch: self.convert_branch()?,
-            directories: self.convert_directories(&graph_data.directory_nodes)?,
-            files: self.convert_files(&graph_data.file_nodes)?,
-            definitions: self.convert_definitions(&graph_data.definition_nodes)?,
-            imported_symbols: self.convert_imported_symbols(&graph_data.imported_symbol_nodes)?,
-            edges: self.convert_edges(graph_data)?,
-        })
-    }
-
-    pub fn convert_branch(&self) -> Result<RecordBatch, ArrowError> {
-        let branch_id = compute_branch_id(self.project_id, &self.branch);
-
-        let schema = Schema::new(vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("name", DataType::Utf8, false),
-            Field::new("is_default", DataType::Boolean, false),
-            Field::new(
-                "_version",
-                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-                false,
-            ),
-            Field::new("_deleted", DataType::Boolean, false),
-        ]);
-
-        RecordBatch::try_new(
-            Arc::new(schema),
-            vec![
-                Arc::new(arrow::array::Int64Array::from(vec![branch_id])) as ArrayRef,
-                Arc::new(arrow::array::StringArray::from(vec![
-                    self.traversal_path.as_str(),
-                ])) as ArrayRef,
-                Arc::new(arrow::array::Int64Array::from(vec![self.project_id])) as ArrayRef,
-                Arc::new(arrow::array::StringArray::from(vec![self.branch.as_str()])) as ArrayRef,
-                Arc::new(arrow::array::BooleanArray::from(vec![true])) as ArrayRef,
-                Arc::new(
-                    arrow::array::TimestampMicrosecondArray::from(vec![self.version_micros])
-                        .with_timezone("UTC"),
-                ) as ArrayRef,
-                Arc::new(arrow::array::BooleanArray::from(vec![false])) as ArrayRef,
-            ],
-        )
-    }
-
-    fn base_builders(&self, count: usize) -> BaseColumnBuilders {
-        BaseColumnBuilders::new(
-            &self.traversal_path,
-            self.project_id,
-            &self.branch,
-            &self.commit_sha,
-            self.version_micros,
-            count,
-        )
-    }
-
-    pub fn convert_directories(&self, nodes: &[DirectoryNode]) -> Result<RecordBatch, ArrowError> {
-        let mut base = self.base_builders(nodes.len());
-        let mut id = Int64Builder::with_capacity(nodes.len());
-        let mut path = StringBuilder::with_capacity(nodes.len(), nodes.len() * 64);
-        let mut name = StringBuilder::with_capacity(nodes.len(), nodes.len() * 32);
-
-        for node in nodes {
-            let Some(node_id) = node.id else { continue };
-            base.append_row();
-            id.append_value(node_id);
-            path.append_value(&node.path);
-            name.append_value(&node.name);
-        }
-
-        base.build_batch_with_id(
-            Arc::new(id.finish()) as ArrayRef,
-            vec![
-                (
-                    "path",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(path.finish()) as ArrayRef,
-                ),
-                (
-                    "name",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(name.finish()) as ArrayRef,
-                ),
-            ],
-        )
-    }
-
-    pub fn convert_files(&self, nodes: &[FileNode]) -> Result<RecordBatch, ArrowError> {
-        let mut base = self.base_builders(nodes.len());
-        let mut id = Int64Builder::with_capacity(nodes.len());
-        let mut path = StringBuilder::with_capacity(nodes.len(), nodes.len() * 64);
-        let mut name = StringBuilder::with_capacity(nodes.len(), nodes.len() * 32);
-        let mut extension = StringBuilder::with_capacity(nodes.len(), nodes.len() * 8);
-        let mut language = StringBuilder::with_capacity(nodes.len(), nodes.len() * 16);
-
-        for node in nodes {
-            let Some(node_id) = node.id else { continue };
-            base.append_row();
-            id.append_value(node_id);
-            path.append_value(&node.path);
-            name.append_value(&node.name);
-            extension.append_value(&node.extension);
-            language.append_value(&node.language);
-        }
-
-        base.build_batch_with_id(
-            Arc::new(id.finish()) as ArrayRef,
-            vec![
-                (
-                    "path",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(path.finish()) as ArrayRef,
-                ),
-                (
-                    "name",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(name.finish()) as ArrayRef,
-                ),
-                (
-                    "extension",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(extension.finish()) as ArrayRef,
-                ),
-                (
-                    "language",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(language.finish()) as ArrayRef,
-                ),
-            ],
-        )
-    }
-
-    pub fn convert_definitions(&self, nodes: &[DefinitionNode]) -> Result<RecordBatch, ArrowError> {
-        let mut base = self.base_builders(nodes.len());
-        let mut id = Int64Builder::with_capacity(nodes.len());
-        let mut file_path = StringBuilder::with_capacity(nodes.len(), nodes.len() * 64);
-        let mut fqn = StringBuilder::with_capacity(nodes.len(), nodes.len() * 128);
-        let mut name = StringBuilder::with_capacity(nodes.len(), nodes.len() * 32);
-        let mut definition_type = StringBuilder::with_capacity(nodes.len(), nodes.len() * 16);
-        let mut start_line = Int64Builder::with_capacity(nodes.len());
-        let mut end_line = Int64Builder::with_capacity(nodes.len());
-        let mut start_byte = Int64Builder::with_capacity(nodes.len());
-        let mut end_byte = Int64Builder::with_capacity(nodes.len());
-
-        for node in nodes {
-            let Some(node_id) = node.id else { continue };
-            base.append_row();
-            id.append_value(node_id);
-            file_path.append_value(node.file_path.as_ref());
-            fqn.append_value(node.fqn.to_string());
-            name.append_value(node.fqn.name());
-            definition_type.append_value(node.definition_type.as_str());
-            start_line.append_value(node.range.start.line as i64);
-            end_line.append_value(node.range.end.line as i64);
-            start_byte.append_value(node.range.byte_offset.0 as i64);
-            end_byte.append_value(node.range.byte_offset.1 as i64);
-        }
-
-        base.build_batch_with_id(
-            Arc::new(id.finish()) as ArrayRef,
-            vec![
-                (
-                    "file_path",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(file_path.finish()) as ArrayRef,
-                ),
-                (
-                    "fqn",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(fqn.finish()) as ArrayRef,
-                ),
-                (
-                    "name",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(name.finish()) as ArrayRef,
-                ),
-                (
-                    "definition_type",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(definition_type.finish()) as ArrayRef,
-                ),
-                (
-                    "start_line",
-                    DataType::Int64,
-                    false,
-                    Arc::new(start_line.finish()) as ArrayRef,
-                ),
-                (
-                    "end_line",
-                    DataType::Int64,
-                    false,
-                    Arc::new(end_line.finish()) as ArrayRef,
-                ),
-                (
-                    "start_byte",
-                    DataType::Int64,
-                    false,
-                    Arc::new(start_byte.finish()) as ArrayRef,
-                ),
-                (
-                    "end_byte",
-                    DataType::Int64,
-                    false,
-                    Arc::new(end_byte.finish()) as ArrayRef,
-                ),
-            ],
-        )
-    }
-
-    pub fn convert_imported_symbols(
-        &self,
-        nodes: &[ImportedSymbolNode],
-    ) -> Result<RecordBatch, ArrowError> {
-        let mut base = self.base_builders(nodes.len());
-        let mut id = Int64Builder::with_capacity(nodes.len());
-        let mut file_path = StringBuilder::with_capacity(nodes.len(), nodes.len() * 64);
-        let mut import_type = StringBuilder::with_capacity(nodes.len(), nodes.len() * 16);
-        let mut import_path = StringBuilder::with_capacity(nodes.len(), nodes.len() * 64);
-        let mut identifier_name = StringBuilder::with_capacity(nodes.len(), nodes.len() * 32);
-        let mut identifier_alias = StringBuilder::with_capacity(nodes.len(), nodes.len() * 32);
-        let mut start_line = Int64Builder::with_capacity(nodes.len());
-        let mut end_line = Int64Builder::with_capacity(nodes.len());
-        let mut start_byte = Int64Builder::with_capacity(nodes.len());
-        let mut end_byte = Int64Builder::with_capacity(nodes.len());
-
-        for node in nodes {
-            let Some(node_id) = node.id else { continue };
-            base.append_row();
-            id.append_value(node_id);
-            file_path.append_value(&node.location.file_path);
-            import_type.append_value(node.import_type.as_str());
-            import_path.append_value(&node.import_path);
-
-            match &node.identifier {
-                Some(ident) => {
-                    identifier_name.append_value(&ident.name);
-                    match &ident.alias {
-                        Some(alias) => identifier_alias.append_value(alias),
-                        None => identifier_alias.append_null(),
-                    }
-                }
-                None => {
-                    identifier_name.append_null();
-                    identifier_alias.append_null();
-                }
-            }
-
-            start_line.append_value(node.location.start_line as i64);
-            end_line.append_value(node.location.end_line as i64);
-            start_byte.append_value(node.location.start_byte);
-            end_byte.append_value(node.location.end_byte);
-        }
-
-        base.build_batch_with_id(
-            Arc::new(id.finish()) as ArrayRef,
-            vec![
-                (
-                    "file_path",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(file_path.finish()) as ArrayRef,
-                ),
-                (
-                    "import_type",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(import_type.finish()) as ArrayRef,
-                ),
-                (
-                    "import_path",
-                    DataType::Utf8,
-                    false,
-                    Arc::new(import_path.finish()) as ArrayRef,
-                ),
-                (
-                    "identifier_name",
-                    DataType::Utf8,
-                    true,
-                    Arc::new(identifier_name.finish()) as ArrayRef,
-                ),
-                (
-                    "identifier_alias",
-                    DataType::Utf8,
-                    true,
-                    Arc::new(identifier_alias.finish()) as ArrayRef,
-                ),
-                (
-                    "start_line",
-                    DataType::Int64,
-                    false,
-                    Arc::new(start_line.finish()) as ArrayRef,
-                ),
-                (
-                    "end_line",
-                    DataType::Int64,
-                    false,
-                    Arc::new(end_line.finish()) as ArrayRef,
-                ),
-                (
-                    "start_byte",
-                    DataType::Int64,
-                    false,
-                    Arc::new(start_byte.finish()) as ArrayRef,
-                ),
-                (
-                    "end_byte",
-                    DataType::Int64,
-                    false,
-                    Arc::new(end_byte.finish()) as ArrayRef,
-                ),
-            ],
-        )
-    }
-
-    pub fn convert_edges(&self, graph_data: &GraphData) -> Result<RecordBatch, ArrowError> {
-        let rels = &graph_data.relationships;
-        let root_children: Vec<(i64, &str)> = graph_data
-            .directory_nodes
-            .iter()
-            .filter(|d| !d.path.contains('/'))
-            .filter_map(|d| d.id.map(|id| (id, "Directory")))
-            .chain(
-                graph_data
-                    .file_nodes
-                    .iter()
-                    .filter(|f| !f.path.contains('/'))
-                    .filter_map(|f| f.id.map(|id| (id, "File"))),
-            )
-            .collect();
-        // +1 for IN_PROJECT, +root children for CONTAINS
-        let capacity = rels.len() + 1 + root_children.len();
-        let mut traversal_path =
-            StringBuilder::with_capacity(capacity, capacity * self.traversal_path.len());
-        let mut source_id = Int64Builder::with_capacity(capacity);
-        let mut source_kind = StringBuilder::with_capacity(capacity, capacity * 16);
-        let mut relationship_kind = StringBuilder::with_capacity(capacity, capacity * 32);
-        let mut target_id = Int64Builder::with_capacity(capacity);
-        let mut target_kind = StringBuilder::with_capacity(capacity, capacity * 16);
-        let mut version = TimestampMicrosecondBuilder::with_capacity(capacity);
-        let mut deleted = BooleanBuilder::with_capacity(capacity);
-
-        let branch_id = compute_branch_id(self.project_id, &self.branch);
-
-        // Branch --IN_PROJECT--> Project
-        traversal_path.append_value(&self.traversal_path);
-        source_id.append_value(branch_id);
-        source_kind.append_value("Branch");
-        relationship_kind.append_value("IN_PROJECT");
-        target_id.append_value(self.project_id);
-        target_kind.append_value("Project");
-        version.append_value(self.version_micros);
-        deleted.append_value(false);
-
-        // Branch --CONTAINS--> root-level directories and files
-        for (child_id, child_kind) in &root_children {
-            traversal_path.append_value(&self.traversal_path);
-            source_id.append_value(branch_id);
-            source_kind.append_value("Branch");
-            relationship_kind.append_value("CONTAINS");
-            target_id.append_value(*child_id);
-            target_kind.append_value(child_kind);
-            version.append_value(self.version_micros);
-            deleted.append_value(false);
-        }
-
-        for rel in rels {
-            let (src_kind_str, tgt_kind_str) = rel.kind.source_target_kinds();
-
-            let source_node_id = self.lookup_node_id(graph_data, src_kind_str, rel.source_id);
-            let target_node_id = self.lookup_node_id(graph_data, tgt_kind_str, rel.target_id);
-
-            let (Some(src_id), Some(tgt_id)) = (source_node_id, target_node_id) else {
-                continue;
-            };
-
-            traversal_path.append_value(&self.traversal_path);
-            source_id.append_value(src_id);
-            source_kind.append_value(src_kind_str);
-            relationship_kind.append_value(rel.relationship_type.edge_kind());
-            target_id.append_value(tgt_id);
-            target_kind.append_value(tgt_kind_str);
-            version.append_value(self.version_micros);
-            deleted.append_value(false);
-        }
-
-        let schema = Schema::new(vec![
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("source_id", DataType::Int64, false),
-            Field::new("source_kind", DataType::Utf8, false),
-            Field::new("relationship_kind", DataType::Utf8, false),
-            Field::new("target_id", DataType::Int64, false),
-            Field::new("target_kind", DataType::Utf8, false),
-            Field::new(
-                "_version",
-                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-                false,
-            ),
-            Field::new("_deleted", DataType::Boolean, false),
-        ]);
-
-        RecordBatch::try_new(
-            Arc::new(schema),
-            vec![
-                Arc::new(traversal_path.finish()) as ArrayRef,
-                Arc::new(source_id.finish()) as ArrayRef,
-                Arc::new(source_kind.finish()) as ArrayRef,
-                Arc::new(relationship_kind.finish()) as ArrayRef,
-                Arc::new(target_id.finish()) as ArrayRef,
-                Arc::new(target_kind.finish()) as ArrayRef,
-                Arc::new(version.finish().with_timezone("UTC")) as ArrayRef,
-                Arc::new(deleted.finish()) as ArrayRef,
-            ],
-        )
-    }
-
-    fn lookup_node_id(
-        &self,
-        graph_data: &GraphData,
-        node_kind: &str,
-        index: Option<u32>,
-    ) -> Option<i64> {
-        let index = index? as usize;
-        match node_kind {
-            "Directory" => graph_data.directory_nodes.get(index).and_then(|n| n.id),
-            "File" => graph_data.file_nodes.get(index).and_then(|n| n.id),
-            "Definition" => graph_data.definition_nodes.get(index).and_then(|n| n.id),
-            "ImportedSymbol" => graph_data
-                .imported_symbol_nodes
-                .get(index)
-                .and_then(|n| n.id),
-            _ => None,
+            version_micros: indexed_at.timestamp_micros(),
         }
     }
 }
 
-struct BaseColumnBuilders {
-    traversal_path: StringBuilder,
-    project_id: Int64Builder,
-    branch: StringBuilder,
-    commit_sha: StringBuilder,
-    version: TimestampMicrosecondBuilder,
-    deleted: BooleanBuilder,
-    traversal_path_value: String,
-    project_id_value: i64,
-    branch_value: String,
-    commit_sha_value: String,
-    version_micros: i64,
-}
-
-impl BaseColumnBuilders {
-    fn new(
-        traversal_path: &str,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        version_micros: i64,
-        capacity: usize,
-    ) -> Self {
-        Self {
-            traversal_path: StringBuilder::with_capacity(capacity, capacity * traversal_path.len()),
-            project_id: Int64Builder::with_capacity(capacity),
-            branch: StringBuilder::with_capacity(capacity, capacity * branch.len()),
-            commit_sha: StringBuilder::with_capacity(capacity, capacity * commit_sha.len()),
-            version: TimestampMicrosecondBuilder::with_capacity(capacity),
-            deleted: BooleanBuilder::with_capacity(capacity),
-            traversal_path_value: traversal_path.to_string(),
-            project_id_value: project_id,
-            branch_value: branch.to_string(),
-            commit_sha_value: commit_sha.to_string(),
-            version_micros,
-        }
+impl RowEnvelope for IndexerEnvelope {
+    fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), ArrowError> {
+        b.col("id")?.push_int(id)?;
+        b.col("traversal_path")?.push_str(&self.traversal_path)?;
+        b.col("project_id")?.push_int(self.project_id)?;
+        b.col("branch")?.push_str(&self.branch)?;
+        b.col("commit_sha")?.push_str(&self.commit_sha)?;
+        b.col("_version")?
+            .push_timestamp_micros(self.version_micros)?;
+        b.col("_deleted")?.push_bool(false)?;
+        Ok(())
     }
 
-    fn append_row(&mut self) {
-        self.traversal_path.append_value(&self.traversal_path_value);
-        self.project_id.append_value(self.project_id_value);
-        self.branch.append_value(&self.branch_value);
-        self.commit_sha.append_value(&self.commit_sha_value);
-        self.version.append_value(self.version_micros);
-        self.deleted.append_value(false);
-    }
-
-    fn build_batch_with_id(
-        mut self,
-        id_array: ArrayRef,
-        extra_columns: Vec<(&str, DataType, bool, ArrayRef)>,
-    ) -> Result<RecordBatch, ArrowError> {
-        let mut fields = vec![
-            Field::new("id", DataType::Int64, false),
-            Field::new("traversal_path", DataType::Utf8, false),
-            Field::new("project_id", DataType::Int64, false),
-            Field::new("branch", DataType::Utf8, false),
-            Field::new("commit_sha", DataType::Utf8, false),
-            Field::new(
-                "_version",
-                DataType::Timestamp(TimeUnit::Microsecond, Some("UTC".into())),
-                false,
-            ),
-            Field::new("_deleted", DataType::Boolean, false),
-        ];
-
-        let mut columns: Vec<ArrayRef> = vec![
-            id_array,
-            Arc::new(self.traversal_path.finish()),
-            Arc::new(self.project_id.finish()),
-            Arc::new(self.branch.finish()),
-            Arc::new(self.commit_sha.finish()),
-            Arc::new(self.version.finish().with_timezone("UTC")),
-            Arc::new(self.deleted.finish()),
-        ];
-
-        for (name, dtype, nullable, array) in extra_columns {
-            fields.push(Field::new(name, dtype, nullable));
-            columns.push(array);
-        }
-
-        RecordBatch::try_new(Arc::new(Schema::new(fields)), columns)
+    fn header_specs(&self) -> Vec<ColumnSpec> {
+        // Not used — specs come from the ontology. Kept for trait compliance.
+        vec![]
     }
 }
 
+/// All Arrow batches produced from a `CodeGraph`, ready for ClickHouse.
 pub struct ConvertedGraphData {
     pub branch: RecordBatch,
     pub directories: RecordBatch,
@@ -581,91 +71,299 @@ pub struct ConvertedGraphData {
     pub edges: RecordBatch,
 }
 
-fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
-    let mut hasher = FxHasher::default();
-    [&project_id.to_string(), branch, "branch"].hash(&mut hasher);
-    hasher.finish() as i64
+/// Convert a v2 `CodeGraph` to Arrow batches with ClickHouse envelope columns.
+/// Column schemas are derived from the ontology.
+pub fn convert_code_graph(
+    graph: &code_graph::v2::linker::CodeGraph,
+    envelope: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<ConvertedGraphData, ArrowError> {
+    let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
+
+    Ok(ConvertedGraphData {
+        branch: convert_branch(envelope)?,
+        directories: convert_entity(graph, &ids, envelope, ontology, "Directory", |g, ids| {
+            g.directories()
+                .map(|(idx, dir)| DirectoryRow {
+                    dir,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        files: convert_entity(graph, &ids, envelope, ontology, "File", |g, ids| {
+            g.files()
+                .map(|(idx, file)| FileRow {
+                    file,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        definitions: convert_entity(graph, &ids, envelope, ontology, "Definition", |g, ids| {
+            g.definitions()
+                .map(|(idx, file_path, def)| DefinitionRow {
+                    file_path,
+                    def,
+                    pool: &g.strings,
+                    id: ids[idx.index()],
+                })
+                .collect()
+        })?,
+        imported_symbols: convert_entity(
+            graph,
+            &ids,
+            envelope,
+            ontology,
+            "ImportedSymbol",
+            |g, ids| {
+                g.imports_iter()
+                    .map(|(idx, file_path, import)| ImportRow {
+                        file_path,
+                        import,
+                        pool: &g.strings,
+                        id: ids[idx.index()],
+                    })
+                    .collect()
+            },
+        )?,
+        edges: convert_edges(graph, &ids, envelope, ontology)?,
+    })
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use code_graph::legacy::linker::analysis::types::{DefinitionType, FqnType};
-    use code_graph::legacy::parser::ruby::types::{
-        RubyDefinitionType, RubyFqn, RubyFqnPart, RubyFqnPartType,
-    };
-    use code_graph::utils::{Position, Range};
-    use internment::ArcIntern;
-    use smallvec::SmallVec;
-    use std::sync::Arc as StdArc;
+/// Ontology-driven specs for a node entity, plus ClickHouse
+/// infrastructure columns (_version, _deleted) that aren't in
+/// the ontology but are required by the ReplacingMergeTree schema.
+fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
+    let node = ontology
+        .get_node(entity_name)
+        .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
+    let mut specs: Vec<ColumnSpec> = node
+        .fields
+        .iter()
+        .filter(|f| !f.is_virtual())
+        .map(|f| ColumnSpec {
+            name: f.name.clone(),
+            col_type: match f.data_type {
+                OntDataType::Int => ColumnType::Int,
+                OntDataType::Bool => ColumnType::Bool,
+                OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ => ColumnType::Str,
+            },
+            nullable: f.nullable,
+        })
+        .collect();
+    specs.push(ColumnSpec {
+        name: "_version".into(),
+        col_type: ColumnType::TimestampMicros,
+        nullable: false,
+    });
+    specs.push(ColumnSpec {
+        name: "_deleted".into(),
+        col_type: ColumnType::Bool,
+        nullable: false,
+    });
+    specs
+}
 
-    fn create_test_definition(
-        class_name: &str,
-        method_name: &str,
-        file_path: &str,
-        start_byte: usize,
-        end_byte: usize,
-    ) -> DefinitionNode {
-        let range = Range::new(
-            Position::new(1, 0),
-            Position::new(10, 0),
-            (start_byte, end_byte),
-        );
+/// Ontology-driven specs for edges, plus infrastructure columns.
+fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+    let mut specs: Vec<ColumnSpec> = ontology
+        .edge_columns()
+        .iter()
+        .map(|c| ColumnSpec {
+            name: c.name.clone(),
+            col_type: match c.data_type {
+                OntDataType::Int => ColumnType::Int,
+                OntDataType::Bool => ColumnType::Bool,
+                OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ => ColumnType::Str,
+            },
+            nullable: false,
+        })
+        .collect();
+    specs.push(ColumnSpec {
+        name: "_version".into(),
+        col_type: ColumnType::TimestampMicros,
+        nullable: false,
+    });
+    specs.push(ColumnSpec {
+        name: "_deleted".into(),
+        col_type: ColumnType::Bool,
+        nullable: false,
+    });
+    specs
+}
 
-        let fqn = RubyFqn {
-            parts: StdArc::new(SmallVec::from_vec(vec![
-                RubyFqnPart::new(RubyFqnPartType::Class, class_name.to_string(), range),
-                RubyFqnPart::new(RubyFqnPartType::Method, method_name.to_string(), range),
-            ])),
-        };
+/// Generic entity converter. Gets specs from the ontology, builds rows
+/// via the provided closure, and produces a RecordBatch.
+fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+    entity_name: &str,
+    build_rows: impl FnOnce(&'a code_graph::v2::linker::CodeGraph, &[i64]) -> Vec<R>,
+) -> Result<RecordBatch, ArrowError> {
+    let specs = entity_specs(ontology, entity_name);
+    let rows = build_rows(graph, ids);
+    R::to_record_batch(&rows, &specs, env)
+}
 
-        DefinitionNode::new(
-            FqnType::Ruby(fqn),
-            DefinitionType::Ruby(RubyDefinitionType::Method),
-            range,
-            ArcIntern::new(file_path.to_string()),
-        )
+fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
+    let branch_id = compute_branch_id(env.project_id, &env.branch);
+    // Branch has a fixed schema (not driven by row types).
+    let specs = vec![
+        ColumnSpec {
+            name: "id".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "traversal_path".into(),
+            col_type: ColumnType::Str,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "project_id".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "name".into(),
+            col_type: ColumnType::Str,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "is_default".into(),
+            col_type: ColumnType::Bool,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "_version".into(),
+            col_type: ColumnType::TimestampMicros,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "_deleted".into(),
+            col_type: ColumnType::Bool,
+            nullable: false,
+        },
+    ];
+
+    struct BranchRow<'a> {
+        id: i64,
+        env: &'a IndexerEnvelope,
     }
-
-    fn create_test_file(path: &str) -> FileNode {
-        FileNode {
-            id: None,
-            path: path.to_string(),
-            absolute_path: format!("/repo/{}", path),
-            language: "Ruby".to_string(),
-            repository_name: "test-repo".to_string(),
-            extension: "rb".to_string(),
-            name: path.split('/').next_back().unwrap_or(path).to_string(),
+    impl AsRecordBatch for BranchRow<'_> {
+        fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
+            b.col("id")?.push_int(self.id)?;
+            b.col("traversal_path")?
+                .push_str(&self.env.traversal_path)?;
+            b.col("project_id")?.push_int(self.env.project_id)?;
+            b.col("name")?.push_str(&self.env.branch)?;
+            b.col("is_default")?.push_bool(true)?;
+            b.col("_version")?
+                .push_timestamp_micros(self.env.version_micros)?;
+            b.col("_deleted")?.push_bool(false)?;
+            Ok(())
         }
     }
 
-    #[test]
-    fn test_node_ids_are_unique() {
-        let project_id = 123;
-        let branch = "main";
+    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
+}
 
-        let mut graph_data = GraphData {
-            directory_nodes: vec![],
-            file_nodes: vec![create_test_file("src/user.rb")],
-            definition_nodes: vec![
-                create_test_definition("User", "save", "src/user.rb", 0, 100),
-                create_test_definition("User", "validate", "src/user.rb", 100, 200),
-            ],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
+fn convert_edges(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    let specs = edge_specs(ontology);
 
-        graph_data.assign_node_ids(project_id, branch);
-
-        let file_id = graph_data.file_nodes[0].id.unwrap();
-        let def1_id = graph_data.definition_nodes[0].id.unwrap();
-        let def2_id = graph_data.definition_nodes[1].id.unwrap();
-
-        println!("file_id: {}", file_id);
-        println!("def1_id: {}", def1_id);
-        println!("def2_id: {}", def2_id);
-        assert_ne!(file_id, def1_id, "file and def1 should have different IDs");
-        assert_ne!(file_id, def2_id, "file and def2 should have different IDs");
-        assert_ne!(def1_id, def2_id, "def1 and def2 should have different IDs");
+    struct IndexerEdgeRow<'a> {
+        env: &'a IndexerEnvelope,
+        source_id: i64,
+        target_id: i64,
+        edge_kind: &'a str,
+        source_node_kind: &'a str,
+        target_node_kind: &'a str,
     }
+
+    impl AsRecordBatch for IndexerEdgeRow<'_> {
+        fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
+            b.col("traversal_path")?
+                .push_str(&self.env.traversal_path)?;
+            b.col("source_id")?.push_int(self.source_id)?;
+            b.col("source_kind")?.push_str(self.source_node_kind)?;
+            b.col("relationship_kind")?.push_str(self.edge_kind)?;
+            b.col("target_id")?.push_int(self.target_id)?;
+            b.col("target_kind")?.push_str(self.target_node_kind)?;
+            b.col("_version")?
+                .push_timestamp_micros(self.env.version_micros)?;
+            b.col("_deleted")?.push_bool(false)?;
+            Ok(())
+        }
+    }
+
+    let branch_id = compute_branch_id(env.project_id, &env.branch);
+
+    let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
+
+    // Branch --IN_PROJECT--> Project
+    edge_rows.push(IndexerEdgeRow {
+        env,
+        source_id: branch_id,
+        target_id: env.project_id,
+        edge_kind: "IN_PROJECT",
+        source_node_kind: "Branch",
+        target_node_kind: "Project",
+    });
+
+    // Branch --CONTAINS--> root-level directories and files
+    for (idx, dir) in graph.directories() {
+        if dir.path != "." && !dir.path.contains('/') {
+            edge_rows.push(IndexerEdgeRow {
+                env,
+                source_id: branch_id,
+                target_id: ids[idx.index()],
+                edge_kind: "CONTAINS",
+                source_node_kind: "Branch",
+                target_node_kind: "Directory",
+            });
+        }
+    }
+    for (idx, file) in graph.files() {
+        if !file.path.contains('/') {
+            edge_rows.push(IndexerEdgeRow {
+                env,
+                source_id: branch_id,
+                target_id: ids[idx.index()],
+                edge_kind: "CONTAINS",
+                source_node_kind: "Branch",
+                target_node_kind: "File",
+            });
+        }
+    }
+
+    // Graph edges (CONTAINS, DEFINES, CALLS, etc.)
+    for ei in graph.graph.edge_indices() {
+        let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
+        let edge = &graph.graph[ei];
+        edge_rows.push(IndexerEdgeRow {
+            env,
+            source_id: ids[src.index()],
+            target_id: ids[tgt.index()],
+            edge_kind: edge.relationship.edge_kind.as_ref(),
+            source_node_kind: edge.relationship.source_node.as_ref(),
+            target_node_kind: edge.relationship.target_node.as_ref(),
+        });
+    }
+
+    IndexerEdgeRow::to_record_batch(&edge_rows, &specs, &())
+}
+
+fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
+    let mut hasher = rustc_hash::FxHasher::default();
+    project_id.hash(&mut hasher);
+    branch.hash(&mut hasher);
+    hasher.finish() as i64
 }

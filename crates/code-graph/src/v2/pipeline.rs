@@ -339,7 +339,7 @@ impl Pipeline {
 ///
 /// - **Phase 1** (parallel): `parse_defs_only()` → add defs/imports to graph under Mutex
 /// - **Finalize**: build ancestor chains, drop construction indexes
-/// - **Phase 2** (parallel): `parse_full_and_resolve()` with callback → edges
+/// - **Phase 2** (parallel): resolve collected refs against the graph → edges
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -370,18 +370,7 @@ where
             .per_file_timeout
             .map(crate::v2::sentinel::spawn_sentinel);
 
-        // ── Pre-phase: bulk file read into memory ───────────────
-        // Read all files once upfront. Both Phase 1 and Phase 2
-        // index into the same buffer — no per-file I/O in the hot loop.
-        let sources: Vec<Option<Vec<u8>>> = files
-            .par_iter()
-            .map(|path| {
-                let abs_path = format!("{root_path}/{path}");
-                std::fs::read(&abs_path).ok()
-            })
-            .collect();
-
-        // ── Phase 1: parallel parse, sequential graph build ─────
+        // ── Phase 1: parallel full walk, sequential graph build ──
         let pb = progress_bar(file_count as u64, "parse + graph");
         let all_errors: Vec<PipelineError> = Vec::new();
 
@@ -391,39 +380,42 @@ where
             import_nodes: Vec<petgraph::graph::NodeIndex>,
         }
 
-        // Phase 1a: parse all files in parallel (no locks, no graph)
-        use crate::v2::dsl::engine::ParsedDefs;
+        // Phase 1a: full AST walk in parallel (no locks, no graph).
+        // Extracts defs, imports, AND refs+SSA in a single pass.
+        // Source bytes are read and dropped per-file — no bulk storage.
+        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
         struct ParsedFile {
             path_idx: usize,
-            result: ParsedDefs,
+            result: ParseFullResult,
             ext: String,
             file_size: u64,
         }
 
         let parsed: Vec<Option<ParsedFile>> = files
             .par_iter()
-            .zip(sources.par_iter())
             .enumerate()
-            .map(|(idx, (path, source_opt))| {
+            .map(|(idx, path)| {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
                 }
-                let source = match source_opt {
-                    Some(s) => s,
-                    None => {
+                let abs_path = format!("{root_path}/{path}");
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(_) => {
                         pb.inc(1);
                         return None;
                     }
                 };
 
-                let result = match spec.parse_defs_only(source, path, language) {
+                let result = match spec.parse_full_collect(&source, path, language, tracer) {
                     Ok(r) => r,
                     Err(_) => {
                         pb.inc(1);
                         return None;
                     }
                 };
+                // source bytes dropped here — single-walk, no re-read needed
 
                 let ext = path
                     .rsplit_once('.')
@@ -441,12 +433,20 @@ where
             })
             .collect();
 
-        // Phase 1b: add to graph sequentially (no lock contention)
+        // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
+        struct FileWithRefs {
+            info: FileInfo,
+            refs: Vec<CollectedRef>,
+            inferred_returns: Vec<(u32, String)>,
+            unresolved_aliases: Vec<(usize, String)>,
+        }
+
         let mut graph =
             CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
-        let mut file_infos: Vec<Option<FileInfo>> = (0..file_count).map(|_| None).collect();
+        let mut files_with_refs: Vec<Option<FileWithRefs>> =
+            (0..file_count).map(|_| None).collect();
 
         for parsed_file in parsed.into_iter().flatten() {
             let path = &files[parsed_file.path_idx];
@@ -462,10 +462,15 @@ where
                 &parsed_file.result.imports,
             );
 
-            file_infos[parsed_file.path_idx] = Some(FileInfo {
-                file_node,
-                def_nodes,
-                import_nodes,
+            files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
+                info: FileInfo {
+                    file_node,
+                    def_nodes,
+                    import_nodes,
+                },
+                refs: parsed_file.result.refs,
+                inferred_returns: parsed_file.result.inferred_returns,
+                unresolved_aliases: parsed_file.result.unresolved_aliases,
             });
         }
 
@@ -474,13 +479,34 @@ where
             t0.elapsed()
         ));
 
-        if !all_errors.is_empty() && file_infos.iter().all(|r| r.is_none()) {
+        if !all_errors.is_empty() && files_with_refs.iter().all(|r| r.is_none()) {
             return Err(all_errors);
         }
 
         graph.finalize(tracer);
 
-        // ── Phase 2: parallel parse_full + resolve (callback) ──
+        // ── Phase 1c: patch unresolved SSA aliases via graph ────
+        // Pass 1.5 equivalent: resolve alias targets that couldn't be
+        // resolved without the cross-file graph, then update reaching
+        // values on the affected CollectedRefs.
+        for fwr in files_with_refs.iter_mut().flatten() {
+            if fwr.unresolved_aliases.is_empty() {
+                continue;
+            }
+            for (ref_idx, alias_target) in &fwr.unresolved_aliases {
+                let nodes = graph.resolve_scope_nodes(alias_target);
+                if let Some(&n) = nodes.first()
+                    && graph.def_kind(n).is_type_container()
+                {
+                    let fqn = graph.def_fqn(n).to_string();
+                    if let Some(r) = fwr.refs.get_mut(*ref_idx) {
+                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn)];
+                    }
+                }
+            }
+        }
+
+        // ── Phase 2: resolve-only (no I/O, no parsing) ──────────
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -493,24 +519,18 @@ where
             )>,
             Vec<(u32, String)>,
             Option<FileInfo>,
-            Vec<(
-                String,
-                Vec<crate::v2::types::ExpressionStep>,
-                smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
-                Option<u32>,
-            )>,
+            Vec<FailedChain>,
         );
 
-        let resolve_results: Vec<Phase2Result> = file_infos
+        let resolve_results: Vec<Phase2Result> = files_with_refs
             .into_par_iter()
-            .zip(sources.par_iter())
             .zip(files.par_iter())
-            .map(|((info_opt, source_opt), path)| -> Phase2Result {
+            .map(|(fwr_opt, path)| -> Phase2Result {
                 if ctx.is_cancelled() {
                     pb2.inc(1);
                     return Default::default();
                 }
-                let (Some(info), Some(source)) = (info_opt, source_opt) else {
+                let Some(fwr) = fwr_opt else {
                     pb2.inc(1);
                     return Default::default();
                 };
@@ -518,52 +538,45 @@ where
                 let guard = sentinel.as_ref().map(|(handle, _)| handle.file_start(path));
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
-                    info.file_node,
-                    &info.def_nodes,
-                    &info.import_nodes,
+                    fwr.info.file_node,
+                    &fwr.info.def_nodes,
+                    &fwr.info.import_nodes,
                     &lang_ctx,
                     guard,
                 );
+                resolver.set_inferred_returns(&fwr.inferred_returns);
+
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
-                let mut inferred_set = false;
 
-                let inferred_result = spec.parse_full_and_resolve(
-                    source,
-                    path,
-                    language,
-                    &mut |name, chain, reaching, enclosing_def, inferred| {
-                        if !inferred_set {
-                            resolver.set_inferred_returns(inferred);
-                            inferred_set = true;
-                        }
-                        let before = edges.len();
-                        if resolver
-                            .resolve(name, chain, reaching, enclosing_def, &mut edges)
-                            .is_err()
-                        {
-                            return; // file killed by sentinel
-                        }
-                        // Store failed chain refs for Phase 3 re-resolution
-                        if edges.len() == before && chain.is_some_and(|c| c.len() >= 2) {
-                            failed_chains.push((
-                                name.to_string(),
-                                chain.unwrap().to_vec(),
-                                reaching.into(),
-                                enclosing_def,
-                            ));
-                        }
-                    },
-                    tracer,
-                    Some(&graph),
-                );
+                for r in &fwr.refs {
+                    let before = edges.len();
+                    if resolver
+                        .resolve(
+                            &r.name,
+                            r.chain.as_deref(),
+                            &r.reaching,
+                            r.enclosing_def,
+                            &mut edges,
+                        )
+                        .is_err()
+                    {
+                        break; // file killed by sentinel
+                    }
+                    if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
+                        failed_chains.push((
+                            r.name.clone(),
+                            r.chain.clone().unwrap(),
+                            r.reaching.clone().into(),
+                            r.enclosing_def,
+                        ));
+                    }
+                }
 
-                let inferred = inferred_result.unwrap_or_default();
                 edges.extend(resolver.drain_import_edges());
-
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
-                (edges, inferred, Some(info), failed_chains)
+                (edges, fwr.inferred_returns, Some(fwr.info), failed_chains)
             })
             .collect();
 
