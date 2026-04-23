@@ -349,8 +349,8 @@ fn run_schema(args: &[&str]) -> (String, String, bool) {
 
 #[test]
 fn schema_default_is_local_scope() {
-    let (stdout, stderr, ok) = run_schema(&["schema"]);
-    assert!(ok, "orbit schema failed: {stderr}");
+    let (stdout, stderr, ok) = run_schema(&["schema", "--ontology"]);
+    assert!(ok, "orbit schema --ontology failed: {stderr}");
 
     for want in ["Directory", "File", "Definition", "ImportedSymbol"] {
         assert!(
@@ -371,7 +371,7 @@ fn schema_default_is_local_scope() {
 
 #[test]
 fn schema_default_is_toon_not_json() {
-    let (stdout, _, ok) = run_schema(&["schema"]);
+    let (stdout, _, ok) = run_schema(&["schema", "--ontology"]);
     assert!(ok);
     assert!(
         !stdout.trim_start().starts_with('{'),
@@ -383,7 +383,7 @@ fn schema_default_is_toon_not_json() {
 
 #[test]
 fn schema_expand_file_shows_props() {
-    let (stdout, stderr, ok) = run_schema(&["schema", "--expand", "File"]);
+    let (stdout, stderr, ok) = run_schema(&["schema", "--ontology", "--expand", "File"]);
     assert!(ok, "stderr: {stderr}");
     assert!(
         stdout.contains("path:string"),
@@ -394,7 +394,7 @@ fn schema_expand_file_shows_props() {
 
 #[test]
 fn schema_raw_is_parseable_json() {
-    let (stdout, _, ok) = run_schema(&["schema", "--raw"]);
+    let (stdout, _, ok) = run_schema(&["schema", "--ontology", "--raw"]);
     assert!(ok);
     let v: Value = serde_json::from_str(&stdout).expect("parseable JSON");
     assert!(v["domains"].is_array());
@@ -412,7 +412,7 @@ fn schema_raw_is_parseable_json() {
 
 #[test]
 fn schema_all_includes_server_entities() {
-    let (stdout, _, ok) = run_schema(&["schema", "--all"]);
+    let (stdout, _, ok) = run_schema(&["schema", "--ontology", "--all"]);
     assert!(ok);
     assert!(stdout.contains("User"), "--all should include User");
     assert!(stdout.contains("AUTHORED"), "--all should include AUTHORED");
@@ -431,7 +431,7 @@ fn debug_ddl_produces_clickhouse_statements() {
 
 #[test]
 fn old_schema_subcommand_no_longer_emits_ddl() {
-    let (stdout, _, ok) = run_schema(&["schema"]);
+    let (stdout, _, ok) = run_schema(&["schema", "--ontology"]);
     assert!(ok);
     assert!(
         !stdout.contains("CREATE TABLE"),
@@ -441,10 +441,43 @@ fn old_schema_subcommand_no_longer_emits_ddl() {
 
 #[test]
 fn schema_expand_without_value_errors() {
-    let (_, stderr, ok) = run_schema(&["schema", "--expand"]);
+    let (_, stderr, ok) = run_schema(&["schema", "--ontology", "--expand"]);
     assert!(!ok, "--expand without a value should fail");
     assert!(
         stderr.contains("--expand") || stderr.contains("NODE"),
         "stderr should mention the missing NODE value: {stderr}"
     );
+}
+
+#[test]
+fn schema_bare_requires_flag() {
+    let (_, stderr, ok) = run_schema(&["schema"]);
+    assert!(
+        !ok,
+        "orbit schema without --ontology or --query should fail"
+    );
+    assert!(
+        stderr.contains("--ontology") || stderr.contains("--query"),
+        "stderr should hint at required flags: {stderr}"
+    );
+}
+
+#[test]
+fn schema_query_returns_dsl() {
+    let (stdout, stderr, ok) = run_schema(&["schema", "--query"]);
+    assert!(ok, "orbit schema --query failed: {stderr}");
+    assert!(stdout.contains("query_type"), "should contain query_type");
+    assert!(stdout.contains("traversal"), "should contain traversal");
+    assert!(
+        stdout.contains("NodeSelector"),
+        "should contain NodeSelector"
+    );
+}
+
+#[test]
+fn schema_query_raw_is_json() {
+    let (stdout, stderr, ok) = run_schema(&["schema", "--query", "--raw"]);
+    assert!(ok, "orbit schema --query --raw failed: {stderr}");
+    let v: Value = serde_json::from_str(&stdout).expect("should be parseable JSON");
+    assert!(v.is_object(), "should be a JSON object");
 }

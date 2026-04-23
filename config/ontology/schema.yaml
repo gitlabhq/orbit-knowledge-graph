@@ -151,11 +151,13 @@ domains:
       MergeRequestDiff: nodes/code_review/merge_request_diff.yaml
       MergeRequestDiffFile: nodes/code_review/merge_request_diff_file.yaml
   ci:
-    description: "Entities related to CI/CD pipelines, stages, and jobs."
+    description: "Entities related to CI/CD pipelines, stages, jobs, deployments, and environments."
     nodes:
       Pipeline: nodes/ci/pipeline.yaml
       Stage: nodes/ci/stage.yaml
       Job: nodes/ci/job.yaml
+      Deployment: nodes/ci/deployment.yaml
+      Environment: nodes/ci/environment.yaml
   security:
     description: "Entities related to security vulnerabilities and findings."
     nodes:
@@ -219,3 +221,7 @@ edges:
   SCANS: edges/scans.yaml
   RAN_BY: edges/ran_by.yaml
   IN_PIPELINE: edges/in_pipeline.yaml
+  DEPLOYED_BY: edges/deployed_by.yaml
+  DEPLOYED_TO: edges/deployed_to.yaml
+  IN_ENVIRONMENT: edges/in_environment.yaml
+  CREATED_FOR_MR: edges/created_for_mr.yaml

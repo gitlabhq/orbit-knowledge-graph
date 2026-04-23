@@ -1,0 +1,162 @@
+# config/ontology/nodes/ci/deployment.yaml
+
+node_type: Deployment
+domain: ci
+description: A deployment of a specific commit to a CI/CD environment
+label: id
+destination_table: gl_deployment
+default_columns: [id, iid, status, ref, sha]
+
+style:
+  size: 26
+  color: "#14B8A6"
+
+redaction:
+  resource_type: deployment
+  id_column: id
+  ability: read_deployment
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the deployment."
+
+  iid:
+    type: int64
+    source: iid
+    nullable: false
+    description: "Project-scoped deployment number."
+
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Project that owns this deployment. Retained on the node row so redaction can resolve project-level permissions without an edge lookup."
+
+  ref:
+    type: string
+    source: ref
+    nullable: false
+    description: "Git ref (branch or tag name) that was deployed."
+
+  tag:
+    type: boolean
+    source: tag
+    nullable: false
+    description: "Whether the deployed ref is a tag."
+
+  sha:
+    type: string
+    source: sha
+    nullable: false
+    description: "Git commit SHA that was deployed."
+
+  status:
+    type: enum
+    source: status
+    nullable: false
+    description: "Current execution status of the deployment."
+    values:
+      0: created
+      1: running
+      2: success
+      3: failed
+      4: canceled
+      5: skipped
+      6: blocked
+
+  deployable_type:
+    type: string
+    source: deployable_type
+    nullable: false
+    description: "Type of the deployable that produced this deployment (typically CommitStatus/Ci::Build)."
+
+  deployable_id:
+    type: int64
+    source: deployable_id
+    nullable: true
+    description: "ID of the deployable that produced this deployment."
+
+  on_stop:
+    type: string
+    source: on_stop
+    nullable: true
+    description: "Name of the job that stops this deployment, if defined."
+
+  archived:
+    type: boolean
+    source: archived
+    nullable: false
+    description: "Whether this deployment has been archived."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the deployment record was created."
+
+  finished_at:
+    type: timestamp
+    source: finished_at
+    nullable: true
+    description: "Timestamp when the deployment finished executing."
+
+  updated_at:
+    type: timestamp
+    source: updated_at
+    nullable: true
+    description: "Timestamp when the deployment was last updated."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_deployments
+  edges:
+    project_id:
+      to: Project
+      as: IN_PROJECT
+      direction: outgoing
+    environment_id:
+      to: Environment
+      as: IN_ENVIRONMENT
+      direction: outgoing
+    user_id:
+      to: User
+      as: DEPLOYED_BY
+      direction: incoming
+
+storage:
+  primary_key: [traversal_path, id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: iid, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: tag, type: "Bool", default: "false"}
+    - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: deployable_type, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: deployable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: on_stop, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: archived, type: "Bool", default: "false"}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_status, column: status, type: "set(8)", granularity: 2}
+    - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_status_id, order_by: [status, id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
