@@ -218,11 +218,34 @@ impl CodeIndexingPipeline {
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
-        let result = Pipeline::run_with_tracer(repo_dir, config, tracer);
+
+        let envelope = IndexerEnvelope::new(
+            traversal_path.to_string(),
+            project_id,
+            branch.to_string(),
+            commit_sha.to_string(),
+            indexed_at,
+        );
+
+        let converter: Arc<dyn code_graph::v2::GraphConverter> =
+            Arc::new(arrow_converter::IndexerConverter {
+                envelope,
+                ontology: self.ontology.clone(),
+                table_names: self.table_names.clone(),
+            });
+        let sink: Arc<dyn code_graph::v2::BatchSink> =
+            Arc::new(arrow_converter::ClickHouseSink::new(
+                context.destination.clone(),
+                tokio::runtime::Handle::current(),
+            ));
+
+        let result = Pipeline::run_with_tracer(repo_dir, config, tracer, converter, sink);
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
+        self.metrics
+            .record_files_processed(result.stats.files_parsed as u64, "parsed");
         self.metrics
             .record_files_processed(result.stats.files_skipped as u64, "skipped");
 
@@ -238,31 +261,6 @@ impl CodeIndexingPipeline {
         }
 
         context.progress.notify_in_progress().await;
-
-        if result.graphs.is_empty() {
-            debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
-            return Ok(());
-        }
-
-        let envelope = IndexerEnvelope::new(
-            traversal_path.to_string(),
-            project_id,
-            branch.to_string(),
-            commit_sha.to_string(),
-            indexed_at,
-        );
-
-        for graph in &result.graphs {
-            self.metrics
-                .record_files_processed(graph.files().count() as u64, "parsed");
-            self.metrics.record_graph_counts(graph);
-
-            let converted = arrow_converter::convert_code_graph(graph, &envelope, &self.ontology)
-                .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
-                .record_error_stage(&self.metrics, "arrow_conversion")?;
-
-            self.write_data(context, &converted).await?;
-        }
 
         if let Err(error) = self
             .stale_data_cleaner

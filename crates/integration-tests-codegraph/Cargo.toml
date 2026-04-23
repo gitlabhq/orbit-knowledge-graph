@@ -15,6 +15,7 @@ arrow_56 = { workspace = true }
 arrow = { workspace = true }
 arrow-ipc = { workspace = true }
 
+crossbeam-channel = "0.5"
 globset = { workspace = true }
 rayon = { workspace = true }
 petgraph = { workspace = true }

@@ -18,7 +18,8 @@ use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
-    FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
+    BatchTx, FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError,
+    PipelineOutput,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -46,23 +47,28 @@ macro_rules! register_v2_pipelines {
             language: Language,
             files: &[FileInput],
             ctx: &Arc<PipelineContext>,
+            btx: &BatchTx<'_>,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             #[allow(unreachable_patterns)]
             Some(match language {
-                $(Language::$variant => <$($pipeline)*>::process_files(files, ctx),)*
+                $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
         }
     };
     // Emit dispatch_by_tag (called by YAML test harness).
+    // Uses a NullConverter since tag-dispatched tests handle their
+    // own conversion — batches flow through the channel and are
+    // collected into PipelineOutput for backward compat.
     (@emit_tag $( [$tag:literal => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_by_tag(
             tag: &str,
             files: &[FileInput],
             ctx: &Arc<PipelineContext>,
+            btx: &BatchTx<'_>,
         ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
             Some(match tag {
-                $($tag => <$($pipeline)*>::process_files(files, ctx),)*
+                $($tag => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
         }

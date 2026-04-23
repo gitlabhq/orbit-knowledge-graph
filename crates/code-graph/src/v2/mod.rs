@@ -5,11 +5,15 @@ pub mod linker;
 pub mod pipeline;
 pub mod registry;
 pub mod sentinel;
+pub mod sink;
 pub mod trace;
 pub mod types;
 
 pub use pipeline::{
-    CancellationToken, GenericPipeline, LanguageContext, LanguagePipeline, Pipeline,
+    BatchTx, CancellationToken, GenericPipeline, LanguageContext, LanguagePipeline, Pipeline,
     PipelineConfig, PipelineContext, PipelineOutput, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_language};
+pub use sink::{
+    BatchSink, CollectSink, GraphCapture, GraphConverter, NullConverter, NullSink, SinkError,
+};

@@ -6284,6 +6284,7 @@ dependencies = [
  "arrow 58.1.0",
  "arrow-ipc 58.1.0",
  "code-graph",
+ "crossbeam-channel",
  "globset",
  "lance-graph",
  "petgraph 0.8.3",

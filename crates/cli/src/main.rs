@@ -753,34 +753,6 @@ async fn index_repo_v2(
     };
     let tracer = code_graph::v2::trace::Tracer::new(false);
 
-    let v2_result = if config.worker_threads > 0 {
-        let pool = rayon::ThreadPoolBuilder::new()
-            .num_threads(config.worker_threads)
-            .build()
-            .context("failed to build thread pool")?;
-        pool.install(|| {
-            code_graph::v2::Pipeline::run_with_tracer(
-                std::path::Path::new(&root_path),
-                pipeline_config,
-                tracer,
-            )
-        })
-    } else {
-        code_graph::v2::Pipeline::run_with_tracer(
-            std::path::Path::new(&root_path),
-            pipeline_config,
-            tracer,
-        )
-    };
-
-    if !v2_result.errors.is_empty() {
-        for err in &v2_result.errors {
-            tracing::warn!("v2 pipeline error: {} ({})", err.error, err.file_path);
-        }
-    }
-
-    let graphs = v2_result.graphs;
-    let graph_stats = summarize_v2_graphs(&graphs);
     let db_path = store.db_path();
     let client =
         duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for writing")?;
@@ -804,20 +776,48 @@ async fn index_repo_v2(
         .delete_project(git.project_id, &node_tables, edge_table)
         .context("failed to clear existing project data")?;
 
-    // Convert to Arrow and write to DuckDB
-    for graph in &graphs {
-        let local_data = duckdb_client::convert_v2_graph(
-            graph,
-            git.project_id,
-            &git.branch,
-            &git.commit_sha,
-            ontology,
+    let converter: std::sync::Arc<dyn code_graph::v2::GraphConverter> =
+        std::sync::Arc::new(duckdb_client::DuckDbConverter {
+            project_id: git.project_id,
+            branch: git.branch.clone(),
+            commit_sha: git.commit_sha.clone(),
+            ontology: std::sync::Arc::new(ontology.clone()),
+        });
+    let sink: std::sync::Arc<dyn code_graph::v2::BatchSink> =
+        std::sync::Arc::new(duckdb_client::DuckDbSink::new(client));
+
+    let v2_result = if config.worker_threads > 0 {
+        let pool = rayon::ThreadPoolBuilder::new()
+            .num_threads(config.worker_threads)
+            .build()
+            .context("failed to build thread pool")?;
+        pool.install(|| {
+            code_graph::v2::Pipeline::run_with_tracer(
+                std::path::Path::new(&root_path),
+                pipeline_config,
+                tracer,
+                converter.clone(),
+                sink.clone(),
+            )
+        })
+    } else {
+        code_graph::v2::Pipeline::run_with_tracer(
+            std::path::Path::new(&root_path),
+            pipeline_config,
+            tracer,
+            converter,
+            sink,
         )
-        .context("failed to convert v2 graph data to Arrow")?;
-        client
-            .insert_graph(local_data)
-            .context("failed to insert graph data")?;
+    };
+
+    if !v2_result.errors.is_empty() {
+        for err in &v2_result.errors {
+            tracing::warn!("v2 pipeline error: {} ({})", err.error, err.file_path);
+        }
     }
+    // Re-open for workspace status (client was moved into sink)
+    let client =
+        duckdb_client::DuckDbClient::open(&db_path).context("failed to open DuckDB for status")?;
     workspace::set_status(
         &client,
         &key,
@@ -833,7 +833,7 @@ async fn index_repo_v2(
         skipped_files: vec![],
         errored_files: vec![],
         graph_data: None,
-        graph_stats: Some(graph_stats),
+        graph_stats: None,
         database_path: Some(db_path.display().to_string()),
     })
 }

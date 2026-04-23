@@ -12,7 +12,7 @@ use arrow::record_batch::RecordBatch;
 use ruby_prism::Visit;
 
 use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
+    BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
 };
 
 pub struct RubyPipeline;
@@ -21,6 +21,7 @@ impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
+        _btx: &BatchTx<'_>,
     ) -> Result<PipelineOutput, Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let mut defs: Vec<DefEntry> = Vec::new();

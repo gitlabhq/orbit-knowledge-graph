@@ -7,7 +7,10 @@ use std::sync::Arc;
 use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
-use code_graph::v2::{Pipeline, PipelineConfig, PipelineContext, PipelineOutput};
+use code_graph::v2::{
+    BatchTx, GraphCapture, NullConverter, NullSink, Pipeline, PipelineConfig, PipelineContext,
+    PipelineOutput,
+};
 
 use super::assertions::{Severity, TestSuite};
 use super::config::make_graph_config;
@@ -40,10 +43,7 @@ fn output_to_datasets(output: PipelineOutput) -> LanceDatasets {
             .iter()
             .map(|(table, batch)| (table.clone(), arrow58_to_arrow56(batch)))
             .collect(),
-        PipelineOutput::Graph(graph) => {
-            let ctx = RowContext::empty();
-            to_lance_datasets(&graph, &ctx).expect("Failed to convert graph to datasets")
-        }
+        PipelineOutput::Streamed => HashMap::new(),
     }
 }
 
@@ -145,10 +145,20 @@ pub async fn run_yaml_suite(yaml: &str) {
     let (datasets, pipeline_ctx) = match suite.pipeline.as_deref() {
         None | Some("generic") => {
             let config = PipelineConfig::default();
+            let capture = Arc::new(GraphCapture::new());
+            let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(NullSink);
             let result = if let Some(pool) = &pool {
-                pool.install(|| Pipeline::run_with_tracer(tmp.path(), config, tracer))
+                let c: Arc<dyn code_graph::v2::GraphConverter> = capture.clone();
+                let s = sink.clone();
+                pool.install(|| Pipeline::run_with_tracer(tmp.path(), config, tracer, c, s))
             } else {
-                Pipeline::run_with_tracer(tmp.path(), config, tracer)
+                Pipeline::run_with_tracer(
+                    tmp.path(),
+                    config,
+                    tracer,
+                    capture.clone() as Arc<dyn code_graph::v2::GraphConverter>,
+                    sink,
+                )
             };
             assert!(
                 result.errors.is_empty(),
@@ -159,16 +169,10 @@ pub async fn run_yaml_suite(yaml: &str) {
             let pctx = result.ctx.clone();
             let row_ctx = RowContext::empty();
             let mut datasets = HashMap::new();
-            for graph in &result.graphs {
+            for graph in &capture.take() {
                 let graph_datasets = to_lance_datasets(graph, &row_ctx)
                     .expect("Failed to convert graph to datasets");
                 extend_datasets(&mut datasets, graph_datasets);
-            }
-            for (table, batch) in &result.batches {
-                extend_datasets(
-                    &mut datasets,
-                    HashMap::from([(table.clone(), arrow58_to_arrow56(batch))]),
-                );
             }
             (datasets, pctx)
         }
@@ -183,10 +187,20 @@ pub async fn run_yaml_suite(yaml: &str) {
                 tracer,
                 root_path: root.clone(),
             });
-            let output = dispatch_by_tag(tag, &files, &ctx)
+            let capture = Arc::new(GraphCapture::new());
+            let (tx, _rx) = crossbeam_channel::unbounded();
+            let btx = BatchTx::new(&tx, capture.as_ref());
+            let output = dispatch_by_tag(tag, &files, &ctx, &btx)
                 .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                 .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
-            (output_to_datasets(output), ctx)
+            let mut datasets = output_to_datasets(output);
+            let row_ctx = RowContext::empty();
+            for graph in &capture.take() {
+                let graph_datasets = to_lance_datasets(graph, &row_ctx)
+                    .expect("Failed to convert graph to datasets");
+                extend_datasets(&mut datasets, graph_datasets);
+            }
+            (datasets, ctx)
         }
     };
 

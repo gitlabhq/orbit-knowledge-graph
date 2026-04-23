@@ -13,6 +13,7 @@ use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowE
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
 use std::hash::{Hash, Hasher};
+use std::sync::Arc;
 
 /// ClickHouse row envelope. Adds `traversal_path`, `_version`, `_deleted`
 /// around the core node columns.
@@ -328,4 +329,74 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     project_id.hash(&mut hasher);
     branch.hash(&mut hasher);
     hasher.finish() as i64
+}
+
+/// `GraphConverter` for the ClickHouse indexer. Wraps `convert_code_graph`.
+pub struct IndexerConverter {
+    pub envelope: IndexerEnvelope,
+    pub ontology: Arc<Ontology>,
+    pub table_names: Arc<super::config::CodeTableNames>,
+}
+
+impl code_graph::v2::GraphConverter for IndexerConverter {
+    fn convert(&self, graph: code_graph::v2::linker::CodeGraph) -> Vec<(String, RecordBatch)> {
+        let Ok(data) = convert_code_graph(&graph, &self.envelope, &self.ontology) else {
+            return Vec::new();
+        };
+        vec![
+            (self.table_names.branch.clone(), data.branch),
+            (self.table_names.directory.clone(), data.directories),
+            (self.table_names.file.clone(), data.files),
+            (self.table_names.definition.clone(), data.definitions),
+            (
+                self.table_names.imported_symbol.clone(),
+                data.imported_symbols,
+            ),
+            // Edges go to gl_edge (edge routing by relationship_kind
+            // happens in the sink/writer, not here).
+            ("gl_edge".to_string(), data.edges),
+        ]
+    }
+}
+
+/// `BatchSink` for ClickHouse. Bridges the sync `write_batch` trait
+/// method to async ClickHouse writes via a tokio runtime handle.
+pub struct ClickHouseSink {
+    destination: Arc<dyn crate::destination::Destination>,
+    runtime: tokio::runtime::Handle,
+}
+
+impl ClickHouseSink {
+    pub fn new(
+        destination: Arc<dyn crate::destination::Destination>,
+        runtime: tokio::runtime::Handle,
+    ) -> Self {
+        Self {
+            destination,
+            runtime,
+        }
+    }
+}
+
+impl code_graph::v2::BatchSink for ClickHouseSink {
+    fn write_batch(
+        &self,
+        table: &str,
+        batch: &RecordBatch,
+    ) -> Result<(), code_graph::v2::SinkError> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        self.runtime.block_on(async {
+            let writer = self
+                .destination
+                .new_batch_writer(table)
+                .await
+                .map_err(|e| code_graph::v2::SinkError(format!("writer for {table}: {e}")))?;
+            writer
+                .write_batch(std::slice::from_ref(batch))
+                .await
+                .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))
+        })
+    }
 }
