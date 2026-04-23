@@ -178,17 +178,17 @@ async fn reconcile_columns(
             Some(live_col) => {
                 // Codec drift.
                 if let Some(desired_codecs) = &col.codec {
-                    let desired_codec_str = format!("CODEC({})", desired_codecs.join(", "));
-                    if !codecs_match(&live_col.codec_expression, desired_codecs) {
+                    let want = format!("CODEC({})", desired_codecs.join(", "));
+                    if !live_col.codec_expression.eq_ignore_ascii_case(&want) {
                         exec(
                             client,
                             &format!(
-                                "ALTER TABLE {table} MODIFY COLUMN {} {} {desired_codec_str}",
+                                "ALTER TABLE {table} MODIFY COLUMN {} {} {want}",
                                 col.name, col.ch_type
                             ),
                         )
                         .await?;
-                        info!(table, column = col.name, codec = %desired_codec_str, "updated codec");
+                        info!(table, column = col.name, codec = %want, "updated codec");
                         count += 1;
                     }
                 }
@@ -278,11 +278,6 @@ async fn query_columns(
         }
     }
     Ok(cols)
-}
-
-fn codecs_match(live: &str, desired: &[String]) -> bool {
-    let want = format!("CODEC({})", desired.join(", "));
-    live.eq_ignore_ascii_case(&want)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
