@@ -434,7 +434,7 @@ mod tests {
             .unwrap();
         let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert!(!ref_names.is_empty());
-        assert!(ref_names.iter().any(|n| *n == "bar"));
+        assert!(ref_names.contains(&"bar"));
     }
 
     #[test]
