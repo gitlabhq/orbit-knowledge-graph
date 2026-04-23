@@ -1,3 +1,15 @@
+## [0.29.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.29.0...v0.29.1) (2026-04-22)
+
+### Fixes
+
+* **compiler:** enforce per-entity role on aggregation target nodes ([4a5bd9d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4a5bd9d0df7321a923031f7bc70a65cab9a1f8d5)) by Michael Angelo Rivera
+* **indexer:** count code-eligible namespaces in migration completion check ([7b8b28e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7b8b28e8add8ae7f768b8d17990bf0c634c31768)) by Michael Angelo Rivera
+
+### Other
+
+* **deps:** resolve new cargo-deny advisories on main ([cb2851e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/cb2851eadbc16a8b17bf866e072c84e97d229424)) by Michael Angelo Rivera
+* revert fix-347-aggregation-authz-per-entity-role' ([e3fd32b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e3fd32ba3d7e6540d28c4e6515f523bd59c0cfa2)) by Michael Angelo Rivera
+
 ## [0.29.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.28.0...v0.29.0) (2026-04-22)
 
 ### Features

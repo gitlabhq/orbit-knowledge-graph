@@ -1,0 +1,8 @@
+# config/ontology/edges/in_environment.yaml
+
+description: Deployment targets an environment
+
+variants:
+  - from_node: { type: Deployment, id: id }
+    to_node: { type: Environment, id: id }
+    description: "Deployment targets environment."

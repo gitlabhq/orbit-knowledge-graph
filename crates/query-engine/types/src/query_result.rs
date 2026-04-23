@@ -482,7 +482,6 @@ mod tests {
                 ability: "read_user".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
-                required_access_level: 20,
             },
         );
         ctx.add_entity_auth(
@@ -492,7 +491,6 @@ mod tests {
                 ability: "read".to_string(),
                 auth_id_column: "id".to_string(),
                 owner_entity: None,
-                required_access_level: 20,
             },
         );
         ctx
@@ -945,7 +943,6 @@ mod tests {
                     ability: "read_user".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
-                    required_access_level: 20,
                 },
             );
             ctx.add_entity_auth(
@@ -955,7 +952,6 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
                 },
             );
 
@@ -998,7 +994,6 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "id".to_string(),
                     owner_entity: None,
-                    required_access_level: 20,
                 },
             );
             ctx.add_entity_auth(
@@ -1008,7 +1003,6 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
                 },
             );
 
@@ -1045,7 +1039,6 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
                 },
             );
             ctx.add_entity_auth(
@@ -1055,7 +1048,6 @@ mod tests {
                     ability: "read_code".to_string(),
                     auth_id_column: "project_id".to_string(),
                     owner_entity: Some("Project".to_string()),
-                    required_access_level: 20,
                 },
             );
 

@@ -5,6 +5,8 @@
 //! cross-test contamination while eliminating per-test container startup overhead.
 
 mod ci;
+mod deployments;
+mod environments;
 mod global;
 mod groups;
 mod labels;
@@ -64,6 +66,11 @@ async fn namespace_indexing() {
         ci::processes_stages,
         ci::processes_jobs,
         ci::processes_ci_hierarchy,
+        deployments::processes_deployments,
+        deployments::processes_deployment_environment_link,
+        deployments::processes_deployment_merge_request_links,
+        environments::processes_environments,
+        environments::processes_mr_pipeline_created_environments,
         security::processes_vulnerabilities,
         security::processes_scanners,
         security::processes_vulnerability_identifiers,

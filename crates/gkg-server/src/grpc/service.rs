@@ -12,12 +12,12 @@ use tracing::{Instrument, info, instrument};
 
 use crate::auth::{Claims, JwtValidator};
 use crate::cluster_health::ClusterHealthChecker;
-use crate::graph_stats::GraphStatsService;
+use crate::graph_status::GraphStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatsRequest, GetGraphStatsResponse, ListToolsRequest,
+    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, ListToolsRequest,
     ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
     SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
@@ -46,7 +46,7 @@ pub struct KnowledgeGraphServiceImpl {
     tool_service: ToolService,
     pipeline: QueryPipelineService,
     cluster_health: Arc<ClusterHealthChecker>,
-    graph_stats: GraphStatsService,
+    graph_status: GraphStatusService,
     stream_timeout_secs: u64,
 }
 
@@ -65,14 +65,14 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
         );
-        let graph_stats = GraphStatsService::new(client, Arc::clone(&ontology));
+        let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
         Self {
             validator,
             ontology,
             tool_service,
             pipeline,
             cluster_health,
-            graph_stats,
+            graph_status,
             stream_timeout_secs,
         }
     }
@@ -261,10 +261,10 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
     }
 
     #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
-    async fn get_graph_stats(
+    async fn get_graph_status(
         &self,
-        request: Request<GetGraphStatsRequest>,
-    ) -> Result<Response<GetGraphStatsResponse>, Status> {
+        request: Request<GetGraphStatusRequest>,
+    ) -> Result<Response<GetGraphStatusResponse>, Status> {
         let claims = extract_claims(&request, &self.validator)?;
         tracing::Span::current().record("user_id", claims.user_id);
         tracing::Span::current().record("source_type", &claims.source_type);
@@ -273,9 +273,9 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
 
-        info!(traversal_path = %req.traversal_path, "Fetching graph stats for user");
+        info!(traversal_path = %req.traversal_path, "Fetching graph status for user");
 
-        let response = self.graph_stats.get_stats(&req.traversal_path).await?;
+        let response = self.graph_status.get_status(&req.traversal_path).await?;
         Ok(Response::new(response))
     }
 }
@@ -426,14 +426,10 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
         .organization_id
         .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
 
-    let authorized_paths: Vec<String> = if claims.admin {
+    let authorized_paths = if claims.admin {
         vec![format!("{org_id}/")]
     } else {
-        claims
-            .group_traversal_ids
-            .iter()
-            .map(|tp| tp.path.clone())
-            .collect()
+        claims.group_traversal_ids.clone()
     };
 
     let is_authorized = authorized_paths
@@ -732,13 +728,7 @@ mod tests {
         };
         let user = |org, groups: Vec<&str>| Claims {
             organization_id: Some(org),
-            group_traversal_ids: groups
-                .into_iter()
-                .map(|p| crate::auth::claims::TraversalPathClaim {
-                    path: p.to_string(),
-                    access_level: 20,
-                })
-                .collect(),
+            group_traversal_ids: groups.into_iter().map(String::from).collect(),
             ..test_claims()
         };
 

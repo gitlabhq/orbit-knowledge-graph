@@ -22,6 +22,7 @@ pub mod etl;
 pub mod introspection;
 mod json_schema;
 mod loading;
+pub mod query_dsl;
 
 pub use constants::{
     DEFAULT_PRIMARY_KEY, DELETED_COLUMN, EDGE_RESERVED_COLUMNS, EDGE_TABLE, GL_TABLE_PREFIX,
@@ -30,8 +31,8 @@ pub use constants::{
 pub use entities::{
     AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
     EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
-    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
-    StorageIndex, StorageProjection, VirtualSource,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
+    StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -422,25 +423,7 @@ impl Ontology {
             resource_type: resource_type.into(),
             id_column: id_column.into(),
             ability: "read".to_string(),
-            required_role: RequiredRole::Reporter,
         });
-        self
-    }
-
-    /// Override the `required_role` on a node's existing redaction config.
-    /// Panics if the node is missing or has no redaction block. Builder-style
-    /// helper for ontologies constructed in tests; production ontologies
-    /// load the role directly from YAML.
-    #[must_use]
-    pub fn with_redaction_role(mut self, node_name: &str, role: RequiredRole) -> Self {
-        let redaction = self
-            .nodes
-            .get_mut(node_name)
-            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"))
-            .redaction
-            .as_mut()
-            .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"));
-        redaction.required_role = role;
         self
     }
 
@@ -617,26 +600,6 @@ impl Ontology {
         self.get_redaction_config(entity_name).is_some()
     }
 
-    /// Minimum access level required to include rows of the node backing
-    /// `table` in a query result. Returns `None` if no node owns this
-    /// physical table.
-    ///
-    /// A `v{N}_` schema-version prefix on the input is stripped before the
-    /// lookup because the compiler may receive either the base
-    /// `destination_table` or the version-prefixed form produced by
-    /// [`Ontology::with_schema_version_prefix`]. Callers that pass edge
-    /// tables or CTE names get `None` and should fall back to a default
-    /// role.
-    #[must_use]
-    pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
-        let normalized = strip_schema_version_prefix(table);
-        self.nodes
-            .values()
-            .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
-            .and_then(|n| n.redaction.as_ref())
-            .map(|r| r.required_role.as_access_level())
-    }
-
     /// Iterator over names of `admin_only` fields on the given entity.
     /// Returns an empty iterator if the entity does not exist.
     pub fn admin_only_properties(&self, entity_name: &str) -> impl Iterator<Item = &str> {
@@ -716,6 +679,18 @@ impl Ontology {
     #[must_use]
     pub fn is_edge_table(&self, table: &str) -> bool {
         self.edge_table_configs.contains_key(table)
+    }
+
+    /// Collapse all edge routing to a single table. Used by the local/DuckDB
+    /// pipeline where only one edge table exists.
+    pub fn collapse_edge_tables(&mut self, table: &str) {
+        let table = table.to_string();
+        self.default_edge_table = table.clone();
+        for variants in self.edges.values_mut() {
+            for edge in variants {
+                edge.destination_table = table.clone();
+            }
+        }
     }
 
     /// Returns the destination table for a given relationship kind.
@@ -990,22 +965,6 @@ impl fmt::Display for Ontology {
     }
 }
 
-/// Strip a `v{N}_` schema-version prefix from a physical table name, if
-/// present. `N` must be one or more ASCII digits. Used to normalize table
-/// names when an ontology built with
-/// [`Ontology::with_schema_version_prefix`] is queried with a lookup key
-/// that may or may not carry the prefix (and vice versa).
-fn strip_schema_version_prefix(table: &str) -> &str {
-    let Some(rest) = table.strip_prefix('v') else {
-        return table;
-    };
-    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
-    if digits == 0 {
-        return table;
-    }
-    rest[digits..].strip_prefix('_').unwrap_or(table)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1212,83 +1171,6 @@ mod tests {
 
         let err = ontology.table_name("Unknown").unwrap_err();
         assert!(err.to_string().contains("unknown node label"));
-    }
-
-    #[test]
-    fn strip_schema_version_prefix_matches_vn_underscore() {
-        assert_eq!(strip_schema_version_prefix("gl_user"), "gl_user");
-        assert_eq!(strip_schema_version_prefix("v1_gl_user"), "gl_user");
-        assert_eq!(
-            strip_schema_version_prefix("v42_gl_vulnerability"),
-            "gl_vulnerability"
-        );
-        // No digits after `v` — leave untouched.
-        assert_eq!(strip_schema_version_prefix("v_gl_user"), "v_gl_user");
-        assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
-        // Missing underscore after digits — leave untouched.
-        assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
-    }
-
-    fn ontology_with_role(node: &str, role: RequiredRole) -> Ontology {
-        let mut ontology = Ontology::new()
-            .with_nodes([node])
-            .with_redaction(node, "dummy", "id");
-        ontology
-            .nodes
-            .get_mut(node)
-            .and_then(|n| n.redaction.as_mut())
-            .expect("node has redaction")
-            .required_role = role;
-        ontology
-    }
-
-    #[test]
-    fn min_access_level_for_table_reads_redaction_required_role() {
-        let ontology = ontology_with_role("Project", RequiredRole::SecurityManager);
-        assert_eq!(ontology.min_access_level_for_table("gl_project"), Some(25));
-    }
-
-    #[test]
-    fn min_access_level_for_table_normalizes_schema_version_prefix() {
-        // The ontology carries the unprefixed `destination_table` but the
-        // compiler may look up the prefixed form, or vice-versa.
-        let ontology = ontology_with_role("Vulnerability", RequiredRole::SecurityManager);
-        assert_eq!(
-            ontology.min_access_level_for_table("gl_vulnerability"),
-            Some(25)
-        );
-        assert_eq!(
-            ontology.min_access_level_for_table("v1_gl_vulnerability"),
-            Some(25)
-        );
-        assert_eq!(
-            ontology.min_access_level_for_table("v42_gl_vulnerability"),
-            Some(25)
-        );
-
-        // Prefixed ontology, prefixed or unprefixed query — both ends
-        // normalize.
-        let prefixed = ontology_with_role("Vulnerability", RequiredRole::SecurityManager)
-            .with_schema_version_prefix("v1_");
-        assert_eq!(
-            prefixed.min_access_level_for_table("v1_gl_vulnerability"),
-            Some(25)
-        );
-        assert_eq!(
-            prefixed.min_access_level_for_table("gl_vulnerability"),
-            Some(25)
-        );
-    }
-
-    #[test]
-    fn min_access_level_for_table_is_none_for_unknown_or_unredacted() {
-        let ontology = Ontology::new().with_nodes(["Project"]);
-        // Edge tables and CTEs aren't known nodes.
-        assert!(ontology.min_access_level_for_table("gl_edge").is_none());
-        assert!(ontology.min_access_level_for_table("some_cte").is_none());
-        // Node without a `redaction` block yields None — caller picks the
-        // default role.
-        assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
     // --- JSON Schema tests ---

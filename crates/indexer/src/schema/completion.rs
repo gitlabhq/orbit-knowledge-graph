@@ -56,6 +56,25 @@ SELECT count(DISTINCT root_namespace_id) AS ns_count \
 FROM siphon_knowledge_graph_enabled_namespaces \
 WHERE _siphon_deleted = false";
 
+/// SQL to count enabled namespaces that have at least one project in the
+/// datalake. A namespace with zero projects never publishes code indexing
+/// tasks, so it can never produce a checkpoint row. Without this filter the
+/// code-completion predicate would be unsatisfiable whenever an enabled
+/// namespace is empty — blocking schema migration promotion indefinitely.
+///
+/// The `[2]` index on `splitByChar('/', traversal_path)` extracts the root
+/// namespace ID from a project path of the form `org_id/root_ns_id/...`,
+/// matching the convention used by `COUNT_CODE_CHECKPOINT_NAMESPACES`.
+const COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES: &str = "\
+SELECT count(DISTINCT root_namespace_id) AS ns_count \
+FROM siphon_knowledge_graph_enabled_namespaces \
+WHERE _siphon_deleted = false \
+  AND root_namespace_id IN ( \
+    SELECT DISTINCT toInt64OrZero(splitByChar('/', traversal_path)[2]) \
+    FROM project_namespace_traversal_paths \
+    WHERE deleted = false \
+  )";
+
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
     graph: ArrowClickHouseClient,
@@ -228,7 +247,7 @@ impl MigrationCompletionChecker {
 
         // Count enabled namespaces from the datalake (the reference set).
         let enabled_count = self
-            .count_enabled_namespaces()
+            .count_datalake_namespaces(COUNT_ENABLED_NAMESPACES)
             .await
             .map_err(|e| format!("count enabled namespaces: {e}"))?;
 
@@ -240,6 +259,15 @@ impl MigrationCompletionChecker {
             );
             return Ok(false);
         }
+
+        // Code-eligible enabled namespaces: those with at least one project.
+        // Empty namespaces never publish code tasks and cannot produce
+        // checkpoint rows, so they must be excluded from the code side of
+        // the completion predicate.
+        let code_eligible_count = self
+            .count_datalake_namespaces(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES)
+            .await
+            .map_err(|e| format!("count code-eligible enabled namespaces: {e}"))?;
 
         // SDLC completeness: namespaces with entries in the new checkpoint table.
         let sdlc_table = format!("{prefix}checkpoint");
@@ -261,11 +289,13 @@ impl MigrationCompletionChecker {
             sdlc_indexed_namespaces = sdlc_count,
             code_indexed_namespaces = code_count,
             enabled_namespaces = enabled_count,
+            code_eligible_enabled_namespaces = code_eligible_count,
             "migration completion status"
         );
 
-        // Both SDLC and code indexing must cover all enabled namespaces.
-        Ok(sdlc_count >= enabled_count && code_count >= enabled_count)
+        // SDLC must cover every enabled namespace; code only needs to cover
+        // the subset that has projects.
+        Ok(sdlc_count >= enabled_count && code_count >= code_eligible_count)
     }
 
     /// Counts distinct namespaces in a checkpoint table using the given query.
@@ -284,10 +314,10 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
-    async fn count_enabled_namespaces(&self) -> Result<u64, String> {
+    async fn count_datalake_namespaces(&self, query: &str) -> Result<u64, String> {
         let batches = self
             .datalake
-            .query_arrow(COUNT_ENABLED_NAMESPACES)
+            .query_arrow(query)
             .await
             .map_err(|e| e.to_string())?;
 
@@ -439,6 +469,24 @@ mod tests {
     #[test]
     fn count_enabled_namespaces_query_filters_deleted() {
         assert!(COUNT_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
+    }
+
+    #[test]
+    fn count_code_eligible_enabled_namespaces_query_filters_deleted() {
+        assert!(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
+        assert!(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("deleted = false"));
+    }
+
+    #[test]
+    fn count_code_eligible_enabled_namespaces_query_filters_on_projects() {
+        assert!(
+            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("project_namespace_traversal_paths"),
+            "code-eligible count must restrict to namespaces with at least one project"
+        );
+        assert!(
+            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("splitByChar"),
+            "code-eligible count must extract root namespace ID from project traversal_path"
+        );
     }
 
     #[test]

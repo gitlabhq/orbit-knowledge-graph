@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
-use gkg_server::graph_stats::GraphStatsService;
+use gkg_server::graph_status::GraphStatusService;
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 
 async fn setup(ctx: &TestContext) {
@@ -31,6 +31,14 @@ async fn setup(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) VALUES
+         ('1/100/1000/', 1000, 'main', 1, now()),
+         ('1/101/1001/', 1001, 'main', 2, now())",
+        t("code_indexing_checkpoint")
+    ))
+    .await;
+
+    ctx.execute(&format!(
         "INSERT INTO {} (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
          (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
          (2001, 2, 'Fix bug B', 'opened', 'fix-b', 'main', '1/101/1001/')",
@@ -41,23 +49,23 @@ async fn setup(ctx: &TestContext) {
     ctx.optimize_all().await;
 }
 
-fn build_service(ctx: &TestContext) -> GraphStatsService {
+fn build_service(ctx: &TestContext) -> GraphStatusService {
     let client = Arc::new(ctx.create_client());
     let ontology = Arc::new(load_ontology());
-    GraphStatsService::new(client, ontology)
+    GraphStatusService::new(client, ontology)
 }
 
 fn find_domain<'a>(
-    domains: &'a [gkg_server::proto::GraphStatsDomain],
+    domains: &'a [gkg_server::proto::GraphStatusDomain],
     name: &str,
-) -> &'a gkg_server::proto::GraphStatsDomain {
+) -> &'a gkg_server::proto::GraphStatusDomain {
     domains
         .iter()
         .find(|d| d.name == name)
         .unwrap_or_else(|| panic!("domain '{name}' not found"))
 }
 
-fn find_item(domain: &gkg_server::proto::GraphStatsDomain, name: &str) -> i64 {
+fn find_item(domain: &gkg_server::proto::GraphStatusDomain, name: &str) -> i64 {
     domain
         .items
         .iter()
@@ -67,7 +75,7 @@ fn find_item(domain: &gkg_server::proto::GraphStatsDomain, name: &str) -> i64 {
 }
 
 #[tokio::test]
-async fn graph_stats() {
+async fn graph_status() {
     let ctx = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     setup(&ctx).await;
 
@@ -78,12 +86,14 @@ async fn graph_stats() {
         empty_traversal_path_rejected,
         non_matching_traversal_path_returns_zeros,
         all_domains_present_in_response,
+        projects_status_at_root,
+        projects_status_scoped_by_traversal_path,
     );
 }
 
 async fn root_traversal_path_returns_all_entity_counts(ctx: &TestContext) {
     let service = build_service(ctx);
-    let response = service.get_stats("1/").await.expect("should succeed");
+    let response = service.get_status("1/").await.expect("should succeed");
 
     let core = find_domain(&response.domains, "core");
     assert_eq!(find_item(core, "Project"), 3);
@@ -96,7 +106,7 @@ async fn root_traversal_path_returns_all_entity_counts(ctx: &TestContext) {
 async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
     let service = build_service(ctx);
 
-    let response = service.get_stats("1/100/").await.expect("should succeed");
+    let response = service.get_status("1/100/").await.expect("should succeed");
 
     let core = find_domain(&response.domains, "core");
     assert_eq!(find_item(core, "Project"), 2, "projects under 1/100/");
@@ -109,7 +119,7 @@ async fn scoped_by_traversal_path_filters_counts(ctx: &TestContext) {
 async fn empty_traversal_path_rejected(ctx: &TestContext) {
     let service = build_service(ctx);
 
-    let result = service.get_stats("").await;
+    let result = service.get_status("").await;
 
     assert!(result.is_err());
     let status = result.unwrap_err();
@@ -119,7 +129,7 @@ async fn empty_traversal_path_rejected(ctx: &TestContext) {
 async fn non_matching_traversal_path_returns_zeros(ctx: &TestContext) {
     let service = build_service(ctx);
 
-    let response = service.get_stats("999/").await.expect("should succeed");
+    let response = service.get_status("999/").await.expect("should succeed");
 
     let core = find_domain(&response.domains, "core");
     assert_eq!(find_item(core, "Project"), 0);
@@ -130,7 +140,7 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
     let service = build_service(ctx);
     let ontology = load_ontology();
 
-    let response = service.get_stats("1/").await.expect("should succeed");
+    let response = service.get_status("1/").await.expect("should succeed");
 
     let expected_domains: Vec<String> = ontology.domains().map(|d| d.name.clone()).collect();
     let actual_domains: Vec<String> = response.domains.iter().map(|d| d.name.clone()).collect();
@@ -142,4 +152,25 @@ async fn all_domains_present_in_response(ctx: &TestContext) {
             "missing domain: {expected}"
         );
     }
+}
+
+async fn projects_status_at_root(ctx: &TestContext) {
+    let service = build_service(ctx);
+    let response = service.get_status("1/").await.expect("should succeed");
+
+    let projects = response.projects.expect("projects should be present");
+    assert_eq!(projects.total_known, 3, "3 projects under 1/");
+    assert_eq!(projects.indexed, 2, "2 projects with checkpoints");
+}
+
+async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
+    let service = build_service(ctx);
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let projects = response.projects.expect("projects should be present");
+    assert_eq!(projects.total_known, 2, "2 projects under 1/100/");
+    assert_eq!(
+        projects.indexed, 1,
+        "1 project with checkpoint under 1/100/"
+    );
 }

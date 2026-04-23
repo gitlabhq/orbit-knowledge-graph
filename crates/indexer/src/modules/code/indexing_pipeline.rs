@@ -320,11 +320,44 @@ impl CodeIndexingPipeline {
             &converted.imported_symbols,
         )
         .await?;
-        // TODO(multi-edge-tables, #454): when gl_code_edge is declared, split converted.edges
-        // by destination table if code edges span multiple tables. Currently all code
-        // edges share one table, so a single write_batch is correct.
-        self.write_batch(ctx, &self.table_names.edge, &converted.edges)
-            .await?;
+        self.write_edge_batches(ctx, &converted.edges).await?;
+
+        Ok(())
+    }
+
+    /// Split an edges RecordBatch by `relationship_kind` and write each
+    /// group to the ontology-resolved table.
+    async fn write_edge_batches(
+        &self,
+        ctx: &HandlerContext,
+        edges: &arrow::record_batch::RecordBatch,
+    ) -> Result<(), HandlerError> {
+        use arrow::array::AsArray;
+        use std::collections::HashMap;
+
+        if edges.num_rows() == 0 {
+            return Ok(());
+        }
+
+        let rel_col = edges
+            .column_by_name("relationship_kind")
+            .expect("edges batch must have relationship_kind column");
+        let rel_array = rel_col.as_string::<i32>();
+
+        // Group row indices by destination table.
+        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+        for i in 0..edges.num_rows() {
+            let rel_kind = rel_array.value(i);
+            let table = self.table_names.edge_table_for(rel_kind);
+            table_rows.entry(table).or_default().push(i as u32);
+        }
+
+        for (table, indices) in &table_rows {
+            let idx_array = arrow::array::UInt32Array::from(indices.clone());
+            let batch = arrow::compute::take_record_batch(edges, &idx_array)
+                .map_err(|e| HandlerError::Processing(format!("edge batch split failed: {e}")))?;
+            self.write_batch(ctx, table, &batch).await?;
+        }
 
         Ok(())
     }

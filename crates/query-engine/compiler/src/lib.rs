@@ -91,7 +91,7 @@ pub use passes::normalize::{build_entity_auth, normalize};
 pub use passes::optimize::optimize;
 pub use passes::security::apply_security_context;
 pub use passes::validate::Validator;
-pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, TraversalPath};
+pub use types::{AccessLevel, SecurityContext};
 
 use metrics::CountErr;
 use std::sync::Arc;
@@ -162,7 +162,13 @@ pub fn compile_input(
 /// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::local(Arc::new(ontology.clone()));
+    let mut ont = ontology.clone();
+    // Local mode uses a single DuckDB edge table. Collapse all edge routing
+    // so the compiler doesn't emit references to tables that don't exist locally.
+    if let Some(local_table) = ontology.local_edge_table_name() {
+        ont.collapse_edge_tables(local_table);
+    }
+    let env = LocalEnv::local(Arc::new(ont));
     let state = DuckDbState::from_json(json_input);
     let pipeline = pipelines::duckdb().seal();
     pipeline.execute(state, &env)?.into_output().count_err()
@@ -176,7 +182,11 @@ pub fn compile_local(json_input: &str, ontology: &Ontology) -> Result<CompiledQu
 /// metadata for table resolution and column aliasing.
 #[must_use = "the compiled query context should be used"]
 pub fn compile_local_input(input: Input, ontology: &Ontology) -> Result<CompiledQueryContext> {
-    let env = LocalEnv::local(Arc::new(ontology.clone()));
+    let mut ont = ontology.clone();
+    if let Some(local_table) = ontology.local_edge_table_name() {
+        ont.collapse_edge_tables(local_table);
+    }
+    let env = LocalEnv::local(Arc::new(ont));
     let state = DuckDbState::from_input(input);
     let pipeline = pipelines::duckdb_hydration().seal();
     pipeline.execute(state, &env)?.into_output().count_err()

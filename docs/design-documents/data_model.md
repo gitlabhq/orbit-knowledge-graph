@@ -36,8 +36,10 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | --------------------- | ------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------- |
 | `Group`               | Represents a GitLab group namespace.                                                                    | `id`, `name`, `full_path`, `visibility_level`                                 |
 | `Project`             | Represents a GitLab project/repository.                                                                 | `id`, `name`, `full_path`, `namespace_id`                                   |
-| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id` |
+| `MergeRequest`        | Represents a GitLab merge request.                                                                      | `id`, `iid`, `title`, `state`, `source_branch`, `target_branch`, `project_id`, `merged_commit_sha`, `squash_commit_sha`, denormalized `metric_*` snapshot columns |
 | `Pipeline`            | Represents a CI/CD pipeline.                                                                            | `id`, `status`, `source`, `project_id`, `user_id`                             |
+| `Deployment`          | Represents a deployment of a commit to a CI/CD environment.                                             | `id`, `iid`, `project_id`, `status`, `ref`, `sha`                             |
+| `Environment`         | Represents a CI/CD deployment target (production, staging, review app, etc.).                           | `id`, `project_id`, `name`, `slug`, `state`, `tier`, `environment_type`       |
 | `Vulnerability`       | Represents a security vulnerability finding.                                                            | `id`, `title`, `severity`, `state`, `project_id`                              |
 | `User`                | Represents a GitLab user.                                                                               | `id`, `username`, `name`                                                    |
 | `Note`                | Represents a comment or annotation on a GitLab object (issue, merge request, commit, vulnerability, etc.). | `id`, `note`, `noteable_type`, `noteable_id`, `author_id`                 |
@@ -45,8 +47,8 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `Milestone`           | Represents a milestone attached to projects or work items.                                              | `id`, `iid`, `title`, `state`, `due_date`                                    |
 | `Label`               | Represents a label applied to work items.                                                               | `id`, `title`, `color`                                                        |
 | `Branch`              | Represents a Git branch.                                                                                | `id`, `name`, `project_id`, `is_default`                                    |
-| `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `state`, `files_count`                              |
-| `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`     |
+| `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `project_id`, `state`, `diff_type`, `files_count`, `real_size`, `stored_externally` |
+| `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`, `generated`, `a_mode`, `b_mode` |
 | `Stage`               | Represents a CI stage.                                                                                  | `id`, `name`, `status`, `position`                                            |
 | `Job`                 | Represents a CI job.                                                                                    | `id`, `name`, `status`, `ref`, `allow_failure`                                |
 | `Finding`             | Represents a security finding.                                                                          | `id`, `uuid`, `name`, `severity`                                              |
@@ -115,11 +117,20 @@ graph TD
 | `HAS_LABEL`                         | `WorkItem`     | `Label`        | A work item has labels.                                                                                 |
 | `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |
 | `HAS_DIFF`                          | `MergeRequest` | `MergeRequestDiff` | A merge request has diff versions.                                                                 |
+| `HAS_LATEST_DIFF`                   | `MergeRequest` | `MergeRequestDiff` | A merge request's most recent diff snapshot (from `latest_merge_request_diff_id`).                 |
 | `HAS_FILE`                          | `MergeRequestDiff` | `MergeRequestDiffFile` | A diff version contains files.                                                             |
+| `SOURCE_PROJECT`                    | `MergeRequest` | `Project`      | Source project for the merge request (differs from target project for fork-based MRs).                  |
+| `HAS_HEAD_PIPELINE`                 | `MergeRequest` | `Pipeline`     | The pipeline running against the tip of the source branch.                                              |
+| `UPDATED_BY`                        | `User`         | `MergeRequest` | User who most recently updated the merge request.                                                       |
+| `LAST_EDITED_BY`                    | `User`         | `MergeRequest` | User who most recently edited the merge request's content (title/description).                         |
 | `HAS_FINDING`                       | `SecurityScan` | `Finding`      | A security scan produced findings.                                                                      |
 | `HAS_IDENTIFIER`                    | `Vulnerability`| `VulnerabilityIdentifier` | A vulnerability is associated with identifiers.                                               |
 | `DETECTED_IN`                       | `Vulnerability`| `VulnerabilityOccurrence` | A vulnerability is detected in an occurrence.                                                  |
 | `DETECTED_BY`                       | `Finding`, `VulnerabilityOccurrence` | `VulnerabilityScanner` | Security data is associated with a scanner.                              |
+| `DEPLOYED_BY`                       | `User`         | `Deployment`   | User who triggered the deployment.                                                                      |
+| `DEPLOYED_TO`                       | `MergeRequest` | `Deployment`   | Merge request was included in a deployment.                                                             |
+| `IN_ENVIRONMENT`                    | `Deployment`   | `Environment`  | Deployment targets a specific environment.                                                              |
+| `CREATED_FOR_MR`                    | `Environment`  | `MergeRequest` | Environment was first created by a merge request pipeline.                                              |
 
 ---
 

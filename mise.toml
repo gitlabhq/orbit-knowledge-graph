@@ -319,6 +319,13 @@ description = "Validate ontology YAML files against JSON schema"
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
 
+[tasks."schema:generate:ddl"]
+run = """
+cargo run --bin orbit -- debug ddl 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql
+cargo run --bin orbit -- debug ddl-local 2>/dev/null > config/graph_local.sql.tmp && mv config/graph_local.sql.tmp config/graph_local.sql
+"""
+description = "Regenerate config/graph.sql (ClickHouse) and config/graph_local.sql (DuckDB) from ontology"
+
 [tasks."lint:markdown"]
 run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
 description = "Run markdownlint on all markdown files"

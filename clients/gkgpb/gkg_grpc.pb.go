@@ -29,7 +29,7 @@ const (
 	KnowledgeGraphService_ExecuteQuery_FullMethodName     = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
 	KnowledgeGraphService_GetGraphSchema_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
 	KnowledgeGraphService_GetClusterHealth_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
-	KnowledgeGraphService_GetGraphStats_FullMethodName    = "/gkg.v1.KnowledgeGraphService/GetGraphStats"
+	KnowledgeGraphService_GetGraphStatus_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
 )
 
 // KnowledgeGraphServiceClient is the client API for KnowledgeGraphService service.
@@ -56,7 +56,7 @@ type KnowledgeGraphServiceClient interface {
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
 	// Returns entity counts per domain, scoped by traversal_path prefix.
 	// Used by admin dashboards to inspect graph coverage.
-	GetGraphStats(ctx context.Context, in *GetGraphStatsRequest, opts ...grpc.CallOption) (*GetGraphStatsResponse, error)
+	GetGraphStatus(ctx context.Context, in *GetGraphStatusRequest, opts ...grpc.CallOption) (*GetGraphStatusResponse, error)
 }
 
 type knowledgeGraphServiceClient struct {
@@ -110,10 +110,10 @@ func (c *knowledgeGraphServiceClient) GetClusterHealth(ctx context.Context, in *
 	return out, nil
 }
 
-func (c *knowledgeGraphServiceClient) GetGraphStats(ctx context.Context, in *GetGraphStatsRequest, opts ...grpc.CallOption) (*GetGraphStatsResponse, error) {
+func (c *knowledgeGraphServiceClient) GetGraphStatus(ctx context.Context, in *GetGraphStatusRequest, opts ...grpc.CallOption) (*GetGraphStatusResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
-	out := new(GetGraphStatsResponse)
-	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetGraphStats_FullMethodName, in, out, cOpts...)
+	out := new(GetGraphStatusResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetGraphStatus_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -144,7 +144,7 @@ type KnowledgeGraphServiceServer interface {
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
 	// Returns entity counts per domain, scoped by traversal_path prefix.
 	// Used by admin dashboards to inspect graph coverage.
-	GetGraphStats(context.Context, *GetGraphStatsRequest) (*GetGraphStatsResponse, error)
+	GetGraphStatus(context.Context, *GetGraphStatusRequest) (*GetGraphStatusResponse, error)
 	mustEmbedUnimplementedKnowledgeGraphServiceServer()
 }
 
@@ -167,8 +167,8 @@ func (UnimplementedKnowledgeGraphServiceServer) GetGraphSchema(context.Context, 
 func (UnimplementedKnowledgeGraphServiceServer) GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClusterHealth not implemented")
 }
-func (UnimplementedKnowledgeGraphServiceServer) GetGraphStats(context.Context, *GetGraphStatsRequest) (*GetGraphStatsResponse, error) {
-	return nil, status.Error(codes.Unimplemented, "method GetGraphStats not implemented")
+func (UnimplementedKnowledgeGraphServiceServer) GetGraphStatus(context.Context, *GetGraphStatusRequest) (*GetGraphStatusResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetGraphStatus not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) mustEmbedUnimplementedKnowledgeGraphServiceServer() {}
 func (UnimplementedKnowledgeGraphServiceServer) testEmbeddedByValue()                               {}
@@ -252,20 +252,20 @@ func _KnowledgeGraphService_GetClusterHealth_Handler(srv interface{}, ctx contex
 	return interceptor(ctx, in, info, handler)
 }
 
-func _KnowledgeGraphService_GetGraphStats_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
-	in := new(GetGraphStatsRequest)
+func _KnowledgeGraphService_GetGraphStatus_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetGraphStatusRequest)
 	if err := dec(in); err != nil {
 		return nil, err
 	}
 	if interceptor == nil {
-		return srv.(KnowledgeGraphServiceServer).GetGraphStats(ctx, in)
+		return srv.(KnowledgeGraphServiceServer).GetGraphStatus(ctx, in)
 	}
 	info := &grpc.UnaryServerInfo{
 		Server:     srv,
-		FullMethod: KnowledgeGraphService_GetGraphStats_FullMethodName,
+		FullMethod: KnowledgeGraphService_GetGraphStatus_FullMethodName,
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
-		return srv.(KnowledgeGraphServiceServer).GetGraphStats(ctx, req.(*GetGraphStatsRequest))
+		return srv.(KnowledgeGraphServiceServer).GetGraphStatus(ctx, req.(*GetGraphStatusRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -290,8 +290,8 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KnowledgeGraphService_GetClusterHealth_Handler,
 		},
 		{
-			MethodName: "GetGraphStats",
-			Handler:    _KnowledgeGraphService_GetGraphStats_Handler,
+			MethodName: "GetGraphStatus",
+			Handler:    _KnowledgeGraphService_GetGraphStatus_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
