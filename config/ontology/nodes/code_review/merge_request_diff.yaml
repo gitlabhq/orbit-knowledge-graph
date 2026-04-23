@@ -111,6 +111,16 @@ properties:
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
+  patch:
+    type: string
+    nullable: true
+    virtual:
+      service: mr_diff
+      lookup: raw_patch
+      disabled: true
+      depends_on: [project_id, id]
+    description: "Full unified patch for this MR snapshot. Resolved from GitLab at query time."
+
 etl:
   type: table
   scope: namespaced
