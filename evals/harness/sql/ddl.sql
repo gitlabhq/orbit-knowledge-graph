@@ -58,6 +58,28 @@ CREATE TABLE IF NOT EXISTS scores (
     PRIMARY KEY (run_id, arm, task_id, evaluator)
 );
 
+CREATE TABLE IF NOT EXISTS live_messages (
+    run_id VARCHAR NOT NULL,
+    arm VARCHAR NOT NULL,
+    task_id VARCHAR NOT NULL,
+    message_id VARCHAR NOT NULL,
+    data JSON NOT NULL,
+    updated_at VARCHAR NOT NULL,
+    PRIMARY KEY (run_id, arm, task_id, message_id)
+);
+
+CREATE TABLE IF NOT EXISTS live_parts (
+    run_id VARCHAR NOT NULL,
+    arm VARCHAR NOT NULL,
+    task_id VARCHAR NOT NULL,
+    part_id VARCHAR NOT NULL,
+    message_id VARCHAR NOT NULL,
+    part_type VARCHAR NOT NULL,
+    data JSON NOT NULL,
+    updated_at VARCHAR NOT NULL,
+    PRIMARY KEY (run_id, arm, task_id, part_id)
+);
+
 CREATE TABLE IF NOT EXISTS live_events (
     run_id VARCHAR NOT NULL,
     arm VARCHAR NOT NULL,

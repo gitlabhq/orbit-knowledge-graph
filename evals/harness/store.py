@@ -92,22 +92,54 @@ class ResultStore:
         return self._db_path
 
     def write_live_event(self, arm: str, task_id: str, event: dict[str, Any]) -> None:
-        """Write a single SSE event to DuckDB as it arrives."""
+        """Write a single SSE event to DuckDB as it arrives.
+
+        Also extracts message and part data for incremental snapshot building.
+        """
         key = f"{arm}:{task_id}"
         seq = self._event_seqs.get(key, 0)
         self._event_seqs[key] = seq + 1
 
         event_type = event.get("type", "unknown")
         timestamp = event.get("ts", "")
-        data = json.dumps(event.get("data", {}), default=str)
+        data = event.get("data", {})
+        data_json = json.dumps(data, default=str)
+        data_type = data.get("type", "")
+        props = data.get("properties", {})
 
         with connect(self._db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO live_events "
                 "(run_id, arm, task_id, seq, event_type, timestamp, data) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
-                [self.run_id, arm, task_id, seq, event_type, timestamp, data],
+                [self.run_id, arm, task_id, seq, event_type, timestamp, data_json],
             )
+
+            if data_type == "message.updated" and "info" in props:
+                info = props["info"]
+                msg_id = info.get("id", "")
+                if msg_id:
+                    db.execute(
+                        "INSERT OR REPLACE INTO live_messages "
+                        "(run_id, arm, task_id, message_id, data, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        [self.run_id, arm, task_id, msg_id,
+                         json.dumps(info, default=str), timestamp],
+                    )
+
+            if data_type == "message.part.updated" and "part" in props:
+                part = props["part"]
+                part_id = part.get("id", "")
+                msg_id = part.get("messageID", "")
+                part_type = part.get("type", "")
+                if part_id:
+                    db.execute(
+                        "INSERT OR REPLACE INTO live_parts "
+                        "(run_id, arm, task_id, part_id, message_id, part_type, data, updated_at) "
+                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                        [self.run_id, arm, task_id, part_id, msg_id, part_type,
+                         json.dumps(part, default=str), timestamp],
+                    )
 
     def write_result(self, result: TaskResult) -> None:
         s = result.session_summary

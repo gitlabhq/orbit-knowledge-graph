@@ -111,6 +111,65 @@ CREATE OR REPLACE MACRO event_count(rid) AS (
     SELECT count(*) FROM live_events WHERE run_id = rid
 );
 
+-- Table: live messages for a task (incremental snapshot)
+CREATE OR REPLACE MACRO live_messages(rid, a, tid) AS TABLE (
+    SELECT
+        m.message_id,
+        json_extract_string(m.data, '$.role') AS role,
+        json_extract_string(m.data, '$.agent') AS agent,
+        json_extract(m.data, '$.cost')::DOUBLE AS cost,
+        json_extract(m.data, '$.tokens')::JSON AS tokens,
+        m.updated_at
+    FROM live_messages m
+    WHERE m.run_id = rid AND m.arm = a AND m.task_id = tid
+    ORDER BY m.updated_at
+);
+
+-- Table: live parts for a task (tool calls, text, etc.)
+CREATE OR REPLACE MACRO live_parts(rid, a, tid) AS TABLE (
+    SELECT
+        p.message_id,
+        p.part_type,
+        CASE
+            WHEN p.part_type = 'tool' THEN json_extract_string(p.data, '$.tool')
+            ELSE NULL
+        END AS tool_name,
+        CASE
+            WHEN p.part_type = 'tool' THEN substr(json_extract_string(p.data, '$.state.input.command'), 1, 200)
+            ELSE NULL
+        END AS command,
+        CASE
+            WHEN p.part_type = 'tool' THEN json_extract(p.data, '$.state.metadata.exit')
+            ELSE NULL
+        END AS exit_code,
+        CASE
+            WHEN p.part_type = 'text' THEN substr(json_extract_string(p.data, '$.text'), 1, 200)
+            ELSE NULL
+        END AS text_preview,
+        p.updated_at
+    FROM live_parts p
+    WHERE p.run_id = rid AND p.arm = a AND p.task_id = tid
+    ORDER BY p.updated_at
+);
+
+-- Table: per-task progress across a run (how many messages/parts per task so far)
+CREATE OR REPLACE MACRO task_progress(rid) AS TABLE (
+    SELECT
+        m.arm,
+        m.task_id,
+        count(DISTINCT m.message_id) AS messages,
+        (SELECT count(*) FROM live_parts p
+         WHERE p.run_id = m.run_id AND p.arm = m.arm AND p.task_id = m.task_id) AS parts,
+        (SELECT count(*) FROM live_parts p
+         WHERE p.run_id = m.run_id AND p.arm = m.arm AND p.task_id = m.task_id
+         AND p.part_type = 'tool') AS tool_calls,
+        max(m.updated_at) AS last_activity
+    FROM live_messages m
+    WHERE m.run_id = rid
+    GROUP BY m.run_id, m.arm, m.task_id
+    ORDER BY m.arm, last_activity
+);
+
 -- Table: task results for a run+arm (used by ResultStore.read_results)
 CREATE OR REPLACE MACRO results_for_arm(rid, a) AS TABLE (
     SELECT
