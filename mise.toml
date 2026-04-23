@@ -136,6 +136,11 @@ run = "cargo nextest run --all-features --test containers --no-fail-fast --retri
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
 
+[tasks."test:integration:indexer:code"]
+run = "cargo nextest run -p integration-tests --retries 0 -E 'test(code_indexing_task)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run indexer integration tests (code indexing)"
+
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
 description = "Clean the crates"
