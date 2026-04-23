@@ -952,6 +952,31 @@ impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
     }
 }
 
+fn range_specs() -> Vec<ColumnSpec> {
+    vec![
+        ColumnSpec {
+            name: "start_line".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "end_line".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "start_byte".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+        ColumnSpec {
+            name: "end_byte".into(),
+            col_type: ColumnType::Int,
+            nullable: false,
+        },
+    ]
+}
+
 fn write_range(b: &mut BatchBuilder, range: &Range) -> Result<(), arrow::error::ArrowError> {
     b.col("start_line")?.push_int(range.start.line as i64)?;
     b.col("end_line")?.push_int(range.end.line as i64)?;
@@ -965,6 +990,20 @@ pub struct DirectoryRow<'a> {
     pub id: i64,
 }
 impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
+    fn entity_specs() -> Vec<ColumnSpec> {
+        vec![
+            ColumnSpec {
+                name: "path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "name".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ]
+    }
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.dir.path)?;
@@ -978,6 +1017,30 @@ pub struct FileRow<'a> {
     pub id: i64,
 }
 impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
+    fn entity_specs() -> Vec<ColumnSpec> {
+        vec![
+            ColumnSpec {
+                name: "path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "name".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "extension".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "language".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ]
+    }
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.file.path)?;
@@ -997,6 +1060,32 @@ pub struct DefinitionRow<'a> {
     pub id: i64,
 }
 impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
+    fn entity_specs() -> Vec<ColumnSpec> {
+        let mut s = vec![
+            ColumnSpec {
+                name: "file_path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "fqn".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "name".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "definition_type".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ];
+        s.extend(range_specs());
+        s
+    }
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
@@ -1017,6 +1106,37 @@ pub struct ImportRow<'a> {
     pub id: i64,
 }
 impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
+    fn entity_specs() -> Vec<ColumnSpec> {
+        let mut s = vec![
+            ColumnSpec {
+                name: "file_path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "import_type".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "import_path".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "identifier_name".into(),
+                col_type: ColumnType::Str,
+                nullable: true,
+            },
+            ColumnSpec {
+                name: "identifier_alias".into(),
+                col_type: ColumnType::Str,
+                nullable: true,
+            },
+        ];
+        s.extend(range_specs());
+        s
+    }
     fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
         ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;

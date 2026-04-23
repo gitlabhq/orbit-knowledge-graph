@@ -1,15 +1,12 @@
 //! Convert a v2 `CodeGraph` directly to Arrow batches for ClickHouse.
 //!
-//! Bypasses the legacy `GraphData` intermediate format. Uses the same
-//! row types as the DuckDB/CLI path but with an `IndexerEnvelope` that
-//! adds `traversal_path`, `_version`, and `_deleted` columns.
+//! Uses the shared row types from code-graph with an `IndexerEnvelope`
+//! that adds `traversal_path`, `_version`, and `_deleted` columns.
 
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use code_graph::v2::linker::graph::{
-    DefinitionRow, DirectoryRow, EdgeRow, FileRow, ImportRow, RowContext,
-};
+use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, ImportRow};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use std::hash::{Hash, Hasher};
 
@@ -112,20 +109,13 @@ pub fn convert_code_graph(
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
 
-    let branch = convert_branch(envelope)?;
-    let directories = convert_directories(graph, &ids, envelope)?;
-    let files = convert_files(graph, &ids, envelope)?;
-    let definitions = convert_definitions(graph, &ids, envelope)?;
-    let imported_symbols = convert_imported_symbols(graph, &ids, envelope)?;
-    let edges = convert_edges(graph, &ids, envelope)?;
-
     Ok(ConvertedGraphData {
-        branch,
-        directories,
-        files,
-        definitions,
-        imported_symbols,
-        edges,
+        branch: convert_branch(envelope)?,
+        directories: convert_directories(graph, &ids, envelope)?,
+        files: convert_files(graph, &ids, envelope)?,
+        definitions: convert_definitions(graph, &ids, envelope)?,
+        imported_symbols: convert_imported_symbols(graph, &ids, envelope)?,
+        edges: convert_edges(graph, &ids, envelope)?,
     })
 }
 
@@ -188,14 +178,7 @@ fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
         }
     }
 
-    let row = BranchRow { id: branch_id, env };
-    BranchRow::to_record_batch(&[row], &specs, &())
-}
-
-fn node_specs(env: &IndexerEnvelope, entity_cols: &[ColumnSpec]) -> Vec<ColumnSpec> {
-    let mut specs = env.header_specs();
-    specs.extend(entity_cols.iter().cloned());
-    specs
+    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
 }
 
 fn convert_directories(
@@ -203,19 +186,6 @@ fn convert_directories(
     ids: &[i64],
     env: &IndexerEnvelope,
 ) -> Result<RecordBatch, ArrowError> {
-    let entity_cols = vec![
-        ColumnSpec {
-            name: "path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "name".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-    ];
-    let specs = node_specs(env, &entity_cols);
     let rows: Vec<_> = graph
         .directories()
         .map(|(idx, dir)| DirectoryRow {
@@ -223,7 +193,7 @@ fn convert_directories(
             id: ids[idx.index()],
         })
         .collect();
-    DirectoryRow::to_record_batch(&rows, &specs, env)
+    DirectoryRow::to_batch(&rows, env)
 }
 
 fn convert_files(
@@ -231,29 +201,6 @@ fn convert_files(
     ids: &[i64],
     env: &IndexerEnvelope,
 ) -> Result<RecordBatch, ArrowError> {
-    let entity_cols = vec![
-        ColumnSpec {
-            name: "path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "name".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "extension".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "language".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-    ];
-    let specs = node_specs(env, &entity_cols);
     let rows: Vec<_> = graph
         .files()
         .map(|(idx, file)| FileRow {
@@ -261,7 +208,7 @@ fn convert_files(
             id: ids[idx.index()],
         })
         .collect();
-    FileRow::to_record_batch(&rows, &specs, env)
+    FileRow::to_batch(&rows, env)
 }
 
 fn convert_definitions(
@@ -269,49 +216,6 @@ fn convert_definitions(
     ids: &[i64],
     env: &IndexerEnvelope,
 ) -> Result<RecordBatch, ArrowError> {
-    let entity_cols = vec![
-        ColumnSpec {
-            name: "file_path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "fqn".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "name".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "definition_type".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "start_line".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "end_line".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "start_byte".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "end_byte".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-    ];
-    let specs = node_specs(env, &entity_cols);
     let rows: Vec<_> = graph
         .definitions()
         .map(|(idx, file_path, def)| DefinitionRow {
@@ -321,7 +225,7 @@ fn convert_definitions(
             id: ids[idx.index()],
         })
         .collect();
-    DefinitionRow::to_record_batch(&rows, &specs, env)
+    DefinitionRow::to_batch(&rows, env)
 }
 
 fn convert_imported_symbols(
@@ -329,54 +233,6 @@ fn convert_imported_symbols(
     ids: &[i64],
     env: &IndexerEnvelope,
 ) -> Result<RecordBatch, ArrowError> {
-    let entity_cols = vec![
-        ColumnSpec {
-            name: "file_path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "import_type".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "import_path".into(),
-            col_type: ColumnType::Str,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "identifier_name".into(),
-            col_type: ColumnType::Str,
-            nullable: true,
-        },
-        ColumnSpec {
-            name: "identifier_alias".into(),
-            col_type: ColumnType::Str,
-            nullable: true,
-        },
-        ColumnSpec {
-            name: "start_line".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "end_line".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "start_byte".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-        ColumnSpec {
-            name: "end_byte".into(),
-            col_type: ColumnType::Int,
-            nullable: false,
-        },
-    ];
-    let specs = node_specs(env, &entity_cols);
     let rows: Vec<_> = graph
         .imports_iter()
         .map(|(idx, file_path, import)| ImportRow {
@@ -386,7 +242,7 @@ fn convert_imported_symbols(
             id: ids[idx.index()],
         })
         .collect();
-    ImportRow::to_record_batch(&rows, &specs, env)
+    ImportRow::to_batch(&rows, env)
 }
 
 fn convert_edges(

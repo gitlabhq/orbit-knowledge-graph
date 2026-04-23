@@ -583,6 +583,12 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
         true
     }
 
+    /// Column specs for the entity-specific columns (not the envelope).
+    /// Override this to declare the schema alongside `write_row`.
+    fn entity_specs() -> Vec<ColumnSpec> {
+        vec![]
+    }
+
     /// Write one row into `builder`. Must push exactly one value to
     /// every column declared in the specs that were used to create the
     /// builder. Returns `Err` if a referenced column is missing.
@@ -601,6 +607,17 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
             item.write_row(b, ctx)?;
             Ok(())
         })
+    }
+
+    /// Build a [`RecordBatch`] using specs derived from the envelope +
+    /// entity. No manual spec list needed.
+    fn to_batch(items: &[Self], ctx: &Ctx) -> BatchResult<RecordBatch>
+    where
+        Ctx: RowEnvelope,
+    {
+        let mut specs = ctx.header_specs();
+        specs.extend(Self::entity_specs());
+        Self::to_record_batch(items, &specs, ctx)
     }
 }
 
