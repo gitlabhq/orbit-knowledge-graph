@@ -107,10 +107,10 @@ SSE events are streamed to DuckDB as they arrive. Message and tool-call data is 
 FROM task_progress('20260423_120000');
 
 -- Watch tool calls for a specific task as they happen
-FROM live_parts('20260423_120000', 'orbit', 'mr-neighbors');
+FROM part_stream('20260423_120000', 'orbit', 'mr-neighbors');
 
 -- See message costs accumulating live
-FROM live_messages('20260423_120000', 'orbit', 'mr-neighbors');
+FROM msg_stream('20260423_120000', 'orbit', 'mr-neighbors');
 
 -- Raw event stream
 FROM live('20260423_120000', 'orbit');

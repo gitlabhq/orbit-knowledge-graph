@@ -112,7 +112,7 @@ CREATE OR REPLACE MACRO event_count(rid) AS (
 );
 
 -- Table: live messages for a task (incremental snapshot)
-CREATE OR REPLACE MACRO live_messages(rid, a, tid) AS TABLE (
+CREATE OR REPLACE MACRO msg_stream(rid, a, tid) AS TABLE (
     SELECT
         m.message_id,
         json_extract_string(m.data, '$.role') AS role,
@@ -126,7 +126,7 @@ CREATE OR REPLACE MACRO live_messages(rid, a, tid) AS TABLE (
 );
 
 -- Table: live parts for a task (tool calls, text, etc.)
-CREATE OR REPLACE MACRO live_parts(rid, a, tid) AS TABLE (
+CREATE OR REPLACE MACRO part_stream(rid, a, tid) AS TABLE (
     SELECT
         p.message_id,
         p.part_type,
