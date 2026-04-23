@@ -1330,8 +1330,8 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "nodes": [{"id": "g", "entity": "Group"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
         &allow_all(),
@@ -1349,11 +1349,11 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
     assert_eq!(columns.len(), 1);
     assert_eq!(columns[0]["name"], "total");
     assert_eq!(columns[0]["function"], "count");
-    assert_eq!(columns[0]["target"], "u");
+    assert_eq!(columns[0]["target"], "g");
     assert_eq!(
         columns[0]["value"].as_i64().unwrap(),
         5,
-        "should count all 5 users"
+        "should count all 5 groups (100, 101, 102, 200, 300)"
     );
 }
 
@@ -1362,11 +1362,11 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User"}],
+            "nodes": [{"id": "g", "entity": "Group"}],
             "aggregations": [
-                {"function": "count", "target": "u", "alias": "total"},
-                {"function": "min", "target": "u", "property": "id", "alias": "min_id"},
-                {"function": "max", "target": "u", "property": "id", "alias": "max_id"}
+                {"function": "count", "target": "g", "alias": "total"},
+                {"function": "min", "target": "g", "property": "id", "alias": "min_id"},
+                {"function": "max", "target": "g", "property": "id", "alias": "max_id"}
             ],
             "limit": 10
         }"#,
@@ -1384,11 +1384,11 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
     assert_eq!(columns[1]["name"], "min_id");
     assert_eq!(columns[1]["function"], "min");
     assert_eq!(columns[1]["property"], "id");
-    assert_eq!(columns[1]["value"].as_i64().unwrap(), 1);
+    assert_eq!(columns[1]["value"].as_i64().unwrap(), 100);
     assert_eq!(columns[2]["name"], "max_id");
     assert_eq!(columns[2]["function"], "max");
     assert_eq!(columns[2]["property"], "id");
-    assert_eq!(columns[2]["value"].as_i64().unwrap(), 5);
+    assert_eq!(columns[2]["value"].as_i64().unwrap(), 300);
 }
 
 async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
@@ -1431,14 +1431,14 @@ async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
 
 async fn ungrouped_count_with_redaction(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
-    svc.allow("user", &[1, 3, 5]);
+    svc.allow("group", &[100, 101]);
 
     let value = run_pipeline(
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User"}],
-            "aggregations": [{"function": "count", "target": "u", "alias": "total"}],
+            "nodes": [{"id": "g", "entity": "Group"}],
+            "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
         &svc,
@@ -1447,7 +1447,8 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
 
     assert!(value["nodes"].as_array().unwrap().is_empty());
 
-    // Count is SQL-level (pre-redaction), so it reflects all 5 users.
+    // Count is SQL-level (pre-redaction), so it reflects all 5 groups under the
+    // traversal_path allowlist regardless of the MockRedactionService policy.
     let columns = value["columns"].as_array().unwrap();
     assert_eq!(columns.len(), 1);
     assert_eq!(columns[0]["name"], "total");
