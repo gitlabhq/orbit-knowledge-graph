@@ -4,8 +4,10 @@ use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunOutcome;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
+use chrono::Utc;
 use gkg_server_config::{HandlerConfiguration, NamespaceHandlerConfig};
 use tracing::info;
 
@@ -58,6 +60,7 @@ impl Handler for NamespaceHandler {
             })?;
 
         let started_at = Instant::now();
+        let started_at_wall = Utc::now();
         info!(
             namespace_id = payload.namespace,
             organization_id = payload.organization,
@@ -70,7 +73,10 @@ impl Handler for NamespaceHandler {
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
-            base_conditions: BTreeMap::from([("traversal_path".to_string(), traversal_path)]),
+            base_conditions: BTreeMap::from([(
+                "traversal_path".to_string(),
+                traversal_path.clone(),
+            )]),
         };
 
         let result = self
@@ -86,6 +92,18 @@ impl Handler for NamespaceHandler {
         let elapsed = started_at.elapsed();
         self.metrics
             .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
+
+        context
+            .indexing_status
+            .record(
+                &traversal_path,
+                RunOutcome {
+                    started_at: started_at_wall,
+                    completed_at: Utc::now(),
+                    error: result.as_ref().err().map(ToString::to_string),
+                },
+            )
+            .await;
 
         if result.is_ok() {
             info!(
@@ -140,6 +158,7 @@ mod tests {
             Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::noop()),
         );
 
         let result = handler.handle(context, envelope).await;

@@ -6,6 +6,7 @@ use crate::IndexerConfig;
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
+use crate::indexing_status::IndexingStatusStore;
 use crate::nats::{NatsBroker, NatsServices};
 use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, GlobalHandlerConfig, HandlersConfiguration,
@@ -99,8 +100,11 @@ impl TestEngineBuilder {
             .nats_services
             .unwrap_or_else(|| Arc::new(MockNatsServices::new()));
 
-        let engine_builder = EngineBuilder::new(self.broker, self.registry, destination)
-            .nats_services(nats_services);
+        let indexing_status = Arc::new(IndexingStatusStore::noop());
+
+        let engine_builder =
+            EngineBuilder::new(self.broker, self.registry, destination, indexing_status)
+                .nats_services(nats_services);
 
         let engine = Arc::new(engine_builder.build());
         (engine, self.configuration)

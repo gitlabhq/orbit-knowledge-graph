@@ -20,6 +20,7 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
         Arc::new(MockNatsServices::new()),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
+        Arc::new(indexer::indexing_status::IndexingStatusStore::noop()),
     )
 }
 

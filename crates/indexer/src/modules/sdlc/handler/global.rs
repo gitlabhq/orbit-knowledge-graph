@@ -131,6 +131,7 @@ mod tests {
             Arc::new(MockNatsServices::new()),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::noop()),
         );
 
         let result = handler.handle(context, envelope).await;

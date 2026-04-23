@@ -33,6 +33,7 @@ pub mod destination;
 pub mod engine;
 pub mod handler;
 pub mod health;
+pub mod indexing_status;
 pub mod llqm_v1;
 pub mod locking;
 pub mod metrics;
@@ -60,6 +61,7 @@ use gkg_server_config::{
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
+use indexing_status::IndexingStatusStore;
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
 use modules::namespace_deletion::{
@@ -119,6 +121,9 @@ impl Default for IndexerConfig {
 pub enum IndexerError {
     #[error("NATS connection failed: {0}")]
     NatsConnection(#[from] nats::NatsError),
+
+    #[error("Indexing status store failed: {0}")]
+    IndexingStatus(#[from] indexing_status::Error),
 
     #[error("ClickHouse connection failed: {0}")]
     ClickHouseConnection(#[from] destination::DestinationError),
@@ -187,6 +192,9 @@ pub async fn run(
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
 
+    info!("opening indexing status KV bucket");
+    let indexing_status = Arc::new(IndexingStatusStore::connect(&config.nats).await?);
+
     // Run the migration orchestrator before the engine starts consuming messages.
     // This ensures no in-flight NATS messages exist during the drain phase.
     let migration_metrics = metrics::MigrationMetrics::new();
@@ -237,7 +245,7 @@ pub async fn run(
     };
 
     let engine = Arc::new(
-        EngineBuilder::new(broker, registry, destination)
+        EngineBuilder::new(broker, registry, destination, indexing_status)
             .metrics(metrics)
             .build(),
     );

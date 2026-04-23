@@ -188,6 +188,7 @@ mod tests {
             Arc::new(MockNatsServices::new()) as Arc<dyn NatsServices>,
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::noop()),
         )
     }
 

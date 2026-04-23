@@ -2,6 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
+use chrono::Utc;
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
@@ -12,6 +13,7 @@ use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
+use crate::indexing_status::RunOutcome;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
@@ -167,6 +169,7 @@ impl CodeIndexingTaskHandler {
             return Ok(None);
         }
 
+        let started_at_wall = Utc::now();
         let result = self
             .pipeline
             .index_project(
@@ -177,6 +180,18 @@ impl CodeIndexingTaskHandler {
                     traversal_path: request.traversal_path.clone(),
                     task_id: request.task_id,
                     commit_sha: request.commit_sha.clone(),
+                },
+            )
+            .await;
+
+        context
+            .indexing_status
+            .record(
+                &request.traversal_path,
+                RunOutcome {
+                    started_at: started_at_wall,
+                    completed_at: Utc::now(),
+                    error: result.as_ref().err().map(ToString::to_string),
                 },
             )
             .await;
@@ -322,6 +337,7 @@ mod tests {
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
+                Arc::new(crate::indexing_status::IndexingStatusStore::noop()),
             )
         }
 
