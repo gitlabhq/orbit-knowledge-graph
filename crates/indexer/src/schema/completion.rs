@@ -349,6 +349,7 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
+        let current_version = retained.first().map(|v| v.version).unwrap_or(0);
         let to_cleanup: Vec<&VersionEntry> = retained[max..].to_vec();
 
         for entry in to_cleanup {
@@ -369,14 +370,16 @@ impl MigrationCompletionChecker {
                         .map_err(|e| {
                             TaskError::new(format!("mark v{} dropped: {e}", entry.version))
                         })?;
-                    self.metrics.record_cleanup(entry.version, "success");
+                    self.metrics
+                        .record_cleanup(entry.version, current_version, "success");
                     info!(
                         version = entry.version,
                         "version tables dropped and marked as dropped"
                     );
                 }
                 Err(e) => {
-                    self.metrics.record_cleanup(entry.version, "failure");
+                    self.metrics
+                        .record_cleanup(entry.version, current_version, "failure");
                     warn!(
                         version = entry.version,
                         error = %e,

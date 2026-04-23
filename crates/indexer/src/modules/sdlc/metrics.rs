@@ -1,9 +1,8 @@
 use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter};
 
-use crate::metrics::DURATION_BUCKETS;
+use gkg_observability::indexer::sdlc;
 
 #[derive(Clone)]
 pub struct SdlcMetrics {
@@ -19,72 +18,20 @@ pub struct SdlcMetrics {
 
 impl SdlcMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg_indexer_sdlc");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
-        let pipeline_duration = meter
-            .f64_histogram("gkg.indexer.sdlc.pipeline.duration")
-            .with_unit("s")
-            .with_description("End-to-end duration of a single entity or edge pipeline run")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let pipeline_rows_processed = meter
-            .u64_counter("gkg.indexer.sdlc.pipeline.rows.processed")
-            .with_description("Total rows extracted and written by SDLC pipelines")
-            .build();
-
-        let pipeline_errors = meter
-            .u64_counter("gkg.indexer.sdlc.pipeline.errors")
-            .with_description("Total SDLC pipeline failures")
-            .build();
-
-        let handler_duration = meter
-            .f64_histogram("gkg.indexer.sdlc.handler.duration")
-            .with_unit("s")
-            .with_description("Duration of a full handler invocation across all its pipelines")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let datalake_query_duration = meter
-            .f64_histogram("gkg.indexer.sdlc.datalake.query.duration")
-            .with_unit("s")
-            .with_description("Duration of ClickHouse datalake extraction queries")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let datalake_query_bytes = meter
-            .u64_counter("gkg.indexer.sdlc.datalake.query.bytes")
-            .with_unit("By")
-            .with_description("Total bytes returned by ClickHouse datalake extraction queries")
-            .build();
-
-        let transform_duration = meter
-            .f64_histogram("gkg.indexer.sdlc.transform.duration")
-            .with_unit("s")
-            .with_description("Duration of DataFusion SQL transform per batch")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let watermark_lag = meter
-            .f64_gauge("gkg.indexer.sdlc.watermark.lag")
-            .with_unit("s")
-            .with_description(
-                "Seconds between the current watermark and wall clock time (data freshness)",
-            )
-            .build();
-
         Self {
-            pipeline_duration,
-            pipeline_rows_processed,
-            pipeline_errors,
-            handler_duration,
-            datalake_query_duration,
-            datalake_query_bytes,
-            transform_duration,
-            watermark_lag,
+            pipeline_duration: sdlc::PIPELINE_DURATION.build_histogram_f64(meter),
+            pipeline_rows_processed: sdlc::PIPELINE_ROWS_PROCESSED.build_counter_u64(meter),
+            pipeline_errors: sdlc::PIPELINE_ERRORS.build_counter_u64(meter),
+            handler_duration: sdlc::HANDLER_DURATION.build_histogram_f64(meter),
+            datalake_query_duration: sdlc::DATALAKE_QUERY_DURATION.build_histogram_f64(meter),
+            datalake_query_bytes: sdlc::DATALAKE_QUERY_BYTES.build_counter_u64(meter),
+            transform_duration: sdlc::TRANSFORM_DURATION.build_histogram_f64(meter),
+            watermark_lag: sdlc::WATERMARK_LAG.build_gauge_f64(meter),
         }
     }
 }
@@ -94,32 +41,34 @@ impl SdlcMetrics {
         self.pipeline_errors.add(
             1,
             &[
-                KeyValue::new("entity", entity.to_owned()),
-                KeyValue::new("error_kind", error_kind.to_owned()),
+                KeyValue::new(sdlc::labels::ENTITY, entity.to_owned()),
+                KeyValue::new(sdlc::labels::ERROR_KIND, error_kind.to_owned()),
             ],
         );
     }
 
     pub(super) fn record_pipeline_completion(&self, entity: &str, duration: f64, rows: u64) {
-        let labels = [KeyValue::new("entity", entity.to_owned())];
+        let labels = [KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())];
         self.pipeline_duration.record(duration, &labels);
         self.pipeline_rows_processed.add(rows, &labels);
     }
 
     pub(super) fn record_datalake_query(&self, entity: &str, duration: f64, bytes: u64) {
-        let labels = [KeyValue::new("entity", entity.to_owned())];
+        let labels = [KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())];
         self.datalake_query_duration.record(duration, &labels);
         self.datalake_query_bytes.add(bytes, &labels);
     }
 
     pub(super) fn record_transform_duration(&self, entity: &str, duration: f64) {
-        self.transform_duration
-            .record(duration, &[KeyValue::new("entity", entity.to_owned())]);
+        self.transform_duration.record(
+            duration,
+            &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
+        );
     }
 
     pub(super) fn record_handler_duration(&self, handler: &'static str, duration: f64) {
         self.handler_duration
-            .record(duration, &[KeyValue::new("handler", handler)]);
+            .record(duration, &[KeyValue::new(sdlc::labels::HANDLER, handler)]);
     }
 
     pub(super) fn record_watermark_lag(&self, entity: &str, watermark: &DateTime<Utc>) {
@@ -128,8 +77,10 @@ impl SdlcMetrics {
             .num_milliseconds()
             .max(0) as f64
             / 1000.0;
-        self.watermark_lag
-            .record(lag, &[KeyValue::new("entity", entity.to_owned())]);
+        self.watermark_lag.record(
+            lag,
+            &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
+        );
     }
 }
 

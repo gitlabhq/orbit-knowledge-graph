@@ -2339,6 +2339,7 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
@@ -5262,6 +5263,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-observability"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "serde",
+]
+
+[[package]]
 name = "gkg-server"
 version = "0.1.0"
 dependencies = [
@@ -5275,6 +5284,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitlab-client",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "health-check",
@@ -6103,6 +6113,7 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "internment",
@@ -14804,6 +14815,7 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "futures",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "ontology",
