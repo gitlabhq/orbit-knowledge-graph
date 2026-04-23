@@ -1,12 +1,10 @@
 """
-Report generation: markdown + JSON from scored and aggregated results.
+Report generation: markdown from scored and aggregated results.
 """
 
 from __future__ import annotations
 
-import json
 from datetime import datetime, timezone
-from pathlib import Path
 from typing import Any
 
 from harness.aggregators import load_aggregators
@@ -14,43 +12,27 @@ from harness.config import EvalConfig
 from harness.store import ResultStore, TaskStatus
 
 
-def generate_report(config: EvalConfig, run_id: str) -> None:
-    output_dir = Path(config.run.output_dir) / run_id
+def generate_report(config: EvalConfig, run_id: str, store: ResultStore) -> None:
+    scores = store.read_scores()
 
-    # Load scores
-    scores_path = output_dir / "scores.json"
-    if not scores_path.exists():
-        raise FileNotFoundError(f"scores not found at {scores_path} -- run 'score' first")
-    scores = json.loads(scores_path.read_text())
+    if not scores:
+        raise ValueError(f"no scores found for run {run_id} -- run 'score' first")
 
-    # Run aggregators
     aggregators = load_aggregators(config.aggregators)
     all_aggregates: dict[str, Any] = {}
     for agg in aggregators:
         for result in agg.aggregate(scores):
             all_aggregates[result.name] = result.data
 
-    # Load results for error analysis
-    store = ResultStore(config.run.output_dir, run_id)
     arm_results: dict[str, Any] = {}
     for arm_cfg in config.arms:
         arm_results[arm_cfg.name] = store.read_results(arm_cfg.name)
 
-    # Generate markdown
     md = _render_markdown(config, run_id, scores, all_aggregates, arm_results)
-    md_path = output_dir / "report.md"
-    md_path.write_text(md)
 
-    # Generate JSON
-    report_data = {
-        "run_id": run_id,
-        "config": config.model_dump(),
-        "scores": scores,
-        "aggregates": all_aggregates,
-        "generated_at": datetime.now(timezone.utc).isoformat(),
-    }
-    json_path = output_dir / "report.json"
-    json_path.write_text(json.dumps(report_data, indent=2, default=str))
+    output_dir = store.db_path.parent
+    md_path = output_dir / f"report_{run_id}.md"
+    md_path.write_text(md)
 
 
 def _render_markdown(

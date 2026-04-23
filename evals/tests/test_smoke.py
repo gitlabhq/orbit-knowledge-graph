@@ -176,7 +176,8 @@ class TestStore:
         from harness.store import ResultStore, SessionSummary, TaskResult, TaskStatus
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = ResultStore(tmpdir, "test-run")
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="test-run")
             result = TaskResult(
                 task_id="search-user",
                 arm="orbit",
@@ -191,7 +192,6 @@ class TestStore:
                     cost=0.05,
                     duration_ms=5000,
                 ),
-                snapshot_path="sessions/search-user.json",
             )
             store.write_result(result)
 
@@ -200,12 +200,45 @@ class TestStore:
             assert results[0].task_id == "search-user"
             assert results[0].status == TaskStatus.SUCCESS
             assert results[0].structured_output == {"id": "1", "username": "root"}
+            assert results[0].session_summary is not None
+            assert results[0].session_summary.steps == 3
+            assert results[0].session_summary.cost == 0.05
+
+    def test_write_and_read_snapshot(self):
+        from unittest.mock import MagicMock
+
+        from harness.session import SessionSnapshot
+        from harness.store import ResultStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="test-run")
+
+            session = MagicMock()
+            session.id = "sess_123"
+            session.model_dump.return_value = {"id": "sess_123"}
+
+            snapshot = SessionSnapshot(
+                session=session,
+                messages=[],
+                children=[],
+                diffs=[],
+                todos=[],
+                events=[{"type": "test", "data": {}}],
+                timing={"duration_ms": 1000},
+            )
+            store.write_snapshot("task-1", snapshot)
+
+            loaded = store.read_snapshot("task-1")
+            assert loaded is not None
+            assert loaded["timing"]["duration_ms"] == 1000
 
     def test_completed_task_ids(self):
         from harness.store import ResultStore, TaskResult, TaskStatus
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = ResultStore(tmpdir, "test-run")
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="test-run")
             for tid in ["task-a", "task-b", "task-c"]:
                 store.write_result(TaskResult(
                     task_id=tid, arm="orbit", status=TaskStatus.SUCCESS,
@@ -217,7 +250,8 @@ class TestStore:
         from harness.store import ResultStore, TaskResult, TaskStatus
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            store = ResultStore(tmpdir, "test-run")
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="test-run")
             store.write_result(TaskResult(
                 task_id="done-task", arm="orbit", status=TaskStatus.SUCCESS,
                 timestamp="2026-04-21T12:00:00Z",
@@ -225,6 +259,69 @@ class TestStore:
             completed = store.completed_task_ids("orbit")
             remaining = [t for t in ["done-task", "new-task"] if t not in completed]
             assert remaining == ["new-task"]
+
+    def test_list_run_ids(self):
+        from harness.store import ResultStore, TaskResult, TaskStatus
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "eval.duckdb"
+            for rid in ["20260421_120000", "20260422_130000"]:
+                store = ResultStore(db_path=db_path, run_id=rid)
+                store.write_result(TaskResult(
+                    task_id="t1", arm="orbit", status=TaskStatus.SUCCESS,
+                    timestamp="2026-04-21T12:00:00Z",
+                ))
+            store = ResultStore(db_path=db_path, run_id="any")
+            run_ids = store.list_run_ids()
+            assert "20260421_120000" in run_ids
+            assert "20260422_130000" in run_ids
+
+    def test_write_and_read_scores(self):
+        from harness.store import ResultStore
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="test-run")
+            store.write_scores("orbit", [
+                {"task_id": "t1", "scores": {"graph": [{"name": "correctness", "value": 1.0}]}},
+                {"task_id": "t2", "scores": {"graph": [{"name": "correctness", "value": 0.5}]}},
+            ])
+            scores = store.read_scores()
+            assert "orbit" in scores
+            assert len(scores["orbit"]) == 2
+            assert scores["orbit"][0]["task_id"] == "t1"
+
+    def test_snapshot_config(self):
+        from harness.config import load_config
+        from harness.store import ResultStore
+
+        config = load_config("eval.yaml")
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            db_path = Path(tmpdir) / "eval.duckdb"
+            store = ResultStore(db_path=db_path, run_id="run-1")
+            hash1 = store.snapshot_config(config)
+
+            assert len(hash1) == 16
+
+            loaded = store.read_config()
+            assert loaded is not None
+            assert loaded["config_hash"] == hash1
+            assert loaded["config_name"] == "orbit-vs-glab-baseline"
+            assert loaded["config_version"] == "0.1.0"
+            assert loaded["config"]["run"]["name"] == "orbit-vs-glab-baseline"
+            assert "agents/orbit.md" in loaded["files"]
+            assert "agents/glab.md" in loaded["files"]
+
+            # Same config -> same hash
+            store2 = ResultStore(db_path=db_path, run_id="run-2")
+            hash2 = store2.snapshot_config(config)
+            assert hash1 == hash2
+
+            # Both runs findable by hash
+            runs = store.find_runs_by_config(hash1)
+            assert "run-1" in runs
+            assert "run-2" in runs
 
 
 # ---------------------------------------------------------------------------

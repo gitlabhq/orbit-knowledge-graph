@@ -25,11 +25,12 @@ from typing import TYPE_CHECKING, Any
 
 import yaml
 
+
 import harness.log as log
 from harness.config import ArmConfig, EvalConfig
 from harness.opencode import OpenCodeClient
 from harness.session import EventDemuxer, capture_snapshot
-from harness.store import ResultStore, SessionSummary, TaskResult, TaskStatus, summarize_snapshot
+from harness.store import ResultStore, TaskResult, TaskStatus, summarize_snapshot
 
 if TYPE_CHECKING:
     from harness.server import ServerManager
@@ -162,7 +163,7 @@ async def execute_task(
             await client.abort_session(session_id)
             with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
                 snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-            snap_path = store.write_snapshot(task.id, snapshot)
+            store.write_snapshot(task.id, snapshot)
             summary = summarize_snapshot(snapshot)
             log.event("task", "timeout", arm=arm.name, task_id=task.id, level="warn",
                       data={"steps": summary.steps, "tool_calls": summary.tool_calls})
@@ -170,12 +171,12 @@ async def execute_task(
                 task_id=task.id, arm=arm.name, status=TaskStatus.TIMEOUT,
                 timestamp=started_at.isoformat(),
                 error=f"task timed out after {timeout}s", error_type="TimeoutError",
-                session_summary=summary, snapshot_path=snap_path,
+                session_summary=summary,
             )
 
         with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
             snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-        snap_path = store.write_snapshot(task.id, snapshot)
+        store.write_snapshot(task.id, snapshot)
 
         structured = _extract_structured_output(snapshot)
         summary = summarize_snapshot(snapshot)
@@ -190,7 +191,7 @@ async def execute_task(
         return TaskResult(
             task_id=task.id, arm=arm.name, status=TaskStatus.SUCCESS,
             timestamp=started_at.isoformat(), structured_output=structured,
-            session_summary=summary, snapshot_path=snap_path,
+            session_summary=summary,
         )
 
     except Exception as e:
@@ -198,14 +199,13 @@ async def execute_task(
         log.event("task", f"failed: {error_type}: {e}", arm=arm.name, task_id=task.id,
                   level="error", data={"error_type": error_type})
 
-        snapshot_path = None
         summary = None
         if session_id and event_queue:
             try:
                 snapshot = await capture_snapshot(
                     client, session_id, event_queue, started_at
                 )
-                snapshot_path = store.write_snapshot(task.id, snapshot)
+                store.write_snapshot(task.id, snapshot)
                 summary = summarize_snapshot(snapshot)
             except Exception:
                 log.event("snapshot", "capture failed", arm=arm.name, task_id=task.id,
@@ -221,7 +221,7 @@ async def execute_task(
             task_id=task.id, arm=arm.name, status=status,
             timestamp=started_at.isoformat(),
             error=str(e), error_type=error_type,
-            session_summary=summary, snapshot_path=snapshot_path,
+            session_summary=summary,
         )
 
     finally:
@@ -322,7 +322,8 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
 
     work_dir = work_dir or os.getcwd()
     run_id = ResultStore.make_run_id()
-    store = ResultStore(config.run.output_dir, run_id)
+    mgr = ServerManager()
+    store = ResultStore(db_path=mgr.db_path, run_id=run_id)
     tasks = load_tasks(config)
 
     log.setup(run_id)
@@ -331,13 +332,15 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
         log.event("run", "no tasks matched filters", level="warn")
         return {}
 
+    config_hash = store.snapshot_config(config)
+
     log.event("run", "starting", data={
         "run_id": run_id, "tasks": len(tasks),
         "arms": [a.name for a in config.arms],
         "model": config.arms[0].model.model if config.arms else "?",
+        "config_hash": config_hash,
     })
 
-    mgr = ServerManager()
     mgr.begin_run(run_id, config.arms, len(tasks))
 
     all_results: dict[str, list[TaskResult]] = {}

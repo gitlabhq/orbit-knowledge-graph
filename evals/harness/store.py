@@ -1,22 +1,22 @@
 """
-Result storage: JSONL lines for fast scanning, snapshot files for deep analysis.
+Result storage backed by DuckDB.
 
-Layout:
-    results/<run_id>/
-        <arm>.jsonl           one TaskResult line per completed task
-        sessions/
-            <task_id>.json    full SessionSnapshot
+All eval state (task results, session snapshots, scores) lives in the
+shared DuckDB file managed by harness.db. No more JSONL or JSON files.
 """
 
 from __future__ import annotations
 
+import hashlib
 import json
-from dataclasses import asdict, dataclass, field
+import logging
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from pathlib import Path
 from typing import Any
 
+from harness.db import connect, default_db_path, ensure_schema
 from harness.session import SessionSnapshot
 
 
@@ -49,12 +49,6 @@ class TaskResult:
     error_type: str | None = None
 
     session_summary: SessionSummary | None = None
-    snapshot_path: str | None = None
-
-    def to_jsonl_line(self) -> str:
-        d = asdict(self)
-        d["status"] = self.status.value
-        return json.dumps(d, separators=(",", ":"), default=str)
 
 
 def summarize_snapshot(snapshot: SessionSnapshot) -> SessionSummary:
@@ -85,45 +79,246 @@ def summarize_snapshot(snapshot: SessionSnapshot) -> SessionSummary:
 
 
 class ResultStore:
-    """Writes task results (JSONL) and session snapshots (JSON) to disk."""
+    """Reads and writes eval results, snapshots, and scores to DuckDB."""
 
-    def __init__(self, output_dir: str | Path, run_id: str) -> None:
-        self.base = Path(output_dir) / run_id
-        self.sessions_dir = self.base / "sessions"
-        self.sessions_dir.mkdir(parents=True, exist_ok=True)
-        self._handles: dict[str, Any] = {}
+    def __init__(self, db_path: Path | None = None, run_id: str | None = None) -> None:
+        self._db_path = db_path or default_db_path()
+        self.run_id = run_id or self.make_run_id()
+        ensure_schema(self._db_path)
 
-    def _jsonl_path(self, arm: str) -> Path:
-        return self.base / f"{arm}.jsonl"
+    @property
+    def db_path(self) -> Path:
+        return self._db_path
 
     def write_result(self, result: TaskResult) -> None:
-        path = self._jsonl_path(result.arm)
-        with path.open("a") as f:
-            f.write(result.to_jsonl_line() + "\n")
+        s = result.session_summary
+        structured = (
+            json.dumps(result.structured_output, default=str)
+            if result.structured_output is not None
+            else None
+        )
+        with connect(self._db_path) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO task_results "
+                "(run_id, task_id, arm, status, timestamp, structured_output, "
+                " error, error_type, session_id, steps, tool_calls, "
+                " tokens_input, tokens_output, tokens_cache_read, cost, duration_ms) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                    self.run_id,
+                    result.task_id,
+                    result.arm,
+                    result.status.value,
+                    result.timestamp,
+                    structured,
+                    result.error,
+                    result.error_type,
+                    s.session_id if s else None,
+                    s.steps if s else 0,
+                    s.tool_calls if s else 0,
+                    s.tokens.get("input", 0) if s else 0,
+                    s.tokens.get("output", 0) if s else 0,
+                    s.tokens.get("cache_read", 0) if s else 0,
+                    s.cost if s else 0.0,
+                    s.duration_ms if s else 0,
+                ],
+            )
 
-    def write_snapshot(self, task_id: str, snapshot: SessionSnapshot) -> str:
-        rel = f"sessions/{task_id}.json"
-        path = self.sessions_dir / f"{task_id}.json"
-        with path.open("w") as f:
-            json.dump(snapshot.to_dict(), f, indent=2, default=str)
-        return rel
+    def write_snapshot(self, task_id: str, snapshot: SessionSnapshot) -> None:
+        data = json.dumps(snapshot.to_dict(), default=str)
+        with connect(self._db_path) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO snapshots (run_id, task_id, data) VALUES (?, ?, ?)",
+                [self.run_id, task_id, data],
+            )
+
+    def read_snapshot(self, task_id: str) -> dict[str, Any] | None:
+        with connect(self._db_path, read_only=True) as db:
+            row = db.execute(
+                "SELECT data FROM snapshots WHERE run_id = ? AND task_id = ?",
+                [self.run_id, task_id],
+            ).fetchone()
+        if not row:
+            return None
+        return json.loads(row[0])
 
     def read_results(self, arm: str) -> list[TaskResult]:
-        path = self._jsonl_path(arm)
-        if not path.exists():
-            return []
+        with connect(self._db_path, read_only=True) as db:
+            rows = db.execute(
+                "SELECT task_id, arm, status, timestamp, structured_output, "
+                "  error, error_type, session_id, steps, tool_calls, "
+                "  tokens_input, tokens_output, tokens_cache_read, cost, duration_ms "
+                "FROM task_results WHERE run_id = ? AND arm = ? "
+                "ORDER BY timestamp",
+                [self.run_id, arm],
+            ).fetchall()
+
         results = []
-        for line in path.read_text().strip().splitlines():
-            d = json.loads(line)
-            d["status"] = TaskStatus(d["status"])
-            if d.get("session_summary"):
-                d["session_summary"] = SessionSummary(**d["session_summary"])
-            results.append(TaskResult(**d))
+        for row in rows:
+            (task_id, arm_name, status, ts, structured_json,
+             error, error_type, session_id, steps, tool_calls,
+             tok_in, tok_out, tok_cache, cost, duration_ms) = row
+
+            structured = json.loads(structured_json) if structured_json else None
+            summary = SessionSummary(
+                session_id=session_id or "",
+                steps=steps,
+                tool_calls=tool_calls,
+                tokens={"input": tok_in, "output": tok_out, "cache_read": tok_cache},
+                cost=cost,
+                duration_ms=duration_ms,
+            ) if session_id else None
+
+            results.append(TaskResult(
+                task_id=task_id,
+                arm=arm_name,
+                status=TaskStatus(status),
+                timestamp=ts,
+                structured_output=structured,
+                error=error,
+                error_type=error_type,
+                session_summary=summary,
+            ))
         return results
 
     def completed_task_ids(self, arm: str) -> set[str]:
-        return {r.task_id for r in self.read_results(arm)}
+        with connect(self._db_path, read_only=True) as db:
+            rows = db.execute(
+                "SELECT task_id FROM task_results WHERE run_id = ? AND arm = ?",
+                [self.run_id, arm],
+            ).fetchall()
+        return {r[0] for r in rows}
+
+    def write_scores(self, arm: str, task_scores: list[dict[str, Any]]) -> None:
+        """Write per-task evaluator scores.
+
+        task_scores: [{"task_id": ..., "scores": {"evaluator_name": {...}, ...}}, ...]
+        """
+        with connect(self._db_path) as db:
+            for entry in task_scores:
+                task_id = entry["task_id"]
+                for evaluator, score_data in entry["scores"].items():
+                    db.execute(
+                        "INSERT OR REPLACE INTO scores "
+                        "(run_id, arm, task_id, evaluator, score) VALUES (?, ?, ?, ?, ?)",
+                        [self.run_id, arm, task_id, evaluator, json.dumps(score_data, default=str)],
+                    )
+
+    def read_scores(self) -> dict[str, list[dict[str, Any]]]:
+        """Read all scores for the current run, grouped by arm.
+
+        Returns: {"arm": [{"task_id": ..., "scores": {"evaluator": {...}}}, ...]}
+        """
+        with connect(self._db_path, read_only=True) as db:
+            rows = db.execute(
+                "SELECT arm, task_id, evaluator, score "
+                "FROM scores WHERE run_id = ? ORDER BY arm, task_id, evaluator",
+                [self.run_id],
+            ).fetchall()
+
+        by_arm: dict[str, dict[str, dict[str, Any]]] = {}
+        for arm, task_id, evaluator, score_json in rows:
+            by_arm.setdefault(arm, {}).setdefault(task_id, {})[evaluator] = json.loads(score_json)
+
+        result: dict[str, list[dict[str, Any]]] = {}
+        for arm, tasks in by_arm.items():
+            result[arm] = [{"task_id": tid, "scores": scores} for tid, scores in tasks.items()]
+        return result
+
+    def list_run_ids(self) -> list[str]:
+        """List all run IDs that have task results, most recent first."""
+        with connect(self._db_path, read_only=True) as db:
+            rows = db.execute(
+                "SELECT DISTINCT run_id FROM task_results ORDER BY run_id DESC"
+            ).fetchall()
+        return [r[0] for r in rows]
+
+    def snapshot_config(self, config: Any, base_dir: Path | None = None) -> str:
+        """Snapshot the full eval config + all referenced files into DuckDB.
+
+        Collects: eval.yaml (as parsed config), agent files, skill files,
+        task YAMLs, and fixture files. Returns the config_hash.
+        """
+        base = base_dir or Path(".")
+        files: dict[str, str] = {}
+
+        for arm in config.arms:
+            _collect_file(files, base / arm.agent)
+            for skill in arm.skills:
+                _collect_file(files, base / skill / "SKILL.md")
+
+        for pattern in config.run.tasks.paths:
+            for path in sorted(base.glob(pattern)):
+                _collect_file(files, path)
+
+        fixtures = base / config.run.scoring.fixtures_path
+        if fixtures.is_dir():
+            for f in sorted(fixtures.rglob("*.json")):
+                _collect_file(files, f)
+
+        config_json = json.dumps(config.model_dump(), sort_keys=True, default=str)
+        files_json = json.dumps(files, sort_keys=True)
+
+        # Hash config + files together for a stable fingerprint
+        h = hashlib.sha256()
+        h.update(config_json.encode())
+        h.update(files_json.encode())
+        config_hash = h.hexdigest()[:16]
+
+        config_name = config.run.name
+        config_version = config.run.version
+
+        with connect(self._db_path) as db:
+            db.execute(
+                "INSERT OR REPLACE INTO run_configs "
+                "(run_id, config_name, config_version, config_hash, config, files) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                [self.run_id, config_name, config_version, config_hash, config_json, files_json],
+            )
+
+        return config_hash
+
+    def read_config(self) -> dict[str, Any] | None:
+        """Read the snapshotted config for the current run."""
+        with connect(self._db_path, read_only=True) as db:
+            row = db.execute(
+                "SELECT config_name, config_version, config_hash, config, files "
+                "FROM run_configs WHERE run_id = ?",
+                [self.run_id],
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "config_name": row[0],
+            "config_version": row[1],
+            "config_hash": row[2],
+            "config": json.loads(row[3]),
+            "files": json.loads(row[4]),
+        }
+
+    def find_runs_by_config(self, config_hash: str) -> list[str]:
+        """Find all run IDs that used the same config hash."""
+        with connect(self._db_path, read_only=True) as db:
+            rows = db.execute(
+                "SELECT run_id FROM run_configs WHERE config_hash = ? ORDER BY run_id DESC",
+                [config_hash],
+            ).fetchall()
+        return [r[0] for r in rows]
 
     @staticmethod
     def make_run_id() -> str:
         return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
+
+
+logger = logging.getLogger(__name__)
+
+
+def _collect_file(files: dict[str, str], path: Path) -> None:
+    """Read a file into the files dict, keyed by relative path."""
+    try:
+        resolved = path.resolve()
+        content = resolved.read_text()
+        # Use the path as given (relative) for the key
+        files[str(path)] = content
+    except (OSError, UnicodeDecodeError) as e:
+        logger.debug("skipping file %s: %s", path, e)

@@ -1,5 +1,6 @@
 run:
   name: orbit-vs-glab-baseline
+  version: "0.1.0"
   concurrency: 4
   task_timeout: 300
   output_dir: results

@@ -11,7 +11,6 @@ Commands:
 from __future__ import annotations
 
 import asyncio
-import importlib
 import json
 import logging
 import os
@@ -20,9 +19,8 @@ import sys
 from pathlib import Path
 
 import click
-import yaml
 
-from harness.config import EvalConfig, load_config
+from harness.config import load_config
 
 
 def _setup_logging(verbose: bool) -> None:
@@ -114,34 +112,33 @@ def run(ctx: click.Context, arm_name: str | None, run_id: str | None, bg: bool) 
 def score(ctx: click.Context, run_id: str | None) -> None:
     """Score evaluation results."""
     config = load_config(ctx.obj["config_path"])
-    output_dir = Path(config.run.output_dir)
 
-    if run_id is None:
-        runs = sorted(output_dir.iterdir()) if output_dir.exists() else []
-        if not runs:
-            click.echo("error: no runs found", err=True)
-            sys.exit(1)
-        run_id = runs[-1].name
-
-    click.echo(f"scoring run {run_id}")
-
+    from harness.db import default_db_path
     from harness.evaluators import load_evaluators
     from harness.store import ResultStore
 
-    store = ResultStore(config.run.output_dir, run_id)
+    db_path = default_db_path()
+    store = ResultStore(db_path=db_path, run_id=run_id or "latest")
+
+    if run_id is None:
+        run_ids = store.list_run_ids()
+        if not run_ids:
+            click.echo("error: no runs found", err=True)
+            sys.exit(1)
+        run_id = run_ids[0]
+        store = ResultStore(db_path=db_path, run_id=run_id)
+
+    click.echo(f"scoring run {run_id}")
+
     evaluators = load_evaluators(config.evaluators)
 
-    all_scores: dict[str, list[dict]] = {}
     for arm_cfg in config.arms:
         results = store.read_results(arm_cfg.name)
         arm_scores = []
         for result in results:
             if result.status.value != "success":
                 continue
-            snapshot_path = output_dir / run_id / result.snapshot_path if result.snapshot_path else None
-            snapshot_data = None
-            if snapshot_path and snapshot_path.exists():
-                snapshot_data = json.loads(snapshot_path.read_text())
+            snapshot_data = store.read_snapshot(result.task_id)
 
             fixture_path = Path(config.run.scoring.fixtures_path) / result.task_id / "expected.json"
             fixture = json.loads(fixture_path.read_text()) if fixture_path.exists() else None
@@ -151,11 +148,9 @@ def score(ctx: click.Context, run_id: str | None) -> None:
                 task_scores[ev.name] = ev.evaluate(result, snapshot_data, fixture)
             arm_scores.append({"task_id": result.task_id, "scores": task_scores})
 
-        all_scores[arm_cfg.name] = arm_scores
+        store.write_scores(arm_cfg.name, arm_scores)
 
-    scores_path = output_dir / run_id / "scores.json"
-    scores_path.write_text(json.dumps(all_scores, indent=2, default=str))
-    click.echo(f"scores written to {scores_path}")
+    click.echo(f"scores written to DuckDB (run_id={run_id})")
 
 
 @cli.command()
@@ -164,18 +159,24 @@ def score(ctx: click.Context, run_id: str | None) -> None:
 def report(ctx: click.Context, run_id: str | None) -> None:
     """Generate report from scored run."""
     config = load_config(ctx.obj["config_path"])
-    output_dir = Path(config.run.output_dir)
+
+    from harness.db import default_db_path
+    from harness.store import ResultStore
+
+    db_path = default_db_path()
 
     if run_id is None:
-        runs = sorted(output_dir.iterdir()) if output_dir.exists() else []
-        if not runs:
+        tmp_store = ResultStore(db_path=db_path, run_id="latest")
+        run_ids = tmp_store.list_run_ids()
+        if not run_ids:
             click.echo("error: no runs found", err=True)
             sys.exit(1)
-        run_id = runs[-1].name
+        run_id = run_ids[0]
 
     from harness.report import generate_report
 
-    generate_report(config, run_id)
+    store = ResultStore(db_path=db_path, run_id=run_id)
+    generate_report(config, run_id, store)
     click.echo(f"report generated for run {run_id}")
 
 

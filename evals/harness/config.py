@@ -69,6 +69,7 @@ class ScoringConfig(BaseModel, frozen=True):
 
 class RunConfig(BaseModel, frozen=True):
     name: str
+    version: str = "0.1.0"
     concurrency: int = 4
     task_timeout: int = 300
     output_dir: str = "results"
