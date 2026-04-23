@@ -242,6 +242,33 @@ pub async fn run(
             .build(),
     );
 
+    // Periodically check if a newer schema version is migrating. If so,
+    // this pod's writes go to tables that will be dropped — shut down early
+    // so Kubernetes can restart with the new binary.
+    let guard_client = config.graph.build_client();
+    let guard_shutdown = shutdown.clone();
+    tokio::spawn(async move {
+        let mut interval = tokio::time::interval(std::time::Duration::from_secs(30));
+        loop {
+            interval.tick().await;
+            if guard_shutdown.is_cancelled() {
+                return;
+            }
+            match schema::version::read_migrating_version(&guard_client).await {
+                Ok(Some(v)) if v > *schema::version::SCHEMA_VERSION => {
+                    warn!(
+                        binary_version = *schema::version::SCHEMA_VERSION,
+                        migrating_version = v,
+                        "newer schema version is migrating — shutting down to avoid wasted writes"
+                    );
+                    guard_shutdown.cancel();
+                    return;
+                }
+                _ => {}
+            }
+        }
+    });
+
     let engine_handle = engine.clone();
     let shutdown_task = tokio::spawn(async move {
         shutdown.cancelled().await;
