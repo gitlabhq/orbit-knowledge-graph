@@ -139,6 +139,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let mut specs: Vec<ColumnSpec> = node
         .fields
         .iter()
+        .filter(|f| !f.is_virtual())
         .map(|f| ColumnSpec {
             name: f.name.clone(),
             col_type: match f.data_type {
