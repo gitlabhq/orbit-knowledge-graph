@@ -5,6 +5,7 @@ edition = "2024"
 license = "MIT"
 
 [dependencies]
+gkg-utils = { path = "../../utils" }
 ontology = { path = "../../ontology" }
 compiler = { path = "../compiler" }
 thiserror = { workspace = true }

@@ -37,61 +37,53 @@ impl PipelineObserver for NoOpObserver {
 ///
 /// Use this to run multiple independent observers (e.g. OTel metrics +
 /// billing events) against the same pipeline without coupling them.
-pub struct MultiObserver {
-    observers: Vec<Box<dyn PipelineObserver>>,
-}
-
-impl MultiObserver {
-    pub fn new(observers: Vec<Box<dyn PipelineObserver>>) -> Self {
-        Self { observers }
-    }
-}
+pub type MultiObserver = gkg_utils::observability::MultiObserver<dyn PipelineObserver>;
 
 impl PipelineObserver for MultiObserver {
     fn set_query_type(&mut self, query_type: &'static str) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.set_query_type(query_type);
         }
     }
 
     fn compiled(&mut self, elapsed: Duration) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.compiled(elapsed);
         }
     }
 
     fn executed(&mut self, elapsed: Duration, batch_count: usize) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.executed(elapsed, batch_count);
         }
     }
 
     fn authorized(&mut self, elapsed: Duration) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.authorized(elapsed);
         }
     }
 
     fn hydrated(&mut self, elapsed: Duration) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.hydrated(elapsed);
         }
     }
 
     fn query_executed(&mut self, label: &str, read_rows: u64, read_bytes: u64, memory: i64) {
-        for o in &mut self.observers {
+        for o in self.iter_mut() {
             o.query_executed(label, read_rows, read_bytes, memory);
         }
     }
 
     fn record_error(&self, error: &PipelineError) {
-        for o in &self.observers {
+        for o in self.iter() {
             o.record_error(error);
         }
     }
 
     fn finish(&self, row_count: usize, redacted_count: usize) {
-        for o in &self.observers {
+        for o in self.iter() {
             o.finish(row_count, redacted_count);
         }
     }
@@ -225,6 +217,7 @@ mod tests {
 
     #[test]
     fn multi_observer_empty_is_valid_noop() {
+        // Passes if forwarded methods don't panic on an empty observer list.
         let mut obs = MultiObserver::new(vec![]);
         obs.set_query_type("search");
         obs.compiled(Duration::from_millis(1));

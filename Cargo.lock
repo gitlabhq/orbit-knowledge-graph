@@ -9411,6 +9411,7 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
+ "gkg-utils",
  "ontology",
  "thiserror 2.0.18",
 ]
