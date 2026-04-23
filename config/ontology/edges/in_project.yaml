@@ -62,3 +62,7 @@ variants:
   - from_node: { type: Environment, id: id }
     to_node: { type: Project, id: id }
     description: "Environment belongs to project."
+
+  - from_node: { type: MergeRequestDiff, id: id }
+    to_node: { type: Project, id: id }
+    description: "Merge request diff belongs to project."
