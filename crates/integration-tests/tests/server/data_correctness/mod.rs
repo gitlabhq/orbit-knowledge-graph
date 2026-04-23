@@ -183,6 +183,8 @@ async fn data_correctness() {
         security::aggregation_user_only_rejection_happens_before_sql_compile,
         security::aggregation_user_only_neighbors_query_is_not_blocked,
         security::aggregation_user_joined_runtime_returns_expected_counts,
+        security::aggregation_user_disconnected_scoped_node_rejects_at_compile,
+        security::aggregation_user_reachable_via_path_compiles,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

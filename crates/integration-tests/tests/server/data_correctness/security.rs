@@ -1015,6 +1015,63 @@ pub(super) async fn aggregation_user_only_neighbors_query_is_not_blocked(ctx: &T
     .expect("non-aggregation query on User must not be blocked by the aggregation guard");
 }
 
+pub(super) async fn aggregation_user_disconnected_scoped_node_rejects_at_compile(
+    ctx: &TestContext,
+) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    // User and Group are both declared, but no relationship connects them.
+    // The declaration-based guard would accept this; the reachability guard
+    // must reject because the User scan would be unbounded by any edge join.
+    let result = compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "filters": {"email": "target@example.com"}},
+                {"id": "g", "entity": "Group"}
+            ],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "hit"}],
+            "limit": 1
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    );
+
+    let err =
+        result.expect_err("aggregation with a declared-but-disconnected scoped node must reject");
+    let msg = err.to_string();
+    assert!(
+        msg.contains("globally-scoped") && msg.contains("relationships"),
+        "error should reference the reachability requirement, got: {msg}"
+    );
+    assert!(
+        !msg.contains("target@example.com"),
+        "rejection must not echo the filter value: {msg}"
+    );
+}
+
+pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestContext) {
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    // Reachability is satisfied through the `path` config (path_finding-style
+    // endpoints), not only through `relationships`.
+    compile(
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+            "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "hit"}],
+            "limit": 10
+        }"#,
+        &ontology,
+        &non_admin_ctx(),
+    )
+    .expect("User reachable via path to a scoped Project must compile");
+}
+
 pub(super) async fn aggregation_user_joined_runtime_returns_expected_counts(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,

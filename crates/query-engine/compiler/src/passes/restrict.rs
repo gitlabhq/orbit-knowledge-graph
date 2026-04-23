@@ -2,15 +2,17 @@
 //!
 //! Strips `admin_only` columns from column selections and rejects filters,
 //! ordering, and aggregations on `admin_only` fields when the caller is not
-//! an instance administrator. Also rejects aggregation queries whose node set
-//! contains no `traversal_path`-scoped entity, since aggregation bypasses the
-//! Rails redaction layer that protects other query types. Runs after
-//! normalization (columns are expanded) and before lowering.
+//! an instance administrator. Also rejects aggregation queries in which a
+//! globally-scoped node (no `traversal_path` column) is not reachable through
+//! `relationships` or `path` from a `traversal_path`-scoped node, since
+//! aggregation bypasses the Rails redaction layer that protects other query
+//! types. Runs after normalization (columns are expanded) and before lowering.
 
 use crate::error::{QueryError, Result};
 use crate::input::{ColumnSelection, Input, QueryType};
 use crate::types::SecurityContext;
 use ontology::Ontology;
+use std::collections::{HashSet, VecDeque};
 
 fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
     input
@@ -18,6 +20,79 @@ fn entity_of<'a>(input: &'a Input, node_id: &str) -> Option<&'a str> {
         .iter()
         .find(|n| n.id == node_id)
         .and_then(|n| n.entity.as_deref())
+}
+
+fn is_scoped(ontology: &Ontology, entity: &str) -> bool {
+    ontology
+        .get_node(entity)
+        .is_some_and(|ne| ne.has_traversal_path)
+}
+
+fn enforce_aggregation_scope(input: &Input, ontology: &Ontology) -> Result<()> {
+    let mut scoped: HashSet<&str> = HashSet::new();
+    let mut unscoped: Vec<&str> = Vec::new();
+    for n in &input.nodes {
+        let Some(entity) = n.entity.as_deref() else {
+            continue;
+        };
+        if is_scoped(ontology, entity) {
+            scoped.insert(n.id.as_str());
+        } else {
+            unscoped.push(n.id.as_str());
+        }
+    }
+
+    if scoped.is_empty() {
+        return Err(QueryError::Validation(
+            "aggregation requires at least one node scoped by traversal_path \
+             (e.g. Group, Project, Note); aggregating on globally-scoped entities \
+             such as User alone is not permitted"
+                .into(),
+        ));
+    }
+
+    for origin in unscoped {
+        if !reaches_scoped(origin, &scoped, input) {
+            return Err(QueryError::Validation(format!(
+                "aggregation node \"{origin}\" is globally-scoped and must be \
+                 connected to a traversal_path-scoped node via \"relationships\" \
+                 or \"path\" before it can participate in an aggregation"
+            )));
+        }
+    }
+
+    Ok(())
+}
+
+fn reaches_scoped<'a>(origin: &'a str, scoped: &HashSet<&str>, input: &'a Input) -> bool {
+    let mut seen: HashSet<&'a str> = HashSet::new();
+    let mut queue: VecDeque<&'a str> = VecDeque::new();
+    seen.insert(origin);
+    queue.push_back(origin);
+
+    while let Some(id) = queue.pop_front() {
+        if scoped.contains(id) {
+            return true;
+        }
+        for r in &input.relationships {
+            if r.from == id && seen.insert(r.to.as_str()) {
+                queue.push_back(r.to.as_str());
+            }
+            if r.to == id && seen.insert(r.from.as_str()) {
+                queue.push_back(r.from.as_str());
+            }
+        }
+        if let Some(p) = &input.path {
+            if p.from == id && seen.insert(p.to.as_str()) {
+                queue.push_back(p.to.as_str());
+            }
+            if p.to == id && seen.insert(p.from.as_str()) {
+                queue.push_back(p.from.as_str());
+            }
+        }
+    }
+
+    false
 }
 
 pub fn restrict(
@@ -30,20 +105,7 @@ pub fn restrict(
     }
 
     if matches!(input.query_type, QueryType::Aggregation) {
-        let any_scoped = input.nodes.iter().any(|n| {
-            n.entity
-                .as_deref()
-                .and_then(|e| ontology.get_node(e))
-                .is_some_and(|ne| ne.has_traversal_path)
-        });
-        if !any_scoped {
-            return Err(QueryError::Validation(
-                "aggregation requires at least one node scoped by traversal_path \
-                 (e.g. Group, Project, Note); aggregating on globally-scoped entities \
-                 such as User alone is not permitted"
-                    .into(),
-            ));
-        }
+        enforce_aggregation_scope(input, ontology)?;
     }
 
     for node in &mut input.nodes {
@@ -132,6 +194,18 @@ mod tests {
             id: "_g".into(),
             entity: Some("Group".into()),
             ..Default::default()
+        }
+    }
+
+    fn rel(from: &str, to: &str) -> crate::input::InputRelationship {
+        crate::input::InputRelationship {
+            types: vec!["MEMBER_OF".into()],
+            from: from.into(),
+            to: to.into(),
+            min_hops: 1,
+            max_hops: 1,
+            direction: crate::input::Direction::Outgoing,
+            filters: std::collections::HashMap::new(),
         }
     }
 
@@ -301,6 +375,7 @@ mod tests {
                 },
                 scoped_node(),
             ],
+            relationships: vec![rel("_u", "_g")],
             aggregations: vec![InputAggregation {
                 function,
                 target: Some("_u".into()),
@@ -460,7 +535,25 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = input_with_aggregation(AggFunction::Count, None);
+        input.relationships.push(rel("_u", "_g"));
         assert!(restrict(&mut input, &ont, &ctx).is_ok());
+    }
+
+    #[test]
+    fn non_admin_rejects_aggregation_with_disconnected_scoped_node() {
+        let ont = ontology();
+        let ctx = non_admin_ctx();
+        let mut input = input_with_aggregation(AggFunction::Count, None);
+        // Drop the helper's default relationship so User and Group are declared
+        // but not connected. The old declaration-based check accepted this;
+        // the reachability check must reject it.
+        input.relationships.clear();
+        let err = restrict(&mut input, &ont, &ctx).unwrap_err();
+        let msg = err.to_string();
+        assert!(
+            msg.contains("globally-scoped") && msg.contains("relationships"),
+            "error should reference the reachability requirement, got: {msg}"
+        );
     }
 
     #[test]
