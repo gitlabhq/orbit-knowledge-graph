@@ -280,26 +280,9 @@ async fn query_columns(
     Ok(cols)
 }
 
-/// Compare live codec expression against desired codec list.
-/// ClickHouse returns codecs as "CODEC(Delta(8), ZSTD(1))" or just the
-/// inner part depending on version. Normalize by comparing the inner tokens.
 fn codecs_match(live: &str, desired: &[String]) -> bool {
-    let live_inner = live
-        .trim()
-        .trim_start_matches("CODEC(")
-        .trim_end_matches(')')
-        .trim();
-    if live_inner.is_empty() && desired.is_empty() {
-        return true;
-    }
-    let live_parts: Vec<&str> = live_inner.split(',').map(|s| s.trim()).collect();
-    if live_parts.len() != desired.len() {
-        return false;
-    }
-    live_parts
-        .iter()
-        .zip(desired.iter())
-        .all(|(a, b)| a.eq_ignore_ascii_case(b))
+    let want = format!("CODEC({})", desired.join(", "));
+    live.eq_ignore_ascii_case(&want)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
