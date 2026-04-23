@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
@@ -58,8 +57,7 @@ impl Handler for NamespaceHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
 
-        let started_at = Instant::now();
-        let started_at_wall = Utc::now();
+        let started_at = Utc::now();
         info!(
             namespace_id = payload.namespace,
             organization_id = payload.organization,
@@ -70,7 +68,7 @@ impl Handler for NamespaceHandler {
         let traversal_path = format!("{}/{}/", payload.organization, payload.namespace);
         context
             .indexing_status
-            .record_start(&traversal_path, started_at_wall)
+            .record_start(&traversal_path, started_at)
             .await;
 
         let pipeline_context = PipelineContext {
@@ -92,7 +90,11 @@ impl Handler for NamespaceHandler {
             )
             .await;
 
-        let elapsed = started_at.elapsed();
+        let completed_at = Utc::now();
+        let elapsed = completed_at
+            .signed_duration_since(started_at)
+            .to_std()
+            .unwrap_or_default();
         self.metrics
             .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
 
@@ -100,8 +102,8 @@ impl Handler for NamespaceHandler {
             .indexing_status
             .record_completion(
                 &traversal_path,
-                started_at_wall,
-                Utc::now(),
+                started_at,
+                completed_at,
                 result.as_ref().err().map(ToString::to_string),
             )
             .await;
