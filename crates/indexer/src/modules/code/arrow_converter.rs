@@ -320,7 +320,7 @@ fn convert_edges(
 
     // Branch --CONTAINS--> root-level directories and files
     for (idx, dir) in graph.directories() {
-        if !dir.path.contains('/') {
+        if !dir.path.is_empty() && !dir.path.contains('/') {
             edge_rows.push(IndexerEdgeRow {
                 env,
                 source_id: branch_id,
