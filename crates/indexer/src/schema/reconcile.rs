@@ -117,7 +117,7 @@ async fn reconcile_projections(
     desired: &[StorageProjection],
 ) -> Result<usize, ReconcileError> {
     let existing = query_names(client, SYSTEM_PROJECTIONS_TABLE, table).await?;
-    let desired_names: HashSet<&str> = desired.iter().map(|p| proj_name(p)).collect();
+    let desired_names: HashSet<&str> = desired.iter().map(proj_name).collect();
     let mut count = 0;
 
     for proj in desired {
@@ -199,19 +199,19 @@ async fn reconcile_columns(
                 }
 
                 // Default drift.
-                if let Some(desired_default) = &col.default {
-                    if live_col.default_expression != *desired_default {
-                        exec(
-                            client,
-                            &format!(
-                                "ALTER TABLE {table} MODIFY COLUMN {} DEFAULT {desired_default}",
-                                col.name
-                            ),
-                        )
-                        .await?;
-                        info!(table, column = col.name, "updated default");
-                        count += 1;
-                    }
+                if let Some(desired_default) = &col.default
+                    && live_col.default_expression != *desired_default
+                {
+                    exec(
+                        client,
+                        &format!(
+                            "ALTER TABLE {table} MODIFY COLUMN {} DEFAULT {desired_default}",
+                            col.name
+                        ),
+                    )
+                    .await?;
+                    info!(table, column = col.name, "updated default");
+                    count += 1;
                 }
             }
             None => {
