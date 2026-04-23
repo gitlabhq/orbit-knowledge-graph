@@ -23,35 +23,18 @@ pub enum Error {
     Deserialize(#[from] serde_json::Error),
 }
 
-#[derive(Debug, Clone)]
-pub struct RunOutcome {
-    pub started_at: DateTime<Utc>,
-    pub completed_at: DateTime<Utc>,
-    pub error: Option<String>,
-}
-
+/// A run is considered in progress when `last_started_at > last_completed_at`
+/// (or `last_completed_at` is absent). A failure still records a completion —
+/// `last_error` carries the failure message.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct IndexingProgress {
     pub last_started_at: DateTime<Utc>,
-    pub last_completed_at: DateTime<Utc>,
-    pub last_duration_ms: u64,
-    pub last_error: String,
-}
-
-impl IndexingProgress {
-    fn from_outcome(outcome: &RunOutcome) -> Self {
-        let duration_ms = outcome
-            .completed_at
-            .signed_duration_since(outcome.started_at)
-            .num_milliseconds()
-            .max(0) as u64;
-        Self {
-            last_started_at: outcome.started_at,
-            last_completed_at: outcome.completed_at,
-            last_duration_ms: duration_ms,
-            last_error: outcome.error.clone().unwrap_or_default(),
-        }
-    }
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_completed_at: Option<DateTime<Utc>>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_duration_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub last_error: Option<String>,
 }
 
 pub struct IndexingStatusStore {
@@ -63,7 +46,59 @@ impl IndexingStatusStore {
         Self { nats }
     }
 
-    pub async fn record(&self, traversal_path: &str, outcome: RunOutcome) {
+    pub async fn record_start(&self, traversal_path: &str, started_at: DateTime<Utc>) {
+        let previous = self.get(traversal_path).await.unwrap_or_else(|error| {
+            warn!(traversal_path, %error, "failed to read previous progress; starting from scratch");
+            None
+        });
+        let progress = match previous {
+            Some(mut prev) => {
+                prev.last_started_at = started_at;
+                prev
+            }
+            None => IndexingProgress {
+                last_started_at: started_at,
+                last_completed_at: None,
+                last_duration_ms: None,
+                last_error: None,
+            },
+        };
+        self.write(traversal_path, progress).await;
+    }
+
+    pub async fn record_completion(
+        &self,
+        traversal_path: &str,
+        started_at: DateTime<Utc>,
+        completed_at: DateTime<Utc>,
+        error: Option<String>,
+    ) {
+        let duration_ms = completed_at
+            .signed_duration_since(started_at)
+            .num_milliseconds()
+            .max(0) as u64;
+        self.write(
+            traversal_path,
+            IndexingProgress {
+                last_started_at: started_at,
+                last_completed_at: Some(completed_at),
+                last_duration_ms: Some(duration_ms),
+                last_error: error,
+            },
+        )
+        .await;
+    }
+
+    pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
+        let key = normalize_key(traversal_path)?;
+        let Some(entry) = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
+            return Ok(None);
+        };
+        let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
+        Ok(Some(progress))
+    }
+
+    async fn write(&self, traversal_path: &str, progress: IndexingProgress) {
         let key = match normalize_key(traversal_path) {
             Ok(key) => key,
             Err(error) => {
@@ -72,7 +107,6 @@ impl IndexingStatusStore {
             }
         };
 
-        let progress = IndexingProgress::from_outcome(&outcome);
         let payload = match serde_json::to_vec(&progress) {
             Ok(bytes) => Bytes::from(bytes),
             Err(error) => {
@@ -94,15 +128,6 @@ impl IndexingStatusStore {
             warn!(%error, key, "failed to write indexing progress");
         }
     }
-
-    pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
-        let key = normalize_key(traversal_path)?;
-        let Some(entry) = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
-            return Ok(None);
-        };
-        let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
-        Ok(Some(progress))
-    }
 }
 
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
@@ -123,83 +148,59 @@ mod tests {
     use super::*;
 
     #[test]
-    fn normalize_group_path() {
-        assert_eq!(normalize_key("42/9970/").unwrap(), "status.42.9970");
+    fn normalize_key_formats_paths() {
+        let cases = [
+            ("42/9970/", "status.42.9970"),
+            ("42/9970/12345/", "status.42.9970.12345"),
+            ("42/9970", "status.42.9970"),
+            ("42//9970", "status.42.9970"),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(normalize_key(input).unwrap(), expected, "input: {input:?}");
+        }
+
+        for empty in ["", "/", "//"] {
+            assert!(
+                matches!(normalize_key(empty), Err(Error::EmptyTraversalPath)),
+                "input: {empty:?}"
+            );
+        }
     }
 
     #[test]
-    fn normalize_project_path() {
-        assert_eq!(
-            normalize_key("42/9970/12345/").unwrap(),
-            "status.42.9970.12345"
-        );
+    fn progress_omits_completion_fields_when_absent() {
+        let progress = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: None,
+            last_duration_ms: None,
+            last_error: None,
+        };
+        let json: serde_json::Value = serde_json::to_value(&progress).unwrap();
+        assert!(json.get("last_completed_at").is_none());
+        assert!(json.get("last_duration_ms").is_none());
+        assert!(json.get("last_error").is_none());
     }
 
     #[test]
-    fn normalize_collapses_empty_segments() {
-        assert_eq!(normalize_key("42//9970").unwrap(), "status.42.9970");
-    }
-
-    #[test]
-    fn normalize_handles_missing_trailing_slash() {
-        assert_eq!(normalize_key("42/9970").unwrap(), "status.42.9970");
-    }
-
-    #[test]
-    fn normalize_rejects_empty_paths() {
-        assert!(matches!(normalize_key(""), Err(Error::EmptyTraversalPath)));
-        assert!(matches!(normalize_key("/"), Err(Error::EmptyTraversalPath)));
-        assert!(matches!(
-            normalize_key("//"),
-            Err(Error::EmptyTraversalPath)
-        ));
-    }
-
-    #[test]
-    fn progress_represents_success_as_empty_error() {
+    fn completion_serializes_success_and_failure() {
         let started_at = Utc::now();
-        let progress = IndexingProgress::from_outcome(&RunOutcome {
-            started_at,
-            completed_at: started_at + chrono::Duration::milliseconds(300),
-            error: None,
-        });
-        assert_eq!(progress.last_duration_ms, 300);
-        assert_eq!(progress.last_error, "");
-    }
+        let success = IndexingProgress {
+            last_started_at: started_at,
+            last_completed_at: Some(started_at + chrono::Duration::milliseconds(300)),
+            last_duration_ms: Some(300),
+            last_error: None,
+        };
+        let json = serde_json::to_value(&success).unwrap();
+        assert_eq!(json["last_duration_ms"], 300);
+        assert!(json.get("last_error").is_none());
 
-    #[test]
-    fn progress_preserves_failure_message() {
-        let now = Utc::now();
-        let progress = IndexingProgress::from_outcome(&RunOutcome {
-            started_at: now,
-            completed_at: now,
-            error: Some("deadline exceeded".to_string()),
-        });
-        assert_eq!(progress.last_error, "deadline exceeded");
-        assert_eq!(progress.last_duration_ms, 0);
-    }
-
-    #[test]
-    fn progress_clamps_negative_duration_to_zero() {
-        let completed_at = Utc::now();
-        let progress = IndexingProgress::from_outcome(&RunOutcome {
-            started_at: completed_at + chrono::Duration::seconds(1),
-            completed_at,
-            error: None,
-        });
-        assert_eq!(progress.last_duration_ms, 0);
-    }
-
-    #[test]
-    fn progress_roundtrips_through_json() {
-        let started_at = Utc::now();
-        let progress = IndexingProgress::from_outcome(&RunOutcome {
-            started_at,
-            completed_at: started_at + chrono::Duration::seconds(5),
-            error: Some("boom".to_string()),
-        });
-        let bytes = serde_json::to_vec(&progress).unwrap();
-        let roundtripped: IndexingProgress = serde_json::from_slice(&bytes).unwrap();
-        assert_eq!(roundtripped, progress);
+        let failure = IndexingProgress {
+            last_started_at: started_at,
+            last_completed_at: Some(started_at),
+            last_duration_ms: Some(0),
+            last_error: Some("deadline exceeded".to_string()),
+        };
+        let json = serde_json::to_value(&failure).unwrap();
+        assert_eq!(json["last_error"], "deadline exceeded");
     }
 }

@@ -4,7 +4,6 @@ use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::indexing_status::RunOutcome;
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
 use chrono::Utc;
@@ -69,6 +68,10 @@ impl Handler for NamespaceHandler {
         );
 
         let traversal_path = format!("{}/{}/", payload.organization, payload.namespace);
+        context
+            .indexing_status
+            .record_start(&traversal_path, started_at_wall)
+            .await;
 
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
@@ -95,13 +98,11 @@ impl Handler for NamespaceHandler {
 
         context
             .indexing_status
-            .record(
+            .record_completion(
                 &traversal_path,
-                RunOutcome {
-                    started_at: started_at_wall,
-                    completed_at: Utc::now(),
-                    error: result.as_ref().err().map(ToString::to_string),
-                },
+                started_at_wall,
+                Utc::now(),
+                result.as_ref().err().map(ToString::to_string),
             )
             .await;
 

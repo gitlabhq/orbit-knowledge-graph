@@ -13,7 +13,6 @@ use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::indexing_status::RunOutcome;
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
@@ -170,6 +169,11 @@ impl CodeIndexingTaskHandler {
         }
 
         let started_at_wall = Utc::now();
+        context
+            .indexing_status
+            .record_start(&request.traversal_path, started_at_wall)
+            .await;
+
         let result = self
             .pipeline
             .index_project(
@@ -186,13 +190,11 @@ impl CodeIndexingTaskHandler {
 
         context
             .indexing_status
-            .record(
+            .record_completion(
                 &request.traversal_path,
-                RunOutcome {
-                    started_at: started_at_wall,
-                    completed_at: Utc::now(),
-                    error: result.as_ref().err().map(ToString::to_string),
-                },
+                started_at_wall,
+                Utc::now(),
+                result.as_ref().err().map(ToString::to_string),
             )
             .await;
 
