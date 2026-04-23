@@ -1,0 +1,236 @@
+name: "Java e2e parity — weather app definitions, edges, and imports"
+
+fixtures:
+  - path: src/main/java/com/example/weather/Main.java
+    content: |
+      package com.example.weather;
+
+      import com.example.weather.cli.Cli;
+      import com.example.weather.model.Forecast;
+
+      public class Main {
+          public static void main(String[] args) {
+              new Main().run(args);
+          }
+
+          public void run(String[] args) {
+              Cli cli = new Cli(System.out);
+              String city = cli.parse(args);
+              Forecast f = new com.example.weather.service.WeatherService().fetch(city);
+              System.out.println(f);
+          }
+      }
+
+  - path: src/main/java/com/example/weather/cli/Cli.java
+    content: |
+      package com.example.weather.cli;
+
+      import java.io.PrintStream;
+      import java.util.Arrays;
+
+      public class Cli {
+          private final PrintStream out;
+
+          public Cli(PrintStream out) { this.out = out; }
+
+          public String parse(String[] args) {
+              return Arrays.stream(args).findFirst().orElse("London");
+          }
+      }
+
+  - path: src/main/java/com/example/weather/model/Forecast.java
+    content: |
+      package com.example.weather.model;
+
+      public record Forecast(String city, double temperatureC, String condition, int humidity) {
+          public double temperatureF() {
+              return temperatureC * 9.0 / 5.0 + 32.0;
+          }
+      }
+
+  - path: src/main/java/com/example/weather/formatter/Formatter.java
+    content: |
+      package com.example.weather.formatter;
+
+      import com.example.weather.model.Forecast;
+      import java.util.Locale;
+
+      public class Formatter {
+          public enum Format { TEXT, JSON }
+
+          private final Format format;
+
+          public Formatter(Format format) { this.format = format; }
+
+          public String render(Forecast f) {
+              return switch (format) {
+                  case TEXT -> renderText(f);
+                  case JSON -> renderJson(f);
+              };
+          }
+
+          private String renderText(Forecast f) {
+              return String.format(Locale.ROOT, "%s: %s", f.city(), f.condition());
+          }
+
+          private String renderJson(Forecast f) {
+              return String.format(Locale.ROOT, "{\"city\":\"%s\"}", f.city());
+          }
+      }
+
+  - path: src/main/java/com/example/weather/service/WeatherService.java
+    content: |
+      package com.example.weather.service;
+
+      import com.example.weather.model.Forecast;
+      import java.util.stream.Collectors;
+      import java.util.List;
+
+      public class WeatherService {
+          public Forecast fetch(String city) {
+              if (!knownCities().contains(city)) {
+                  throw new UnknownCityException(city);
+              }
+              return new Forecast(city, 20.0, "Sunny", 50);
+          }
+
+          private List<String> knownCities() {
+              return List.of("London", "Paris", "Tokyo");
+          }
+      }
+
+  - path: src/main/java/com/example/weather/service/UnknownCityException.java
+    content: |
+      package com.example.weather.service;
+
+      public class UnknownCityException extends RuntimeException {
+          public UnknownCityException(String city) {
+              super("Unknown city: " + city);
+          }
+      }
+
+tests:
+  # ── Definition types: enum and record ─────────────────────────
+  - name: "Record definition type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.weather.model.Forecast'
+        AND d.definition_type = 'Record'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Enum definition type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.weather.formatter.Formatter.Format'
+        AND d.definition_type = 'Enum'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Class definition type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'com.example.weather.Main'
+        AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 1 }
+
+  - name: "Method definitions exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn IN ['com.example.weather.Main.run',
+                       'com.example.weather.cli.Cli.parse',
+                       'com.example.weather.service.WeatherService.fetch']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+
+  # ── Containment edges ─────────────────────────────────────────
+  - name: "Class defines method"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'com.example.weather.Main'
+        AND child.fqn = 'com.example.weather.Main.run'
+        AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "Enum defines enum constant"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'com.example.weather.formatter.Formatter.Format'
+        AND child.fqn = 'com.example.weather.formatter.Formatter.Format.JSON'
+        AND e.edge_kind = 'Defines'
+      RETURN parent.fqn AS parent, child.fqn AS child
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines top-level class"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'src/main/java/com/example/weather/Main.java'
+        AND d.fqn = 'com.example.weather.Main'
+        AND e.edge_kind = 'Defines'
+      RETURN f.path AS file, d.fqn AS def
+    assert:
+      - { row_count: 1 }
+
+  - name: "File defines record"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'src/main/java/com/example/weather/model/Forecast.java'
+        AND d.fqn = 'com.example.weather.model.Forecast'
+        AND e.edge_kind = 'Defines'
+      RETURN f.path AS file, d.fqn AS def
+    assert:
+      - { row_count: 1 }
+
+  # ── Imports ────────────────────────────────────────────────────
+  - name: "Cli imports PrintStream"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
+        AND i.path = 'java.io'
+        AND i.name = 'PrintStream'
+        AND e.edge_kind = 'Imports'
+      RETURN f.path AS file, i.name AS import
+    assert:
+      - { row_count: 1 }
+
+  - name: "Cli imports Arrays"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'src/main/java/com/example/weather/cli/Cli.java'
+        AND i.path = 'java.util'
+        AND i.name = 'Arrays'
+        AND e.edge_kind = 'Imports'
+      RETURN f.path AS file, i.name AS import
+    assert:
+      - { row_count: 1 }
+
+  - name: "WeatherService imports Collectors"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'src/main/java/com/example/weather/service/WeatherService.java'
+        AND i.path = 'java.util.stream'
+        AND i.name = 'Collectors'
+        AND e.edge_kind = 'Imports'
+      RETURN f.path AS file, i.name AS import
+    assert:
+      - { row_count: 1 }
+
+  - name: "Main imports Forecast"
+    query: |
+      MATCH (f:File)-[e:FileToImportedSymbol]->(i:ImportedSymbol)
+      WHERE f.path = 'src/main/java/com/example/weather/Main.java'
+        AND i.path = 'com.example.weather.model'
+        AND i.name = 'Forecast'
+        AND e.edge_kind = 'Imports'
+      RETURN f.path AS file, i.name AS import
+    assert:
+      - { row_count: 1 }

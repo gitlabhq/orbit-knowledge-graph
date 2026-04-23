@@ -79,6 +79,7 @@ pub fn register_handlers(
         stale_data_cleaner,
         metrics.clone(),
         table_names,
+        Arc::new(ontology.clone()),
     ));
 
     registry.register_handler(Box::new(CodeIndexingTaskHandler::new(
