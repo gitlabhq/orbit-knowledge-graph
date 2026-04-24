@@ -41,6 +41,7 @@ pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
+use crate::v2::error::CodeGraphError;
 use crate::v2::linker::CodeGraph;
 
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
@@ -106,6 +107,11 @@ struct EdgeCollectionResult {
     edge_candidates: Vec<ResolvedEdgeCandidate>,
 }
 
+struct RustParseOutput {
+    parsed: Vec<ParsedRustFile>,
+    errors: Vec<PipelineError>,
+}
+
 impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
@@ -116,17 +122,35 @@ impl LanguagePipeline for RustPipeline {
         let tracer = &ctx.tracer;
         let canonical_root = canonical_root_path(root_path);
         let root_path = canonical_root.as_str();
-        let workspaces = match WorkspaceCatalog::load(root_path, files) {
-            Ok(catalog) => Some(catalog),
-            Err(err) => {
+        let workspaces = match std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            WorkspaceCatalog::load(root_path, files)
+        })) {
+            Ok(Ok(catalog)) => Some(catalog),
+            Ok(Err(err)) => {
                 tracing::warn!(
                     error = %err,
                     "rust v2 workspace load failed; falling back to standalone parsing"
                 );
                 None
             }
+            Err(err) => {
+                let message = rust_panic_message(&err);
+                tracing::warn!(
+                    error = %message,
+                    "rust v2 workspace load panicked; falling back to standalone parsing"
+                );
+                None
+            }
         };
-        let parsed = parse_rust_files(files, root_path, workspaces.as_ref())?;
+        let output = parse_rust_files(files, root_path, workspaces.as_ref())?;
+        for error in &output.errors {
+            tracing::warn!(path = %error.file_path, error = %error.error, "rust: skipped file");
+            ctx.record_error(CodeGraphError::ParseFailed {
+                path: error.file_path.clone(),
+                message: error.error.clone(),
+            });
+        }
+        let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
 
         for file in &parsed {
@@ -162,7 +186,7 @@ fn parse_rust_files(
     files: &[FileInput],
     root_path: &str,
     workspaces: Option<&WorkspaceCatalog>,
-) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+) -> Result<RustParseOutput, Vec<PipelineError>> {
     if let Some(workspaces) = workspaces {
         return parse_rust_files_with_workspaces(files, root_path, workspaces);
     }
@@ -174,7 +198,7 @@ fn parse_rust_files_with_workspaces(
     files: &[FileInput],
     root_path: &str,
     workspaces: &WorkspaceCatalog,
-) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+) -> Result<RustParseOutput, Vec<PipelineError>> {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces().len()];
@@ -203,7 +227,9 @@ fn parse_rust_files_with_workspaces(
         let workspace_results = workspace_tasks
             .into_par_iter()
             .zip(workspace_files.par_iter())
-            .map(|(workspace, file)| parse_workspace_file(file, root_path, &workspace))
+            .map(|(workspace, file)| {
+                catch_rust_file_panic(file, || parse_workspace_file(file, root_path, &workspace))
+            })
             .collect::<Vec<_>>();
 
         for result in workspace_results {
@@ -216,7 +242,11 @@ fn parse_rust_files_with_workspaces(
 
     let standalone_results = standalone
         .par_iter()
-        .map(|file_path| parse_rust_file_standalone(file_path, root_path))
+        .map(|file_path| {
+            catch_rust_file_panic(file_path, || {
+                parse_rust_file_standalone(file_path, root_path)
+            })
+        })
         .collect::<Vec<_>>();
 
     for result in standalone_results {
@@ -229,17 +259,21 @@ fn parse_rust_files_with_workspaces(
     if parsed.is_empty() && !errors.is_empty() {
         Err(errors)
     } else {
-        Ok(parsed)
+        Ok(RustParseOutput { parsed, errors })
     }
 }
 
 fn parse_rust_files_standalone(
     files: &[FileInput],
     root_path: &str,
-) -> Result<Vec<ParsedRustFile>, Vec<PipelineError>> {
+) -> Result<RustParseOutput, Vec<PipelineError>> {
     let results = files
         .par_iter()
-        .map(|file_path| parse_rust_file_standalone(file_path, root_path))
+        .map(|file_path| {
+            catch_rust_file_panic(file_path, || {
+                parse_rust_file_standalone(file_path, root_path)
+            })
+        })
         .collect::<Vec<_>>();
 
     let mut parsed = Vec::with_capacity(results.len());
@@ -255,7 +289,32 @@ fn parse_rust_files_standalone(
     if parsed.is_empty() && !errors.is_empty() {
         Err(errors)
     } else {
-        Ok(parsed)
+        Ok(RustParseOutput { parsed, errors })
+    }
+}
+
+fn catch_rust_file_panic(
+    file_path: &str,
+    f: impl FnOnce() -> Result<ParsedRustFile, PipelineError>,
+) -> Result<ParsedRustFile, PipelineError> {
+    std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|payload| {
+        Err(PipelineError::parse(
+            file_path,
+            format!(
+                "panic during rust analysis: {}",
+                rust_panic_message(&payload)
+            ),
+        ))
+    })
+}
+
+fn rust_panic_message(payload: &Box<dyn std::any::Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
     }
 }
 
@@ -371,9 +430,11 @@ struct ResolvedEdgeCollector<'a> {
     seen_expanded_sites: HashSet<(u32, u32, u32, SyntaxKind)>,
     edges: Vec<ResolvedEdgeCandidate>,
     macro_depth: u32,
+    expanded_macro_nodes: usize,
 }
 
 const MAX_MACRO_EXPANSION_DEPTH: u32 = 8;
+const MAX_EXPANDED_MACRO_NODES: usize = 20_000;
 
 impl<'a> ResolvedEdgeCollector<'a> {
     fn collect(mut self, source_file: &ast::SourceFile) -> Self {
@@ -602,6 +663,15 @@ impl<'a> ResolvedEdgeCollector<'a> {
             let macro_call_start = u32::from(macro_call.syntax().text_range().start());
             self.macro_depth += 1;
             for node in expanded.value.descendants() {
+                if self.expanded_macro_nodes >= MAX_EXPANDED_MACRO_NODES {
+                    tracing::warn!(
+                        file = self.relative_path,
+                        max_nodes = MAX_EXPANDED_MACRO_NODES,
+                        "rust macro expansion budget exhausted"
+                    );
+                    break;
+                }
+                self.expanded_macro_nodes += 1;
                 if !is_edge_relevant_node(&node) {
                     continue;
                 }
@@ -710,6 +780,7 @@ fn collect_resolved_edge_candidates(
         seen_expanded_sites: HashSet::new(),
         edges: Vec::new(),
         macro_depth: 0,
+        expanded_macro_nodes: 0,
     }
     .collect(source_file);
     EdgeCollectionResult {
@@ -1003,6 +1074,22 @@ mod tests {
         let inside = repo_local_existing_file(inside_file, &repo_root).unwrap();
         assert!(inside.ends_with("repo/src/lib.rs"));
         assert_eq!(repo_local_existing_file(outside_file, &repo_root), None);
+    }
+
+    #[test]
+    fn catch_rust_file_panic_converts_to_parse_error() {
+        let err = match super::catch_rust_file_panic("src/lib.rs", || {
+            panic!("analysis exploded");
+            #[allow(unreachable_code)]
+            super::parse_rust_file_standalone("src/lib.rs", "/tmp")
+        }) {
+            Ok(_) => panic!("panic should be converted to a parse error"),
+            Err(err) => err,
+        };
+
+        assert_eq!(err.file_path, "src/lib.rs");
+        assert!(err.error.contains("panic during rust analysis"));
+        assert!(err.error.contains("analysis exploded"));
     }
 
     #[test]

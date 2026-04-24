@@ -781,15 +781,19 @@ impl JsAnalyzer {
         let source_type = SourceType::from_path(file_path)
             .map_err(|_| format!("Unknown JS source type: {file_path}"))?;
         let allocator = Allocator::default();
-        let parsed = Parser::new(&allocator, source, source_type).parse();
+        let parsed = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
+            Parser::new(&allocator, source, source_type).parse()
+        });
 
         if parsed.panicked {
             return Err(format!("OXC parser panicked on {file_path}"));
         }
 
-        let semantic_ret = SemanticBuilder::new()
-            .with_check_syntax_error(true)
-            .build(&parsed.program);
+        let semantic_ret = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
+            SemanticBuilder::new()
+                .with_check_syntax_error(true)
+                .build(&parsed.program)
+        });
         // A file that failed semantic analysis has an inconsistent
         // scoping/symbols view; downstream SSA and class extraction
         // assume the view is valid. Skip these files rather than
