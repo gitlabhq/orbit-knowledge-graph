@@ -208,6 +208,10 @@ yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
+yaml_test!(
+    csharp_advanced_resolution,
+    "csharp/advanced_resolution.yaml"
+);
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");

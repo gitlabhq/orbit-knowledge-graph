@@ -191,12 +191,17 @@ impl DslLanguage for CSharpDsl {
         };
         use treesitter_visit::extract::child_of_kind;
         vec![
-            // Field declarations: private readonly UserService _userService;
-            // variable_declaration has type: field and variable_declarator children
+            // variable_declaration: covers both local vars and fields.
+            // C# variable_declarator has name as identifier child, and
+            // the initializer (= expr) as equals_value_clause child.
             csharp_type(
                 binding("variable_declaration", BindingKind::Assignment)
                     .name_from_extract(child_of_kind("variable_declarator").field("name"))
-                    .value_from_extract(child_of_kind("variable_declarator").field("value"))
+                    .value_from_extract(
+                        // The initializer is the last named child of variable_declarator
+                        // (after identifier and anonymous "=").
+                        child_of_kind("variable_declarator").nth(Child, Named, -1),
+                    )
                     .instance_attrs(&["this."]),
             ),
             // Method/constructor parameters
