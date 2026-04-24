@@ -2,6 +2,7 @@ use std::path::Path;
 
 use std::sync::Arc;
 
+use crate::v2::error::CodeGraphError;
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use rustc_hash::FxHashMap;
 
@@ -61,6 +62,10 @@ impl LanguagePipeline for JsPipeline {
         if !errors.is_empty() {
             for error in &errors {
                 tracing::warn!(path = %error.file_path, error = %error.error, "js: skipped file");
+                ctx.record_error(CodeGraphError::ParseFailed {
+                    path: error.file_path.clone(),
+                    message: error.error.clone(),
+                });
             }
         }
         Ok(())

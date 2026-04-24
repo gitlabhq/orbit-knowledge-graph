@@ -609,22 +609,15 @@ impl RustStructureExtractor {
         let Some(body) = function.body() else {
             return;
         };
-        let function_syntax = function.syntax().clone();
 
-        for item in body.syntax().descendants().filter_map(ast::Item::cast) {
-            let item_syntax = item.syntax().clone();
-            let nested_within_other_item = item_syntax
-                .ancestors()
-                .skip(1)
-                .take_while(|ancestor| ancestor != &function_syntax)
-                .filter_map(ast::Item::cast)
-                .next()
-                .is_some();
-            if nested_within_other_item {
+        let mut stack = body.syntax().children().collect::<Vec<_>>();
+        while let Some(node) = stack.pop() {
+            if let Some(item) = ast::Item::cast(node.clone()) {
+                self.collect_item(item, container_parts, false, sema, workspace);
                 continue;
             }
 
-            self.collect_item(item, container_parts, false, sema, workspace);
+            stack.extend(node.children());
         }
     }
 

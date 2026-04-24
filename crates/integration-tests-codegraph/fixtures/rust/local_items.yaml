@@ -32,6 +32,12 @@ fixtures:
           }
       }
 
+      pub fn with_local_mod() {
+          mod local_mod {
+              pub fn nested() {}
+          }
+      }
+
 tests:
   - name: "block-local definitions are retained under the enclosing function"
     query: |
@@ -92,3 +98,17 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { fqn: 'Container::method::nested', type: 'Function' } }
+
+  - name: "function-local modules keep nested definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path = 'src/lib.rs'
+        AND d.fqn IN [
+          'local_mod',
+          'local_mod::nested'
+        ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: 'local_mod', type: 'Module' } }
+      - { row: { fqn: 'local_mod::nested', type: 'Function' } }

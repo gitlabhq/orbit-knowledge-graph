@@ -25,6 +25,16 @@ fixtures:
         return 'local-safe';
       }
 
+  - path: node_modules/local-package/package.json
+    content: |
+      { "name": "local-package", "main": "./lib/index.js" }
+
+  - path: node_modules/local-package/lib/index.js
+    content: |
+      export function packageSafe() {
+        return 'package-safe';
+      }
+
   - path: src/consumer.js
     content: |
       import { safeOp } from 'localAlias';
@@ -36,6 +46,11 @@ fixtures:
       export function runLocal() { return safeOp(); }
       export function runFs() { return fsThing(); }
       export function runProc() { return procThing(); }
+
+  - path: src/package_consumer.js
+    content: |
+      import { packageSafe } from 'local-package';
+      export function runPackage() { return packageSafe(); }
 
   # --- L2: star-reexport dedup ---
   - path: src/lib/shared.js
@@ -105,6 +120,17 @@ tests:
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { empty: true }
+
+  - name: Node package metadata resolves only through contained repo files
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/package_consumer.js'
+        AND caller.fqn = 'runPackage'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, callee.file_path AS callee_file
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "runPackage", callee: "packageSafe", callee_file: "node_modules/local-package/lib/index.js" } }
 
   - name: Duplicate star-reexport specifiers dedup into a single resolved binding
     query: |

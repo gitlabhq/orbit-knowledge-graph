@@ -6,6 +6,7 @@ use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
+use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
@@ -66,6 +67,16 @@ fn spinner(msg: &str) -> ProgressBar {
     pb.set_message(msg.to_string());
     pb.enable_steady_tick(std::time::Duration::from_millis(100));
     pb
+}
+
+fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
+    if let Some(s) = payload.downcast_ref::<&'static str>() {
+        (*s).to_string()
+    } else if let Some(s) = payload.downcast_ref::<String>() {
+        s.clone()
+    } else {
+        "unknown panic".to_string()
+    }
 }
 
 /// Input to a language pipeline: file path (source read on demand).
@@ -473,13 +484,22 @@ impl Pipeline {
                     );
 
                     let result = pool.install(|| {
-                        crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                        std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                            crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                        }))
                     });
 
                     // Pool dropped here — rayon threads freed
                     drop(pool);
 
-                    match result {
+                    match result.unwrap_or_else(|payload| {
+                        let message = panic_payload_message(&payload);
+                        Some(Err(vec![PipelineError::fatal(
+                            format!("<language:{language}>"),
+                            format!("language worker panicked: {message}"),
+                            "panic",
+                        )]))
+                    }) {
                         Some(Ok(())) => {
                             tracing::info!(
                                 %language,
