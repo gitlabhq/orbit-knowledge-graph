@@ -1,12 +1,40 @@
 use crate::v2::config::Language;
-use crate::v2::dsl::types::*;
-use crate::v2::types::DefKind;
-use treesitter_visit::extract::{Extract, default_name, field};
+use crate::v2::dsl::extractors::metadata;
+use crate::v2::dsl::types::{self, *};
+use crate::v2::types::{BindingKind, DefKind};
+use treesitter_visit::Axis::*;
+use treesitter_visit::Match::*;
+use treesitter_visit::extract::{Extract, default_name, field, text};
+use treesitter_visit::predicate::*;
+use treesitter_visit::tree_sitter::StrDoc;
+use treesitter_visit::{Node, SupportLang};
+
+use crate::v2::linker::rules::{
+    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+};
+use crate::v2::linker::{HasRules, ResolveSettings};
 
 // ── DSL parser spec ─────────────────────────────────────────────
 
 #[derive(Default)]
 pub struct CSharpDsl;
+
+type N<'a> = Node<'a, StrDoc<SupportLang>>;
+
+fn csharp_super_types(node: &N<'_>) -> Vec<String> {
+    let mut result = Vec::new();
+    for child in node.children() {
+        if child.kind() == "base_list" {
+            for inner in child.children() {
+                let ik = inner.kind();
+                if ik == "identifier" || ik == "qualified_name" || ik == "generic_name" {
+                    result.push(inner.text().to_string());
+                }
+            }
+        }
+    }
+    result
+}
 
 impl DslLanguage for CSharpDsl {
     fn name() -> &'static str {
@@ -17,44 +45,232 @@ impl DslLanguage for CSharpDsl {
         Language::CSharp
     }
 
+    fn hooks() -> LanguageHooks {
+        LanguageHooks {
+            return_kinds: &["return_statement"],
+            adopt_sibling_refs: &["attribute_list"],
+            ..LanguageHooks::default()
+        }
+    }
+
     fn scopes() -> Vec<ScopeRule> {
+        let class_meta = || metadata().super_types(csharp_super_types);
+
         vec![
             scope("namespace_declaration", "Namespace").def_kind(DefKind::Other),
-            scopes(
-                &[
-                    "class_declaration",
-                    "struct_declaration",
-                    "enum_declaration",
-                    "record_declaration",
-                ],
-                "Class",
-            )
-            .def_kind(DefKind::Class),
-            scope("interface_declaration", "Interface").def_kind(DefKind::Interface),
-            scope("method_declaration", "Method").def_kind(DefKind::Method),
+            scope("class_declaration", "Class")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
+            scope("struct_declaration", "Struct")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
+            scope("record_declaration", "Record")
+                .def_kind(DefKind::Class)
+                .metadata(class_meta()),
+            scope("enum_declaration", "Enum").def_kind(DefKind::Class),
+            scope("interface_declaration", "Interface")
+                .def_kind(DefKind::Interface)
+                .metadata(class_meta()),
+            scope("method_declaration", "Method")
+                .def_kind(DefKind::Method)
+                .metadata(metadata().return_type(field("returns"))),
             scope("constructor_declaration", "Constructor").def_kind(DefKind::Constructor),
             scope("property_declaration", "Property")
                 .def_kind(DefKind::Property)
-                .no_scope(),
+                .no_scope()
+                .metadata(metadata().type_annotation(field("type"))),
+            scope("field_declaration", "Field")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .name_from(field("declaration").field("name"))
+                .metadata(metadata().type_annotation(field("declaration").field("type"))),
+            scope("event_field_declaration", "Event")
+                .def_kind(DefKind::Property)
+                .no_scope()
+                .name_from(field("declaration").field("name")),
             scope("enum_member_declaration", "EnumMember")
                 .def_kind(DefKind::EnumEntry)
                 .no_scope(),
+            scope("lambda_expression", "Lambda")
+                .def_kind(DefKind::Lambda)
+                .no_scope()
+                .name_from(field("parameters")),
         ]
     }
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            reference("invocation_expression").name_from(field("function")),
+            // Method call: obj.Method() or Method()
+            reference("invocation_expression")
+                .name_from(field("function"))
+                .receiver("expression"),
+            // Constructor: new Foo()
             reference("object_creation_expression").name_from(field("type")),
+            // Bare type references: type casts, is, as
+            reference("type_identifier")
+                .name_from(text())
+                .when(!parent_is("object_creation_expression")),
+            // is pattern: x is Foo
+            reference("is_pattern_expression").name_from(field("pattern")),
+            // Attribute references: [Serializable]
+            reference("attribute").name_from(field("name")),
         ]
     }
 
     fn imports() -> Vec<ImportRule> {
-        vec![import("using_directive")]
+        fn csharp_import_classify(node: &N<'_>) -> &'static str {
+            let text = node.text().to_string();
+            if text.contains("static") {
+                "StaticImport"
+            } else if text.contains('=') {
+                "AliasedImport"
+            } else {
+                "Import"
+            }
+        }
+
+        vec![
+            import("using_directive")
+                .path_from(Extract::one(
+                    Child,
+                    AnyKind(&["qualified_name", "identifier"]),
+                ))
+                .classify(csharp_import_classify)
+                .split_last("."),
+        ]
+    }
+
+    fn chain_config() -> Option<ChainConfig> {
+        Some(ChainConfig {
+            ident_kinds: &["identifier"],
+            this_kinds: &[],  // 'this' is anonymous in C# tree-sitter
+            super_kinds: &[], // 'base' is anonymous
+            field_access: vec![FieldAccessEntry {
+                kind: "member_access_expression",
+                object: field("expression"),
+                member: field("name"),
+            }],
+            constructor: &[("object_creation_expression", "type")],
+            qualified_type_kinds: &["qualified_name"],
+        })
     }
 
     fn package_node() -> Option<(&'static str, Extract)> {
-        Some(("namespace_declaration", default_name()))
+        // C# namespaces are scopes, not package declarations. The FQN
+        // is built from scope nesting (namespace → class → method).
+        // No separate package_node needed.
+        None
+    }
+
+    fn bindings() -> Vec<BindingRule> {
+        let skip = &[
+            "int", "long", "short", "byte", "float", "double", "bool", "char", "void", "string",
+            "object", "decimal", "var",
+        ];
+        let csharp_type = |rule: BindingRule| {
+            rule.typed(
+                vec![
+                    // Qualified types (Outer.Inner): extract full text
+                    Extract::one(Field("type"), Kind("qualified_name")),
+                    // Generic types (List<T>): extract the base identifier
+                    field("type").child_of_kind("identifier"),
+                    // Simple types: identifier text
+                    field("type"),
+                ],
+                skip,
+            )
+        };
+        vec![
+            // var x = new Foo(); int y = 5;
+            csharp_type(
+                binding("variable_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .value_from("value"),
+            ),
+            // Method/constructor parameters
+            csharp_type(
+                binding("parameter", BindingKind::Parameter)
+                    .name_from(&["name"])
+                    .no_value(),
+            ),
+            // foreach variable
+            binding("foreach_statement", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+            // x = y
+            binding("assignment_expression", BindingKind::Assignment)
+                .name_from(&["left"])
+                .value_from("right"),
+            // catch (Exception e)
+            binding("catch_declaration", BindingKind::Parameter)
+                .name_from(&["name"])
+                .typed(vec![field("type")], skip)
+                .no_value(),
+        ]
+    }
+
+    fn branches() -> Vec<BranchRule> {
+        vec![
+            branch("if_statement")
+                .branches(&["block", "else_clause"])
+                .condition("condition")
+                .catch_all("else_clause"),
+            branch("try_statement").branches(&["block", "catch_clause", "finally_clause"]),
+            branch("switch_statement").branches(&["switch_section"]),
+            branch("conditional_expression")
+                .branches(&["consequence", "alternative"])
+                .catch_all("alternative"),
+        ]
+    }
+
+    fn loops() -> Vec<LoopRule> {
+        vec![
+            loop_rule("for_statement"),
+            loop_rule("while_statement"),
+            loop_rule("foreach_statement").iter_over("right"),
+            loop_rule("do_statement"),
+        ]
+    }
+
+    fn ssa_config() -> types::SsaConfig {
+        types::SsaConfig {
+            self_names: &["this"],
+            super_name: Some("base"),
+            ..Default::default()
+        }
+    }
+}
+
+// ── Resolution rules ────────────────────────────────────────────
+
+pub struct CSharpRules;
+
+impl HasRules for CSharpRules {
+    fn rules() -> ResolutionRules {
+        let spec = CSharpDsl::spec();
+        let scopes = ResolutionRules::derive_scopes(&spec);
+
+        ResolutionRules::new(
+            "csharp",
+            scopes,
+            spec,
+            vec![
+                ResolveStage::SSA,
+                ResolveStage::ImportStrategies,
+                ResolveStage::ImplicitMember,
+            ],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::ExplicitImport,
+                ImportStrategy::SameFile,
+            ],
+            ReceiverMode::Keyword,
+            ".",
+            &["this"],
+            Some("base"),
+        )
+        .with_hooks(ResolverHooks::default())
+        .with_settings(ResolveSettings::default())
     }
 }
 
@@ -63,7 +279,9 @@ mod tests {
     use super::*;
     use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         CSharpDsl::spec()
             .parse_full_collect(
                 code.as_bytes(),
@@ -75,15 +293,129 @@ mod tests {
                 definitions: r.definitions,
                 imports: r.imports,
             })
-            .unwrap()
+            .map_err(|e| {
+                crate::v2::pipeline::PipelineError::parse(
+                    "Test.cs",
+                    format!("Parse error: {:?}", e),
+                )
+            })
     }
 
     #[test]
     fn class_with_methods() {
         let result = parse(
-            "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n    }\n}\n",
+            "namespace MyApp {\n    public class Controller {\n        public void Index() {}\n        public string Get(int id) { return \"\"; }\n    }\n}\n",
+        ).unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"MyApp"), "should have namespace");
+        assert!(names.contains(&"Controller"), "should have class");
+        assert!(names.contains(&"Index"), "should have method");
+        assert!(names.contains(&"Get"), "should have method");
+    }
+
+    #[test]
+    fn namespace_scoping() {
+        let result = parse(
+            "namespace Com.Example {\n    public class Service {\n        public void Run() {}\n    }\n}\n",
+        ).unwrap();
+        let service = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "Service")
+            .unwrap();
+        assert_eq!(service.fqn.to_string(), "Com.Example.Service");
+    }
+
+    #[test]
+    fn struct_and_enum() {
+        let result = parse(
+            "public struct Point { public int X; public int Y; }\npublic enum Color { Red, Green, Blue }\n",
+        ).unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"Point"));
+        assert!(names.contains(&"Color"));
+        assert!(names.contains(&"Red"));
+    }
+
+    #[test]
+    fn interface_declaration() {
+        let result = parse("public interface IService {\n    void Execute();\n}\n").unwrap();
+        let iface = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "IService")
+            .unwrap();
+        assert_eq!(iface.kind, DefKind::Interface);
+    }
+
+    #[test]
+    fn super_types_extracted() {
+        let result = parse("public class Dog : Animal, IRunnable {\n}\n").unwrap();
+        let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
+        let meta = dog.metadata.as_ref().expect("Dog should have metadata");
+        assert!(meta.super_types.contains(&"Animal".to_string()));
+        assert!(meta.super_types.contains(&"IRunnable".to_string()));
+    }
+
+    #[test]
+    fn imports_extracted() {
+        let result =
+            parse("using System;\nusing System.Collections.Generic;\n\npublic class Test {}\n")
+                .unwrap();
+        assert!(
+            result.imports.len() >= 2,
+            "Expected at least 2 imports, got {}",
+            result.imports.len()
         );
-        assert!(result.definitions.len() >= 2);
-        assert!(result.definitions.iter().any(|d| d.name == "Controller"));
+        let paths: Vec<&str> = result.imports.iter().map(|i| i.path.as_str()).collect();
+        assert!(
+            paths.iter().any(|p| p.contains("System")),
+            "should have System import"
+        );
+    }
+
+    #[test]
+    fn static_import_extracted() {
+        let result = parse("using static System.Math;\n\npublic class Test {}\n").unwrap();
+        // using static may parse differently — verify we get at least the basic form
+        assert!(!result.imports.is_empty(), "should extract static import");
+    }
+
+    #[test]
+    fn property_and_field() {
+        let result = parse(
+            "public class Foo {\n    public int Count { get; set; }\n    private string _name;\n}\n",
+        ).unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"Count"), "should have property");
+    }
+
+    #[test]
+    fn enum_members() {
+        let result = parse("public enum Direction { North, South, East, West }\n").unwrap();
+        let names: Vec<&str> = result.definitions.iter().map(|d| d.name.as_str()).collect();
+        assert!(names.contains(&"North"));
+        assert!(names.contains(&"West"));
+    }
+
+    #[test]
+    fn record_declaration() {
+        let result = parse("public record Person(string Name, int Age);\n").unwrap();
+        let person = result
+            .definitions
+            .iter()
+            .find(|d| d.name == "Person")
+            .unwrap();
+        assert_eq!(person.kind, DefKind::Class);
+    }
+
+    #[test]
+    fn constructor_declaration() {
+        let result = parse("public class Foo {\n    public Foo(int x) {}\n}\n").unwrap();
+        let ctor = result
+            .definitions
+            .iter()
+            .find(|d| d.kind == DefKind::Constructor);
+        assert!(ctor.is_some(), "should find constructor");
     }
 }
