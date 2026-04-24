@@ -284,6 +284,10 @@ impl ArrowUtils {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {
     Str,
+    /// Dictionary-encoded string. Uses integer indices internally,
+    /// stores each unique value once. Ideal for low-cardinality columns
+    /// like edge_kind, definition_type, language.
+    DictStr,
     Int,
     Bool,
     /// Microsecond-precision UTC timestamp.
@@ -298,18 +302,28 @@ pub struct ColumnSpec {
     pub nullable: bool,
 }
 
-#[derive(Debug)]
 enum Col {
     Str(StringBuilder, bool),
+    DictStr(
+        arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
+        bool,
+    ),
     Int(Int64Builder, bool),
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
+}
+
+impl std::fmt::Debug for Col {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Col::{}", self.kind())
+    }
 }
 
 impl Col {
     fn len(&self) -> usize {
         match self {
             Self::Str(b, _) => b.len(),
+            Self::DictStr(b, _) => b.len(),
             Self::Int(b, _) => b.len(),
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
@@ -319,6 +333,7 @@ impl Col {
     fn kind(&self) -> &'static str {
         match self {
             Self::Str(..) => "Str",
+            Self::DictStr(..) => "DictStr",
             Self::Int(..) => "Int",
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
@@ -328,6 +343,11 @@ impl Col {
     fn finish(self) -> (DataType, bool, ArrayRef) {
         match self {
             Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
+            Self::DictStr(mut b, nullable) => (
+                DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+                nullable,
+                Arc::new(b.finish()),
+            ),
             Self::Int(mut b, nullable) => (DataType::Int64, nullable, Arc::new(b.finish())),
             Self::Bool(mut b, nullable) => (DataType::Boolean, nullable, Arc::new(b.finish())),
             Self::Timestamp(mut b, nullable) => (
@@ -362,6 +382,10 @@ impl ColRef<'_> {
     pub fn push_str(&mut self, v: impl AsRef<str>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            Col::DictStr(b, _) => {
                 b.append_value(v);
                 Ok(())
             }
@@ -424,6 +448,13 @@ impl ColRef<'_> {
                 }
                 Ok(())
             }
+            Col::DictStr(b, _) => {
+                match v {
+                    Some(s) => b.append_value(s),
+                    None => b.append_null(),
+                }
+                Ok(())
+            }
             other => Err(batch_err(format!(
                 "push_opt_str on {} column '{}'",
                 other.kind(),
@@ -478,6 +509,10 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
+                ColumnType::DictStr => Col::DictStr(
+                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::new(),
+                    spec.nullable,
+                ),
                 ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
                 ColumnType::TimestampMicros => Col::Timestamp(
                     TimestampMicrosecondBuilder::with_capacity(cap),

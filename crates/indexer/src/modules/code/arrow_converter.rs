@@ -133,6 +133,17 @@ pub fn convert_code_graph(
 /// Ontology-driven specs for a node entity, plus ClickHouse
 /// infrastructure columns (_version, _deleted) that aren't in
 /// the ontology but are required by the ReplacingMergeTree schema.
+/// Fields with a small set of distinct values — stored as dictionary-encoded
+/// Arrow arrays (integer indices + unique value table) instead of plain strings.
+const DICT_ENCODED_FIELDS: &[&str] = &[
+    "definition_type",
+    "language",
+    "relationship_kind",
+    "source_node_kind",
+    "target_node_kind",
+    "import_type",
+];
+
 fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
@@ -147,6 +158,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ if DICT_ENCODED_FIELDS.contains(&f.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: f.nullable,
@@ -176,6 +188,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ if DICT_ENCODED_FIELDS.contains(&c.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: false,
