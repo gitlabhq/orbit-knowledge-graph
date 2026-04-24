@@ -517,6 +517,37 @@ pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &T
     });
 }
 
+// 3-node aggregation where the intermediate node (MR) is cascade-optimized
+// into a CTE. The cascade `IN (SELECT ...)` filter must stay in WHERE, not
+// be folded into `countIf` — otherwise ClickHouse errors with
+// "Unknown identifier `mr.id`" because the CTE alias isn't in FROM.
+pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+            ],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    // User 1 authored MR 2000 (notes 3000, 3002, 3003) and MR 2001 (note 3001) → 4 notes
+    resp.assert_node("User", 1, |n| {
+        n.prop_str("username") == Some("alice") && n.prop_i64("note_count") == Some(4)
+    });
+}
+
 pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &TestContext) {
     // Empty traversal_paths — the query engine refuses to compile rather than
     // silently returning empty results. The defense-in-depth check_ast pass
