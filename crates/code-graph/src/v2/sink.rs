@@ -51,6 +51,12 @@ pub struct CollectSink {
     batches: std::sync::Mutex<Vec<(String, RecordBatch)>>,
 }
 
+impl Default for CollectSink {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl CollectSink {
     pub fn new() -> Self {
         Self {
