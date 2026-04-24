@@ -81,9 +81,9 @@ def load_tasks(config: EvalConfig) -> list[EvalTask]:
     if filt.categories:
         tasks = [t for t in tasks if t.category in filt.categories]
 
-    difficulty_order = ["easy", "medium", "hard"]
-    min_idx = difficulty_order.index(filt.min_difficulty.value)
-    tasks = [t for t in tasks if difficulty_order.index(t.difficulty) >= min_idx]
+    difficulty_order = ["easy", "medium", "hard", "very-hard"]
+    min_idx = difficulty_order.index(filt.min_difficulty.value) if filt.min_difficulty.value in difficulty_order else 0
+    tasks = [t for t in tasks if difficulty_order.index(t.difficulty) >= min_idx if t.difficulty in difficulty_order]
 
     return tasks
 

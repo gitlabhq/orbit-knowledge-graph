@@ -1,0 +1,25 @@
+id: label-hotspots
+prompt: |
+  Find the top {{limit}} most-used labels across all merge requests in project {{project_id}}.
+  For each label, return the label title, the count of MRs using it, and the count of those MRs that are still open.
+category: aggregation
+difficulty: hard
+description: Aggregation across MR->Label edge with secondary filter on MR state
+structured_output_schema:
+  type: object
+  required: [labels]
+  properties:
+    labels:
+      type: array
+      items:
+        type: object
+        required: [label_title, mr_count, open_mr_count]
+        properties:
+          label_title:
+            type: string
+          mr_count:
+            type: integer
+          open_mr_count:
+            type: integer
+tags: [aggregation, labels, merge-requests]
+timeout_override: 600

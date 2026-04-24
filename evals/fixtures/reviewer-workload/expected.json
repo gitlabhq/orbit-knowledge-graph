@@ -1,0 +1,8 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "reviewers": [
+    {"username": "tkuah", "open_review_count": 14},
+    {"username": "reprazent", "open_review_count": 11},
+    {"username": "rspeicher", "open_review_count": 8}
+  ]
+}

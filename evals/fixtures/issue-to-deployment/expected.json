@@ -1,0 +1,8 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "issue_title": "Support custom notification levels for groups",
+  "closing_mrs": [
+    {"mr_iid": 1042, "pipeline_status": "success", "deployment_environment": "production"},
+    {"mr_iid": 1057, "pipeline_status": "success", "deployment_environment": null}
+  ]
+}

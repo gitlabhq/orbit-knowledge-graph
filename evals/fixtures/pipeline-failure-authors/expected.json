@@ -1,0 +1,8 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "authors": [
+    {"username": "stanhu", "failed_pipeline_count": 47},
+    {"username": "tkuah", "failed_pipeline_count": 31},
+    {"username": "reprazent", "failed_pipeline_count": 18}
+  ]
+}

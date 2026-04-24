@@ -1,0 +1,9 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "mr_iid": 100,
+  "author": "stanhu",
+  "assignees": ["tkuah"],
+  "reviewers": ["reprazent", "rspeicher"],
+  "approvers": ["reprazent"],
+  "merged_by": "rspeicher"
+}

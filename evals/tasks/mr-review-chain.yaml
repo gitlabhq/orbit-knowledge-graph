@@ -1,0 +1,32 @@
+id: mr-review-chain
+prompt: |
+  For merge request with iid {{mr_iid}} in project {{project_id}}, reconstruct the full review chain:
+  who authored it, who was assigned, who reviewed it, who approved it, and who merged it.
+  Return the chain with each role and the user's username. If a role has no user, set username to null.
+category: traversal
+difficulty: hard
+description: Fan-out traversal from a single MR across 5 different edge types to collect all participants
+structured_output_schema:
+  type: object
+  required: [mr_iid, author, assignees, reviewers, approvers, merged_by]
+  properties:
+    mr_iid:
+      type: integer
+    author:
+      type: string
+    assignees:
+      type: array
+      items:
+        type: string
+    reviewers:
+      type: array
+      items:
+        type: string
+    approvers:
+      type: array
+      items:
+        type: string
+    merged_by:
+      type: string
+      nullable: true
+tags: [traversal, merge-requests, multi-edge]

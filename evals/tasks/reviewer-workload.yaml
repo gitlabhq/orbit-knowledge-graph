@@ -1,0 +1,24 @@
+id: reviewer-workload
+prompt: |
+  Find all users who have been assigned as reviewers on open merge requests in project {{project_id}}.
+  For each reviewer, return their username and the number of open MRs they are reviewing.
+  Sort by count descending. Only include reviewers with at least {{min_reviews}} open reviews.
+category: aggregation
+difficulty: hard
+description: 3-node traversal (User<-REVIEWER-MR->IN_PROJECT->Project) with state filter and aggregation
+structured_output_schema:
+  type: object
+  required: [reviewers]
+  properties:
+    reviewers:
+      type: array
+      items:
+        type: object
+        required: [username, open_review_count]
+        properties:
+          username:
+            type: string
+          open_review_count:
+            type: integer
+tags: [aggregation, traversal, reviewers]
+timeout_override: 600

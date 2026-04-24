@@ -1,0 +1,24 @@
+id: pipeline-failure-authors
+prompt: |
+  Find which users have authored merge requests that triggered failed pipelines in project {{project_id}}.
+  Return each user's username and the number of failed pipelines associated with their MRs.
+  Only include users with at least {{min_failures}} failed pipelines. Sort by failure count descending.
+category: aggregation
+difficulty: hard
+description: 3-hop traversal (User->MR->Pipeline) with status filter and aggregation
+structured_output_schema:
+  type: object
+  required: [authors]
+  properties:
+    authors:
+      type: array
+      items:
+        type: object
+        required: [username, failed_pipeline_count]
+        properties:
+          username:
+            type: string
+          failed_pipeline_count:
+            type: integer
+tags: [aggregation, multi-hop, pipelines]
+timeout_override: 600

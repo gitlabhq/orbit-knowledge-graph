@@ -1,0 +1,15 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "labels": [
+    {"label_title": "bug", "mr_count": 4521, "open_mr_count": 312},
+    {"label_title": "feature", "mr_count": 3892, "open_mr_count": 587},
+    {"label_title": "backend", "mr_count": 3654, "open_mr_count": 401},
+    {"label_title": "frontend", "mr_count": 2987, "open_mr_count": 298},
+    {"label_title": "database", "mr_count": 1876, "open_mr_count": 143},
+    {"label_title": "performance", "mr_count": 1543, "open_mr_count": 89},
+    {"label_title": "security", "mr_count": 1298, "open_mr_count": 76},
+    {"label_title": "documentation", "mr_count": 1102, "open_mr_count": 64},
+    {"label_title": "CI/CD", "mr_count": 987, "open_mr_count": 55},
+    {"label_title": "UX", "mr_count": 876, "open_mr_count": 48}
+  ]
+}

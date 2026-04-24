@@ -1,0 +1,31 @@
+id: issue-to-deployment
+prompt: |
+  Trace the lifecycle of issue iid {{issue_iid}} in project {{project_id}}:
+  find which merge requests close this issue, what pipelines those MRs triggered,
+  and whether any of those pipelines have deployments.
+  Return the issue title, and for each closing MR: the MR iid, pipeline status, and deployment environment (if any).
+category: multi-hop
+difficulty: very-hard
+description: 4-hop lifecycle trace (Issue<-CLOSES-MR->TRIGGERED->Pipeline->Deployment) across multiple edge types
+structured_output_schema:
+  type: object
+  required: [issue_title, closing_mrs]
+  properties:
+    issue_title:
+      type: string
+    closing_mrs:
+      type: array
+      items:
+        type: object
+        required: [mr_iid, pipeline_status]
+        properties:
+          mr_iid:
+            type: integer
+          pipeline_status:
+            type: string
+            nullable: true
+          deployment_environment:
+            type: string
+            nullable: true
+tags: [multi-hop, lifecycle, issues, deployments]
+timeout_override: 600

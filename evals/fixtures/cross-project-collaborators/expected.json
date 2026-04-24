@@ -1,0 +1,8 @@
+{
+  "_note": "Mock fixture -- replace with real data from staging after first live run",
+  "collaborators": [
+    {"username": "stanhu", "mrs_in_project_a": 312, "mrs_in_project_b": 87},
+    {"username": "reprazent", "mrs_in_project_a": 245, "mrs_in_project_b": 63},
+    {"username": "tkuah", "mrs_in_project_a": 198, "mrs_in_project_b": 41}
+  ]
+}

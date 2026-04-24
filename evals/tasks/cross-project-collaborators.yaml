@@ -1,0 +1,26 @@
+id: cross-project-collaborators
+prompt: |
+  Find all users who have authored merge requests in BOTH project "{{project_a}}" (ID {{project_a_id}}) and project "{{project_b}}" (ID {{project_b_id}}).
+  For each user, return their username, and the count of MRs they authored in each project.
+  Sort by total MR count descending.
+category: aggregation
+difficulty: hard
+description: Multi-project cross-join requiring two traversals and intersection logic
+structured_output_schema:
+  type: object
+  required: [collaborators]
+  properties:
+    collaborators:
+      type: array
+      items:
+        type: object
+        required: [username, mrs_in_project_a, mrs_in_project_b]
+        properties:
+          username:
+            type: string
+          mrs_in_project_a:
+            type: integer
+          mrs_in_project_b:
+            type: integer
+tags: [aggregation, multi-hop, cross-project]
+timeout_override: 600
