@@ -217,12 +217,20 @@ impl CodeIndexingPipeline {
         repo_dir: &Path,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
+        let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
+            Some(std::time::Duration::from_millis(
+                self.pipeline_config.per_file_timeout_ms,
+            ))
+        } else {
+            None
+        };
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
             respect_gitignore: self.pipeline_config.respect_gitignore,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
+            per_file_timeout,
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -275,6 +283,13 @@ impl CodeIndexingPipeline {
             .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
         self.metrics
             .record_nodes_indexed(result.stats.edges_count as u64, "edge");
+
+        // Record typed pipeline errors (file read, parse, conversion failures).
+        for graph_error in &result.graph_errors {
+            self.metrics
+                .errors
+                .add(1, &[KeyValue::new("stage", graph_error.stage())]);
+        }
 
         let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
         if parse_error_count > 0 {
