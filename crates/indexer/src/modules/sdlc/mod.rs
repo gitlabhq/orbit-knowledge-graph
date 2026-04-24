@@ -56,7 +56,12 @@ pub async fn register_handlers(
         "SDLC pipelines initialized"
     );
 
-    let pipeline = Arc::new(Pipeline::new(datalake, checkpoint_store, metrics.clone()));
+    let pipeline = Arc::new(Pipeline::new(
+        datalake,
+        checkpoint_store,
+        metrics.clone(),
+        config.engine.datalake_retry.clone(),
+    ));
 
     if !plans.global.is_empty() {
         registry.register_handler(Box::new(GlobalHandler::new(
@@ -101,6 +106,7 @@ pub(crate) mod test_fixtures {
             &self,
             _sql: &str,
             _params: serde_json::Value,
+            _max_block_size: Option<u64>,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(stream::empty()))
         }
@@ -109,6 +115,7 @@ pub(crate) mod test_fixtures {
             &self,
             _sql: &str,
             _params: serde_json::Value,
+            _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             Ok(vec![])
         }
@@ -122,6 +129,7 @@ pub(crate) mod test_fixtures {
             &self,
             _sql: &str,
             _params: serde_json::Value,
+            _max_block_size: Option<u64>,
         ) -> Result<RecordBatchStream<'_>, DatalakeError> {
             Err(DatalakeError::Query("simulated failure".to_string()))
         }
@@ -130,6 +138,7 @@ pub(crate) mod test_fixtures {
             &self,
             _sql: &str,
             _params: serde_json::Value,
+            _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             Err(DatalakeError::Query("simulated failure".to_string()))
         }

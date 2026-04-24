@@ -106,6 +106,44 @@ fn default_datalake_batch_size() -> u64 {
     1_000_000
 }
 
+fn default_halving_initial_block_size() -> u64 {
+    100_000
+}
+
+fn default_halving_min_block_size() -> u64 {
+    1024
+}
+
+/// Tuning for the SDLC datalake extract retry loop.
+///
+/// The first attempt uses the datalake's configured `max_block_size`
+/// (typically `datalake_batch_size`). After a failure, subsequent attempts
+/// seed at `halving_initial_block_size` and halve on each retry, with
+/// `halving_min_block_size` as the floor.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DatalakeRetryConfig {
+    /// Starting `max_block_size` (in rows) for the halving series after the
+    /// first failure. Sized to stay safely under the Arrow String int32
+    /// offset cap even on unexpectedly heavy text columns.
+    #[serde(default = "default_halving_initial_block_size")]
+    pub halving_initial_block_size: u64,
+
+    /// Floor for the halving series. Prevents pathologically tiny scans
+    /// after repeated retries.
+    #[serde(default = "default_halving_min_block_size")]
+    pub halving_min_block_size: u64,
+}
+
+impl Default for DatalakeRetryConfig {
+    fn default() -> Self {
+        Self {
+            halving_initial_block_size: default_halving_initial_block_size(),
+            halving_min_block_size: default_halving_min_block_size(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalHandlerConfig {
     #[serde(flatten)]
@@ -387,6 +425,10 @@ pub struct EngineConfiguration {
     /// Per-handler configuration.
     #[serde(default)]
     pub handlers: HandlersConfiguration,
+
+    /// Datalake retry tuning shared by all SDLC pipelines.
+    #[serde(default)]
+    pub datalake_retry: DatalakeRetryConfig,
 }
 
 impl Default for EngineConfiguration {
@@ -395,6 +437,7 @@ impl Default for EngineConfiguration {
             max_concurrent_workers: Self::default_max_concurrent_workers(),
             concurrency_groups: HashMap::new(),
             handlers: HandlersConfiguration::default(),
+            datalake_retry: DatalakeRetryConfig::default(),
         }
     }
 }
