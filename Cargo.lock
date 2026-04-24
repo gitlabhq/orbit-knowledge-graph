@@ -2270,6 +2270,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "smallvec",
+ "smol_str",
  "stacker",
  "strum 0.28.0",
  "swc_atoms",

@@ -1057,7 +1057,7 @@ impl<'a> ResolveCtx<'a> {
                     })
                 });
                 if !fqn_matches.is_empty() {
-                    return Ok(vec![type_name.clone()]);
+                    return Ok(vec![type_name.to_string()]);
                 }
                 let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
                     self.graph.graph[idx].def_id().is_some_and(|d| {

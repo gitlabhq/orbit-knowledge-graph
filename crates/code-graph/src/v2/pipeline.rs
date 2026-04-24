@@ -690,7 +690,7 @@ where
                     }
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
                         failed_chains.push((
-                            r.name.clone(),
+                            r.name.to_string(),
                             r.chain.clone().unwrap(),
                             r.reaching.clone().into(),
                             r.enclosing_def,

@@ -26,7 +26,7 @@ pub struct ParsedDefs {
 /// already resolved to owned `ParseValue`s. Ready for cross-file
 /// resolution without re-parsing the source.
 pub struct CollectedRef {
-    pub name: String,
+    pub name: smol_str::SmolStr,
     pub chain: Option<Vec<ExpressionStep>>,
     pub reaching: Vec<crate::v2::types::ssa::ParseValue>,
     pub enclosing_def: Option<u32>,
@@ -117,7 +117,7 @@ impl LanguageSpec {
                     sep,
                     tracer,
                 );
-                chain.push(ExpressionStep::Call(name.clone()));
+                chain.push(ExpressionStep::Call(name.clone().into()));
                 if chain.len() > 1 { Some(chain) } else { None }
             });
 
@@ -161,7 +161,7 @@ impl LanguageSpec {
                         text: text.clone(),
                     }
                 );
-                chain.push(ExpressionStep::Ident(text));
+                chain.push(ExpressionStep::Ident(text.into()));
                 break;
             }
 
@@ -207,7 +207,7 @@ impl LanguageSpec {
                             text: resolved.clone(),
                         }
                     );
-                    chain.push(ExpressionStep::Ident(resolved));
+                    chain.push(ExpressionStep::Ident(resolved.into()));
                     for seg in segments {
                         let seg_text = seg.text().to_string();
                         trace!(
@@ -218,7 +218,7 @@ impl LanguageSpec {
                                 text: seg_text.clone(),
                             }
                         );
-                        chain.push(ExpressionStep::Field(seg_text));
+                        chain.push(ExpressionStep::Field(seg_text.into()));
                     }
                 }
                 break;
@@ -244,9 +244,10 @@ impl LanguageSpec {
                                         text: resolved.clone(),
                                     }
                                 );
-                                chain.push(ExpressionStep::New(resolved));
+                                chain.push(ExpressionStep::New(resolved.into()));
                                 for seg in segments {
-                                    chain.push(ExpressionStep::Field(seg.text().to_string()));
+                                    chain
+                                        .push(ExpressionStep::Field(seg.text().to_string().into()));
                                 }
                             }
                         } else {
@@ -260,7 +261,7 @@ impl LanguageSpec {
                                     text: resolved.clone(),
                                 }
                             );
-                            chain.push(ExpressionStep::New(resolved));
+                            chain.push(ExpressionStep::New(resolved.into()));
                         }
                     }
                     matched_ctor = true;
@@ -286,7 +287,7 @@ impl LanguageSpec {
                                 text: name.clone(),
                             }
                         );
-                        deferred.push(ExpressionStep::Field(name));
+                        deferred.push(ExpressionStep::Field(name.into()));
                     }
                     if let Some(obj) = fa.object.navigate(&current) {
                         current = obj;
@@ -311,7 +312,7 @@ impl LanguageSpec {
                             text: name.clone(),
                         }
                     );
-                    deferred.push(ExpressionStep::Call(name));
+                    deferred.push(ExpressionStep::Call(name.into()));
                 }
                 if let Some(extract) = &rule.receiver_extract
                     && let Some(recv) = extract.navigate(&current)
@@ -334,7 +335,7 @@ impl LanguageSpec {
                         text: text.clone(),
                     }
                 );
-                chain.push(ExpressionStep::Ident(text));
+                chain.push(ExpressionStep::Ident(text.into()));
             }
             break;
         }
@@ -1455,7 +1456,7 @@ impl<'a> WalkFullState<'a> {
             }
 
             collected.push(CollectedRef {
-                name: pending.name.clone(),
+                name: smol_str::SmolStr::from(pending.name.as_str()),
                 chain: chain_slice.map(|s| s.to_vec()),
                 reaching: parse_values.to_vec(),
                 enclosing_def: pending.enclosing_def,
