@@ -100,7 +100,9 @@ impl TestEngineBuilder {
             .nats_services
             .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
 
-        let indexing_status = Arc::new(IndexingStatusStore::new(nats_services.clone()));
+        let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
+            nats_client::KvServicesImpl::new(self.broker.client().clone()),
+        )));
 
         let engine_builder =
             EngineBuilder::new(self.broker, self.registry, destination, indexing_status)

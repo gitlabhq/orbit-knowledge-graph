@@ -156,13 +156,13 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
-        let nats: Arc<dyn crate::nats::NatsServices> = Arc::new(MockNatsServices::new());
+        let mock_nats = Arc::new(MockNatsServices::new());
         let context = HandlerContext::new(
             destination,
-            nats.clone(),
+            mock_nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(nats)),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         );
 
         let result = handler.handle(context, envelope).await;

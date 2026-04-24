@@ -199,7 +199,9 @@ pub async fn run(
         Arc::new(nats::NatsServicesImpl::new(broker.clone()));
     let lock_service: Arc<dyn locking::LockService> =
         Arc::new(locking::NatsLockService::new(nats_services.clone()));
-    let indexing_status = Arc::new(IndexingStatusStore::new(nats_services));
+    let indexing_status = Arc::new(IndexingStatusStore::new(Arc::new(
+        nats_client::KvServicesImpl::new(broker.client().clone()),
+    )));
     info!("running schema migration check");
     schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;

@@ -27,6 +27,7 @@ gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
 indexer = { path = "../indexer" }
+nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 prost = { workspace = true }
@@ -36,6 +37,7 @@ query-engine = { path = "../query-engine" }
 gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
+labkit-events = { workspace = true }
 serde = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }

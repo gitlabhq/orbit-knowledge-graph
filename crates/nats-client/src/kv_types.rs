@@ -1,5 +1,3 @@
-//! NATS KV store types.
-
 use std::time::Duration;
 
 #[derive(Debug, Clone, Default)]
@@ -69,7 +67,7 @@ pub struct KvEntry {
 
 /// Configuration for a NATS KV bucket.
 ///
-/// Used with [`NatsBroker::ensure_kv_bucket_exists`](super::NatsBroker::ensure_kv_bucket_exists)
+/// Used with [`NatsClient::ensure_kv_bucket_exists`](super::NatsClient::ensure_kv_bucket_exists)
 /// to create buckets with specific settings at startup.
 #[derive(Debug, Clone, Default)]
 pub struct KvBucketConfig {

@@ -310,6 +310,7 @@ mod tests {
                 metrics.clone(),
                 table_names,
                 Arc::new(ontology),
+                CodeIndexingTaskHandlerConfig::default().pipeline,
             ));
 
             let handler = CodeIndexingTaskHandler::new(
