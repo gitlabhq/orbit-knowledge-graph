@@ -1,6 +1,6 @@
 use std::path::Path;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
@@ -244,11 +244,21 @@ impl CodeIndexingPipeline {
         // runtime.block_on() which would deadlock a single-threaded
         // tokio runtime if we blocked the worker here.
         let repo_dir_owned = repo_dir.to_path_buf();
+        let progress = context.progress.clone();
+        let heartbeat = tokio::spawn(async move {
+            let mut interval = tokio::time::interval(Duration::from_secs(30));
+            loop {
+                interval.tick().await;
+                progress.notify_in_progress().await;
+            }
+        });
         let result = tokio::task::spawn_blocking(move || {
             Pipeline::run_with_tracer(&repo_dir_owned, config, tracer, converter, sink)
         })
-        .await
-        .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
+        .await;
+        heartbeat.abort();
+        let result = result
+            .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
