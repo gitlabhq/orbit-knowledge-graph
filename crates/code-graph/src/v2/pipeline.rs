@@ -191,6 +191,9 @@ pub trait LanguagePipeline {
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
+    /// Max language-supported files accepted for one pipeline run.
+    /// 0 = no limit.
+    pub max_files: usize,
     pub respect_gitignore: bool,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
@@ -205,6 +208,7 @@ impl Default for PipelineConfig {
     fn default() -> Self {
         Self {
             max_file_size: 1_000_000,
+            max_files: 0,
             respect_gitignore: true,
             cancel: CancellationToken::new(),
             worker_threads: 0,
@@ -411,6 +415,7 @@ impl Pipeline {
 
     fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
         let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+        let mut accepted_files = 0usize;
 
         let walker = WalkBuilder::new(root)
             .git_ignore(config.respect_gitignore)
@@ -436,6 +441,10 @@ impl Pipeline {
 
             let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
             if let Some(lang) = detect_language_from_extension(ext) {
+                if config.max_files > 0 && accepted_files >= config.max_files {
+                    break;
+                }
+
                 if lang
                     .exclude_extensions()
                     .iter()
@@ -449,6 +458,7 @@ impl Pipeline {
                     continue;
                 }
 
+                accepted_files += 1;
                 groups.entry(lang).or_default().push(rel_path.to_string());
             }
         }
@@ -867,6 +877,25 @@ mod tests {
         let mut graphs = capture.take();
         assert!(!graphs.is_empty(), "expected graph output");
         graphs.remove(0)
+    }
+
+    #[test]
+    fn walk_and_group_respects_max_files() {
+        let dir = tempfile::tempdir().expect("temp dir");
+        std::fs::write(dir.path().join("a.java"), "class A {}").expect("write a");
+        std::fs::write(dir.path().join("b.java"), "class B {}").expect("write b");
+        std::fs::write(dir.path().join("c.java"), "class C {}").expect("write c");
+
+        let groups = Pipeline::walk_and_group(
+            dir.path(),
+            &PipelineConfig {
+                max_files: 2,
+                ..PipelineConfig::default()
+            },
+        );
+        let accepted = groups.values().map(Vec::len).sum::<usize>();
+
+        assert_eq!(accepted, 2);
     }
 
     // ── Python fixture ──────────────────────────────────────────────

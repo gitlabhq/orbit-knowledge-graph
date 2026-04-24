@@ -62,6 +62,12 @@ engine:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss
       retry_interval_secs: 60
+      pipeline:
+        max_file_size_bytes: 5000000
+        max_files: 1000000
+        respect_gitignore: true
+        worker_threads: 0
+        max_concurrent_languages: 0
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1  # re-dispatched daily, no need to retry
@@ -126,4 +132,3 @@ analytics:
 billing:
   enabled: false
   collector_url: "http://localhost:9090"
-
