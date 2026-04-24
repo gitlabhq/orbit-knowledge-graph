@@ -23,7 +23,7 @@ spec:
             robotframework=={{ .Values.robotframework.version }} \
             robotframework-requests=={{ .Values.robotframework.requestsVersion }}
           set +e
-          robot --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
+          robot ${ROBOT_OPTIONS} --outputdir /tmp/results --xunit /tmp/results/xunit.xml \
             --consolecolors off --exitonfailure /tests/
           RC=$?
           echo "---XUNIT_REPORT_START---"
@@ -38,6 +38,16 @@ spec:
             secretKeyRef:
               name: {{ .Values.rootCredentialsSecret }}
               key: password
+        - name: ROBOT_OPTIONS
+          value: {{ .Values.robotOptions | quote }}
+        - name: ROLE_SCOPED_AUTHZ_E2E
+          value: {{ .Values.roleScopedAuthz.enabled | quote }}
+        - name: RAILS_RUNNER_CMD
+          value: {{ .Values.roleScopedAuthz.railsRunnerCmd | quote }}
+        - name: ROLE_SCOPED_AUTHZ_SEED
+          value: {{ .Values.roleScopedAuthz.seedPath | quote }}
+        - name: ROLE_SCOPED_AUTHZ_TOUCH
+          value: {{ .Values.roleScopedAuthz.touchPath | quote }}
         volumeMounts:
         - name: tests
           mountPath: /tests

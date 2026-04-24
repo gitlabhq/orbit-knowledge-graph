@@ -44,6 +44,13 @@ E2E_SHA=abc1234 e2e/scripts/test.sh
 # CI runs automatically on MR via e2e-build + e2e jobs
 ```
 
+Role-scoped authorization tests in `e2e/tests/05_role_scoped_authz.robot`
+are excluded by default because they require a GitLab Rails version that
+publishes `group_traversal_ids[].access_levels`. To run them intentionally, set
+`ROBOT_OPTIONS="--include requires_rails_kg_authz"`,
+`ROLE_SCOPED_AUTHZ_E2E=true`, and `RAILS_RUNNER_CMD` to a Rails runner command
+that can execute the Rails fixture scripts in `e2e/fixtures/rails`.
+
 ## Test suites
 
 | Suite | What it tests |

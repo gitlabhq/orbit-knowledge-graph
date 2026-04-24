@@ -37,7 +37,12 @@ helm install "$RELEASE_NAME" "$E2E_DIR/charts/robot-runner" \
   --namespace "$NS_GKG" \
   --kube-context "$KCTX" \
   --set "namespaces.gitlab=$NS_GITLAB" \
-  --set "namespaces.gkg=$NS_GKG"
+  --set "namespaces.gkg=$NS_GKG" \
+  --set-string "robotOptions=${ROBOT_OPTIONS:---exclude requires_rails_kg_authz}" \
+  --set-string "roleScopedAuthz.enabled=${ROLE_SCOPED_AUTHZ_E2E:-false}" \
+  --set-string "roleScopedAuthz.railsRunnerCmd=${RAILS_RUNNER_CMD:-}" \
+  --set-string "roleScopedAuthz.seedPath=${ROLE_SCOPED_AUTHZ_SEED:-/fixtures/rails/role_scoped_authz_seed.rb}" \
+  --set-string "roleScopedAuthz.touchPath=${ROLE_SCOPED_AUTHZ_TOUCH:-/fixtures/rails/role_scoped_authz_touch.rb}"
 
 # Poll job status until terminal condition or timeout. Heartbeat keeps the
 # pipeline trace alive without the complexity (and orphaned-kubectl bugs) of

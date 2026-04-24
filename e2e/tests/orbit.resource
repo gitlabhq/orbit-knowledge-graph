@@ -111,6 +111,15 @@ Orbit Query
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
+Orbit Query With Token
+    [Documentation]    Low-level POST /orbit/query using an explicit GitLab PAT.
+    [Arguments]    ${query}    ${token}
+    ${headers}=    Create Dictionary    PRIVATE-TOKEN=${token}    Content-Type=application/json
+    ${body}=    Create Dictionary    query=${query}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
+    ...    headers=${headers}    json=${body}    expected_status=200
+    RETURN    ${resp.json()}
+
 Orbit Search Nodes With Filters
     [Documentation]    Search query for nodes of ${entity} matching ${filters} (dict). Returns the parsed response.
     [Arguments]    ${entity}    ${filters}    ${limit}=30

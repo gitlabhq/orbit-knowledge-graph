@@ -4,6 +4,14 @@ robotframework:
   version: "7.2.2"
   requestsVersion: "0.9.7"
 
+robotOptions: "--exclude requires_rails_kg_authz"
+
+roleScopedAuthz:
+  enabled: "false"
+  railsRunnerCmd: ""
+  seedPath: "/fixtures/rails/role_scoped_authz_seed.rb"
+  touchPath: "/fixtures/rails/role_scoped_authz_touch.rb"
+
 resources:
   requests:
     cpu: 100m
