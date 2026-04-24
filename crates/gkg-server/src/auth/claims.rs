@@ -20,4 +20,20 @@ pub struct Claims {
     pub source_type: String,
     #[serde(default, rename = "session_id")]
     pub ai_session_id: Option<String>,
+    #[serde(default)]
+    pub instance_id: Option<String>,
+    #[serde(default)]
+    pub unique_instance_id: Option<String>,
+    #[serde(default)]
+    pub instance_version: Option<String>,
+    #[serde(default)]
+    pub global_user_id: Option<String>,
+    #[serde(default)]
+    pub host_name: Option<String>,
+    #[serde(default)]
+    pub root_namespace_id: Option<i64>,
+    #[serde(default)]
+    pub deployment_type: Option<String>,
+    #[serde(default)]
+    pub realm: Option<String>,
 }

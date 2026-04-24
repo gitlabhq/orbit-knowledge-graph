@@ -5293,6 +5293,7 @@ dependencies = [
  "jsonschema",
  "jsonwebtoken 10.3.0",
  "labkit",
+ "labkit-events",
  "mimalloc",
  "ontology",
  "opentelemetry",
@@ -6810,7 +6811,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=594f02c#594f02c842bcfcb9fd2d45a16533ba72e0d9df81"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
 dependencies = [
  "axum",
  "futures-util",
@@ -6839,9 +6840,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "labkit-events"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "parking_lot",
+ "rand 0.9.4",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=594f02c#594f02c842bcfcb9fd2d45a16533ba72e0d9df81"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
 
 [[package]]
 name = "lance"
@@ -9392,6 +9411,7 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
+ "gkg-utils",
  "ontology",
  "thiserror 2.0.18",
 ]

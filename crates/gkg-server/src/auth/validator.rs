@@ -83,6 +83,14 @@ mod tests {
             group_traversal_ids: vec![],
             source_type: "rest".into(),
             ai_session_id: None,
+            instance_id: None,
+            unique_instance_id: None,
+            instance_version: None,
+            global_user_id: None,
+            host_name: None,
+            root_namespace_id: None,
+            deployment_type: None,
+            realm: None,
         };
 
         let token = encode(
