@@ -8,6 +8,10 @@ Library             DateTime
 Resource            gitlab.resource
 
 
+*** Variables ***
+${INDEXING_BUDGET_MULTIPLIER}       %{INDEXING_BUDGET_MULTIPLIER=1}
+
+
 *** Keywords ***
 Orbit Status Is Healthy
     ${headers}=    GitLab Auth Headers
@@ -54,13 +58,15 @@ Wait For Node Indexed
     [Documentation]    Poll Verify Node Indexed until success or ${timeout} elapses.
     [Arguments]    ${entity}    ${node_id}    ${expected_label}=${None}
     ...    ${label_field}=name    ${timeout}=120s    ${interval}=3s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
 
 Wait For Entity Population
     [Documentation]    Wait until at least one node of ${entity} is indexed.
     [Arguments]    ${entity}    ${minimum}=1    ${timeout}=120s    ${interval}=3s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Entity Count Is At Least    ${entity}    ${minimum}
 
 Entity Count Is At Least
@@ -74,7 +80,13 @@ Start Indexing Budget
     ...                Use one budget per logical "wait for the pipeline to catch up" sequence.
     [Arguments]    ${seconds}=300
     ${now}=    Get Current Date    result_format=epoch
-    Set Global Variable    ${INDEXING_DEADLINE}    ${{${now} + ${seconds}}}
+    ${scaled_seconds}=    Evaluate    int(${seconds} * float(${INDEXING_BUDGET_MULTIPLIER}))
+    Set Global Variable    ${INDEXING_DEADLINE}    ${{${now} + ${scaled_seconds}}}
+
+Scaled Timeout
+    [Documentation]    Scale simple Robot timeouts like 120s for slower VM e2e runs.
+    [Arguments]    ${timeout}
+    RETURN    ${{str(int(float(str($timeout).rstrip("s")) * float($INDEXING_BUDGET_MULTIPLIER))) + "s"}}
 
 Remaining Budget
     [Documentation]    Seconds left until INDEXING_DEADLINE; fails fast if exhausted.
@@ -160,7 +172,8 @@ Wait For Edge Indexed
     ...                node of that entity (useful for e.g. "some User AUTHORED this Note").
     [Arguments]    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
     ...            ${timeout}=120s    ${interval}=3s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Verify Edge Indexed    ${src_entity}    ${src_id}    ${rel_type}    ${dst_entity}    ${dst_id}
 
 Verify Edge Indexed
@@ -183,12 +196,14 @@ Verify Edge Indexed
 File Count For Project Is
     [Documentation]    Wait until File node count under ${project_id} equals ${expected}.
     [Arguments]    ${project_id}    ${expected}    ${timeout}=180s    ${interval}=5s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Entity Count For Project    File    ${project_id}    ${expected}
 
 Definition Count For Project Is At Least
     [Arguments]    ${project_id}    ${minimum}    ${timeout}=180s    ${interval}=5s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Entity Count At Least For Project    Definition    ${project_id}    ${minimum}
 
 Assert Entity Count For Project
@@ -209,7 +224,8 @@ Definition Exists In Project
     [Documentation]    Assert that a Definition with ${fqn} (and optional ${definition_type}) exists under ${project_id}.
     ...                Returns the matched node dict.
     [Arguments]    ${project_id}    ${fqn}    ${definition_type}=${None}    ${timeout}=180s    ${interval}=5s
-    ${node}=    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    ${node}=    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Lookup Definition By Fqn    ${project_id}    ${fqn}    ${definition_type}
     RETURN    ${node}
 
@@ -234,7 +250,8 @@ Defines Edge Exists Between Definitions
     [Documentation]    Assert a DEFINES edge from Definition fqn=${parent_fqn} to Definition fqn=${child_fqn}
     ...                under ${project_id}. Models structural containment (e.g. Class defines Method).
     [Arguments]    ${project_id}    ${parent_fqn}    ${child_fqn}    ${timeout}=180s    ${interval}=5s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Defines Edge Between Definitions    ${project_id}    ${parent_fqn}    ${child_fqn}
 
 Assert Defines Edge Between Definitions
@@ -250,7 +267,8 @@ Defines Edge Exists Between File And Definition
     [Documentation]    Assert a DEFINES edge from File path=${file_path} to Definition fqn=${def_fqn}
     ...                under ${project_id}. Models the file→top-level-definition relationship.
     [Arguments]    ${project_id}    ${file_path}    ${def_fqn}    ${timeout}=180s    ${interval}=5s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Defines Edge Between File And Definition    ${project_id}    ${file_path}    ${def_fqn}
 
 Assert Defines Edge Between File And Definition
@@ -267,7 +285,8 @@ Imports Edge Exists Between File And Imported Symbol
     ...                (import_path=${import_path}, identifier_name=${identifier_name}) under ${project_id}.
     [Arguments]    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
     ...    ${timeout}=180s    ${interval}=5s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
+    ${scaled_timeout}=    Scaled Timeout    ${timeout}
+    Wait Until Keyword Succeeds    ${scaled_timeout}    ${interval}
     ...    Assert Imports Edge Between File And Imported Symbol
     ...    ${project_id}    ${file_path}    ${import_path}    ${identifier_name}
 
