@@ -209,6 +209,10 @@ pub struct PipelineConfig {
     /// (at most N CodeGraphs + N rayon pools alive at once).
     /// 0 = default (2).
     pub max_concurrent_languages: usize,
+    /// Global per-file resolution timeout. Applied to all languages
+    /// unless the language's own DSL rules specify a different value.
+    /// `None` = no global timeout (language rules may still set one).
+    pub per_file_timeout: Option<std::time::Duration>,
 }
 
 impl Default for PipelineConfig {
@@ -220,6 +224,7 @@ impl Default for PipelineConfig {
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
+            per_file_timeout: None,
         }
     }
 }
@@ -544,11 +549,13 @@ where
         let t0 = std::time::Instant::now();
 
         // Spawn sentinel watchdog if per_file_timeout is configured.
+        // Language rules take precedence; global config is the fallback.
         // Falls back to no timeout if the thread can't be spawned.
-        let sentinel = rules
+        let per_file_timeout = rules
             .settings
             .per_file_timeout
-            .and_then(crate::v2::sentinel::spawn_sentinel);
+            .or(ctx.config.per_file_timeout);
+        let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
 
         // ── Phase 1: parallel full walk, sequential graph build ──
         let pb = progress_bar(file_count as u64, "parse + graph");

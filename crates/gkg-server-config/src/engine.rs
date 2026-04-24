@@ -167,6 +167,11 @@ pub struct CodeIndexingPipelineConfig {
     pub worker_threads: usize,
     #[serde(default)]
     pub max_concurrent_languages: usize,
+    /// Global per-file resolution timeout in milliseconds.
+    /// Applied to all languages unless the language's own DSL rules
+    /// specify a different value. 0 = no global timeout.
+    #[serde(default)]
+    pub per_file_timeout_ms: u64,
 }
 
 impl Default for CodeIndexingPipelineConfig {
@@ -177,6 +182,7 @@ impl Default for CodeIndexingPipelineConfig {
             respect_gitignore: default_code_indexing_respect_gitignore(),
             worker_threads: 0,
             max_concurrent_languages: 0,
+            per_file_timeout_ms: 0,
         }
     }
 }

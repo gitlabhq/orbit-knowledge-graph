@@ -56,6 +56,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "per_file_timeout_ms": 0,
               "respect_gitignore": true,
               "worker_threads": 0
             },
@@ -337,6 +338,13 @@
           "default": 1000000,
           "minimum": 0
         },
+        "per_file_timeout_ms": {
+          "description": "Global per-file resolution timeout in milliseconds.\nApplied to all languages unless the language's own DSL rules\nspecify a different value. 0 = no global timeout.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 0,
+          "minimum": 0
+        },
         "respect_gitignore": {
           "type": "boolean",
           "default": true
@@ -378,6 +386,7 @@
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
+            "per_file_timeout_ms": 0,
             "respect_gitignore": true,
             "worker_threads": 0
           }
@@ -449,6 +458,7 @@
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
+                "per_file_timeout_ms": 0,
                 "respect_gitignore": true,
                 "worker_threads": 0
               },
@@ -637,6 +647,7 @@
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
+              "per_file_timeout_ms": 0,
               "respect_gitignore": true,
               "worker_threads": 0
             },
