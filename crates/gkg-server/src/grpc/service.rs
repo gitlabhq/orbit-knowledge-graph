@@ -82,7 +82,7 @@ impl KnowledgeGraphServiceImpl {
         self
     }
 
-    pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
+    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.pipeline = self.pipeline.with_cache_broker(broker);
         self
     }

@@ -10,8 +10,16 @@ use futures::stream::Stream as FuturesStream;
 use tracing::warn;
 
 use super::broker::NatsBroker;
-use super::error::{NatsError, map_ack_error, map_nack_error};
 use crate::types::{Envelope, Subscription};
+use nats_client::NatsError;
+
+fn map_ack_error(error: async_nats::Error) -> NatsError {
+    NatsError::Ack(error.to_string())
+}
+
+fn map_nack_error(error: async_nats::Error) -> NatsError {
+    NatsError::Nack(error.to_string())
+}
 
 #[async_trait]
 pub trait MessageAcker: Send + Sync {

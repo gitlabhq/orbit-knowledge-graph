@@ -265,13 +265,15 @@ pub fn handler_context(clickhouse: &TestContext) -> HandlerContext {
     )
     .expect("failed to create destination");
 
-    let nats = Arc::new(MockNatsServices::new());
+    let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
         Arc::new(destination),
-        nats.clone(),
+        mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(nats)),
+        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
+            mock_nats,
+        )),
     )
 }
 

@@ -27,6 +27,7 @@ gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 health-check = { path = "../health-check" }
 indexer = { path = "../indexer" }
+nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 opentelemetry = { workspace = true }
 prost = { workspace = true }

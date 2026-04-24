@@ -36,15 +36,12 @@
 //! Handlers can use different streams. The broker caches stream connections.
 
 mod broker;
-mod error;
-mod kv_types;
 mod message;
 mod services;
 
 pub use broker::NatsBroker;
-pub use error::NatsError;
-pub use kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
 pub use message::{
     DlqResult, MessageAcker, NatsMessage, NatsSubscription, NoopAcker, ProgressNotifier,
 };
+pub use nats_client::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, NatsError};
 pub use services::{NatsServices, NatsServicesImpl};
