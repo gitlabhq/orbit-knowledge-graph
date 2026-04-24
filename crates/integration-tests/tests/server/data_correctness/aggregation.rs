@@ -542,6 +542,17 @@ pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestC
     )
     .await;
 
+    // node_ids on User is used for cascade narrowing, not for verifying
+    // specific IDs in the response — skip that requirement.
+    resp.skip_requirement(Requirement::NodeIds);
+    // Edges are consumed by the aggregation join, not returned as response edges.
+    resp.skip_requirement(Requirement::Relationship {
+        edge_type: "AUTHORED".into(),
+    });
+    resp.skip_requirement(Requirement::Relationship {
+        edge_type: "HAS_NOTE".into(),
+    });
+
     // User 1 authored MR 2000 (notes 3000, 3002, 3003) and MR 2001 (note 3001) → 4 notes
     resp.assert_node("User", 1, |n| {
         n.prop_str("username") == Some("alice") && n.prop_i64("note_count") == Some(4)
