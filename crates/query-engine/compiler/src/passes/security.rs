@@ -309,6 +309,17 @@ mod tests {
         assert!(sc.paths_at_least(50).is_empty());
     }
 
+    #[test]
+    fn empty_access_levels_are_invalid() {
+        assert!(
+            SecurityContext::new_with_roles(
+                1,
+                vec![TraversalPath::with_access_levels("1/100/", vec![])]
+            )
+            .is_err()
+        );
+    }
+
     /// Build a minimal ontology where `Vulnerability` requires
     /// Security Manager. Used by the per-entity role scoping tests.
     fn ontology_with_sm_vulnerability() -> Ontology {

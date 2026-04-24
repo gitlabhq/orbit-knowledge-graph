@@ -1,18 +1,18 @@
 use serde::{Deserialize, Serialize};
 
-/// One traversal path the user holds in their scope, paired with the highest
-/// access level they hold on that path. Mirrors the `(path, role)` tuples
-/// discussed with Security: a single user can hold Reporter on one group
-/// and Developer on another, and the compiler security pass needs to see
-/// both so it can drop lower-role paths from an entity's predicate.
+/// One traversal path the user holds in their scope, paired with the exact
+/// effective access levels they hold on that path. Mirrors the `(path, roles)`
+/// tuples discussed with Security: a single user can hold Reporter on one group
+/// and Developer on another, and the compiler security pass needs to see both
+/// so it can drop lower-role paths from an entity's predicate.
 ///
-/// `access_level` is the raw `Gitlab::Access` integer (Reporter=20,
+/// `access_levels` contains raw `Gitlab::Access` integers (Reporter=20,
 /// SecurityManager=25, Developer=30, ...) so comparisons against
-/// `required_role` in the ontology are a direct `>=` without a table lookup.
+/// `required_role` in the ontology remain direct numeric checks.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TraversalPathClaim {
     pub path: String,
-    pub access_level: u32,
+    pub access_levels: Vec<u32>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -30,12 +30,11 @@ pub struct Claims {
     pub organization_id: Option<u64>,
     #[serde(default)]
     pub min_access_level: Option<u32>,
-    /// Traversal paths the user can query, each paired with their highest
-    /// access level on that path. Rails derives this from `Search::GroupsFinder`
-    /// runs for every role the ontology currently references (Reporter and
-    /// Security Manager today). The compiler security pass consumes it to
-    /// filter paths per-entity: for example, a user with
-    /// `[("1/2/", Reporter), ("1/3/", Security Manager)]` sees Project rows
+    /// Traversal paths the user can query, each paired with the exact
+    /// access-level set on that path. Rails derives this from
+    /// `Search::GroupsFinder`. The compiler security pass consumes it to filter
+    /// paths per-entity: for example, a user with
+    /// `[("1/2/", [Reporter]), ("1/3/", [Security Manager])]` sees Project rows
     /// from both paths but only Vulnerability rows from `1/3/`.
     #[serde(default)]
     pub group_traversal_ids: Vec<TraversalPathClaim>,

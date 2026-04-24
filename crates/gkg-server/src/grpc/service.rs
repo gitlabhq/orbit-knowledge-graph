@@ -760,7 +760,7 @@ mod tests {
                 .into_iter()
                 .map(|p| crate::auth::claims::TraversalPathClaim {
                     path: p.to_string(),
-                    access_level: 20,
+                    access_levels: vec![20],
                 })
                 .collect(),
             ..test_claims()
