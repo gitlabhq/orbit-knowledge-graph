@@ -346,6 +346,20 @@ pub struct GetGraphStatusRequest {
     #[prost(enumeration = "SourceType", tag = "2")]
     pub source_type: i32,
 }
+/// Indexing progress metadata from the most recent indexing run.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct IndexingStatus {
+    #[prost(enumeration = "IndexingState", tag = "1")]
+    pub state: i32,
+    #[prost(string, optional, tag = "2")]
+    pub last_started_at: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(string, optional, tag = "3")]
+    pub last_completed_at: ::core::option::Option<::prost::alloc::string::String>,
+    #[prost(uint64, optional, tag = "4")]
+    pub last_duration_ms: ::core::option::Option<u64>,
+    #[prost(string, optional, tag = "5")]
+    pub last_error: ::core::option::Option<::prost::alloc::string::String>,
+}
 /// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetGraphStatusResponse {
@@ -353,6 +367,8 @@ pub struct GetGraphStatusResponse {
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
     pub domains: ::prost::alloc::vec::Vec<GraphStatusDomain>,
+    #[prost(message, optional, tag = "3")]
+    pub indexing: ::core::option::Option<IndexingStatus>,
 }
 /// How many projects under this scope have been code-indexed.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
@@ -514,6 +530,45 @@ impl SourceType {
         match value {
             "SOURCE_TYPE_GROUP" => Some(Self::Group),
             "SOURCE_TYPE_PROJECT" => Some(Self::Project),
+            _ => None,
+        }
+    }
+}
+/// Derived indexing lifecycle state.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord, ::prost::Enumeration)]
+#[repr(i32)]
+pub enum IndexingState {
+    NotIndexed = 0,
+    Backfilling = 1,
+    Indexed = 2,
+    Error = 3,
+    Unknown = 4,
+    Indexing = 5,
+}
+impl IndexingState {
+    /// String value of the enum field names used in the ProtoBuf definition.
+    ///
+    /// The values are not transformed in any way and thus are considered stable
+    /// (if the ProtoBuf definition does not change) and safe for programmatic use.
+    pub fn as_str_name(&self) -> &'static str {
+        match self {
+            Self::NotIndexed => "INDEXING_STATE_NOT_INDEXED",
+            Self::Backfilling => "INDEXING_STATE_BACKFILLING",
+            Self::Indexed => "INDEXING_STATE_INDEXED",
+            Self::Error => "INDEXING_STATE_ERROR",
+            Self::Unknown => "INDEXING_STATE_UNKNOWN",
+            Self::Indexing => "INDEXING_STATE_INDEXING",
+        }
+    }
+    /// Creates an enum from field names used in the ProtoBuf definition.
+    pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
+        match value {
+            "INDEXING_STATE_NOT_INDEXED" => Some(Self::NotIndexed),
+            "INDEXING_STATE_BACKFILLING" => Some(Self::Backfilling),
+            "INDEXING_STATE_INDEXED" => Some(Self::Indexed),
+            "INDEXING_STATE_ERROR" => Some(Self::Error),
+            "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),
+            "INDEXING_STATE_INDEXING" => Some(Self::Indexing),
             _ => None,
         }
     }

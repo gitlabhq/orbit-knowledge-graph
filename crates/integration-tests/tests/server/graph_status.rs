@@ -1,8 +1,59 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
+use bytes::Bytes;
+use chrono::{Duration, Utc};
+use nats_client::error::NatsError;
+use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
+
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 use gkg_server::graph_status::GraphStatusService;
+use gkg_server::proto::IndexingState;
+use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
 use integration_testkit::{load_ontology, run_subtests_shared, t};
+use nats_client::testkit::MockKvServices;
+
+struct FailingKvServices;
+
+#[async_trait]
+impl nats_client::KvServices for FailingKvServices {
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        Err(NatsError::KvGet {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        _value: Bytes,
+        _options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        Err(NatsError::KvPut {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        Err(NatsError::KvDelete {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        Err(NatsError::KvKeys {
+            bucket: bucket.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+}
 
 async fn setup(ctx: &TestContext) {
     ctx.execute(&format!(
@@ -55,6 +106,31 @@ fn build_service(ctx: &TestContext) -> GraphStatusService {
     GraphStatusService::new(client, ontology)
 }
 
+fn build_service_with_indexing_status(
+    ctx: &TestContext,
+    mock_kv: MockKvServices,
+) -> GraphStatusService {
+    let client = Arc::new(ctx.create_client());
+    let ontology = Arc::new(load_ontology());
+    let store = IndexingStatusStore::new(Arc::new(mock_kv));
+    GraphStatusService::new(client, ontology).with_indexing_status(store)
+}
+
+fn seed_indexing_progress(
+    mock_kv: &MockKvServices,
+    traversal_path: &str,
+    progress: &IndexingProgress,
+) {
+    let key = traversal_path
+        .split('/')
+        .filter(|s| !s.is_empty())
+        .collect::<Vec<_>>()
+        .join(".");
+    let key = format!("status.{key}");
+    let payload = serde_json::to_vec(progress).expect("serialize progress");
+    mock_kv.set(INDEXING_PROGRESS_BUCKET, &key, Bytes::from(payload));
+}
+
 fn find_domain<'a>(
     domains: &'a [gkg_server::proto::GraphStatusDomain],
     name: &str,
@@ -88,6 +164,13 @@ async fn graph_status() {
         all_domains_present_in_response,
         projects_status_at_root,
         projects_status_scoped_by_traversal_path,
+        indexing_status_absent_without_store,
+        indexing_status_indexed_for_group,
+        indexing_status_backfilling_for_project,
+        indexing_status_not_indexed_when_no_kv_entry,
+        indexing_status_indexing_when_reindex_in_flight,
+        indexing_status_error_state,
+        indexing_status_unknown_when_nats_unreachable,
     );
 }
 
@@ -173,4 +256,130 @@ async fn projects_status_scoped_by_traversal_path(ctx: &TestContext) {
         projects.indexed, 1,
         "1 project with checkpoint under 1/100/"
     );
+}
+
+async fn indexing_status_absent_without_store(ctx: &TestContext) {
+    let service = build_service(ctx);
+    let response = service.get_status("1/").await.expect("should succeed");
+
+    assert!(
+        response.indexing.is_none(),
+        "indexing field should be absent when no store is configured"
+    );
+}
+
+async fn indexing_status_indexed_for_group(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(30);
+    let completed = Utc::now() - Duration::seconds(25);
+    seed_indexing_progress(
+        &mock_kv,
+        "1/100/",
+        &IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(completed),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        },
+    );
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Indexed as i32);
+    assert!(indexing.last_started_at.is_some());
+    assert!(indexing.last_completed_at.is_some());
+    assert_eq!(indexing.last_duration_ms, Some(5000));
+    assert!(indexing.last_error.is_none());
+}
+
+async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    seed_indexing_progress(
+        &mock_kv,
+        "1/100/1000/",
+        &IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: None,
+            last_duration_ms: None,
+            last_error: None,
+        },
+    );
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service
+        .get_status("1/100/1000/")
+        .await
+        .expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Backfilling as i32);
+    assert!(indexing.last_started_at.is_some());
+    assert!(indexing.last_completed_at.is_none());
+}
+
+async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let previous_completion = Utc::now() - Duration::seconds(60);
+    seed_indexing_progress(
+        &mock_kv,
+        "1/100/",
+        &IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: Some(previous_completion),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        },
+    );
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Indexing as i32);
+}
+
+async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service.get_status("1/101/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::NotIndexed as i32);
+    assert!(indexing.last_started_at.is_none());
+}
+
+async fn indexing_status_error_state(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let started = Utc::now() - Duration::seconds(10);
+    seed_indexing_progress(
+        &mock_kv,
+        "1/100/",
+        &IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(started + Duration::seconds(2)),
+            last_duration_ms: Some(2000),
+            last_error: Some("deadline exceeded".to_string()),
+        },
+    );
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Error as i32);
+    assert_eq!(indexing.last_error.as_deref(), Some("deadline exceeded"));
+}
+
+async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
+    let store = IndexingStatusStore::new(Arc::new(FailingKvServices));
+    let client = Arc::new(ctx.create_client());
+    let ontology = Arc::new(load_ontology());
+    let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
+
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Unknown as i32);
 }
