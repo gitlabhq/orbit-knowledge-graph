@@ -608,6 +608,7 @@ where
         }
 
         graph.finalize(tracer);
+        graph.drop_construction_indexes();
 
         // ── Phase 1c: patch unresolved SSA aliases via graph ────
         // Pass 1.5 equivalent: resolve alias targets that couldn't be
@@ -784,6 +785,10 @@ where
                 }
             }
         }
+
+        // Free resolution-only indexes before conversion.
+        graph.indexes.definition_ranges.clear();
+        graph.indexes.definition_ranges.shrink_to_fit();
 
         // Shut down sentinel
         if let Some((handle, join)) = sentinel {
