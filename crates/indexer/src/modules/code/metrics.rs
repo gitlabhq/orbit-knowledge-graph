@@ -15,7 +15,6 @@ pub struct CodeMetrics {
     pub(super) repository_empty: Counter<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
-    pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
 }
 
@@ -76,11 +75,6 @@ impl CodeMetrics {
             .with_description("Total files seen by the code-graph indexer")
             .build();
 
-        let nodes_indexed = meter
-            .u64_counter("gkg.indexer.code.nodes.indexed")
-            .with_description("Total graph nodes and edges indexed by the code handler")
-            .build();
-
         let errors = meter
             .u64_counter("gkg.indexer.code.errors")
             .with_description("Total code indexing errors by pipeline stage")
@@ -95,7 +89,6 @@ impl CodeMetrics {
             repository_empty,
             indexing_duration,
             files_processed,
-            nodes_indexed,
             errors,
         }
     }
@@ -125,29 +118,6 @@ impl CodeMetrics {
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
         self.files_processed
             .add(count, &[KeyValue::new("outcome", outcome)]);
-    }
-
-    pub(super) fn record_graph_counts(&self, graph: &code_graph::v2::linker::CodeGraph) {
-        self.nodes_indexed.add(
-            graph.directories().count() as u64,
-            &[KeyValue::new("kind", "directory")],
-        );
-        self.nodes_indexed.add(
-            graph.files().count() as u64,
-            &[KeyValue::new("kind", "file")],
-        );
-        self.nodes_indexed.add(
-            graph.defs.len() as u64,
-            &[KeyValue::new("kind", "definition")],
-        );
-        self.nodes_indexed.add(
-            graph.imports.len() as u64,
-            &[KeyValue::new("kind", "imported_symbol")],
-        );
-        self.nodes_indexed.add(
-            graph.graph.edge_count() as u64,
-            &[KeyValue::new("kind", "edge")],
-        );
     }
 }
 
