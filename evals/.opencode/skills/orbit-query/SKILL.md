@@ -1,49 +1,34 @@
 ---
 name: orbit-query
-description: Query the GitLab Knowledge Graph via the Orbit REST API. Covers search, traversal, aggregation, neighbors, and path-finding queries using tools/orbit_query.py.
+description: Query the GitLab Knowledge Graph via the Orbit REST API. All counting, grouping, filtering, and multi-hop logic should be pushed into the query DSL — never fetch raw data and post-process in Python.
 ---
 
 # Orbit Query Skill
 
-The Orbit Knowledge Graph exposes a JSON query DSL via `POST /api/v4/orbit/query`. You interact with it through `python tools/orbit_query.py`.
+The Knowledge Graph query DSL compiles to ClickHouse SQL. It handles joins, aggregation, grouping, sorting, and filtering server-side. Your job is to express the question as a single query (or a small chain of queries), not to fetch raw data and process it yourself.
 
-**Important:** All commands run from the `evals/` directory. Do NOT `cd` to the repo root.
+**All commands run from `evals/`. Never `cd` elsewhere.**
 
-## Step 1: Discover the schema (do this first)
+## Step 1: Discover the schema
 
 ```bash
 python tools/orbit_query.py query-schema
 python tools/orbit_query.py schema --expand User,Project,MergeRequest
 ```
 
-## Step 2: Build and run queries
+## Step 2: Run queries
 
-Output defaults to toon format (compact text). Use `--format raw` for JSON.
+Output is toon format by default (compact text). Do NOT use `--format raw`.
 
 ```bash
-# Pipe JSON on stdin (toon output by default)
 cat <<'EOF' | python tools/orbit_query.py query
 {"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":10}
 EOF
-
-# Raw JSON output when you need structured data
-cat <<'EOF' | python tools/orbit_query.py query --format raw
-{"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":1}
-EOF
-```
-
-Toon output looks like:
-```
-query_type: search
-row_count: 1
-nodes[1]:
-  User#781 { username: root, state: active }
-edges[0]:
 ```
 
 ## Query patterns
 
-### Search (find entities by filters)
+### Search
 
 ```json
 {"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":10}
@@ -51,9 +36,9 @@ edges[0]:
 
 ### Traversal (multi-hop joins)
 
-Requires `nodes` (2+), `relationships` (1+). Use `type` for the edge name.
+All filtering happens in the query — do NOT search entities separately then join in Python.
 
-User's MRs:
+2-node (User → MR):
 ```json
 {
   "query_type": "traversal",
@@ -66,7 +51,7 @@ User's MRs:
 }
 ```
 
-User's open MRs in a specific project (3-node traversal with filters on multiple nodes):
+3-node with filters on each (User → open MRs → specific Project):
 ```json
 {
   "query_type": "traversal",
@@ -83,10 +68,30 @@ User's open MRs in a specific project (3-node traversal with filters on multiple
 }
 ```
 
-Note: `node_ids` filters by the entity's primary ID (integer). Use `filters` for other properties like `username`, `state`, `iid`.
+4-node chain (Finding → SecurityScan → Pipeline → MergeRequest):
+```json
+{
+  "query_type": "traversal",
+  "nodes": [
+    {"id": "f", "entity": "Finding"},
+    {"id": "s", "entity": "SecurityScan"},
+    {"id": "pl", "entity": "Pipeline"},
+    {"id": "mr", "entity": "MergeRequest"}
+  ],
+  "relationships": [
+    {"type": "HAS_FINDING", "from": "s", "to": "f"},
+    {"type": "SCANS", "from": "s", "to": "pl"},
+    {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"}
+  ],
+  "limit": 50
+}
+```
 
 ### Aggregation
 
+Aggregation runs server-side. Push ALL counting, grouping, and sorting into the query. Never fetch raw rows and count in Python.
+
+Count MRs per project (sorted):
 ```json
 {
   "query_type": "aggregation",
@@ -101,9 +106,68 @@ Note: `node_ids` filters by the entity's primary ID (integer). Use `filters` for
 }
 ```
 
-### Neighbors (all connected entities)
+Count MRs per label in a project:
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "mr", "entity": "MergeRequest"},
+    {"id": "l", "entity": "Label"},
+    {"id": "p", "entity": "Project", "node_ids": [278964]}
+  ],
+  "relationships": [
+    {"type": "HAS_LABEL", "from": "mr", "to": "l"},
+    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+  ],
+  "aggregations": [{"function": "count", "target": "mr", "group_by": "l", "alias": "mr_count"}],
+  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "limit": 10
+}
+```
 
-Use this to find everything connected to a node. Do NOT manually traverse each edge type.
+Count failed pipelines per user in a project (3-hop aggregation):
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "u", "entity": "User"},
+    {"id": "mr", "entity": "MergeRequest"},
+    {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
+    {"id": "p", "entity": "Project", "node_ids": [278964]}
+  ],
+  "relationships": [
+    {"type": "AUTHORED", "from": "u", "to": "mr"},
+    {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"},
+    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+  ],
+  "aggregations": [{"function": "count", "target": "pl", "group_by": "u", "alias": "failed_count"}],
+  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "limit": 20
+}
+```
+
+Count open review assignments per user:
+```json
+{
+  "query_type": "aggregation",
+  "nodes": [
+    {"id": "u", "entity": "User"},
+    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
+    {"id": "p", "entity": "Project", "node_ids": [278964]}
+  ],
+  "relationships": [
+    {"type": "REVIEWER", "from": "u", "to": "mr"},
+    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+  ],
+  "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "review_count"}],
+  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "limit": 20
+}
+```
+
+### Neighbors
+
+Use this to discover all connections to a node. Do NOT manually query each edge type.
 
 ```json
 {
@@ -128,28 +192,15 @@ Use this to find everything connected to a node. Do NOT manually traverse each e
 }
 ```
 
-## Response format
-
-```json
-{
-  "result": {
-    "query_type": "search",
-    "nodes": [{"type": "User", "id": "1", "username": "root"}],
-    "edges": [{"type": "AUTHORED", "from_id": "1", "from_type": "User", "to_id": "99", "to_type": "MergeRequest"}]
-  }
-}
-```
-
 ## Key rules
 
-- Entity names are PascalCase: `User`, `Project`, `MergeRequest`, `Issue`, `Pipeline`, `Group`
-- Edge names are UPPER_SNAKE_CASE: `AUTHORED`, `IN_PROJECT`, `ASSIGNED`, `APPROVED`, `REVIEWED`
+- Entity names: PascalCase (`User`, `MergeRequest`, `Pipeline`, `Finding`, `SecurityScan`)
+- Edge names: UPPER_SNAKE_CASE (`AUTHORED`, `IN_PROJECT`, `HAS_HEAD_PIPELINE`, `SCANS`, `HAS_FINDING`)
 - Relationship selectors use `type` (not `edge`): `{"type": "AUTHORED", "from": "u", "to": "mr"}`
-- Filter values: strings for usernames/state, integers for IDs and iids
-- `node_ids` takes an array of integers to filter by primary entity ID
-- `filters` takes key-value pairs for property filters (username, state, iid, etc.)
-- Output defaults to toon format (compact text). Use `--format raw` only when you need structured JSON
-- If a query returns empty results, verify the edge direction is correct by checking the schema
-- If a query returns 400, read the error message and fix the query
-- Use `neighbors` query type when finding all connections to a node
-- The working directory is `evals/` — run `python tools/orbit_query.py`, not from the repo root
+- `node_ids`: integer array, filters by primary entity ID
+- `filters`: key-value pairs for properties (username, state, iid, status)
+- **Use aggregation queries for any counting or grouping. Never fetch raw rows and count in Python.**
+- **Use multi-hop traversals for chains. Never query each hop separately and join in Python.**
+- **Use the default toon output. Do NOT use `--format raw`.**
+- If a query returns empty, verify edge direction in the schema
+- If a query returns 400, read the error and fix the query
