@@ -69,14 +69,14 @@ pub fn longest_existing_ancestor(path: &Path) -> &Path {
 }
 
 /// Walk a directory tree and reject any symlink that resolves outside
-/// `root` or is dangling. Deletes offending symlinks before returning
-/// the error.
+/// `root`. Dangling symlinks are removed with a warning but do not
+/// cause an error. Escaping symlinks are deleted and the first error
+/// encountered is returned after the full traversal.
 ///
 /// The scan never short-circuits: every entry is visited and every bad
 /// symlink is deleted even if earlier entries failed. This prevents a
 /// malicious archive from planting multiple escaping symlinks where only
-/// the first gets cleaned up. The first error encountered is returned
-/// after the full traversal completes.
+/// the first gets cleaned up.
 pub fn validate_symlinks(root: &Path) -> io::Result<()> {
     // Accumulates the first error without stopping the scan.
     let mut first_err: Option<io::Error> = None;
