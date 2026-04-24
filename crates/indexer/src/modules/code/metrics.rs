@@ -36,7 +36,6 @@ impl CodeMetrics {
             repository_empty: code::REPOSITORY_EMPTY.build_counter_u64(meter),
             indexing_duration: code::INDEXING_DURATION.build_histogram_f64(meter),
             files_processed: code::FILES_PROCESSED.build_counter_u64(meter),
-            nodes_indexed: code::NODES_INDEXED.build_counter_u64(meter),
             errors: code::ERRORS.build_counter_u64(meter),
         }
     }
@@ -71,29 +70,6 @@ impl CodeMetrics {
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
         self.files_processed
             .add(count, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
-    }
-
-    pub(super) fn record_graph_counts(&self, graph: &code_graph::v2::linker::CodeGraph) {
-        self.nodes_indexed.add(
-            graph.directories().count() as u64,
-            &[KeyValue::new(code::labels::KIND, "directory")],
-        );
-        self.nodes_indexed.add(
-            graph.files().count() as u64,
-            &[KeyValue::new(code::labels::KIND, "file")],
-        );
-        self.nodes_indexed.add(
-            graph.defs.len() as u64,
-            &[KeyValue::new(code::labels::KIND, "definition")],
-        );
-        self.nodes_indexed.add(
-            graph.imports.len() as u64,
-            &[KeyValue::new(code::labels::KIND, "imported_symbol")],
-        );
-        self.nodes_indexed.add(
-            graph.graph.edge_count() as u64,
-            &[KeyValue::new(code::labels::KIND, "edge")],
-        );
     }
 }
 
