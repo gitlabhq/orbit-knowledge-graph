@@ -4,6 +4,10 @@ version.workspace = true
 edition = "2024"
 license = "LicenseRef-EE"
 
+[features]
+default = []
+testkit = []
+
 [dependencies]
 async-nats = { workspace = true }
 async-trait = { workspace = true }

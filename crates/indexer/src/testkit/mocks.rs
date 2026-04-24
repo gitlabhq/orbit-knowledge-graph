@@ -1,6 +1,6 @@
 //! Mock implementations for testing.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
@@ -9,6 +9,7 @@ use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::Utc;
+use nats_client::testkit::MockKvServices;
 use parking_lot::Mutex;
 use uuid::Uuid;
 
@@ -21,33 +22,11 @@ use crate::nats::{
 use crate::types::{Envelope, MessageId, Subscription};
 use gkg_server_config::HandlerConfiguration;
 
-/// Mock implementation of [`NatsServices`] for testing handlers.
-///
-/// Records all published messages for later verification.
-/// Provides an in-memory KV store for testing KV operations.
-///
-/// # Example
-///
-/// ```ignore
-/// let mock_nats = MockNatsServices::new();
-/// let context = HandlerContext::new(destination, Arc::new(mock_nats.clone()));
-///
-/// handler.handle(context, envelope).await?;
-///
-/// let published = mock_nats.get_published();
-/// assert_eq!(published.len(), 1);
-/// ```
 #[derive(Clone, Default)]
 pub struct MockNatsServices {
     published: Arc<Mutex<Vec<(Subscription, Envelope)>>>,
     pending_messages: Arc<Mutex<Vec<Envelope>>>,
-    kv_stores: Arc<Mutex<HashMap<String, HashMap<String, MockKvEntry>>>>,
-}
-
-#[derive(Clone)]
-struct MockKvEntry {
-    value: Bytes,
-    revision: u64,
+    kv: MockKvServices,
 }
 
 impl MockNatsServices {
@@ -60,11 +39,7 @@ impl MockNatsServices {
     }
 
     pub fn get_kv(&self, bucket: &str, key: &str) -> Option<Bytes> {
-        let stores = self.kv_stores.lock();
-        stores
-            .get(bucket)
-            .and_then(|b| b.get(key))
-            .map(|e| e.value.clone())
+        self.kv.get(bucket, key)
     }
 
     pub fn add_pending_message(&self, envelope: Envelope) {
@@ -72,10 +47,7 @@ impl MockNatsServices {
     }
 
     pub fn set_kv(&self, bucket: &str, key: &str, value: Bytes) {
-        let mut stores = self.kv_stores.lock();
-        let bucket_store = stores.entry(bucket.to_string()).or_default();
-        let revision = bucket_store.get(key).map(|e| e.revision + 1).unwrap_or(1);
-        bucket_store.insert(key.to_string(), MockKvEntry { value, revision });
+        self.kv.set(bucket, key, value);
     }
 }
 
@@ -93,16 +65,7 @@ impl NatsServices for MockNatsServices {
     }
 
     async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
-        let stores = self.kv_stores.lock();
-        let entry = stores
-            .get(bucket)
-            .and_then(|b| b.get(key))
-            .map(|e| KvEntry {
-                key: key.to_string(),
-                value: e.value.clone(),
-                revision: e.revision,
-            });
-        Ok(entry)
+        nats_client::KvServices::kv_get(&self.kv, bucket, key).await
     }
 
     async fn kv_put(
@@ -112,48 +75,15 @@ impl NatsServices for MockNatsServices {
         value: Bytes,
         options: KvPutOptions,
     ) -> Result<KvPutResult, NatsError> {
-        let mut stores = self.kv_stores.lock();
-        let bucket_store = stores.entry(bucket.to_string()).or_default();
-
-        let existing = bucket_store.get(key);
-
-        if options.create_only && existing.is_some() {
-            return Ok(KvPutResult::AlreadyExists);
-        }
-
-        if let Some(expected_rev) = options.expected_revision {
-            match existing {
-                Some(e) if e.revision != expected_rev => {
-                    return Ok(KvPutResult::RevisionMismatch);
-                }
-                None => {
-                    return Ok(KvPutResult::RevisionMismatch);
-                }
-                _ => {}
-            }
-        }
-
-        let revision = existing.map(|e| e.revision + 1).unwrap_or(1);
-        bucket_store.insert(key.to_string(), MockKvEntry { value, revision });
-
-        Ok(KvPutResult::Success(revision))
+        nats_client::KvServices::kv_put(&self.kv, bucket, key, value, options).await
     }
 
     async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
-        let mut stores = self.kv_stores.lock();
-        if let Some(bucket_store) = stores.get_mut(bucket) {
-            bucket_store.remove(key);
-        }
-        Ok(())
+        nats_client::KvServices::kv_delete(&self.kv, bucket, key).await
     }
 
     async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
-        let stores = self.kv_stores.lock();
-        let keys = stores
-            .get(bucket)
-            .map(|b| b.keys().cloned().collect())
-            .unwrap_or_default();
-        Ok(keys)
+        nats_client::KvServices::kv_keys(&self.kv, bucket).await
     }
 
     async fn consume_pending(
@@ -172,21 +102,8 @@ impl NatsServices for MockNatsServices {
 
 #[async_trait]
 impl nats_client::KvServices for MockNatsServices {
-    async fn kv_get(
-        &self,
-        bucket: &str,
-        key: &str,
-    ) -> Result<Option<nats_client::KvEntry>, nats_client::NatsError> {
-        let stores = self.kv_stores.lock();
-        let entry = stores
-            .get(bucket)
-            .and_then(|b| b.get(key))
-            .map(|e| nats_client::KvEntry {
-                key: key.to_string(),
-                value: e.value.clone(),
-                revision: e.revision,
-            });
-        Ok(entry)
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        nats_client::KvServices::kv_get(&self.kv, bucket, key).await
     }
 
     async fn kv_put(
@@ -194,50 +111,17 @@ impl nats_client::KvServices for MockNatsServices {
         bucket: &str,
         key: &str,
         value: Bytes,
-        options: nats_client::KvPutOptions,
-    ) -> Result<nats_client::KvPutResult, nats_client::NatsError> {
-        let mut stores = self.kv_stores.lock();
-        let bucket_store = stores.entry(bucket.to_string()).or_default();
-
-        let existing = bucket_store.get(key);
-
-        if options.create_only && existing.is_some() {
-            return Ok(nats_client::KvPutResult::AlreadyExists);
-        }
-
-        if let Some(expected_rev) = options.expected_revision {
-            match existing {
-                Some(e) if e.revision != expected_rev => {
-                    return Ok(nats_client::KvPutResult::RevisionMismatch);
-                }
-                None => {
-                    return Ok(nats_client::KvPutResult::RevisionMismatch);
-                }
-                _ => {}
-            }
-        }
-
-        let revision = existing.map(|e| e.revision + 1).unwrap_or(1);
-        bucket_store.insert(key.to_string(), MockKvEntry { value, revision });
-
-        Ok(nats_client::KvPutResult::Success(revision))
+        options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        nats_client::KvServices::kv_put(&self.kv, bucket, key, value, options).await
     }
 
-    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), nats_client::NatsError> {
-        let mut stores = self.kv_stores.lock();
-        if let Some(bucket_store) = stores.get_mut(bucket) {
-            bucket_store.remove(key);
-        }
-        Ok(())
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        nats_client::KvServices::kv_delete(&self.kv, bucket, key).await
     }
 
-    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, nats_client::NatsError> {
-        let stores = self.kv_stores.lock();
-        let keys = stores
-            .get(bucket)
-            .map(|b| b.keys().cloned().collect())
-            .unwrap_or_default();
-        Ok(keys)
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        nats_client::KvServices::kv_keys(&self.kv, bucket).await
     }
 }
 

@@ -29,9 +29,13 @@ use crate::types::{Envelope, MessageId, Subscription};
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
-use super::error::{NatsError, map_subscribe_error};
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
 use gkg_server_config::NatsConfiguration;
+use nats_client::NatsError;
+
+fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {
+    NatsError::Subscribe(error.to_string())
+}
 
 pub struct NatsBroker {
     inner: Arc<NatsClient>,
@@ -42,7 +46,7 @@ pub struct NatsBroker {
 
 impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
-        let inner = NatsClient::connect(config).await.map_err(NatsError::from)?;
+        let inner = NatsClient::connect(config).await?;
         Ok(Self {
             config: config.clone(),
             inner: Arc::new(inner),
@@ -153,10 +157,7 @@ impl NatsBroker {
         bucket: &str,
         config: nats_client::KvBucketConfig,
     ) -> Result<(), NatsError> {
-        self.inner
-            .ensure_kv_bucket_exists(bucket, config)
-            .await
-            .map_err(Into::into)
+        self.inner.ensure_kv_bucket_exists(bucket, config).await
     }
 
     pub async fn kv_get(
@@ -164,7 +165,7 @@ impl NatsBroker {
         bucket: &str,
         key: &str,
     ) -> Result<Option<nats_client::KvEntry>, NatsError> {
-        self.inner.kv_get(bucket, key).await.map_err(Into::into)
+        self.inner.kv_get(bucket, key).await
     }
 
     pub async fn kv_put(
@@ -174,18 +175,15 @@ impl NatsBroker {
         value: Bytes,
         options: nats_client::KvPutOptions,
     ) -> Result<nats_client::KvPutResult, NatsError> {
-        self.inner
-            .kv_put(bucket, key, value, options)
-            .await
-            .map_err(Into::into)
+        self.inner.kv_put(bucket, key, value, options).await
     }
 
     pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
-        self.inner.kv_delete(bucket, key).await.map_err(Into::into)
+        self.inner.kv_delete(bucket, key).await
     }
 
     pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
-        self.inner.kv_keys(bucket).await.map_err(Into::into)
+        self.inner.kv_keys(bucket).await
     }
 
     fn convert_message(

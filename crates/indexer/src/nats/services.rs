@@ -51,8 +51,8 @@ use bytes::Bytes;
 use nats_client::{KvEntry, KvPutOptions, KvPutResult};
 
 use crate::types::{Envelope, Subscription};
+use nats_client::NatsError;
 
-use super::error::NatsError;
 use super::message::NatsMessage;
 
 #[async_trait]
