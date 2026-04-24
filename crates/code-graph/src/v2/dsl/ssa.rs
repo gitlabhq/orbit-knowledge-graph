@@ -77,7 +77,7 @@ impl SsaValue<'_> {
         match self {
             SsaValue::LocalDef(i) => Some(ParseValue::LocalDef(*i)),
             SsaValue::ImportRef(i) => Some(ParseValue::ImportRef(*i)),
-            SsaValue::Type(t) => Some(ParseValue::Type(t.to_string())),
+            SsaValue::Type(t) => Some(ParseValue::Type(smol_str::SmolStr::from(*t))),
             SsaValue::Opaque => Some(ParseValue::Opaque),
             SsaValue::ResolvedSite(_)
             | SsaValue::Alias(_)

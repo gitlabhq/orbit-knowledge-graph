@@ -625,7 +625,7 @@ where
                 {
                     let fqn = graph.def_fqn(n).to_string();
                     if let Some(r) = fwr.refs.get_mut(*ref_idx) {
-                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn)];
+                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn.into())];
                     }
                 }
             }

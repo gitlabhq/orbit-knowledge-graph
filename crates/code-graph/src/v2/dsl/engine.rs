@@ -564,7 +564,7 @@ impl LanguageSpec {
             let inferred = reaching.values.iter().find_map(|v| {
                 let pv = v.to_parse_value()?;
                 match pv {
-                    crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn),
+                    crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn.to_string()),
                     crate::v2::types::ssa::ParseValue::LocalDef(i) => state
                         .defs
                         .get(i as usize)
@@ -1074,7 +1074,7 @@ impl LanguageSpec {
                     let inferred = reaching.values.iter().find_map(|v| {
                         let pv = v.to_parse_value()?;
                         match pv {
-                            crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn),
+                            crate::v2::types::ssa::ParseValue::Type(fqn) => Some(fqn.to_string()),
                             crate::v2::types::ssa::ParseValue::LocalDef(i) => state
                                 .defs
                                 .get(i as usize)
