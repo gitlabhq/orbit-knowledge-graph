@@ -239,7 +239,16 @@ impl CodeIndexingPipeline {
                 tokio::runtime::Handle::current(),
             ));
 
-        let result = Pipeline::run_with_tracer(repo_dir, config, tracer, converter, sink);
+        // Run the synchronous pipeline on a blocking thread so the tokio
+        // worker is freed. The writer thread inside the pipeline calls
+        // runtime.block_on() which would deadlock a single-threaded
+        // tokio runtime if we blocked the worker here.
+        let repo_dir_owned = repo_dir.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            Pipeline::run_with_tracer(&repo_dir_owned, config, tracer, converter, sink)
+        })
+        .await
+        .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
