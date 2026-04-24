@@ -1,0 +1,3800 @@
+{
+   "annotations": {
+      "list": [ ]
+   },
+   "description": "Indexer metrics: ETL engine, code pipeline, SDLC pipeline, namespace deletion, scheduler, schema migration.",
+   "editable": true,
+   "fiscalYearStartMonth": 0,
+   "graphTooltip": 1,
+   "id": null,
+   "links": [
+      {
+         "asDropdown": true,
+         "includeVars": true,
+         "keepTime": true,
+         "tags": [
+            "orbit"
+         ],
+         "title": "Orbit",
+         "type": "dashboards"
+      }
+   ],
+   "panels": [
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+         },
+         "id": 1,
+         "panels": [ ],
+         "title": "Overview",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total rows written to ClickHouse per minute.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 1
+         },
+         "id": 2,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_etl_destination_rows_written_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]) * 60)",
+               "legendFormat": "rows/min",
+               "refId": "A"
+            }
+         ],
+         "title": "Rows indexed / min",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "ETL destination write throughput.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "Bps"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 1
+         },
+         "id": 3,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_etl_destination_written_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "B/s",
+               "refId": "A"
+            }
+         ],
+         "title": "Bytes indexed / s",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "95th percentile of per-handler ETL execution time.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 1
+         },
+         "id": 4,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95",
+               "refId": "A"
+            }
+         ],
+         "title": "Handler p95 (s)",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "ETL handler errors per minute.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 1
+         },
+         "id": 5,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_etl_handler_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]) * 60)",
+               "legendFormat": "errors/min",
+               "refId": "A"
+            }
+         ],
+         "title": "Handler errors / min",
+         "type": "stat"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 5
+         },
+         "id": 6,
+         "panels": [ ],
+         "title": "ETL engine",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total rows written to ClickHouse per table.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 6
+         },
+         "id": 7,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_etl_destination_rows_written_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_destination_rows_written_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time to write a batch to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 6
+         },
+         "id": 8,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{table}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{table}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{table}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_etl_destination_write_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time to write a batch to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 6
+         },
+         "id": 9,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_etl_destination_write_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_destination_write_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total failed writes to ClickHouse per table.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 14
+         },
+         "id": 10,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_etl_destination_write_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_destination_write_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total bytes written to ClickHouse per table.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "Bps"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 14
+         },
+         "id": 11,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_etl_destination_written_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_destination_written_bytes_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time inside each handler's handle() call.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 14
+         },
+         "id": 12,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, handler) (rate(gkg_etl_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{handler}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(gkg_etl_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{handler}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, handler) (rate(gkg_etl_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{handler}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_etl_handler_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time inside each handler's handle() call.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 22
+         },
+         "id": 13,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (handler) (rate(gkg_etl_handler_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{handler}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_handler_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total handler errors at the engine dispatch level.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 22
+         },
+         "id": 14,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (handler, error_kind) (rate(gkg_etl_handler_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{handler}} / {{error_kind}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_handler_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end time per message through dispatch.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 22
+         },
+         "id": 15,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, topic) (rate(gkg_etl_message_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{topic}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, topic) (rate(gkg_etl_message_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{topic}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, topic) (rate(gkg_etl_message_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{topic}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_etl_message_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end time per message through dispatch.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 30
+         },
+         "id": 16,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (topic) (rate(gkg_etl_message_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{topic}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_message_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "ETL messages processed by the indexer, labelled by topic and outcome.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 30
+         },
+         "id": 17,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (topic, outcome) (rate(gkg_etl_messages_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{topic}} / {{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_messages_processed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time to fetch a batch of messages from NATS.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 30
+         },
+         "id": 18,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, outcome) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{outcome}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, outcome) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{outcome}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, outcome) (rate(gkg_etl_nats_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{outcome}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_etl_nats_fetch_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time to fetch a batch of messages from NATS.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 38
+         },
+         "id": 19,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_etl_nats_fetch_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_nats_fetch_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time waiting for a worker pool permit, labelled by permit kind (global|group) and group.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 38
+         },
+         "id": 20,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, permit_kind, group) (rate(gkg_etl_permit_wait_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{permit_kind}} / {{group}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, permit_kind, group) (rate(gkg_etl_permit_wait_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{permit_kind}} / {{group}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, permit_kind, group) (rate(gkg_etl_permit_wait_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{permit_kind}} / {{group}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_etl_permit_wait_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Time waiting for a worker pool permit, labelled by permit kind (global|group) and group.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 38
+         },
+         "id": 21,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (permit_kind, group) (rate(gkg_etl_permit_wait_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{permit_kind}} / {{group}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_permit_wait_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Number of worker permits currently held, labelled by permit kind (global or concurrency-group name).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 46
+         },
+         "id": 22,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (permit_kind) (gkg_etl_permits_active{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{permit_kind}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_etl_permits_active",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 54
+         },
+         "id": 23,
+         "panels": [ ],
+         "title": "Code pipeline",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total code indexing errors by pipeline stage.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 55
+         },
+         "id": 24,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (stage) (rate(gkg_indexer_code_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{stage}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total push events processed by the code indexing handler.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 55
+         },
+         "id": 25,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_events_processed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total files seen by the code-graph indexer.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 55
+         },
+         "id": 26,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_files_processed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of processing a single push event.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 63
+         },
+         "id": 27,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_code_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_code_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_code_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_code_handler_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of processing a single push event.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 63
+         },
+         "id": 28,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_handler_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_handler_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of code-graph parsing and analysis.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 63
+         },
+         "id": 29,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_code_indexing_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_code_indexing_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_code_indexing_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_code_indexing_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of code-graph parsing and analysis.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 71
+         },
+         "id": 30,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_indexing_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_indexing_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total graph nodes and edges indexed by the code handler.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 71
+         },
+         "id": 31,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (kind) (rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{kind}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_nodes_indexed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Repository disk cleanup outcomes (success, failure).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 71
+         },
+         "id": 32,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_indexer_code_repository_cleanup_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_cleanup_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Projects short-circuited as terminal-empty at fetch time.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 79
+         },
+         "id": 33,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (reason) (rate(gkg_indexer_code_repository_empty_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{reason}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_empty_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of downloading a repository archive from Gitaly.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 79
+         },
+         "id": 34,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_code_repository_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_code_repository_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_code_repository_fetch_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_fetch_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of downloading a repository archive from Gitaly.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 79
+         },
+         "id": 35,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_repository_fetch_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_fetch_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Repository indexing runs completed by the code indexing handler.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 87
+         },
+         "id": 36,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (outcome) (rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_indexing_completed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Repository resolution strategy used (full_download, empty_repository).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 87
+         },
+         "id": 37,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (strategy) (rate(gkg_indexer_code_repository_resolution_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{strategy}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_resolution_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 87
+         },
+         "id": 38,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_code_repository_source_size_bytes_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_code_repository_source_size_bytes_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_code_repository_source_size_bytes_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_source_size_bytes — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 95
+         },
+         "id": 39,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_repository_source_size_bytes_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_code_repository_source_size_bytes — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 103
+         },
+         "id": 40,
+         "panels": [ ],
+         "title": "SDLC pipeline",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total bytes returned by ClickHouse datalake extraction queries.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "Bps"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 104
+         },
+         "id": 41,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_datalake_query_bytes_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of ClickHouse datalake extraction queries.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 104
+         },
+         "id": 42,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{entity}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{entity}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{entity}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_datalake_query_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of ClickHouse datalake extraction queries.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 104
+         },
+         "id": 43,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_datalake_query_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a full handler invocation across all its pipelines.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 112
+         },
+         "id": 44,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, handler) (rate(gkg_indexer_sdlc_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{handler}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, handler) (rate(gkg_indexer_sdlc_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{handler}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, handler) (rate(gkg_indexer_sdlc_handler_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{handler}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_handler_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a full handler invocation across all its pipelines.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 112
+         },
+         "id": 45,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (handler) (rate(gkg_indexer_sdlc_handler_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{handler}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_handler_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of a single entity or edge pipeline run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 112
+         },
+         "id": 46,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{entity}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{entity}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{entity}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_pipeline_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of a single entity or edge pipeline run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 120
+         },
+         "id": 47,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_pipeline_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total SDLC pipeline failures.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 120
+         },
+         "id": 48,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity, error_kind) (rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}} / {{error_kind}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_pipeline_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total rows extracted and written by SDLC pipelines.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 120
+         },
+         "id": 49,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_pipeline_rows_processed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of DataFusion SQL transform per batch.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 128
+         },
+         "id": 50,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{entity}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{entity}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{entity}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_transform_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of DataFusion SQL transform per batch.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 128
+         },
+         "id": 51,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_transform_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Seconds between the current watermark and wall-clock time (data freshness).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 128
+         },
+         "id": 52,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_sdlc_watermark_lag_seconds",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 136
+         },
+         "id": 53,
+         "panels": [ ],
+         "title": "Namespace deletion",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a single table's soft-delete INSERT-SELECT.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 137
+         },
+         "id": 54,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{table}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{table}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{table}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_indexer_namespace_deletion_table_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a single table's soft-delete INSERT-SELECT.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 137
+         },
+         "id": 55,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_namespace_deletion_table_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total per-table deletion failures.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 137
+         },
+         "id": 56,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (table) (rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{table}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_indexer_namespace_deletion_table_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 145
+         },
+         "id": 57,
+         "panels": [ ],
+         "title": "Scheduler",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of a scheduled task run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 146
+         },
+         "id": 58,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{task}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{task}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, task) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{task}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_scheduler_task_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "End-to-end duration of a scheduled task run.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 146
+         },
+         "id": 59,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (task) (rate(gkg_scheduler_task_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{task}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Scheduled task errors, labelled by task and pipeline stage.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 146
+         },
+         "id": 60,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (task, stage) (rate(gkg_scheduler_task_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{task}} / {{stage}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_errors_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a scheduled task's ClickHouse query.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 154
+         },
+         "id": 61,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.5, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{query}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.95, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{query}}",
+               "refId": "B"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "histogram_quantile(0.99, sum by (le, query) (rate(gkg_scheduler_task_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{query}}",
+               "refId": "C"
+            }
+         ],
+         "title": "gkg_scheduler_task_query_duration_seconds — p50/p95/p99",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Duration of a scheduled task's ClickHouse query.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 154
+         },
+         "id": 62,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (query) (rate(gkg_scheduler_task_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{query}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_query_duration_seconds — observation rate",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Requests successfully published to NATS per task.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 154
+         },
+         "id": 63,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_published_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{task}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_requests_published_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Requests skipped because an equivalent request was already in flight.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 162
+         },
+         "id": 64,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (task) (rate(gkg_scheduler_task_requests_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{task}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_requests_skipped_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total scheduled task runs, labelled by task and outcome.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 162
+         },
+         "id": 65,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (task, outcome) (rate(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{task}} / {{outcome}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_scheduler_task_runs_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 170
+         },
+         "id": 66,
+         "panels": [ ],
+         "title": "Schema migration",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Schema table cleanup operations, labelled by version band and result.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 171
+         },
+         "id": 67,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (version_band, result) (rate(gkg_schema_cleanup_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{version_band}} / {{result}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_cleanup_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Distinct units under enabled namespaces. Denominator of the migration-readiness ratio.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 171
+         },
+         "id": 68,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (scope, version_band) (gkg_schema_eligible_units{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{scope}} / {{version_band}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_eligible_units",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Distinct units with a checkpoint on the migrating schema version. Numerator of the migration-readiness ratio.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 171
+         },
+         "id": 69,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (scope, version_band) (gkg_schema_indexed_units{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{scope}} / {{version_band}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_indexed_units",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Seconds since the current migrating version's row was created. Zero when no version is migrating.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 179
+         },
+         "id": 70,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(gkg_schema_migrating_age_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_migrating_age_seconds",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total successful schema migration completions.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 179
+         },
+         "id": 71,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_schema_migration_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{instance}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_migration_completed_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total schema migration phase executions, labelled by phase and result.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 16,
+            "y": 179
+         },
+         "id": 72,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (phase, result) (rate(gkg_schema_migration_phase_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{phase}} / {{result}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_schema_migration_phase_total — rate/s",
+         "type": "timeseries"
+      }
+   ],
+   "refresh": "1m",
+   "schemaVersion": 39,
+   "tags": [
+      "orbit",
+      "protected",
+      "gkg",
+      "indexer"
+   ],
+   "templating": {
+      "list": [
+         {
+            "current": {
+               "text": "Mimir - Analytics Eventsdot",
+               "value": "mimir-analytics-eventsdot"
+            },
+            "hide": 0,
+            "label": "Orbit datasource (analytics-eventsdot tenant)",
+            "name": "ORBIT_DS",
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "/Analytics Eventsdot/",
+            "type": "datasource"
+         },
+         {
+            "current": {
+               "text": "Mimir - Gitlab Gprd",
+               "value": "mimir-gitlab-gprd"
+            },
+            "hide": 0,
+            "label": "Rails datasource (gitlab tenant)",
+            "name": "RAILS_DS",
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "/Gitlab Gstg|Gitlab Gprd/",
+            "type": "datasource"
+         },
+         {
+            "current": {
+               "text": "orbit-prd",
+               "value": "orbit-prd"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Orbit cluster",
+            "multi": false,
+            "name": "cluster",
+            "options": [
+               {
+                  "selected": true,
+                  "text": "orbit-prd",
+                  "value": "orbit-prd"
+               },
+               {
+                  "selected": false,
+                  "text": "orbit-stg",
+                  "value": "orbit-stg"
+               },
+               {
+                  "selected": false,
+                  "text": "all",
+                  "value": "orbit-.*"
+               }
+            ],
+            "query": "orbit-prd,orbit-stg,orbit-.*",
+            "type": "custom"
+         },
+         {
+            "current": {
+               "text": "gprd",
+               "value": "gprd"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Rails env",
+            "multi": false,
+            "name": "rails_env",
+            "options": [
+               {
+                  "selected": true,
+                  "text": "gprd",
+                  "value": "gprd"
+               },
+               {
+                  "selected": false,
+                  "text": "gstg",
+                  "value": "gstg"
+               },
+               {
+                  "selected": false,
+                  "text": "both",
+                  "value": "gstg|gprd"
+               }
+            ],
+            "query": "gprd,gstg,gstg|gprd",
+            "type": "custom"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-3h",
+      "to": "now"
+   },
+   "timezone": "utc",
+   "title": "Orbit — GKG indexer",
+   "uid": "orbit-gkg-indexer",
+   "version": 1
+}
