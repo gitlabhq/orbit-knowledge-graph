@@ -1,3 +1,9 @@
+## [0.31.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.31.0...v0.31.1) (2026-04-24)
+
+### Fixes
+
+* **indexer:** avoid Arrow 2 GiB column overflow in SDLC transform ([e31758b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e31758b67dbe26b45a06600ae372c92f66b7b72a)) by Jean-Gabriel Doyon
+
 ## [0.31.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.30.0...v0.31.0) (2026-04-24)
 
 ### Features
