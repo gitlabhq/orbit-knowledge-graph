@@ -379,9 +379,11 @@ mod tests {
                 definitions: r.definitions,
                 imports: r.imports,
             })
-            .map_err(|e| crate::v2::pipeline::PipelineError {
-                file_path: "test.py".to_string(),
-                error: format!("Invalid UTF-8: {:?}", e),
+            .map_err(|e| {
+                crate::v2::pipeline::PipelineError::parse(
+                    "test.py",
+                    format!("Invalid UTF-8: {:?}", e),
+                )
             })
     }
 

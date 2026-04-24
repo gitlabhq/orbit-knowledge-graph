@@ -377,10 +377,12 @@ pub struct IndexerConverter {
 }
 
 impl code_graph::v2::GraphConverter for IndexerConverter {
-    fn convert(&self, graph: code_graph::v2::linker::CodeGraph) -> Vec<(String, RecordBatch)> {
-        let Ok(data) = convert_code_graph(&graph, &self.envelope, &self.ontology) else {
-            return Vec::new();
-        };
+    fn convert(
+        &self,
+        graph: code_graph::v2::linker::CodeGraph,
+    ) -> Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
+        let data = convert_code_graph(&graph, &self.envelope, &self.ontology)
+            .map_err(|e| code_graph::v2::SinkError(format!("ClickHouse graph conversion: {e}")))?;
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
             (self.table_names.directory.clone(), data.directories),
@@ -412,13 +414,13 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
 
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
-                if let Ok(batch) = arrow::compute::take_record_batch(&data.edges, &idx_array) {
-                    result.push((table.to_string(), batch));
-                }
+                let batch = arrow::compute::take_record_batch(&data.edges, &idx_array)
+                    .map_err(|e| code_graph::v2::SinkError(format!("edge routing: {e}")))?;
+                result.push((table.to_string(), batch));
             }
         }
 
-        result
+        Ok(result)
     }
 }
 

@@ -1,6 +1,14 @@
+use std::sync::Arc;
+
 use arrow::array::{BooleanArray, Int64Array, StringArray};
+use arrow::record_batch::RecordBatch;
+use async_trait::async_trait;
 use gkg_utils::arrow::ArrowUtils;
-use indexer::handler::Handler;
+use indexer::destination::{BatchWriter, Destination, DestinationError};
+use indexer::handler::{Handler, HandlerContext};
+use indexer::indexing_status::IndexingStatusStore;
+use indexer::nats::ProgressNotifier;
+use indexer::testkit::{MockLockService, MockNatsServices};
 use indexer::topic::CodeIndexingTaskRequest;
 use indexer::types::Envelope;
 use integration_testkit::{assert_edge_count_for_traversal_path, t};
@@ -251,6 +259,87 @@ async fn disk_is_clean_after_multiple_reindexes() {
     );
 }
 
+#[tokio::test]
+async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
+    let project_id: i64 = 6;
+    let traversal_path = "/write-failure-test";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Main.java",
+            "public class Main { public void keep() {} }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        "commit1",
+        1,
+        traversal_path,
+    )
+    .await;
+
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1)
+    );
+
+    mock.replace_archive(
+        project_id,
+        &[(
+            "src/Other.java",
+            "public class Other { public void run() {} }",
+        )],
+    );
+    let (context, indexing_status) = handler_context_with_destination(Arc::new(FailingDestination));
+    let envelope = code_indexing_task_envelope(project_id, "commit2", 2, traversal_path);
+    let error = handler
+        .handle(context, envelope)
+        .await
+        .expect_err("writer failure should fail the task");
+
+    assert!(
+        error
+            .to_string()
+            .contains("fatal code indexing pipeline error"),
+        "unexpected error: {error}"
+    );
+    assert_file_is_active(&clickhouse, project_id, "src/Main.java").await;
+    assert_file_not_active(&clickhouse, project_id, "src/Other.java").await;
+    assert_eq!(
+        latest_checkpoint_task_id(&clickhouse, traversal_path, project_id, "main").await,
+        Some(1),
+        "failed reindex must not advance the checkpoint"
+    );
+
+    let progress = indexing_status
+        .get(traversal_path)
+        .await
+        .expect("progress lookup should succeed")
+        .expect("failed run should record indexing progress");
+    assert!(
+        progress
+            .last_error
+            .as_deref()
+            .is_some_and(|error| error.contains("fatal code indexing pipeline error")),
+        "failed run should record the fatal pipeline error in indexing progress, got {progress:?}"
+    );
+}
+
 async fn index_code(
     handler: &indexer::modules::code::CodeIndexingTaskHandler,
     clickhouse: &integration_testkit::TestContext,
@@ -266,6 +355,68 @@ async fn index_code(
         .handle(context, envelope)
         .await
         .unwrap_or_else(|e| panic!("indexing commit {commit_sha} (task {task_id}) failed: {e}"));
+}
+
+struct FailingDestination;
+
+#[async_trait]
+impl Destination for FailingDestination {
+    async fn new_batch_writer(
+        &self,
+        _table: &str,
+    ) -> Result<Box<dyn BatchWriter>, DestinationError> {
+        Ok(Box::new(FailingBatchWriter))
+    }
+}
+
+struct FailingBatchWriter;
+
+#[async_trait]
+impl BatchWriter for FailingBatchWriter {
+    async fn write_batch(&self, _batch: &[RecordBatch]) -> Result<(), DestinationError> {
+        Err(DestinationError::Write(
+            "forced write failure".to_string(),
+            None,
+        ))
+    }
+}
+
+fn handler_context_with_destination(
+    destination: Arc<dyn Destination>,
+) -> (HandlerContext, Arc<IndexingStatusStore>) {
+    let mock_nats = Arc::new(MockNatsServices::new());
+    let indexing_status = Arc::new(IndexingStatusStore::new(mock_nats.clone()));
+    let context = HandlerContext::new(
+        destination,
+        mock_nats.clone(),
+        Arc::new(MockLockService::new()),
+        ProgressNotifier::noop(),
+        indexing_status.clone(),
+    );
+    (context, indexing_status)
+}
+
+async fn latest_checkpoint_task_id(
+    clickhouse: &integration_testkit::TestContext,
+    traversal_path: &str,
+    project_id: i64,
+    branch: &str,
+) -> Option<i64> {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT last_task_id FROM {} FINAL \
+             WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
+             AND branch = '{branch}' AND _deleted = false",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    let batch = result.first()?;
+    if batch.num_rows() == 0 {
+        return None;
+    }
+    let task_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "last_task_id")
+        .expect("task id column");
+    Some(task_ids.value(0))
 }
 
 fn code_indexing_task_envelope(
