@@ -624,7 +624,7 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     control.assert_str("state", "merged");
 }
 
-/// Aggregation excludes deleted entities from count via _nf_* CTE argMax.
+/// Aggregation excludes deleted entities from count via _nf_* CTE dedup.
 /// MR 9900 has latest version _deleted=true. It should not be counted.
 /// MR 9901 is alive and serves as the control (should be counted).
 pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
