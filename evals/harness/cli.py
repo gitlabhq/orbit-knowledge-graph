@@ -115,18 +115,18 @@ def score(ctx: click.Context, run_id: str | None) -> None:
 
     from harness.db import default_db_path
     from harness.evaluators import load_evaluators
-    from harness.store import ResultStore
+    from harness.store import ResultStore, list_run_ids
 
     db_path = default_db_path()
-    store = ResultStore(db_path=db_path, run_id=run_id or "latest")
 
     if run_id is None:
-        run_ids = store.list_run_ids()
+        run_ids = list_run_ids(db_path)
         if not run_ids:
             click.echo("error: no runs found", err=True)
             sys.exit(1)
         run_id = run_ids[0]
-        store = ResultStore(db_path=db_path, run_id=run_id)
+
+    store = ResultStore(db_path=db_path, run_id=run_id)
 
     click.echo(f"scoring run {run_id}")
 
@@ -161,13 +161,12 @@ def report(ctx: click.Context, run_id: str | None) -> None:
     config = load_config(ctx.obj["config_path"])
 
     from harness.db import default_db_path
-    from harness.store import ResultStore
+    from harness.store import ResultStore, list_run_ids
 
     db_path = default_db_path()
 
     if run_id is None:
-        tmp_store = ResultStore(db_path=db_path, run_id="latest")
-        run_ids = tmp_store.list_run_ids()
+        run_ids = list_run_ids(db_path)
         if not run_ids:
             click.echo("error: no runs found", err=True)
             sys.exit(1)
@@ -320,12 +319,10 @@ def servers(log_arm: str | None, tail: int, kill_arm: str | None, show_runs: boo
         else:
             asyncio.run(mgr.stop(kill_arm))
             click.echo(f"server {kill_arm} stopped")
-        mgr.close()
         return
 
     if log_arm:
         click.echo(mgr.logs(log_arm, tail=tail))
-        mgr.close()
         return
 
     if show_runs:
@@ -341,7 +338,6 @@ def servers(log_arm: str | None, tail: int, kill_arm: str | None, show_runs: boo
                     f"{r['run_id']:<22} {r['status']:<12} {arms_str:<20} "
                     f"{r['task_count'] or '-':<6} {r['started_at']}"
                 )
-        mgr.close()
         return
 
     # Default: show server status
@@ -356,7 +352,6 @@ def servers(log_arm: str | None, tail: int, kill_arm: str | None, show_runs: boo
                 f"{s['arm']:<12} {s['status']:<10} {s['port']:<7} "
                 f"{s['pid'] or '-':<8} {s['started_at'] or '-'}"
             )
-    mgr.close()
 
 
 def main() -> None:

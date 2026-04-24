@@ -147,11 +147,6 @@ class OpenCodeClient:
         r.raise_for_status()
         return [SessionInfo.model_validate(s) for s in r.json()]
 
-    async def get_session_status(self) -> dict[str, str]:
-        r = await self._http.get("/session/status")
-        r.raise_for_status()
-        return r.json()
-
     # -- messages -------------------------------------------------------------
 
     async def list_messages(self, session_id: str) -> list[MessageWithParts]:
@@ -191,30 +186,6 @@ class OpenCodeClient:
             return MessageWithParts(info=MessageInfo(id="", role="assistant"))
         return MessageWithParts.model_validate(r.json())
 
-    async def send_message_async(
-        self,
-        session_id: str,
-        text: str,
-        *,
-        model: dict[str, str] | None = None,
-        agent: str | None = None,
-        tools: dict[str, Any] | None = None,
-        system: str | None = None,
-    ) -> None:
-        body: dict[str, Any] = {
-            "parts": [{"type": "text", "text": text}],
-        }
-        if model:
-            body["model"] = model
-        if agent:
-            body["agent"] = agent
-        if tools:
-            body["tools"] = tools
-        if system:
-            body["system"] = system
-        r = await self._http.post(f"/session/{session_id}/prompt_async", json=body)
-        r.raise_for_status()
-
     # -- session artifacts ----------------------------------------------------
 
     async def get_diff(self, session_id: str) -> list[FileDiff]:
@@ -227,14 +198,4 @@ class OpenCodeClient:
         r.raise_for_status()
         return [TodoItem.model_validate(t) for t in r.json()]
 
-    # -- permissions ----------------------------------------------------------
 
-    async def respond_permission(
-        self, session_id: str, permission_id: str, response: str = "once"
-    ) -> bool:
-        r = await self._http.post(
-            f"/session/{session_id}/permissions/{permission_id}",
-            json={"response": response},
-        )
-        r.raise_for_status()
-        return True

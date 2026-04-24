@@ -16,40 +16,16 @@ import yaml
 from pydantic import BaseModel, Field, field_validator, model_validator
 
 
-class TaskStatus(str, Enum):
-    SUCCESS = "success"
-    TIMEOUT = "timeout"
-    AGENT_ERROR = "agent_error"
-    INFRA_ERROR = "infra_error"
-
-
 class Difficulty(str, Enum):
     EASY = "easy"
     MEDIUM = "medium"
     HARD = "hard"
-
-
-class TaskCategory(str, Enum):
-    TRAVERSAL = "traversal"
-    SEARCH = "search"
-    AGGREGATION = "aggregation"
-    MUTATION = "mutation"
-    MULTI_HOP = "multi-hop"
-
-
-class RetryConfig(BaseModel, frozen=True):
-    max_attempts: int = 3
-    base_delay_ms: int = 1000
-    max_delay_ms: int = 30000
-    backoff_factor: int = 2
-    jitter: bool = True
+    VERY_HARD = "very-hard"
 
 
 class TimeoutConfig(BaseModel, frozen=True):
     task: int = 300
     server_start: int = 30
-    session_create: int = 10
-    data_extract: int = 10
 
 
 class TaskFilter(BaseModel, frozen=True):
@@ -64,31 +40,20 @@ class TasksConfig(BaseModel, frozen=True):
 
 class ScoringConfig(BaseModel, frozen=True):
     fixtures_path: str = "fixtures"
-    report_formats: list[str] = Field(default_factory=lambda: ["markdown", "json"])
 
 
 class RunConfig(BaseModel, frozen=True):
     name: str
     version: str = "0.1.0"
     concurrency: int = 4
-    task_timeout: int = 300
-    output_dir: str = "results"
     tasks: TasksConfig
     scoring: ScoringConfig = Field(default_factory=ScoringConfig)
-    retry: RetryConfig = Field(default_factory=RetryConfig)
     timeouts: TimeoutConfig = Field(default_factory=TimeoutConfig)
 
 
 class ModelConfig(BaseModel, frozen=True):
     provider: str
     model: str
-    temperature: float = 0.0
-    max_tokens: int = 16384
-
-
-class ToolsConfig(BaseModel, frozen=True):
-    allow: list[str] = Field(default_factory=list)
-    bash_scope: list[str] = Field(default_factory=list)
 
 
 class ArmConfig(BaseModel, frozen=True):
@@ -97,7 +62,6 @@ class ArmConfig(BaseModel, frozen=True):
     skills: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     model: ModelConfig
-    tools: ToolsConfig = Field(default_factory=ToolsConfig)
     port: int
 
     @field_validator("name")

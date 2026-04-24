@@ -17,7 +17,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Any, Generator
+from typing import Any
 
 from harness.config import ArmConfig
 from harness.db import WORKSPACE_DIR, connect, default_db_path, ensure_schema
@@ -43,22 +43,15 @@ class ServerManager:
         self.workspace = Path(workspace)
         self.workspace.mkdir(parents=True, exist_ok=True)
         (self.workspace / "logs").mkdir(exist_ok=True)
-        self._db_path = default_db_path(self.workspace)
-        ensure_schema(self._db_path)
+        self.db_path = default_db_path(self.workspace)
+        ensure_schema(self.db_path)
         self._handles: dict[str, ServerHandle] = {}
-
-    @property
-    def db_path(self) -> Path:
-        return self._db_path
-
-    def close(self) -> None:
-        pass
 
     # -- runs -----------------------------------------------------------------
 
     def begin_run(self, run_id: str, arms: list[ArmConfig], task_count: int) -> None:
         arm_names = [a.name for a in arms]
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO runs (run_id, started_at, arms, task_count, status) "
                 "VALUES (?, ?, ?, ?, 'running')",
@@ -66,7 +59,7 @@ class ServerManager:
             )
 
     def end_run(self, run_id: str, status: str = "completed") -> None:
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "UPDATE runs SET completed_at = ?, status = ? WHERE run_id = ?",
                 [datetime.now(timezone.utc), status, run_id],
@@ -83,7 +76,7 @@ class ServerManager:
         started = now if status == "ready" else None
         stopped = now if status in ("stopped", "error") else None
 
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO servers "
                 "(arm, status, port, pid, work_dir, log_path, started_at, stopped_at, error) "
@@ -156,7 +149,7 @@ class ServerManager:
     async def stop_all(self) -> None:
         for arm in list(self._handles.keys()):
             await self.stop(arm)
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             rows = db.execute(
                 "SELECT arm, pid FROM servers WHERE status IN ('ready', 'starting')"
             ).fetchall()
@@ -166,7 +159,7 @@ class ServerManager:
             self._set_server(arm_name, "stopped", 0, pid=pid)
 
     def _kill_by_arm(self, arm: str) -> None:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             row = db.execute(
                 "SELECT pid FROM servers WHERE arm = ? AND status IN ('ready', 'starting')", [arm]
             ).fetchone()
@@ -178,7 +171,7 @@ class ServerManager:
     # -- queries (for CLI) ----------------------------------------------------
 
     def status(self) -> list[dict]:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "SELECT arm, status, port, pid, started_at, stopped_at, error, log_path "
                 "FROM servers ORDER BY arm"
@@ -198,7 +191,7 @@ class ServerManager:
         return results
 
     def get_runs(self) -> list[dict]:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "SELECT run_id, started_at, completed_at, arms, task_count, status "
                 "FROM runs ORDER BY started_at DESC LIMIT 10"
@@ -211,7 +204,7 @@ class ServerManager:
         ]
 
     def logs(self, arm: str, tail: int = 50) -> str:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             row = db.execute(
                 "SELECT log_path FROM servers WHERE arm = ?", [arm]
             ).fetchone()

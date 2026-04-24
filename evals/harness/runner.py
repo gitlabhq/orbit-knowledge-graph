@@ -18,7 +18,8 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from dataclasses import dataclass, field
+import re
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -82,8 +83,8 @@ def load_tasks(config: EvalConfig) -> list[EvalTask]:
         tasks = [t for t in tasks if t.category in filt.categories]
 
     difficulty_order = ["easy", "medium", "hard", "very-hard"]
-    min_idx = difficulty_order.index(filt.min_difficulty.value) if filt.min_difficulty.value in difficulty_order else 0
-    tasks = [t for t in tasks if difficulty_order.index(t.difficulty) >= min_idx if t.difficulty in difficulty_order]
+    min_idx = difficulty_order.index(filt.min_difficulty.value)
+    tasks = [t for t in tasks if t.difficulty in difficulty_order and difficulty_order.index(t.difficulty) >= min_idx]
 
     return tasks
 
@@ -99,18 +100,6 @@ def render_prompt(task: EvalTask, fixtures_path: str) -> str:
             prompt = prompt.replace(f"{{{{{key}}}}}", str(val))
         return prompt
     return task.prompt
-
-
-# ---------------------------------------------------------------------------
-# Server lifecycle (delegated to ServerManager)
-# ---------------------------------------------------------------------------
-
-# Kept for backward compat / inline usage -- prefer ServerManager for detached mode.
-
-
-# ---------------------------------------------------------------------------
-# Per-task execution
-# ---------------------------------------------------------------------------
 
 async def execute_task(
     client: OpenCodeClient,
@@ -251,7 +240,7 @@ async def execute_task(
                 pass
 
 
-_JSON_FENCE_RE = __import__("re").compile(r"```(?:json)?\s*\n(.*?)```", __import__("re").DOTALL)
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
 
 
 def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
@@ -386,7 +375,6 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
         raise
     finally:
         await mgr.stop_all()
-        mgr.close()
 
     total = sum(len(v) for v in all_results.values())
     successes = sum(1 for rs in all_results.values() for r in rs if r.status == TaskStatus.SUCCESS)

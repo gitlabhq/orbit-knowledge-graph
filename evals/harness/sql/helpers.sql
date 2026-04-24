@@ -111,63 +111,51 @@ CREATE OR REPLACE MACRO event_count(rid) AS (
     SELECT count(*) FROM live_events WHERE run_id = rid
 );
 
--- Table: live messages for a task (incremental snapshot)
+-- Table: live messages for a task (extracted from live_events)
 CREATE OR REPLACE MACRO msg_stream(rid, a, tid) AS TABLE (
     SELECT
-        m.message_id,
-        json_extract_string(m.data, '$.role') AS role,
-        json_extract_string(m.data, '$.agent') AS agent,
-        json_extract(m.data, '$.cost')::DOUBLE AS cost,
-        json_extract(m.data, '$.tokens')::JSON AS tokens,
-        m.updated_at
-    FROM live_messages m
-    WHERE m.run_id = rid AND m.arm = a AND m.task_id = tid
-    ORDER BY m.updated_at
+        json_extract_string(data, '$.properties.info.id') AS message_id,
+        json_extract_string(data, '$.properties.info.role') AS role,
+        json_extract_string(data, '$.properties.info.agent') AS agent,
+        json_extract(data, '$.properties.info.cost')::DOUBLE AS cost,
+        json_extract(data, '$.properties.info.tokens')::JSON AS tokens,
+        timestamp AS updated_at
+    FROM live_events
+    WHERE run_id = rid AND arm = a AND task_id = tid
+      AND json_extract_string(data, '$.type') = 'message.updated'
+    ORDER BY seq
 );
 
 -- Table: live parts for a task (tool calls, text, etc.)
 CREATE OR REPLACE MACRO part_stream(rid, a, tid) AS TABLE (
     SELECT
-        p.message_id,
-        p.part_type,
-        CASE
-            WHEN p.part_type = 'tool' THEN json_extract_string(p.data, '$.tool')
-            ELSE NULL
-        END AS tool_name,
-        CASE
-            WHEN p.part_type = 'tool' THEN substr(json_extract_string(p.data, '$.state.input.command'), 1, 200)
-            ELSE NULL
-        END AS command,
-        CASE
-            WHEN p.part_type = 'tool' THEN json_extract(p.data, '$.state.metadata.exit')
-            ELSE NULL
-        END AS exit_code,
-        CASE
-            WHEN p.part_type = 'text' THEN substr(json_extract_string(p.data, '$.text'), 1, 200)
-            ELSE NULL
-        END AS text_preview,
-        p.updated_at
-    FROM live_parts p
-    WHERE p.run_id = rid AND p.arm = a AND p.task_id = tid
-    ORDER BY p.updated_at
+        json_extract_string(data, '$.properties.part.messageID') AS message_id,
+        json_extract_string(data, '$.properties.part.type') AS part_type,
+        json_extract_string(data, '$.properties.part.tool') AS tool_name,
+        substr(json_extract_string(data, '$.properties.part.state.input.command'), 1, 200) AS command,
+        json_extract(data, '$.properties.part.state.metadata.exit') AS exit_code,
+        substr(json_extract_string(data, '$.properties.part.text'), 1, 200) AS text_preview,
+        timestamp AS updated_at
+    FROM live_events
+    WHERE run_id = rid AND arm = a AND task_id = tid
+      AND json_extract_string(data, '$.type') = 'message.part.updated'
+    ORDER BY seq
 );
 
--- Table: per-task progress across a run (how many messages/parts per task so far)
+-- Table: per-task progress across a run
 CREATE OR REPLACE MACRO task_progress(rid) AS TABLE (
     SELECT
-        m.arm,
-        m.task_id,
-        count(DISTINCT m.message_id) AS messages,
-        (SELECT count(*) FROM live_parts p
-         WHERE p.run_id = m.run_id AND p.arm = m.arm AND p.task_id = m.task_id) AS parts,
-        (SELECT count(*) FROM live_parts p
-         WHERE p.run_id = m.run_id AND p.arm = m.arm AND p.task_id = m.task_id
-         AND p.part_type = 'tool') AS tool_calls,
-        max(m.updated_at) AS last_activity
-    FROM live_messages m
-    WHERE m.run_id = rid
-    GROUP BY m.run_id, m.arm, m.task_id
-    ORDER BY m.arm, last_activity
+        arm,
+        task_id,
+        count(*) FILTER (WHERE json_extract_string(data, '$.type') = 'message.updated') AS messages,
+        count(*) FILTER (WHERE json_extract_string(data, '$.type') = 'message.part.updated') AS parts,
+        count(*) FILTER (WHERE json_extract_string(data, '$.type') = 'message.part.updated'
+          AND json_extract_string(data, '$.properties.part.type') = 'tool') AS tool_calls,
+        max(timestamp) AS last_activity
+    FROM live_events
+    WHERE run_id = rid
+    GROUP BY arm, task_id
+    ORDER BY arm, last_activity
 );
 
 -- Table: task results for a run+arm (used by ResultStore.read_results)

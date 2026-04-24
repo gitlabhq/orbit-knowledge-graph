@@ -17,6 +17,8 @@ from pathlib import Path
 from typing import Any
 
 from harness.db import connect, default_db_path, ensure_schema
+
+logger = logging.getLogger(__name__)
 from harness.session import SessionSnapshot
 
 
@@ -88,64 +90,41 @@ class ResultStore:
     """Reads and writes eval results, snapshots, and scores to DuckDB."""
 
     def __init__(self, db_path: Path | None = None, run_id: str | None = None) -> None:
-        self._db_path = db_path or default_db_path()
+        self.db_path = db_path or default_db_path()
         self.run_id = run_id or self.make_run_id()
-        self._event_seqs: dict[str, int] = {}
-        ensure_schema(self._db_path)
+        ensure_schema(self.db_path)
+        self._event_seqs = self._load_event_seqs()
 
-    @property
-    def db_path(self) -> Path:
-        return self._db_path
+    def _load_event_seqs(self) -> dict[str, int]:
+        """Seed event sequence counters from DB for resume correctness."""
+        try:
+            with connect(self.db_path, read_only=True) as db:
+                rows = db.execute(
+                    "SELECT arm || ':' || task_id, max(seq) + 1 "
+                    "FROM live_events WHERE run_id = ? GROUP BY arm, task_id",
+                    [self.run_id],
+                ).fetchall()
+            return {k: v for k, v in rows}
+        except Exception:
+            return {}
 
     def write_live_event(self, arm: str, task_id: str, event: dict[str, Any]) -> None:
-        """Write a single SSE event to DuckDB as it arrives.
-
-        Also extracts message and part data for incremental snapshot building.
-        """
+        """Write a single SSE event to DuckDB as it arrives."""
         key = f"{arm}:{task_id}"
         seq = self._event_seqs.get(key, 0)
         self._event_seqs[key] = seq + 1
 
         event_type = event.get("type", "unknown")
         timestamp = event.get("ts", "")
-        data = event.get("data", {})
-        data_json = json.dumps(data, default=str)
-        data_type = data.get("type", "")
-        props = data.get("properties", {})
+        data_json = json.dumps(event.get("data", {}), default=str)
 
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO live_events "
                 "(run_id, arm, task_id, seq, event_type, timestamp, data) "
                 "VALUES (?, ?, ?, ?, ?, ?, ?)",
                 [self.run_id, arm, task_id, seq, event_type, timestamp, data_json],
             )
-
-            if data_type == "message.updated" and "info" in props:
-                info = props["info"]
-                msg_id = info.get("id", "")
-                if msg_id:
-                    db.execute(
-                        "INSERT OR REPLACE INTO live_messages "
-                        "(run_id, arm, task_id, message_id, data, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?)",
-                        [self.run_id, arm, task_id, msg_id,
-                         json.dumps(info, default=str), timestamp],
-                    )
-
-            if data_type == "message.part.updated" and "part" in props:
-                part = props["part"]
-                part_id = part.get("id", "")
-                msg_id = part.get("messageID", "")
-                part_type = part.get("type", "")
-                if part_id:
-                    db.execute(
-                        "INSERT OR REPLACE INTO live_parts "
-                        "(run_id, arm, task_id, part_id, message_id, part_type, data, updated_at) "
-                        "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                        [self.run_id, arm, task_id, part_id, msg_id, part_type,
-                         json.dumps(part, default=str), timestamp],
-                    )
 
     def write_result(self, result: TaskResult) -> None:
         s = result.session_summary
@@ -154,7 +133,7 @@ class ResultStore:
             if result.structured_output is not None
             else None
         )
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO task_results "
                 "(run_id, task_id, arm, status, timestamp, structured_output, "
@@ -183,14 +162,14 @@ class ResultStore:
 
     def write_snapshot(self, arm: str, task_id: str, snapshot: SessionSnapshot) -> None:
         data = json.dumps(snapshot.to_dict(), default=str)
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO snapshots (run_id, arm, task_id, data) VALUES (?, ?, ?, ?)",
                 [self.run_id, arm, task_id, data],
             )
 
     def read_snapshot(self, arm: str, task_id: str) -> dict[str, Any] | None:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             row = db.execute(
                 "FROM snapshot(?, ?, ?)", [self.run_id, arm, task_id]
             ).fetchone()
@@ -199,7 +178,7 @@ class ResultStore:
         return json.loads(row[0])
 
     def read_results(self, arm: str) -> list[TaskResult]:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "FROM results_for_arm(?, ?)", [self.run_id, arm]
             ).fetchall()
@@ -233,7 +212,7 @@ class ResultStore:
         return results
 
     def completed_task_ids(self, arm: str) -> set[str]:
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "FROM completed_tasks(?, ?)", [self.run_id, arm]
             ).fetchall()
@@ -244,7 +223,7 @@ class ResultStore:
 
         task_scores: [{"task_id": ..., "scores": {"evaluator_name": {...}, ...}}, ...]
         """
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             for entry in task_scores:
                 task_id = entry["task_id"]
                 for evaluator, score_data in entry["scores"].items():
@@ -259,7 +238,7 @@ class ResultStore:
 
         Returns: {"arm": [{"task_id": ..., "scores": {"evaluator": {...}}}, ...]}
         """
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "FROM scores_for_run(?)", [self.run_id]
             ).fetchall()
@@ -275,9 +254,7 @@ class ResultStore:
 
     def list_run_ids(self) -> list[str]:
         """List all run IDs that have task results, most recent first."""
-        with connect(self._db_path, read_only=True) as db:
-            rows = db.execute("FROM all_run_ids()").fetchall()
-        return [r[0] for r in rows]
+        return list_run_ids(self.db_path)
 
     def snapshot_config(self, config: Any, base_dir: Path | None = None) -> str:
         """Snapshot the full eval config + all referenced files into DuckDB.
@@ -314,7 +291,7 @@ class ResultStore:
         config_name = config.run.name
         config_version = config.run.version
 
-        with connect(self._db_path) as db:
+        with connect(self.db_path) as db:
             db.execute(
                 "INSERT OR REPLACE INTO run_configs "
                 "(run_id, config_name, config_version, config_hash, config, files) "
@@ -326,7 +303,7 @@ class ResultStore:
 
     def read_config(self) -> dict[str, Any] | None:
         """Read the snapshotted config for the current run."""
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             row = db.execute(
                 "FROM run_config(?)", [self.run_id]
             ).fetchone()
@@ -342,7 +319,7 @@ class ResultStore:
 
     def find_runs_by_config(self, config_hash: str) -> list[str]:
         """Find all run IDs that used the same config hash."""
-        with connect(self._db_path, read_only=True) as db:
+        with connect(self.db_path, read_only=True) as db:
             rows = db.execute(
                 "FROM run_ids_by_config(?)", [config_hash]
             ).fetchall()
@@ -353,7 +330,11 @@ class ResultStore:
         return datetime.now(timezone.utc).strftime("%Y%m%d_%H%M%S")
 
 
-logger = logging.getLogger(__name__)
+def list_run_ids(db_path: Path) -> list[str]:
+    """List all run IDs that have task results, most recent first."""
+    with connect(db_path, read_only=True) as db:
+        rows = db.execute("FROM all_run_ids()").fetchall()
+    return [r[0] for r in rows]
 
 
 def _collect_file(files: dict[str, str], path: Path) -> None:
