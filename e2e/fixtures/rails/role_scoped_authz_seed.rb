@@ -21,7 +21,7 @@ def create_project!(name, group, admin, org)
   Project.create!(name: name, path: name, namespace: group, creator: admin, organization: org)
 end
 
-def create_vulnerability!(project, admin, title:, severity:)
+def create_vulnerability!(project, admin, title:, severity:, report_type:, created_at:)
   scanner = Vulnerabilities::Scanner.find_or_create_by!(
     project: project,
     external_id: "kg347-#{project.id}",
@@ -46,11 +46,13 @@ def create_vulnerability!(project, admin, title:, severity:)
 
   finding.assign_attributes(
     severity: severity,
-    report_type: :sast,
+    report_type: report_type,
     name: title,
     metadata_version: 'sast:1.0',
     raw_metadata: '{}',
-    uuid: SecureRandom.uuid
+    uuid: SecureRandom.uuid,
+    created_at: created_at,
+    updated_at: created_at
   )
   finding.save!
 
@@ -59,8 +61,10 @@ def create_vulnerability!(project, admin, title:, severity:)
     author: admin,
     severity: severity,
     state: :detected,
-    report_type: :sast,
-    present_on_default_branch: true
+    report_type: report_type,
+    present_on_default_branch: true,
+    created_at: created_at,
+    updated_at: created_at
   )
   vulnerability.finding_id = finding.id
   vulnerability.save!
@@ -100,13 +104,17 @@ reporter_vulnerability = create_vulnerability!(
   reporter_project,
   admin,
   title: "#{suffix} reporter-only SQLi",
-  severity: :critical
+  severity: :critical,
+  report_type: :generic,
+  created_at: Time.zone.parse('2026-03-24 12:00:00 UTC')
 )
 security_vulnerability = create_vulnerability!(
   security_project,
   admin,
   title: "#{suffix} security-manager XSS",
-  severity: :high
+  severity: :high,
+  report_type: :generic,
+  created_at: Time.zone.parse('2026-03-25 12:00:00 UTC')
 )
 
 pat_attrs = {
@@ -126,5 +134,9 @@ puts "ROLE_SCOPED_AUTHZ_FIXTURE_JSON=#{JSON.generate(
   reporter_project_id: reporter_project.id,
   security_project_id: security_project.id,
   reporter_vulnerability_id: reporter_vulnerability.id,
-  security_vulnerability_id: security_vulnerability.id
+  security_vulnerability_id: security_vulnerability.id,
+  reporter_vulnerability_title: reporter_vulnerability.title,
+  security_vulnerability_title: security_vulnerability.title,
+  reporter_vulnerability_created_at: reporter_vulnerability.created_at.iso8601,
+  security_vulnerability_created_at: security_vulnerability.created_at.iso8601
 )}"

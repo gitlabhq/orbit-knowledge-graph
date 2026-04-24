@@ -32,6 +32,33 @@ Reporter Path Cannot Infer Vulnerability Aggregates
     Response Has Project Count    ${resp}    ${SECURITY_PROJECT_ID}    1
     Response Does Not Have Project    ${resp}    ${REPORTER_PROJECT_ID}
 
+Reporter Project Vulnerability Oracle Filters Are Neutralized
+    [Documentation]    Replays the original issue's aggregation-oracle matrix
+    ...                against the Reporter-only path: total count, enum
+    ...                fields, ID exact/range predicates, title equality, and
+    ...                timestamp predicates must all return no Project row.
+    [Tags]    requires_rails_kg_authz    authz    security
+    Wait For Seeded Vulnerabilities Indexed
+
+    ${filters}=    Reporter Vulnerability Oracle Filters
+    FOR    ${filter}    IN    @{filters}
+        ${resp}=    Query Vulnerability Counts For Project As Victim    ${REPORTER_PROJECT_ID}    ${filter}
+        Response Does Not Have Project    ${resp}    ${REPORTER_PROJECT_ID}
+    END
+
+Security Manager Project Vulnerability Oracle Filters Remain Authorized
+    [Documentation]    The same query shapes must still work for a path where
+    ...                the caller has Security Manager access, proving the fix
+    ...                narrows only below-threshold traversal paths.
+    [Tags]    requires_rails_kg_authz    authz    security
+    Wait For Seeded Vulnerabilities Indexed
+
+    ${filters}=    Security Manager Vulnerability Oracle Filters
+    FOR    ${filter}    IN    @{filters}
+        ${resp}=    Query Vulnerability Counts For Project As Victim    ${SECURITY_PROJECT_ID}    ${filter}
+        Response Has Project Count    ${resp}    ${SECURITY_PROJECT_ID}    1
+    END
+
 Reporter Path Cannot Search Vulnerability Directly
     [Documentation]    Direct Vulnerability search is also scoped by per-path
     ...                access_levels, so the Reporter-path row is absent while
@@ -77,6 +104,10 @@ Seed Role Scoped Authz Fixtures
     Set Suite Variable    ${SECURITY_PROJECT_ID}    ${fixture["security_project_id"]}
     Set Suite Variable    ${REPORTER_VULNERABILITY_ID}    ${fixture["reporter_vulnerability_id"]}
     Set Suite Variable    ${SECURITY_VULNERABILITY_ID}    ${fixture["security_vulnerability_id"]}
+    Set Suite Variable    ${REPORTER_VULNERABILITY_TITLE}    ${fixture["reporter_vulnerability_title"]}
+    Set Suite Variable    ${SECURITY_VULNERABILITY_TITLE}    ${fixture["security_vulnerability_title"]}
+    Set Suite Variable    ${REPORTER_VULNERABILITY_CREATED_AT}    ${fixture["reporter_vulnerability_created_at"]}
+    Set Suite Variable    ${SECURITY_VULNERABILITY_CREATED_AT}    ${fixture["security_vulnerability_created_at"]}
 
     Wait For Node Indexed    Project    ${REPORTER_PROJECT_ID}    timeout=300s
     Wait For Node Indexed    Project    ${SECURITY_PROJECT_ID}    timeout=300s
@@ -110,6 +141,20 @@ Query Vulnerability Counts As Victim
     ${query}=    Evaluate    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"]}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}], "limit": 20}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
+
+Query Vulnerability Counts For Project As Victim
+    [Arguments]    ${project_id}    ${vulnerability_filters}=${None}
+    ${query}=    Evaluate    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [int($project_id)]}, {"id": "v", "entity": "Vulnerability", "filters": $vulnerability_filters or {}}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}], "limit": 10}
+    ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
+    RETURN    ${resp}
+
+Reporter Vulnerability Oracle Filters
+    ${filters}=    Evaluate    [None, {"severity": "critical"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($REPORTER_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($REPORTER_VULNERABILITY_ID)}}, {"title": $REPORTER_VULNERABILITY_TITLE}, {"created_at": {"op": "lte", "value": $REPORTER_VULNERABILITY_CREATED_AT}}]
+    RETURN    ${filters}
+
+Security Manager Vulnerability Oracle Filters
+    ${filters}=    Evaluate    [None, {"severity": "high"}, {"state": "detected"}, {"report_type": "generic"}, {"id": int($SECURITY_VULNERABILITY_ID)}, {"id": {"op": "lte", "value": int($SECURITY_VULNERABILITY_ID)}}, {"title": $SECURITY_VULNERABILITY_TITLE}, {"created_at": {"op": "gte", "value": $SECURITY_VULNERABILITY_CREATED_AT}}]
+    RETURN    ${filters}
 
 Response Has Project Count
     [Arguments]    ${resp}    ${project_id}    ${expected}
