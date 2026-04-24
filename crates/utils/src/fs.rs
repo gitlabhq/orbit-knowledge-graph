@@ -123,24 +123,26 @@ pub fn validate_symlinks(root: &Path) -> io::Result<()> {
 }
 
 fn check_symlink(path: &Path, root: &Path) -> io::Result<()> {
-    let display = path.strip_prefix(root).unwrap_or(path);
-    let err = match path.canonicalize() {
-        Ok(r) if r.starts_with(root) => return Ok(()),
-        Ok(r) => io::Error::new(
-            io::ErrorKind::PermissionDenied,
-            format!(
-                "symlink target escapes target directory: {} -> {}",
-                display.display(),
-                r.display()
-            ),
-        ),
-        Err(_) => io::Error::new(
-            io::ErrorKind::InvalidInput,
-            format!("dangling symlink: {}", display.display()),
-        ),
-    };
-    let _ = std::fs::remove_file(path);
-    Err(err)
+    let relative = path.strip_prefix(root).unwrap_or(path);
+    match path.canonicalize() {
+        Ok(r) if r.starts_with(root) => Ok(()),
+        Ok(r) => {
+            let _ = std::fs::remove_file(path);
+            Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "symlink target escapes target directory: {} -> {}",
+                    relative.display(),
+                    r.display()
+                ),
+            ))
+        }
+        Err(_) => {
+            let _ = std::fs::remove_file(path);
+            tracing::warn!(path = %relative.display(), "removing dangling symlink");
+            Ok(())
+        }
+    }
 }
 
 #[cfg(test)]
@@ -268,15 +270,18 @@ mod tests {
     }
 
     #[test]
-    fn validate_symlinks_rejects_dangling() {
+    fn validate_symlinks_tolerates_dangling() {
         let dir = tempfile::tempdir().unwrap();
         let root = dir.path().canonicalize().unwrap();
 
         #[cfg(unix)]
         {
             std::os::unix::fs::symlink("nonexistent/target", root.join("bad")).unwrap();
-            let err = validate_symlinks(&root).unwrap_err();
-            assert_eq!(err.kind(), io::ErrorKind::InvalidInput);
+            validate_symlinks(&root).unwrap();
+            assert!(
+                root.join("bad").symlink_metadata().is_err(),
+                "dangling symlink must be removed"
+            );
         }
     }
 
