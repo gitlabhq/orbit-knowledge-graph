@@ -190,13 +190,20 @@ async fn run_webserver(
     )
     .with_resolver_registry(Arc::new(resolver_registry));
 
+    info!("initializing NATS connection");
+    let nats = Arc::new(
+        nats_client::NatsClient::connect(&config.nats)
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
+    );
+
+    let kv_services: Arc<dyn nats_client::KvServices> =
+        Arc::new(nats_client::KvServicesImpl::new(Arc::clone(&nats)));
+    let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(kv_services);
+    grpc_server = grpc_server.with_indexing_status(indexing_status_store);
+
     if config.query.default.graph_query_cache_enabled == Some(true) {
-        info!("initializing NATS connection for graph query cache");
-        let nats = Arc::new(
-            nats_client::NatsClient::connect(&config.nats)
-                .await
-                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
-        );
+        info!("graph query cache enabled");
         grpc_server = grpc_server.with_cache_broker(nats);
     }
 
