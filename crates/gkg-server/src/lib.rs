@@ -1,4 +1,5 @@
 pub mod auth;
+pub mod billing;
 pub mod cli;
 pub mod cluster_health;
 pub mod content;

@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
+use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
@@ -11,7 +12,7 @@ use tokio::sync::mpsc;
 use tonic::{Status, Streaming};
 
 use query_engine::pipeline::{
-    PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
+    MultiObserver, PipelineError, PipelineObserver, PipelineRunner, QueryPipelineContext, TypeMap,
 };
 use query_engine::shared::{CompilationStage, ExtractionStage, OutputStage, PipelineOutput};
 
@@ -27,6 +28,7 @@ pub struct QueryPipelineService {
     profiling: ProfilingConfig,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsBroker>>,
+    billing_tracker: Option<Arc<dyn BillingTracker>>,
 }
 
 impl QueryPipelineService {
@@ -41,6 +43,7 @@ impl QueryPipelineService {
             profiling,
             resolver_registry: None,
             cache_broker: None,
+            billing_tracker: None,
         }
     }
 
@@ -54,6 +57,11 @@ impl QueryPipelineService {
         self
     }
 
+    pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
+        self.billing_tracker = Some(tracker);
+        self
+    }
+
     pub async fn run_query(
         &self,
         claims: Claims,
@@ -61,7 +69,13 @@ impl QueryPipelineService {
         tx: mpsc::Sender<Result<ExecuteQueryMessage, Status>>,
         stream: Streaming<ExecuteQueryMessage>,
     ) -> Result<PipelineOutput, PipelineError> {
-        let mut obs = OTelPipelineObserver::start();
+        let mut obs = MultiObserver::new(vec![
+            Box::new(OTelPipelineObserver::start()),
+            Box::new(BillingObserver::new(
+                self.billing_tracker.clone(),
+                claims.clone(),
+            )),
+        ]);
 
         let mut server_extensions = TypeMap::default();
         server_extensions.insert(Arc::clone(&self.client));

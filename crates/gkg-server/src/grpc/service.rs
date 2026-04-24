@@ -10,7 +10,9 @@ use tokio_stream::wrappers::ReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
+use super::auth::extract_claims;
 use crate::auth::{Claims, JwtValidator};
+use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
@@ -24,8 +26,6 @@ use crate::proto::{
 };
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
-
-use super::auth::extract_claims;
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
     match name {
@@ -84,6 +84,11 @@ impl KnowledgeGraphServiceImpl {
 
     pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
         self.pipeline = self.pipeline.with_cache_broker(broker);
+        self
+    }
+
+    pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
+        self.pipeline = self.pipeline.with_billing(tracker);
         self
     }
 }
@@ -716,6 +721,14 @@ mod tests {
             group_traversal_ids: vec![],
             source_type: "rest".into(),
             ai_session_id: None,
+            instance_id: None,
+            unique_instance_id: None,
+            instance_version: None,
+            global_user_id: None,
+            host_name: None,
+            root_namespace_id: None,
+            deployment_type: None,
+            realm: None,
         }
     }
 
