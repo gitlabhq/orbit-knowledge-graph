@@ -37,7 +37,9 @@ impl SecurityStage {
             claims
                 .group_traversal_ids
                 .iter()
-                .map(|tp| TraversalPath::new(tp.path.clone(), tp.access_level))
+                .map(|tp| {
+                    TraversalPath::with_access_levels(tp.path.clone(), tp.access_levels.clone())
+                })
                 .collect()
         };
         SecurityContext::new_with_roles(org_id, traversal_paths)
@@ -108,14 +110,14 @@ mod tests {
     fn reporter(path: &str) -> TraversalPathClaim {
         TraversalPathClaim {
             path: path.to_string(),
-            access_level: 20,
+            access_levels: vec![20],
         }
     }
 
     fn developer(path: &str) -> TraversalPathClaim {
         TraversalPathClaim {
             path: path.to_string(),
-            access_level: 30,
+            access_levels: vec![30],
         }
     }
 
@@ -134,8 +136,8 @@ mod tests {
         assert_eq!(paths(&ctx), vec!["42/".to_string()]);
         // Admin is tagged Owner so entity-level required_role gates always pass.
         assert_eq!(
-            ctx.traversal_paths[0].access_level,
-            ADMIN_ORG_ROOT_ACCESS_LEVEL
+            ctx.traversal_paths[0].access_levels,
+            vec![ADMIN_ORG_ROOT_ACCESS_LEVEL]
         );
     }
 
@@ -151,7 +153,11 @@ mod tests {
         let claims = make_claims(false, vec![reporter("1/22/"), reporter("1/33/")], Some(1));
         let ctx = SecurityStage::build_context(&claims).unwrap();
         assert_eq!(paths(&ctx), vec!["1/22/".to_string(), "1/33/".to_string()]);
-        assert!(ctx.traversal_paths.iter().all(|tp| tp.access_level == 20));
+        assert!(
+            ctx.traversal_paths
+                .iter()
+                .all(|tp| tp.access_levels == vec![20])
+        );
     }
 
     #[test]
@@ -171,5 +177,23 @@ mod tests {
 
         assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "1/33/"]);
         assert_eq!(ctx.paths_at_least(30), vec!["1/33/"]);
+    }
+
+    #[test]
+    fn exact_access_levels_propagate_into_context() {
+        let claims = make_claims(
+            false,
+            vec![TraversalPathClaim {
+                path: "1/22/".to_string(),
+                access_levels: vec![20, 25],
+            }],
+            Some(1),
+        );
+        let ctx = SecurityStage::build_context(&claims).unwrap();
+
+        assert_eq!(ctx.traversal_paths[0].access_levels, vec![20, 25]);
+        assert_eq!(ctx.paths_at_least(20), vec!["1/22/"]);
+        assert_eq!(ctx.paths_at_least(25), vec!["1/22/"]);
+        assert!(ctx.paths_at_least(30).is_empty());
     }
 }

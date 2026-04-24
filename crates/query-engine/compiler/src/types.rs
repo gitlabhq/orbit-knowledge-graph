@@ -39,22 +39,30 @@ impl AccessLevel {
     }
 }
 
-/// A traversal path the user is entitled to see, plus the highest access
-/// level they hold on that path. The access level is stored as the raw
-/// GitLab integer (matching `Gitlab::Access` in Rails) so that comparing
+/// A traversal path the user is entitled to see, plus the exact effective
+/// access levels they hold on that path. The access levels are stored as raw
+/// GitLab integers (matching `Gitlab::Access` in Rails) so that comparing
 /// against an entity's `required_access_level` is a direct `>=` without a
 /// role-table lookup.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct TraversalPath {
     pub path: String,
-    pub access_level: u32,
+    pub access_levels: Vec<u32>,
 }
 
 impl TraversalPath {
     pub fn new(path: impl Into<String>, access_level: u32) -> Self {
+        Self::with_access_levels(path, vec![access_level])
+    }
+
+    pub fn with_access_levels(path: impl Into<String>, access_levels: Vec<u32>) -> Self {
+        let mut access_levels = access_levels;
+        access_levels.sort_unstable();
+        access_levels.dedup();
+
         Self {
             path: path.into(),
-            access_level,
+            access_levels,
         }
     }
 }
@@ -65,9 +73,9 @@ impl TraversalPath {
 /// a specific organization's data, plus optional role metadata from
 /// the JWT claims for access-gated features (e.g. debug output).
 ///
-/// Each entry in `traversal_paths` carries the user's highest role on that
-/// path. The compiler security pass uses the per-path role to drop paths
-/// that do not meet an entity's `required_access_level`, which is how
+/// Each entry in `traversal_paths` carries the user's exact role set on that
+/// path. The compiler security pass uses the per-path roles to drop paths that
+/// do not meet an entity's `required_access_level`, which is how
 /// aggregation queries over e.g. Vulnerability are redacted for users who
 /// only have Reporter access.
 #[derive(Debug, Clone)]
@@ -99,6 +107,12 @@ impl SecurityContext {
     pub fn new_with_roles(org_id: i64, traversal_paths: Vec<TraversalPath>) -> Result<Self> {
         for tp in &traversal_paths {
             Self::validate_traversal_path(&tp.path, org_id)?;
+            if tp.access_levels.is_empty() {
+                return Err(QueryError::Security(format!(
+                    "traversal_path '{}' has no access_levels",
+                    tp.path
+                )));
+            }
         }
         Ok(Self {
             org_id,
@@ -114,13 +128,17 @@ impl SecurityContext {
         self
     }
 
-    /// Return the subset of paths where the user's access level meets
+    /// Return the subset of paths where one of the user's access levels meets
     /// `required_access_level`. Admin users bypass the filter because they
     /// already carry the synthetic org-root path at maximum role.
     pub fn paths_at_least(&self, required_access_level: u32) -> Vec<&str> {
         self.traversal_paths
             .iter()
-            .filter(|tp| tp.access_level >= required_access_level)
+            .filter(|tp| {
+                tp.access_levels
+                    .iter()
+                    .any(|level| *level >= required_access_level)
+            })
             .map(|tp| tp.path.as_str())
             .collect()
     }
