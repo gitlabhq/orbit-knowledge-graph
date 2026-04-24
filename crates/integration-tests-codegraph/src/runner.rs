@@ -62,7 +62,7 @@ impl GraphConverter for LanceConverter {
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, code_graph::v2::SinkError> {
         let row_ctx = RowContext::empty();
         let ds = to_lance_datasets(&graph, &row_ctx)
-            .map_err(|e| code_graph::v2::SinkError(format!("lance conversion: {e}")))?;
+            .map_err(|e| code_graph::v2::SinkError(format!("Lance conversion: {e}")))?;
         let mut datasets = self.datasets.lock().unwrap();
         extend_datasets(&mut datasets, ds);
         Ok(Vec::new())
@@ -207,7 +207,8 @@ pub async fn run_yaml_suite(yaml: &str) {
             let imps = AtomicUsize::new(0);
             let edgs = AtomicUsize::new(0);
             {
-                let btx = BatchTx::new(&tx, &converter, &defs, &imps, &edgs);
+                let errors = std::sync::Mutex::new(Vec::new());
+                let btx = BatchTx::new(&tx, &converter, &errors, &defs, &imps, &edgs);
                 dispatch_by_tag(tag, &files, &ctx, &btx)
                     .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));

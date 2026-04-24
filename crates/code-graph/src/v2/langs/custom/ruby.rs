@@ -38,10 +38,7 @@ impl LanguagePipeline for RubyPipeline {
             let source = match std::fs::read_to_string(&abs_path) {
                 Ok(s) => s,
                 Err(e) => {
-                    errors.push(PipelineError {
-                        file_path: file_path.clone(),
-                        error: e.to_string(),
-                    });
+                    errors.push(PipelineError::parse(file_path.clone(), e.to_string()));
                     continue;
                 }
             };
@@ -245,10 +242,11 @@ fn build_file_batch(files: &[FileEntry]) -> Result<RecordBatch, Vec<PipelineErro
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-file-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }
 
@@ -295,10 +293,11 @@ fn build_def_batch(defs: &[DefEntry]) -> Result<RecordBatch, Vec<PipelineError>>
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-definition-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }
 
@@ -337,9 +336,10 @@ fn build_edge_batch(edges: &[EdgeEntry]) -> Result<RecordBatch, Vec<PipelineErro
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-edge-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }

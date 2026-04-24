@@ -304,17 +304,15 @@ fn parse_rust_file_standalone(
 ) -> Result<ParsedRustFile, PipelineError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let relative_path = relative_path(root_path, &abs_path);
-    let source = std::fs::read_to_string(&abs_path).map_err(|err| PipelineError {
-        file_path: file_path.to_string(),
-        error: format!("Read error: {err}"),
-    })?;
+    let source = std::fs::read_to_string(&abs_path)
+        .map_err(|err| PipelineError::parse(file_path, format!("Read error: {err}")))?;
     let file_module_parts = fallback_file_module_parts(&relative_path);
     let workspace = standalone_workspace(&relative_path, source, Path::new(root_path));
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
-        return Err(PipelineError {
-            file_path: file_path.to_string(),
-            error: "standalone rust-analyzer workspace did not materialize file".to_string(),
-        });
+        return Err(PipelineError::parse(
+            file_path,
+            "standalone rust-analyzer workspace did not materialize file",
+        ));
     };
     let sema = Semantics::new(&workspace.db);
     let source_file = sema.parse_guess_edition(file_id);

@@ -343,9 +343,11 @@ mod tests {
                 crate::v2::config::Language::Java,
                 &Tracer::new(false),
             )
-            .map_err(|e| crate::v2::pipeline::PipelineError {
-                file_path: "Test.java".to_string(),
-                error: format!("Invalid UTF-8: {:?}", e),
+            .map_err(|e| {
+                crate::v2::pipeline::PipelineError::parse(
+                    "Test.java",
+                    format!("Invalid UTF-8: {:?}", e),
+                )
             })
             .map(|r| crate::v2::dsl::engine::ParsedDefs {
                 definitions: r.definitions,

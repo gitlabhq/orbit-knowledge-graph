@@ -8,8 +8,8 @@ use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex};
 
 use crate::v2::linker::CodeGraph;
 use crate::v2::trace::Tracer;
@@ -128,6 +128,7 @@ impl LanguageContext {
 pub struct BatchTx<'a> {
     tx: &'a Sender<(String, RecordBatch)>,
     converter: &'a dyn GraphConverter,
+    errors: &'a Mutex<Vec<PipelineError>>,
     definitions: &'a AtomicUsize,
     imports: &'a AtomicUsize,
     edges: &'a AtomicUsize,
@@ -137,6 +138,7 @@ impl<'a> BatchTx<'a> {
     pub fn new(
         tx: &'a Sender<(String, RecordBatch)>,
         converter: &'a dyn GraphConverter,
+        errors: &'a Mutex<Vec<PipelineError>>,
         definitions: &'a AtomicUsize,
         imports: &'a AtomicUsize,
         edges: &'a AtomicUsize,
@@ -144,6 +146,7 @@ impl<'a> BatchTx<'a> {
         Self {
             tx,
             converter,
+            errors,
             definitions,
             imports,
             edges,
@@ -162,14 +165,22 @@ impl BatchTx<'_> {
         self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
-            Err(e) => {
-                tracing::error!(error = %e, "graph conversion failed — data dropped");
+            Err(error) => {
+                self.errors.lock().unwrap().push(PipelineError::fatal(
+                    "<conversion>",
+                    error.to_string(),
+                    "arrow_conversion",
+                ));
                 return;
             }
         };
         for (table, batch) in batches {
             if self.tx.send((table, batch)).is_err() {
-                tracing::warn!("batch channel closed — writer thread may have panicked");
+                self.errors.lock().unwrap().push(PipelineError::fatal(
+                    "<batch-channel>",
+                    "batch channel closed before writer accepted graph output",
+                    "write",
+                ));
                 return;
             }
         }
@@ -178,7 +189,11 @@ impl BatchTx<'_> {
     /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
         if self.tx.send((table, batch)).is_err() {
-            tracing::warn!("batch channel closed — writer thread may have panicked");
+            self.errors.lock().unwrap().push(PipelineError::fatal(
+                "<batch-channel>",
+                "batch channel closed before writer accepted raw output",
+                "write",
+            ));
         }
     }
 }
@@ -251,6 +266,32 @@ pub struct PipelineStats {
 pub struct PipelineError {
     pub file_path: String,
     pub error: String,
+    pub stage: &'static str,
+    pub fatal: bool,
+}
+
+impl PipelineError {
+    pub fn parse(file_path: impl Into<String>, error: impl Into<String>) -> Self {
+        Self {
+            file_path: file_path.into(),
+            error: error.into(),
+            stage: "indexing",
+            fatal: false,
+        }
+    }
+
+    pub fn fatal(
+        file_path: impl Into<String>,
+        error: impl Into<String>,
+        stage: &'static str,
+    ) -> Self {
+        Self {
+            file_path: file_path.into(),
+            error: error.into(),
+            stage,
+            fatal: true,
+        }
+    }
 }
 
 impl std::fmt::Display for PipelineError {
@@ -362,7 +403,11 @@ impl Pipeline {
                 s.spawn(move || {
                     for (table, batch) in rx {
                         if let Err(e) = sink.write_batch(&table, &batch) {
-                            tracing::error!(%language, error = %e, "writer batch failed");
+                            all_errors.lock().unwrap().push(PipelineError::fatal(
+                                format!("<writer:{language}>"),
+                                e.to_string(),
+                                "write",
+                            ));
                         }
                     }
                 });
@@ -400,6 +445,7 @@ impl Pipeline {
                     let btx = BatchTx {
                         tx: &tx,
                         converter: converter.as_ref(),
+                        errors: all_errors,
                         definitions: definitions_count,
                         imports: imports_count,
                         edges: edges_count,
@@ -896,7 +942,7 @@ where
 mod tests {
     use super::*;
     use crate::v2::linker::CodeGraph;
-    use crate::v2::sink::{GraphConverter, NullSink};
+    use crate::v2::sink::{GraphConverter, NullSink, SinkError};
     use crate::v2::types::{DefKind, NodeKind};
 
     /// Test-only converter that captures CodeGraphs for inspection.
@@ -917,10 +963,7 @@ mod tests {
     }
 
     impl GraphConverter for TestCapture {
-        fn convert(
-            &self,
-            graph: CodeGraph,
-        ) -> Result<Vec<(String, RecordBatch)>, crate::v2::SinkError> {
+        fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError> {
             self.graphs.lock().unwrap().push(graph);
             Ok(Vec::new())
         }
@@ -942,7 +985,8 @@ mod tests {
         let defs = AtomicUsize::new(0);
         let imps = AtomicUsize::new(0);
         let edgs = AtomicUsize::new(0);
-        let btx = BatchTx::new(&tx, capture.as_ref(), &defs, &imps, &edgs);
+        let errors = Mutex::new(Vec::new());
+        let btx = BatchTx::new(&tx, capture.as_ref(), &errors, &defs, &imps, &edgs);
         crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));

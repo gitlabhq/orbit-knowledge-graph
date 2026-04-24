@@ -224,7 +224,7 @@ impl code_graph::v2::GraphConverter for DuckDbConverter {
             &self.ontology,
         )
         .map(|data| data.tables)
-        .map_err(|e| code_graph::v2::SinkError(format!("DuckDB conversion: {e}")))
+        .map_err(|e| code_graph::v2::SinkError(format!("DuckDB graph conversion: {e}")))
     }
 }
 
