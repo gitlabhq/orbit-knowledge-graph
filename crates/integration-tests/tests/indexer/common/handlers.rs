@@ -15,13 +15,15 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
     let destination =
         ClickHouseDestination::new(ctx.config.clone(), Arc::new(EngineMetrics::default()))
             .expect("failed to create destination");
-    let nats = Arc::new(MockNatsServices::new());
+    let mock_nats = Arc::new(MockNatsServices::new());
     HandlerContext::new(
         Arc::new(destination),
-        nats.clone(),
+        mock_nats.clone(),
         Arc::new(MockLockService::new()),
         ProgressNotifier::noop(),
-        Arc::new(indexer::indexing_status::IndexingStatusStore::new(nats)),
+        Arc::new(indexer::indexing_status::IndexingStatusStore::new(
+            mock_nats,
+        )),
     )
 }
 

@@ -2,11 +2,10 @@ use std::sync::Arc;
 
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
+use nats_client::KvPutOptions;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use tracing::warn;
-
-use crate::nats::{KvPutOptions, NatsServices};
 
 pub const INDEXING_PROGRESS_BUCKET: &str = "orbit_indexing_progress";
 const KEY_PREFIX: &str = "status";
@@ -17,7 +16,7 @@ pub enum Error {
     EmptyTraversalPath,
 
     #[error("NATS KV operation failed: {0}")]
-    Nats(#[from] crate::nats::NatsError),
+    Nats(#[from] nats_client::NatsError),
 
     #[error("failed to deserialize indexing progress: {0}")]
     Deserialize(#[from] serde_json::Error),
@@ -35,12 +34,12 @@ pub struct IndexingProgress {
 }
 
 pub struct IndexingStatusStore {
-    nats: Arc<dyn NatsServices>,
+    kv: Arc<dyn nats_client::KvServices>,
 }
 
 impl IndexingStatusStore {
-    pub fn new(nats: Arc<dyn NatsServices>) -> Self {
-        Self { nats }
+    pub fn new(kv: Arc<dyn nats_client::KvServices>) -> Self {
+        Self { kv }
     }
 
     /// Read-modify-write — a concurrent call on the same path could lose the
@@ -91,7 +90,7 @@ impl IndexingStatusStore {
 
     pub async fn get(&self, traversal_path: &str) -> Result<Option<IndexingProgress>, Error> {
         let key = normalize_key(traversal_path)?;
-        let Some(entry) = self.nats.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
+        let Some(entry) = self.kv.kv_get(INDEXING_PROGRESS_BUCKET, &key).await? else {
             return Ok(None);
         };
         let progress = serde_json::from_slice::<IndexingProgress>(&entry.value)?;
@@ -116,7 +115,7 @@ impl IndexingStatusStore {
         };
 
         if let Err(error) = self
-            .nats
+            .kv
             .kv_put(
                 INDEXING_PROGRESS_BUCKET,
                 &key,

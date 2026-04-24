@@ -5,7 +5,7 @@ use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::ProfilingConfig;
-use indexer::nats::NatsBroker;
+use nats_client::NatsClient;
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -27,7 +27,7 @@ pub struct QueryPipelineService {
     client: Arc<ArrowClickHouseClient>,
     profiling: ProfilingConfig,
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
-    cache_broker: Option<Arc<NatsBroker>>,
+    cache_broker: Option<Arc<NatsClient>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
 }
 
@@ -52,7 +52,7 @@ impl QueryPipelineService {
         self
     }
 
-    pub fn with_cache_broker(mut self, broker: Arc<NatsBroker>) -> Self {
+    pub fn with_cache_broker(mut self, broker: Arc<NatsClient>) -> Self {
         self.cache_broker = Some(broker);
         self
     }

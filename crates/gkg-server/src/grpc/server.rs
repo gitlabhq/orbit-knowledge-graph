@@ -53,7 +53,7 @@ impl GrpcServer {
         self
     }
 
-    pub fn with_cache_broker(mut self, broker: Arc<indexer::nats::NatsBroker>) -> Self {
+    pub fn with_cache_broker(mut self, broker: Arc<nats_client::NatsClient>) -> Self {
         self.service = self.service.with_cache_broker(broker);
         self
     }

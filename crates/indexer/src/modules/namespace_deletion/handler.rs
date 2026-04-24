@@ -176,20 +176,20 @@ mod tests {
     use crate::destination::Destination;
     use crate::handler::HandlerContext;
     use crate::locking::LockService;
-    use crate::nats::{NatsServices, ProgressNotifier};
+    use crate::nats::ProgressNotifier;
     use crate::testkit::mocks::{MockDestination, MockLockService, MockNatsServices};
     use crate::types::Envelope;
 
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
     fn handler_context() -> HandlerContext {
-        let nats: Arc<dyn NatsServices> = Arc::new(MockNatsServices::new());
+        let mock_nats = Arc::new(MockNatsServices::new());
         HandlerContext::new(
             Arc::new(MockDestination::new()) as Arc<dyn Destination>,
-            nats.clone(),
+            mock_nats.clone(),
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
             ProgressNotifier::noop(),
-            Arc::new(crate::indexing_status::IndexingStatusStore::new(nats)),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         )
     }
 

@@ -1,14 +1,7 @@
-//! NATS-specific error types.
-
 use thiserror::Error;
-
-use crate::types::SerializationError;
 
 #[derive(Debug, Error)]
 pub enum NatsError {
-    #[error("serialization failed: {0}")]
-    Serialization(#[from] SerializationError),
-
     #[error("failed to publish message: {0}")]
     Publish(String),
 
@@ -71,16 +64,4 @@ pub enum NatsError {
 
 pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {
     NatsError::Connection(error.to_string())
-}
-
-pub(crate) fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {
-    NatsError::Subscribe(error.to_string())
-}
-
-pub(crate) fn map_ack_error(error: async_nats::Error) -> NatsError {
-    NatsError::Ack(error.to_string())
-}
-
-pub(crate) fn map_nack_error(error: async_nats::Error) -> NatsError {
-    NatsError::Nack(error.to_string())
 }

@@ -48,18 +48,13 @@
 
 use async_trait::async_trait;
 use bytes::Bytes;
+use nats_client::{KvEntry, KvPutOptions, KvPutResult};
 
 use crate::types::{Envelope, Subscription};
+use nats_client::NatsError;
 
-use super::error::NatsError;
-use super::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 use super::message::NatsMessage;
 
-/// Mockable interface for NATS operations used by handlers.
-///
-/// This trait abstracts NATS operations that handlers might need,
-/// allowing for easy mocking in unit tests while the engine uses
-/// the real NATS broker directly.
 #[async_trait]
 pub trait NatsServices: Send + Sync {
     async fn publish(
