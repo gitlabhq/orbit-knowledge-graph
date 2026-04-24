@@ -49,6 +49,7 @@ pub struct NatsBroker {
     kv_stores: RwLock<HashMap<String, KvStore>>,
     subscription_handles: Mutex<Vec<JoinHandle<()>>>,
     cancellation_token: CancellationToken,
+    metrics: RwLock<Option<Arc<EngineMetrics>>>,
 }
 
 impl NatsBroker {
@@ -74,7 +75,20 @@ impl NatsBroker {
             kv_stores: RwLock::new(HashMap::new()),
             subscription_handles: Mutex::new(Vec::new()),
             cancellation_token: CancellationToken::new(),
+            metrics: RwLock::new(None),
         })
+    }
+
+    /// Attaches metrics so broker operations can record NATS errors by
+    /// operation/kind/transient. Called once by the engine at startup.
+    pub async fn set_metrics(&self, metrics: Arc<EngineMetrics>) {
+        *self.metrics.write().await = Some(metrics);
+    }
+
+    async fn record_error(&self, operation: &'static str, error: &NatsError) {
+        if let Some(metrics) = self.metrics.read().await.as_ref() {
+            metrics.record_nats_error(operation, error);
+        }
     }
 
     pub async fn shutdown(self) {
@@ -135,16 +149,83 @@ impl NatsBroker {
         }
 
         for (stream_name, subjects) in managed_streams {
-            self.create_or_update_stream(stream_name, subjects).await?;
+            let subjects_clone = subjects.clone();
+            self.retry_transient("stream_create", || {
+                let subjects = subjects_clone.clone();
+                async move { self.create_or_update_stream(stream_name, subjects).await }
+            })
+            .await?;
         }
 
         for stream_name in unmanaged_streams {
-            self.get_stream(stream_name).await?;
+            self.retry_transient("stream_get", || async move {
+                self.get_stream(stream_name).await
+            })
+            .await?;
         }
 
-        self.ensure_dead_letter_stream().await?;
+        self.retry_transient("stream_create", || async {
+            self.ensure_dead_letter_stream().await
+        })
+        .await?;
 
         Ok(())
+    }
+
+    /// Runs an async NATS op with exponential backoff on transient errors.
+    ///
+    /// Cap is `startup_retry_max_attempts`; each attempt delay doubles up to
+    /// `startup_retry_max_delay`. Non-transient errors abort immediately.
+    /// Every attempt's error is counted via the `nats.errors` metric; only the
+    /// final error is logged at ERROR, intermediate attempts at WARN.
+    #[doc(hidden)]
+    pub async fn retry_transient<F, Fut, T>(
+        &self,
+        operation: &'static str,
+        mut op: F,
+    ) -> Result<T, NatsError>
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, NatsError>>,
+    {
+        let max_attempts = self.config.startup_retry_max_attempts.max(1);
+        let initial_delay = self.config.startup_retry_initial_delay();
+        let max_delay = self.config.startup_retry_max_delay();
+        let mut delay = initial_delay;
+
+        for attempt in 1..=max_attempts {
+            match op().await {
+                Ok(value) => return Ok(value),
+                Err(error) => {
+                    self.record_error(operation, &error).await;
+                    let transient = error.is_transient();
+                    let is_final = attempt == max_attempts || !transient;
+                    if is_final {
+                        tracing::error!(
+                            operation,
+                            attempt,
+                            transient,
+                            error = %error,
+                            "NATS operation failed"
+                        );
+                        return Err(error);
+                    }
+                    let jittered = apply_jitter(delay);
+                    warn!(
+                        operation,
+                        attempt,
+                        max_attempts,
+                        backoff_ms = jittered.as_millis() as u64,
+                        error = %error,
+                        "transient NATS error; retrying"
+                    );
+                    tokio::time::sleep(jittered).await;
+                    delay = (delay * 2).min(max_delay);
+                }
+            }
+        }
+        // Unreachable: the loop always returns on the last attempt.
+        unreachable!("retry loop exited without returning")
     }
 
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
@@ -630,6 +711,22 @@ impl NatsBroker {
     }
 }
 
+/// Applies ±25% jitter to a retry delay using a cheap PRNG seeded from the
+/// system clock. Keeps callers using the same broker from synchronising their
+/// retry storms against the upstream.
+fn apply_jitter(delay: Duration) -> Duration {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.subsec_nanos())
+        .unwrap_or(0);
+    // Fraction in [-0.25, 0.25) based on a nanosecond-scale source.
+    let frac = (nanos as f64 / 1_000_000_000.0 - 0.5) * 0.5;
+    let base = delay.as_millis() as f64;
+    let jittered = (base * (1.0 + frac)).max(1.0);
+    Duration::from_millis(jittered as u64)
+}
+
 /// async_nats has no typed variant for per-subject limit rejection; it falls through to PublishErrorKind::Other.
 fn is_per_subject_limit_error(error: &PublishError) -> bool {
     use std::error::Error as _;
@@ -640,4 +737,95 @@ fn is_per_subject_limit_error(error: &PublishError) -> bool {
         return api_error.error_code() == ErrorCode::STREAM_STORE_FAILED;
     }
     false
+}
+
+#[cfg(test)]
+mod retry_tests {
+    use super::*;
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    fn transient_error() -> NatsError {
+        NatsError::Subscribe("503, None".into())
+    }
+
+    fn terminal_error() -> NatsError {
+        NatsError::Subscribe("permission denied".into())
+    }
+
+    fn fast_retry_config() -> NatsConfiguration {
+        NatsConfiguration {
+            url: "localhost:4222".into(),
+            startup_retry_max_attempts: 4,
+            startup_retry_initial_delay_ms: 1,
+            startup_retry_max_delay_secs: 1,
+            ..Default::default()
+        }
+    }
+
+    // Extracted retry algorithm for pure tests. Mirrors the method body on
+    // `NatsBroker::retry_transient` so the algorithm can be exercised
+    // without a live NATS client (async_nats has no no-op constructor).
+    async fn retry_loop<F, Fut, T>(
+        config: &NatsConfiguration,
+        mut op: F,
+    ) -> (Result<T, NatsError>, u32)
+    where
+        F: FnMut() -> Fut,
+        Fut: std::future::Future<Output = Result<T, NatsError>>,
+    {
+        let max_attempts = config.startup_retry_max_attempts.max(1);
+        let initial_delay = config.startup_retry_initial_delay();
+        let max_delay = config.startup_retry_max_delay();
+        let mut delay = initial_delay;
+        for attempt in 1..=max_attempts {
+            match op().await {
+                Ok(v) => return (Ok(v), attempt),
+                Err(e) => {
+                    if attempt == max_attempts || !e.is_transient() {
+                        return (Err(e), attempt);
+                    }
+                    tokio::time::sleep(apply_jitter(delay)).await;
+                    delay = (delay * 2).min(max_delay);
+                }
+            }
+        }
+        unreachable!()
+    }
+
+    #[tokio::test]
+    async fn retries_transient_until_success() {
+        let config = fast_retry_config();
+        let attempts = AtomicU32::new(0);
+        let (result, count) = retry_loop::<_, _, ()>(&config, || {
+            let n = attempts.fetch_add(1, Ordering::SeqCst);
+            async move {
+                if n < 2 {
+                    Err(transient_error())
+                } else {
+                    Ok(())
+                }
+            }
+        })
+        .await;
+        assert!(result.is_ok());
+        assert_eq!(count, 3);
+    }
+
+    #[tokio::test]
+    async fn gives_up_after_max_attempts_on_persistent_transient() {
+        let config = fast_retry_config();
+        let (result, count) =
+            retry_loop::<_, _, ()>(&config, || async { Err::<(), _>(transient_error()) }).await;
+        assert!(result.is_err());
+        assert_eq!(count, config.startup_retry_max_attempts);
+    }
+
+    #[tokio::test]
+    async fn fails_fast_on_terminal_error() {
+        let config = fast_retry_config();
+        let (result, count) =
+            retry_loop::<_, _, ()>(&config, || async { Err::<(), _>(terminal_error()) }).await;
+        assert!(result.is_err());
+        assert_eq!(count, 1);
+    }
 }

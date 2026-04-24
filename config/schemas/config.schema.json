@@ -164,6 +164,9 @@
         "max_deliver": 5,
         "password": null,
         "request_timeout_secs": 5,
+        "startup_retry_initial_delay_ms": 500,
+        "startup_retry_max_attempts": 5,
+        "startup_retry_max_delay_secs": 15,
         "stream_max_age_secs": null,
         "stream_max_bytes": null,
         "stream_max_messages": null,
@@ -885,6 +888,27 @@
           "type": "integer",
           "format": "uint64",
           "default": 5,
+          "minimum": 0
+        },
+        "startup_retry_initial_delay_ms": {
+          "description": "Initial delay (milliseconds) between startup stream-setup retries.\nDoubles each attempt, capped at `startup_retry_max_delay_secs`. Defaults to 500ms.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 500,
+          "minimum": 0
+        },
+        "startup_retry_max_attempts": {
+          "description": "How many times to retry a transient JetStream stream-setup failure\nduring `ensure_streams` before giving up and exiting. Defaults to 5.\n\n\"Transient\" means JetStream stream-offline, meta-layer timeouts, and\nsubscribe-path 503 responses. Non-transient errors still fail fast.",
+          "type": "integer",
+          "format": "uint32",
+          "default": 5,
+          "minimum": 0
+        },
+        "startup_retry_max_delay_secs": {
+          "description": "Upper bound on the per-attempt delay during startup retries. Defaults to 15s.",
+          "type": "integer",
+          "format": "uint64",
+          "default": 15,
           "minimum": 0
         },
         "stream_max_age_secs": {

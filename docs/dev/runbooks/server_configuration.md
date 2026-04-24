@@ -66,6 +66,9 @@ All modes share the same configuration structure.
 | `nats.stream_max_age_secs` | `GKG_NATS__STREAM_MAX_AGE_SECS` | None | Max message age before deletion |
 | `nats.stream_max_bytes` | `GKG_NATS__STREAM_MAX_BYTES` | None | Max stream size in bytes |
 | `nats.stream_max_messages` | `GKG_NATS__STREAM_MAX_MESSAGES` | None | Max messages per stream |
+| `nats.startup_retry_max_attempts` | | `5` | Retries for transient JetStream errors during `ensure_streams` (e.g. "stream offline" during cluster recovery). |
+| `nats.startup_retry_initial_delay_ms` | | `500` | Initial backoff; doubles each attempt. |
+| `nats.startup_retry_max_delay_secs` | | `15` | Per-attempt backoff cap. |
 
 The `GKG_INDEXER` stream is created with:
 

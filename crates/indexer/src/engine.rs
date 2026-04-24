@@ -180,6 +180,7 @@ impl Engine {
 
         self.validate_concurrency_groups(configuration)?;
 
+        self.broker.set_metrics(self.metrics.clone()).await;
         self.broker.ensure_streams(&subscriptions).await?;
 
         let runtime = Arc::new(EngineRuntime {

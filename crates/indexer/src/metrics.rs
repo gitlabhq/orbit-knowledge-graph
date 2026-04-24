@@ -31,6 +31,7 @@ pub struct EngineMetrics {
     pub(crate) destination_bytes_written: Counter<u64>,
     pub(crate) destination_write_errors: Counter<u64>,
     pub(crate) handler_errors: Counter<u64>,
+    pub(crate) nats_errors: Counter<u64>,
 }
 
 impl EngineMetrics {
@@ -52,6 +53,7 @@ impl EngineMetrics {
             destination_bytes_written: etl::DESTINATION_BYTES_WRITTEN.build_counter_u64(meter),
             destination_write_errors: etl::DESTINATION_WRITE_ERRORS.build_counter_u64(meter),
             handler_errors: etl::HANDLER_ERRORS.build_counter_u64(meter),
+            nats_errors: etl::NATS_ERRORS.build_counter_u64(meter),
         }
     }
 }
@@ -104,6 +106,21 @@ impl EngineMetrics {
     pub(crate) fn record_write_error(&self, table: &str) {
         self.destination_write_errors
             .add(1, &[KeyValue::new(etl::labels::TABLE, table.to_owned())]);
+    }
+
+    pub(crate) fn record_nats_error(
+        &self,
+        operation: &'static str,
+        error: &crate::nats::NatsError,
+    ) {
+        self.nats_errors.add(
+            1,
+            &[
+                KeyValue::new(etl::labels::OPERATION, operation),
+                KeyValue::new(etl::labels::ERROR_KIND, error.variant_name()),
+                KeyValue::new(etl::labels::TRANSIENT, error.is_transient()),
+            ],
+        );
     }
 }
 

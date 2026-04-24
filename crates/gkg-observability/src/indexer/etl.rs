@@ -12,6 +12,8 @@ pub mod labels {
     pub const TABLE: &str = "table";
     pub const PERMIT_KIND: &str = "permit_kind";
     pub const GROUP: &str = "group";
+    pub const OPERATION: &str = "operation";
+    pub const TRANSIENT: &str = "transient";
 }
 
 const DOMAIN: &str = "indexer.etl";
@@ -112,6 +114,14 @@ pub const HANDLER_ERRORS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const NATS_ERRORS: MetricSpec = MetricSpec::counter(
+    "gkg.etl.nats.errors",
+    "Total NATS broker errors, labelled by operation (stream_create, stream_get, publish, subscribe, fetch, kv_get, kv_put, kv_delete, kv_keys), error_kind (NatsError variant), and transient (true|false).",
+    None,
+    &[labels::OPERATION, labels::ERROR_KIND, labels::TRANSIENT],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &MESSAGES_PROCESSED,
     &MESSAGE_DURATION,
@@ -124,4 +134,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &DESTINATION_BYTES_WRITTEN,
     &DESTINATION_WRITE_ERRORS,
     &HANDLER_ERRORS,
+    &NATS_ERRORS,
 ];

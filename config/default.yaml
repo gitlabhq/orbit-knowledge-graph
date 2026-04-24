@@ -21,6 +21,9 @@ nats:
   # stream_max_age_secs: null
   # stream_max_bytes: null
   # stream_max_messages: null
+  # startup_retry_max_attempts: 5       # retries for transient JetStream errors during ensure_streams
+  # startup_retry_initial_delay_ms: 500 # doubles each attempt, capped at max_delay
+  # startup_retry_max_delay_secs: 15
 
 datalake:
   url: "http://127.0.0.1:8123"

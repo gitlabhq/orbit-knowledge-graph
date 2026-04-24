@@ -445,3 +445,105 @@ async fn in_progress_prevents_redelivery() {
 
     message.ack().await.expect("failed to ack");
 }
+
+#[tokio::test]
+async fn retries_transient_stream_setup_until_success() {
+    // Happy-path smoke test for the startup backoff. Tight retry parameters
+    // keep the test fast, and ensure_streams still has to converge on a real
+    // JetStream cluster via the retry loop.
+    let (_container, url) = start_nats_container().await;
+
+    let config = NatsConfiguration {
+        url: url.clone(),
+        auto_create_streams: true,
+        startup_retry_max_attempts: 3,
+        startup_retry_initial_delay_ms: 10,
+        startup_retry_max_delay_secs: 1,
+        ..Default::default()
+    };
+
+    let broker = connect_broker(&config).await;
+    let subscription = Subscription::new("retry_stream", "retry.events");
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("ensure_streams should succeed");
+
+    assert_stream_has_subjects(&url, "retry_stream", &["retry.events"]).await;
+}
+
+#[tokio::test]
+async fn retry_transient_recovers_after_intermittent_errors() {
+    // Drives the public `retry_transient` helper directly with a counter
+    // that fails twice with a transient error before returning Ok. Validates
+    // attempt count without needing to tear down a NATS cluster mid-test.
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    let (_container, url) = start_nats_container().await;
+    let config = NatsConfiguration {
+        url,
+        startup_retry_max_attempts: 5,
+        startup_retry_initial_delay_ms: 5,
+        startup_retry_max_delay_secs: 1,
+        ..Default::default()
+    };
+    let broker = connect_broker(&config).await;
+
+    let attempts = Arc::new(AtomicU32::new(0));
+    let attempts_inner = attempts.clone();
+
+    let result: Result<&'static str, _> = broker
+        .retry_transient("stream_create", move || {
+            let attempts = attempts_inner.clone();
+            async move {
+                let n = attempts.fetch_add(1, Ordering::SeqCst);
+                if n < 2 {
+                    Err(indexer::nats::NatsError::Subscribe(
+                        "stream is offline (code 500, error code 10118)".into(),
+                    ))
+                } else {
+                    Ok("ready")
+                }
+            }
+        })
+        .await;
+
+    assert_eq!(result.expect("op should succeed after retries"), "ready");
+    assert_eq!(attempts.load(Ordering::SeqCst), 3);
+}
+
+#[tokio::test]
+async fn retry_transient_fails_fast_on_terminal_error() {
+    let (_container, url) = start_nats_container().await;
+    let config = NatsConfiguration {
+        url,
+        startup_retry_max_attempts: 5,
+        startup_retry_initial_delay_ms: 5,
+        startup_retry_max_delay_secs: 1,
+        ..Default::default()
+    };
+    let broker = connect_broker(&config).await;
+
+    use std::sync::atomic::{AtomicU32, Ordering};
+    let attempts = Arc::new(AtomicU32::new(0));
+    let attempts_inner = attempts.clone();
+
+    let result: Result<(), _> = broker
+        .retry_transient("stream_create", move || {
+            let attempts = attempts_inner.clone();
+            async move {
+                attempts.fetch_add(1, Ordering::SeqCst);
+                Err(indexer::nats::NatsError::Subscribe(
+                    "permission denied".into(),
+                ))
+            }
+        })
+        .await;
+
+    assert!(result.is_err(), "terminal error should propagate");
+    assert_eq!(
+        attempts.load(Ordering::SeqCst),
+        1,
+        "non-transient errors should not be retried"
+    );
+}

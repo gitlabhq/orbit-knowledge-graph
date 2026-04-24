@@ -113,6 +113,23 @@ pub struct NatsConfiguration {
     /// matching messages in filtered consumers. Defaults to 5.
     #[serde(default = "NatsConfiguration::default_fetch_expires_secs")]
     pub fetch_expires_secs: u64,
+
+    /// How many times to retry a transient JetStream stream-setup failure
+    /// during `ensure_streams` before giving up and exiting. Defaults to 5.
+    ///
+    /// "Transient" means JetStream stream-offline, meta-layer timeouts, and
+    /// subscribe-path 503 responses. Non-transient errors still fail fast.
+    #[serde(default = "NatsConfiguration::default_startup_retry_max_attempts")]
+    pub startup_retry_max_attempts: u32,
+
+    /// Initial delay (milliseconds) between startup stream-setup retries.
+    /// Doubles each attempt, capped at `startup_retry_max_delay_secs`. Defaults to 500ms.
+    #[serde(default = "NatsConfiguration::default_startup_retry_initial_delay_ms")]
+    pub startup_retry_initial_delay_ms: u64,
+
+    /// Upper bound on the per-attempt delay during startup retries. Defaults to 15s.
+    #[serde(default = "NatsConfiguration::default_startup_retry_max_delay_secs")]
+    pub startup_retry_max_delay_secs: u64,
 }
 
 impl NatsConfiguration {
@@ -150,6 +167,26 @@ impl NatsConfiguration {
 
     fn default_fetch_expires_secs() -> u64 {
         5
+    }
+
+    fn default_startup_retry_max_attempts() -> u32 {
+        5
+    }
+
+    fn default_startup_retry_initial_delay_ms() -> u64 {
+        500
+    }
+
+    fn default_startup_retry_max_delay_secs() -> u64 {
+        15
+    }
+
+    pub fn startup_retry_initial_delay(&self) -> Duration {
+        Duration::from_millis(self.startup_retry_initial_delay_ms)
+    }
+
+    pub fn startup_retry_max_delay(&self) -> Duration {
+        Duration::from_secs(self.startup_retry_max_delay_secs)
     }
 
     /// Returns true when TLS is configured -- either via cert paths or a `tls://` url scheme.
@@ -266,6 +303,9 @@ impl Default for NatsConfiguration {
             stream_max_bytes: None,
             stream_max_messages: None,
             fetch_expires_secs: Self::default_fetch_expires_secs(),
+            startup_retry_max_attempts: Self::default_startup_retry_max_attempts(),
+            startup_retry_initial_delay_ms: Self::default_startup_retry_initial_delay_ms(),
+            startup_retry_max_delay_secs: Self::default_startup_retry_max_delay_secs(),
         }
     }
 }
