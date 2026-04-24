@@ -146,16 +146,15 @@ fn basic_search_query() {
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let rendered = result.base.render();
 
-    // Search uses argMax dedup: value filters go to HAVING with argMax.
+    // Search uses LIMIT 1 BY dedup: mutable filters stay outside subquery.
     assert!(
-        rendered.contains("HAVING"),
-        "search should have HAVING clause"
+        rendered.contains("LIMIT 1 BY"),
+        "search should use LIMIT 1 BY for dedup"
     );
     assert!(
-        rendered.contains("argMax"),
-        "search should use argMax for dedup"
+        rendered.contains("_deleted"),
+        "search should filter deleted rows"
     );
-    assert!(rendered.contains("GROUP BY"), "search should GROUP BY id");
     assert!(rendered.contains("username"));
     assert!(rendered.contains("LIMIT 10"));
     assert!(
@@ -186,9 +185,9 @@ fn complex_search_query() {
     // Uses ClickHouse `IN [...]` array syntax which sqlparser can't parse.
     let rendered = result.base.render();
 
-    // Search uses argMax dedup: value filters go to HAVING.
-    assert!(rendered.contains("HAVING"));
-    assert!(rendered.contains("argMax"));
+    // Search uses LIMIT 1 BY dedup: mutable filters stay outside subquery.
+    assert!(rendered.contains("LIMIT 1 BY"));
+    assert!(rendered.contains("_deleted"));
     assert!(rendered.contains("username"));
     assert!(rendered.contains("state"));
     assert!(rendered.contains("created_at"));
@@ -431,10 +430,10 @@ fn definition_uses_project_id_for_redaction() {
 
     assert!(sql.has_select_column("_gkg_d_id"));
     assert!(sql.has_select_column("_gkg_d_type"));
-    // Search uses argMaxIfOrNull dedup, so project_id is wrapped.
+    // Search uses LIMIT 1 BY dedup, so project_id is a plain column reference.
     assert!(
-        sql.raw_contains("argMaxIfOrNull(d.project_id") && sql.raw_contains("_gkg_d_id"),
-        "Definition should use project_id for redaction (via argMaxIfOrNull in search)"
+        sql.raw_contains("d.project_id") && sql.raw_contains("_gkg_d_id"),
+        "Definition should use project_id for redaction"
     );
 }
 
