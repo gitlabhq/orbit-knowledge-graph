@@ -22,6 +22,7 @@ If agent teams are available, create an agent team for each major section of the
 | `CLAUDE.md` / `AGENTS.md` | Agent context. Must stay identical — CI enforces this. |
 | `crates/*/README.md` | Per-crate docs |
 | `crates/indexer/AGENTS.md` | Indexer agent context |
+| `skills/orbit/references/*.md` | Agent-facing mirror of `docs/source/queries/*.md`. Byte-equal — CI enforces via `orbit-skill-docs-sync`. |
 
 ## Gathering context
 
@@ -44,6 +45,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 - Crate renames, splits, or new crates not reflected in `CLAUDE.md`
 - People or epic changes not in `README.md`
 - Stale config references in `docs/dev/runbooks/server_configuration.md`
+- Changes to `docs/source/queries/*.md` not mirrored into `skills/orbit/references/*.md` (byte-equal sync — the orbit skill ships the DSL reference inline for standalone installs)
 
 ## Fixing
 
@@ -52,6 +54,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 3. Edit the doc to match
 4. Run `mise run lint:docs` to validate
 5. If you touched CLAUDE.md, mirror the change to AGENTS.md
+6. If you touched `docs/source/queries/*.md`, run `mise run skill:sync:orbit` to update the skill mirror (lefthook `orbit-skill-docs-sync` will otherwise fail the commit)
 
 ## Self-improvement
 
