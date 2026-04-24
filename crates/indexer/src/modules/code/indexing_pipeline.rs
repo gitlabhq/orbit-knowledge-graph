@@ -219,6 +219,7 @@ impl CodeIndexingPipeline {
         let indexing_start = Instant::now();
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
+            max_files: self.pipeline_config.max_files,
             respect_gitignore: self.pipeline_config.respect_gitignore,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,

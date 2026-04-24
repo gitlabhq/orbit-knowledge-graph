@@ -166,6 +166,7 @@ handlers:
     retry_interval_secs: 60
     pipeline:
       max_file_size_bytes: 10000000
+      max_files: 200000
       respect_gitignore: false
       worker_threads: 2
       max_concurrent_languages: 3
@@ -215,6 +216,10 @@ handlers:
                 .pipeline
                 .max_file_size_bytes,
             10_000_000
+        );
+        assert_eq!(
+            engine.handlers.code_indexing_task.pipeline.max_files,
+            200_000
         );
         assert!(
             !engine

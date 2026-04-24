@@ -55,6 +55,7 @@
             "pipeline": {
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
+              "max_files": 1000000,
               "respect_gitignore": true,
               "worker_threads": 0
             },
@@ -330,6 +331,12 @@
           "default": 5000000,
           "minimum": 0
         },
+        "max_files": {
+          "type": "integer",
+          "format": "uint",
+          "default": 1000000,
+          "minimum": 0
+        },
         "respect_gitignore": {
           "type": "boolean",
           "default": true
@@ -370,6 +377,7 @@
           "default": {
             "max_concurrent_languages": 0,
             "max_file_size_bytes": 5000000,
+            "max_files": 1000000,
             "respect_gitignore": true,
             "worker_threads": 0
           }
@@ -440,6 +448,7 @@
               "pipeline": {
                 "max_concurrent_languages": 0,
                 "max_file_size_bytes": 5000000,
+                "max_files": 1000000,
                 "respect_gitignore": true,
                 "worker_threads": 0
               },
@@ -627,6 +636,7 @@
             "pipeline": {
               "max_concurrent_languages": 0,
               "max_file_size_bytes": 5000000,
+              "max_files": 1000000,
               "respect_gitignore": true,
               "worker_threads": 0
             },
