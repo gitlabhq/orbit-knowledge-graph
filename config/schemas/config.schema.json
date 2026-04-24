@@ -63,6 +63,7 @@
             "retry_interval_secs": null
           },
           "global-handler": {
+            "batch_size_overrides": {},
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
@@ -74,6 +75,7 @@
             "retry_interval_secs": null
           },
           "namespace-handler": {
+            "batch_size_overrides": {},
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
@@ -465,6 +467,7 @@
               "retry_interval_secs": null
             },
             "global-handler": {
+              "batch_size_overrides": {},
               "concurrency_group": null,
               "datalake_batch_size": 1000000,
               "max_attempts": null,
@@ -476,6 +479,7 @@
               "retry_interval_secs": null
             },
             "namespace-handler": {
+              "batch_size_overrides": {},
               "concurrency_group": null,
               "datalake_batch_size": 1000000,
               "max_attempts": null,
@@ -538,6 +542,15 @@
       "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
+        "batch_size_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "default": {}
+        },
         "concurrency_group": {
           "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
           "type": [
@@ -657,6 +670,7 @@
         "global-handler": {
           "$ref": "#/$defs/GlobalHandlerConfig",
           "default": {
+            "batch_size_overrides": {},
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
@@ -674,6 +688,7 @@
         "namespace-handler": {
           "$ref": "#/$defs/NamespaceHandlerConfig",
           "default": {
+            "batch_size_overrides": {},
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
@@ -851,6 +866,15 @@
       "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
       "properties": {
+        "batch_size_overrides": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 0
+          },
+          "default": {}
+        },
         "concurrency_group": {
           "description": "Which concurrency group this handler belongs to.\nMaps to a named semaphore in `EngineConfiguration::concurrency_groups`.",
           "type": [

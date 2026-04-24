@@ -113,6 +113,9 @@ pub struct GlobalHandlerConfig {
 
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
 }
 
 impl Default for GlobalHandlerConfig {
@@ -120,6 +123,7 @@ impl Default for GlobalHandlerConfig {
         Self {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
         }
     }
 }
@@ -131,6 +135,9 @@ pub struct NamespaceHandlerConfig {
 
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
 }
 
 impl Default for NamespaceHandlerConfig {
@@ -138,6 +145,7 @@ impl Default for NamespaceHandlerConfig {
         Self {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
         }
     }
 }
