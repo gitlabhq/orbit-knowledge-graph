@@ -251,6 +251,9 @@ async def execute_task(
                 pass
 
 
+_JSON_FENCE_RE = __import__("re").compile(r"```(?:json)?\s*\n(.*?)```", __import__("re").DOTALL)
+
+
 def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
     """Extract structured output from the last assistant message parts."""
     for msg in reversed(snapshot.messages):
@@ -261,10 +264,17 @@ def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
                 if isinstance(part.input, dict):
                     return part.input
             if part.type == "text" and part.text:
+                # Try raw JSON first
                 try:
                     return json.loads(part.text)
                 except (json.JSONDecodeError, TypeError):
-                    continue
+                    pass
+                # Try extracting from ```json ... ``` fences
+                for m in _JSON_FENCE_RE.finditer(part.text):
+                    try:
+                        return json.loads(m.group(1))
+                    except (json.JSONDecodeError, TypeError):
+                        continue
     return None
 
 
