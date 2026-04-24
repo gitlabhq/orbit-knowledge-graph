@@ -2,7 +2,7 @@
 //! per-stage errors).
 
 use crate::MetricSpec;
-use crate::buckets::LATENCY;
+use crate::buckets::{LATENCY, MEMORY_BYTES};
 
 pub mod labels {
     pub const OUTCOME: &str = "outcome";
@@ -64,6 +64,23 @@ pub const REPOSITORY_EMPTY: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const REPOSITORY_INDEXING_COMPLETED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.repository.indexing.completed",
+    "Repository indexing runs completed by the code indexing handler.",
+    None,
+    &[labels::OUTCOME],
+    DOMAIN,
+);
+
+pub const REPOSITORY_SOURCE_SIZE: MetricSpec = MetricSpec::histogram_u64(
+    "gkg.indexer.code.repository.source.size",
+    "Total bytes of language-supported source files discovered during one code indexing run.",
+    Some("By"),
+    &[],
+    MEMORY_BYTES,
+    DOMAIN,
+);
+
 pub const INDEXING_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.code.indexing.duration",
     "Duration of code-graph parsing and analysis.",
@@ -104,6 +121,8 @@ pub const CATALOG: &[&MetricSpec] = &[
     &REPOSITORY_RESOLUTION_STRATEGY,
     &REPOSITORY_CLEANUP,
     &REPOSITORY_EMPTY,
+    &REPOSITORY_INDEXING_COMPLETED,
+    &REPOSITORY_SOURCE_SIZE,
     &INDEXING_DURATION,
     &FILES_PROCESSED,
     &NODES_INDEXED,

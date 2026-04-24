@@ -88,9 +88,11 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 | `gkg.indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
 | `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
 | `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
+| `gkg.indexer.code.repository.indexing.completed` | Counter | count | `outcome` (indexed, empty_repository) | Repository indexing runs completed by the code indexing handler |
+| `gkg.indexer.code.repository.source.size` | Histogram | By | | Total bytes of language-supported source files discovered during one code indexing run |
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
-| `gkg.indexer.code.files.processed` | Counter | count | `outcome` (parsed, skipped, errored) | Total files seen by the code-graph indexer |
-| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
+| `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
+| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge) | Total graph nodes and edges indexed |
 | `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
 
 *Namespace deletion module metrics:*

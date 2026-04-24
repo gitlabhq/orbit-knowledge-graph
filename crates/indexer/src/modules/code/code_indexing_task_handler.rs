@@ -142,6 +142,12 @@ impl CodeIndexingTaskHandler {
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
+        if matches!(
+            &result,
+            Ok(Some(IndexOutcome::Indexed | IndexOutcome::EmptyRepository))
+        ) {
+            self.metrics.record_repository_indexed(outcome);
+        }
         self.metrics.record_handler_duration(started_at);
 
         result.map(|_| ())
