@@ -3,7 +3,6 @@ name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
 version: 0.1.0
 license: MIT
-compatibility: opencode
 metadata:
   audience: developers
   keywords: orbit, knowledge-graph, gkg, graph, query, glab, api
