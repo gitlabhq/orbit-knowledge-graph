@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
@@ -254,7 +253,7 @@ impl Pipeline {
 
         for transform in transforms {
             let transform_start = Instant::now();
-            let result_batch = self
+            let result_batches = self
                 .execute_transform(session, &transform.to_sql())
                 .await
                 .map_err(|err| {
@@ -265,7 +264,8 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
-            if result_batch.num_rows() == 0 {
+            let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
+            if row_count == 0 {
                 continue;
             }
 
@@ -279,7 +279,7 @@ impl Pipeline {
                     ))
                 })?;
 
-            writer.write_batch(&[result_batch]).await.map_err(|err| {
+            writer.write_batch(&result_batches).await.map_err(|err| {
                 HandlerError::Processing(format!(
                     "failed to write to {}: {err}",
                     transform.destination_table
@@ -297,16 +297,9 @@ impl Pipeline {
         &self,
         session: &SessionContext,
         sql: &str,
-    ) -> Result<RecordBatch, datafusion::error::DataFusionError> {
+    ) -> Result<Vec<RecordBatch>, datafusion::error::DataFusionError> {
         let dataframe = session.sql(sql).await?;
-        let schema = Arc::new(dataframe.schema().as_arrow().clone());
-        let batches = dataframe.collect().await?;
-
-        if batches.is_empty() {
-            return Ok(RecordBatch::new_empty(schema));
-        }
-
-        concat_batches(&schema, &batches).map_err(Into::into)
+        dataframe.collect().await
     }
 
     async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
