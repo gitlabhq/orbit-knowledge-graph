@@ -6123,6 +6123,7 @@ dependencies = [
  "parking_lot",
  "prost 0.14.3",
  "query-engine",
+ "rand 0.10.1",
  "rustc-hash 2.1.2",
  "serde",
  "serde_json",

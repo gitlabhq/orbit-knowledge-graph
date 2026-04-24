@@ -711,20 +711,13 @@ impl NatsBroker {
     }
 }
 
-/// Applies ±25% jitter to a retry delay using a cheap PRNG seeded from the
-/// system clock. Keeps callers using the same broker from synchronising their
-/// retry storms against the upstream.
+/// Applies ±25% jitter to a retry delay. Keeps callers that share a broker
+/// from synchronising their retry storms against the upstream.
 fn apply_jitter(delay: Duration) -> Duration {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    let nanos = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.subsec_nanos())
-        .unwrap_or(0);
-    // Fraction in [-0.25, 0.25) based on a nanosecond-scale source.
-    let frac = (nanos as f64 / 1_000_000_000.0 - 0.5) * 0.5;
-    let base = delay.as_millis() as f64;
-    let jittered = (base * (1.0 + frac)).max(1.0);
-    Duration::from_millis(jittered as u64)
+    use rand::RngExt;
+    let factor = rand::rng().random_range(0.75..=1.25);
+    let jittered = (delay.as_secs_f64() * factor).max(0.001);
+    Duration::from_secs_f64(jittered)
 }
 
 /// async_nats has no typed variant for per-subject limit rejection; it falls through to PublishErrorKind::Other.

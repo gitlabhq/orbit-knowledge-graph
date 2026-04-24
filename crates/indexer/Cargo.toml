@@ -33,6 +33,7 @@ query-engine = { path = "../query-engine" }
 opentelemetry = { workspace = true }
 parking_lot = { workspace = true }
 prost = { workspace = true }
+rand = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
