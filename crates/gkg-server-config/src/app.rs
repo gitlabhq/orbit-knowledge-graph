@@ -164,6 +164,12 @@ handlers:
     concurrency_group: code
     max_attempts: 5
     retry_interval_secs: 60
+    pipeline:
+      max_file_size_bytes: 10000000
+      max_files: 200000
+      respect_gitignore: false
+      worker_threads: 2
+      max_concurrent_languages: 3
   namespace-deletion:
     concurrency_group: code
     max_attempts: 1
@@ -202,6 +208,37 @@ handlers:
         assert_eq!(
             engine.handlers.code_indexing_task.engine.max_attempts,
             Some(5)
+        );
+        assert_eq!(
+            engine
+                .handlers
+                .code_indexing_task
+                .pipeline
+                .max_file_size_bytes,
+            10_000_000
+        );
+        assert_eq!(
+            engine.handlers.code_indexing_task.pipeline.max_files,
+            200_000
+        );
+        assert!(
+            !engine
+                .handlers
+                .code_indexing_task
+                .pipeline
+                .respect_gitignore
+        );
+        assert_eq!(
+            engine.handlers.code_indexing_task.pipeline.worker_threads,
+            2
+        );
+        assert_eq!(
+            engine
+                .handlers
+                .code_indexing_task
+                .pipeline
+                .max_concurrent_languages,
+            3
         );
         assert_eq!(
             engine
