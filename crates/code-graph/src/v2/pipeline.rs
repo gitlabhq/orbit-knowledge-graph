@@ -456,7 +456,13 @@ impl Pipeline {
             .hidden(true)
             .build();
 
-        for entry in walker.flatten() {
+        for entry in walker.filter_map(|result| match result {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                tracing::debug!(error = %e, "directory walk error, skipping entry");
+                None
+            }
+        }) {
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
