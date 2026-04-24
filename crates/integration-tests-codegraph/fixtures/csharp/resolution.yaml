@@ -175,7 +175,7 @@ tests:
 
   # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller calls UserService.FindById"
-    skip: true  # C# cross-file resolution not yet producing CALLS edges
+    skip: true  # chain calls need SSA type flow from field declarations
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
@@ -186,7 +186,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Controller calls UserService.Save"
-    skip: true  # C# cross-file resolution not yet producing CALLS edges
+    skip: true  # chain calls need SSA type flow from field declarations
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'

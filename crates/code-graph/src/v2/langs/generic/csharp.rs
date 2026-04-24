@@ -125,7 +125,9 @@ impl DslLanguage for CSharpDsl {
             } else if text.contains('=') {
                 "AliasedImport"
             } else {
-                "Import"
+                // Regular using directives are namespace-level wildcards:
+                // `using MyApp.Models;` makes all types in MyApp.Models available.
+                "WildcardImport"
             }
         }
 
@@ -136,7 +138,9 @@ impl DslLanguage for CSharpDsl {
                     AnyKind(&["qualified_name", "identifier"]),
                 ))
                 .classify(csharp_import_classify)
-                .split_last("."),
+                // C# using directives import all types from a namespace.
+                // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
+                .always_wildcard(),
         ]
     }
 
@@ -262,6 +266,7 @@ impl HasRules for CSharpRules {
             vec![
                 ImportStrategy::ScopeFqnWalk,
                 ImportStrategy::ExplicitImport,
+                ImportStrategy::WildcardImport,
                 ImportStrategy::SameFile,
             ],
             ReceiverMode::Keyword,
