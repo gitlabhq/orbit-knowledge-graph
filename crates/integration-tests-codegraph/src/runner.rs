@@ -206,11 +206,12 @@ pub async fn run_yaml_suite(yaml: &str) {
             let defs = AtomicUsize::new(0);
             let imps = AtomicUsize::new(0);
             let edgs = AtomicUsize::new(0);
-            let btx = BatchTx::new(&tx, &converter, &defs, &imps, &edgs);
-            dispatch_by_tag(tag, &files, &ctx, &btx)
-                .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
-                .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
-            drop(btx);
+            {
+                let btx = BatchTx::new(&tx, &converter, &defs, &imps, &edgs);
+                dispatch_by_tag(tag, &files, &ctx, &btx)
+                    .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
+                    .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));
+            }
             drop(tx);
             // Collect any raw batches sent via send_raw (e.g. Ruby/Prism)
             let mut datasets = converter.take();
