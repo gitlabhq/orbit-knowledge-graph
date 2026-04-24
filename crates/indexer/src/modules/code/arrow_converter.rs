@@ -381,7 +381,7 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
         let Ok(data) = convert_code_graph(&graph, &self.envelope, &self.ontology) else {
             return Vec::new();
         };
-        vec![
+        let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
             (self.table_names.directory.clone(), data.directories),
             (self.table_names.file.clone(), data.files),
@@ -390,10 +390,35 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 self.table_names.imported_symbol.clone(),
                 data.imported_symbols,
             ),
-            // Edges go to gl_edge (edge routing by relationship_kind
-            // happens in the sink/writer, not here).
-            ("gl_edge".to_string(), data.edges),
-        ]
+        ];
+
+        // Route edges to ontology-resolved tables by relationship_kind.
+        if data.edges.num_rows() > 0 {
+            use arrow::array::AsArray;
+            use std::collections::HashMap;
+
+            let rel_col = data
+                .edges
+                .column_by_name("relationship_kind")
+                .expect("edges batch must have relationship_kind column");
+            let rel_array = rel_col.as_string::<i32>();
+
+            let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
+            for i in 0..data.edges.num_rows() {
+                let rel_kind = rel_array.value(i);
+                let table = self.table_names.edge_table_for(rel_kind);
+                table_rows.entry(table).or_default().push(i as u32);
+            }
+
+            for (table, indices) in table_rows {
+                let idx_array = arrow::array::UInt32Array::from(indices);
+                if let Ok(batch) = arrow::compute::take_record_batch(&data.edges, &idx_array) {
+                    result.push((table.to_string(), batch));
+                }
+            }
+        }
+
+        result
     }
 }
 
