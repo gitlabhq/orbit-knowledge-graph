@@ -175,23 +175,21 @@ tests:
 
   # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller calls UserService.FindById"
-    skip: true  # chain calls need SSA type flow from field declarations
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
         AND callee.fqn = 'MyApp.Services.UserService.FindById'
-        AND e.edge_kind = 'CALLS'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }
 
   - name: "Controller calls UserService.Save"
-    skip: true  # chain calls need SSA type flow from field declarations
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
         AND callee.fqn = 'MyApp.Services.UserService.Save'
-        AND e.edge_kind = 'CALLS'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, callee.fqn AS callee
     assert:
       - { row_count: 1 }

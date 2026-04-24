@@ -100,10 +100,15 @@ impl DslLanguage for CSharpDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Method call: obj.Method() or Method()
+            // Chain method call: obj.Method() — function is a member_access_expression
+            reference("invocation_expression")
+                .name_from(field("function").field("name"))
+                .when(has_descendant("member_access_expression"))
+                .receiver_via(field("function").field("expression")),
+            // Simple method call: Method() — function is an identifier
             reference("invocation_expression")
                 .name_from(field("function"))
-                .receiver("expression"),
+                .when(!has_descendant("member_access_expression")),
             // Constructor: new Foo()
             reference("object_creation_expression").name_from(field("type")),
             // Bare type references: type casts, is, as
@@ -184,12 +189,15 @@ impl DslLanguage for CSharpDsl {
                 skip,
             )
         };
+        use treesitter_visit::extract::child_of_kind;
         vec![
-            // var x = new Foo(); int y = 5;
+            // Field declarations: private readonly UserService _userService;
+            // variable_declaration has type: field and variable_declarator children
             csharp_type(
                 binding("variable_declaration", BindingKind::Assignment)
-                    .name_from(&["name"])
-                    .value_from("value"),
+                    .name_from_extract(child_of_kind("variable_declarator").field("name"))
+                    .value_from_extract(child_of_kind("variable_declarator").field("value"))
+                    .instance_attrs(&["this."]),
             ),
             // Method/constructor parameters
             csharp_type(
