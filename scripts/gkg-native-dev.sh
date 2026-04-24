@@ -18,42 +18,35 @@ fi
 
 parse_gdk_value() {
   local expr="$1"
-  python3 - "$GDK_DEFAULT_YML" "$GDK_YML" "$expr" <<'PY'
-import sys
-from pathlib import Path
+  ruby - "$GDK_DEFAULT_YML" "$GDK_YML" "$expr" <<'RB'
+require 'yaml'
 
-default_path = Path(sys.argv[1])
-local_path = Path(sys.argv[2])
-expr = sys.argv[3].split('.')
+def load_yaml(path)
+  return {} unless File.exist?(path)
+  YAML.safe_load(File.read(path)) || {}
+rescue StandardError
+  {}
+end
 
-import yaml
+def lookup(data, keys)
+  cur = data
+  keys.each do |key|
+    return nil unless cur.is_a?(Hash) && cur.key?(key)
+    cur = cur[key]
+  end
+  cur
+end
 
-def load(path):
-    if not path.exists():
-        return {}
-    data = yaml.safe_load(path.read_text())
-    return data or {}
+default_path, local_path, expr = ARGV
+keys = expr.split('.')
 
-def lookup(data, keys):
-    cur = data
-    for key in keys:
-        if not isinstance(cur, dict) or key not in cur:
-            return None
-        cur = cur[key]
-    return cur
+value = lookup(load_yaml(local_path), keys)
+value = lookup(load_yaml(default_path), keys) if value.nil?
 
-value = lookup(load(local_path), expr)
-if value is None:
-    value = lookup(load(default_path), expr)
+exit 1 if value.nil?
 
-if value is None:
-    sys.exit(1)
-
-if isinstance(value, bool):
-    print(str(value).lower())
-else:
-    print(value)
-PY
+puts value == true || value == false ? value.to_s : value
+RB
 }
 
 gdk_enabled() {
