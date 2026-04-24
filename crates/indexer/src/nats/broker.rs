@@ -1,21 +1,19 @@
 //! NATS JetStream message broker.
+//!
+//! Wraps [`nats_client::NatsClient`] and adds indexer-specific functionality:
+//! subscriptions, publishing, dead-letter queues, and message conversion.
 
-use std::collections::HashMap;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
 
 const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
 
-use async_nats::jetstream::Context;
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
-use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
-use async_nats::jetstream::stream::Stream;
 use bytes::Bytes;
-use futures::{StreamExt, TryStreamExt};
+use futures::StreamExt;
+use nats_client::NatsClient;
 use parking_lot::Mutex;
-use tokio::sync::RwLock;
 use tokio::task::JoinHandle;
 use tokio_stream::wrappers::ReceiverStream;
 use tokio_util::sync::CancellationToken;
@@ -31,50 +29,39 @@ use crate::types::{Envelope, MessageId, Subscription};
 use async_nats::jetstream::ErrorCode;
 use async_nats::jetstream::context::{PublishError, PublishErrorKind};
 
-use super::error::{NatsError, map_connect_error, map_subscribe_error};
-use super::kv_types::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult};
+use super::error::{NatsError, map_subscribe_error};
 use super::message::{NatsAcker, NatsMessage, NatsSubscription};
 use gkg_server_config::NatsConfiguration;
 
-/// NATS JetStream message broker.
-///
-/// See the [module docs](super) for examples.
-///
-/// Call [`shutdown`](Self::shutdown) for graceful termination of subscription tasks.
 pub struct NatsBroker {
-    client: async_nats::Client,
-    jetstream: Context,
+    inner: Arc<NatsClient>,
     config: NatsConfiguration,
-    streams: RwLock<HashMap<Arc<str>, Stream>>,
-    kv_stores: RwLock<HashMap<String, KvStore>>,
     subscription_handles: Mutex<Vec<JoinHandle<()>>>,
     cancellation_token: CancellationToken,
 }
 
 impl NatsBroker {
     pub async fn connect(config: &NatsConfiguration) -> Result<Self, NatsError> {
-        config
-            .validate_tls_config()
-            .map_err(NatsError::Connection)?;
-
-        let connect_options = Self::build_connect_options(config);
-
-        let url = config.connection_url();
-        let client = async_nats::connect_with_options(&url, connect_options)
-            .await
-            .map_err(map_connect_error)?;
-
-        let jetstream = async_nats::jetstream::new(client.clone());
-
+        let inner = NatsClient::connect(config).await.map_err(NatsError::from)?;
         Ok(Self {
-            client,
-            jetstream,
             config: config.clone(),
-            streams: RwLock::new(HashMap::new()),
-            kv_stores: RwLock::new(HashMap::new()),
+            inner: Arc::new(inner),
             subscription_handles: Mutex::new(Vec::new()),
             cancellation_token: CancellationToken::new(),
         })
+    }
+
+    pub fn from_client(client: Arc<NatsClient>, config: &NatsConfiguration) -> Self {
+        Self {
+            inner: client,
+            config: config.clone(),
+            subscription_handles: Mutex::new(Vec::new()),
+            cancellation_token: CancellationToken::new(),
+        }
+    }
+
+    pub fn client(&self) -> &Arc<NatsClient> {
+        &self.inner
     }
 
     pub async fn shutdown(self) {
@@ -87,32 +74,7 @@ impl NatsBroker {
     }
 
     pub fn nats_client(&self) -> &async_nats::Client {
-        &self.client
-    }
-
-    /// Builds connect options. Must be called after `validate_tls_config()`.
-    fn build_connect_options(config: &NatsConfiguration) -> async_nats::ConnectOptions {
-        let mut options = async_nats::ConnectOptions::new()
-            .connection_timeout(config.connection_timeout())
-            .request_timeout(Some(config.request_timeout()));
-
-        if let (Some(user), Some(pass)) = (&config.username, &config.password) {
-            options = options.user_and_password(user.clone(), pass.clone());
-        }
-
-        if config.tls_enabled() {
-            options = options.require_tls(true);
-        }
-
-        if let Some(ca_path) = &config.tls_ca_cert_path {
-            options = options.add_root_certificates(PathBuf::from(ca_path));
-        }
-
-        if let (Some(cert), Some(key)) = (&config.tls_cert_path, &config.tls_key_path) {
-            options = options.add_client_certificate(PathBuf::from(cert), PathBuf::from(key));
-        }
-
-        options
+        self.inner.nats_client()
     }
 
     pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
@@ -120,7 +82,8 @@ impl NatsBroker {
             return Ok(());
         }
 
-        let mut managed_streams: HashMap<&Arc<str>, Vec<String>> = HashMap::new();
+        let mut managed_streams: std::collections::HashMap<&Arc<str>, Vec<String>> =
+            std::collections::HashMap::new();
         let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
         for subscription in subscriptions {
@@ -135,11 +98,13 @@ impl NatsBroker {
         }
 
         for (stream_name, subjects) in managed_streams {
-            self.create_or_update_stream(stream_name, subjects).await?;
+            self.inner
+                .create_or_update_stream(stream_name, subjects)
+                .await?;
         }
 
         for stream_name in unmanaged_streams {
-            self.get_stream(stream_name).await?;
+            self.inner.get_stream(stream_name).await?;
         }
 
         self.ensure_dead_letter_stream().await?;
@@ -148,9 +113,9 @@ impl NatsBroker {
     }
 
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
-        let stream_name: Arc<str> = Arc::from(DEAD_LETTER_STREAM);
         let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
-        self.create_or_update_stream(&stream_name, vec![subject])
+        self.inner
+            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject])
             .await?;
         Ok(())
     }
@@ -170,7 +135,8 @@ impl NatsBroker {
             })?;
 
         let subject = dead_letter_subject(original_subscription);
-        self.jetstream
+        self.inner
+            .jetstream()
             .publish(subject.clone(), payload)
             .await
             .map_err(|error| {
@@ -185,132 +151,41 @@ impl NatsBroker {
     pub async fn ensure_kv_bucket_exists(
         &self,
         bucket: &str,
-        config: KvBucketConfig,
+        config: nats_client::KvBucketConfig,
     ) -> Result<(), NatsError> {
-        let kv_config = async_nats::jetstream::kv::Config {
-            bucket: bucket.to_string(),
-            limit_markers: config.limit_markers,
-            ..Default::default()
-        };
-
-        let store = self
-            .jetstream
-            .create_key_value(kv_config)
+        self.inner
+            .ensure_kv_bucket_exists(bucket, config)
             .await
-            .map_err(|e| NatsError::KvBucket {
-                bucket: bucket.to_string(),
-                message: e.to_string(),
-            })?;
-
-        info!(bucket, "KV bucket ready");
-
-        let mut cache = self.kv_stores.write().await;
-        cache.insert(bucket.to_string(), store);
-        Ok(())
+            .map_err(Into::into)
     }
 
-    async fn create_or_update_stream(
+    pub async fn kv_get(
         &self,
-        stream_name: &Arc<str>,
-        subjects: Vec<String>,
-    ) -> Result<Stream, NatsError> {
-        let stream_config = async_nats::jetstream::stream::Config {
-            name: stream_name.to_string(),
-            subjects: subjects.clone(),
-            num_replicas: self.config.stream_replicas,
-            max_age: self.config.stream_max_age().unwrap_or_default(),
-            max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
-            max_messages: self.config.stream_max_messages.unwrap_or(-1),
-            max_messages_per_subject: 1,
-            storage: async_nats::jetstream::stream::StorageType::File,
-            retention: async_nats::jetstream::stream::RetentionPolicy::WorkQueue,
-            discard: async_nats::jetstream::stream::DiscardPolicy::New,
-            discard_new_per_subject: true,
-            ..Default::default()
-        };
-
-        self.jetstream
-            .create_or_update_stream(stream_config)
-            .await
-            .map_err(|e| NatsError::StreamCreationFailed {
-                stream: stream_name.to_string(),
-                source: e,
-            })?;
-
-        let stream = self
-            .jetstream
-            .get_stream(stream_name.as_ref())
-            .await
-            .map_err(|e| NatsError::StreamNotFound {
-                stream: stream_name.to_string(),
-                source: e,
-            })?;
-
-        info!(stream = %stream_name, ?subjects, "stream created or updated");
-
-        let mut cache = self.streams.write().await;
-        cache.insert(stream_name.clone(), stream.clone());
-        Ok(stream)
+        bucket: &str,
+        key: &str,
+    ) -> Result<Option<nats_client::KvEntry>, NatsError> {
+        self.inner.kv_get(bucket, key).await.map_err(Into::into)
     }
 
-    async fn get_stream(&self, stream_name: &Arc<str>) -> Result<Stream, NatsError> {
-        {
-            let cache = self.streams.read().await;
-            if let Some(stream) = cache.get(stream_name) {
-                return Ok(stream.clone());
-            }
-        }
-
-        let mut cache = self.streams.write().await;
-        if let Some(stream) = cache.get(stream_name) {
-            return Ok(stream.clone());
-        }
-
-        let stream = self
-            .jetstream
-            .get_stream(stream_name.as_ref())
-            .await
-            .map_err(|e| NatsError::StreamNotFound {
-                stream: stream_name.to_string(),
-                source: e,
-            })?;
-
-        cache.insert(stream_name.clone(), stream.clone());
-        Ok(stream)
-    }
-
-    async fn get_or_create_consumer(
+    pub async fn kv_put(
         &self,
-        stream: &Stream,
-        subject: &str,
-    ) -> Result<PullConsumer, NatsError> {
-        let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: nats_client::KvPutOptions,
+    ) -> Result<nats_client::KvPutResult, NatsError> {
+        self.inner
+            .kv_put(bucket, key, value, options)
+            .await
+            .map_err(Into::into)
+    }
 
-        let durable_name = self.config.consumer_name.as_ref().map(|base| {
-            format!(
-                "{base}-{}",
-                subject.replace('.', "-").replace('*', "wildcard")
-            )
-        });
+    pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        self.inner.kv_delete(bucket, key).await.map_err(Into::into)
+    }
 
-        let consumer_config = ConsumerConfig {
-            filter_subject: subject.to_string(),
-            ack_wait: self.config.ack_wait(),
-            max_deliver,
-            durable_name: durable_name.clone(),
-            ..Default::default()
-        };
-
-        match &durable_name {
-            Some(name) => stream
-                .get_or_create_consumer(name, consumer_config)
-                .await
-                .map_err(map_subscribe_error),
-            None => stream
-                .create_consumer(consumer_config)
-                .await
-                .map_err(map_subscribe_error),
-        }
+    pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        self.inner.kv_keys(bucket).await.map_err(Into::into)
     }
 
     fn convert_message(
@@ -351,7 +226,8 @@ impl NatsBroker {
         envelope: &Envelope,
     ) -> Result<(), NatsError> {
         let ack_future = self
-            .jetstream
+            .inner
+            .jetstream()
             .publish(subscription.subject.to_string(), envelope.payload.clone())
             .await
             .map_err(|e| {
@@ -378,7 +254,7 @@ impl NatsBroker {
         subscription: &Subscription,
         metrics: Arc<EngineMetrics>,
     ) -> Result<NatsSubscription, NatsError> {
-        let stream = self.get_stream(&subscription.stream).await?;
+        let stream = self.inner.get_stream(&subscription.stream).await?;
         let consumer = self
             .get_or_create_consumer(&stream, &subscription.subject)
             .await?;
@@ -457,7 +333,7 @@ impl NatsBroker {
         subscription: &Subscription,
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError> {
-        let stream = self.get_stream(&subscription.stream).await?;
+        let stream = self.inner.get_stream(&subscription.stream).await?;
 
         let durable_name = format!(
             "dispatch-{}",
@@ -499,138 +375,41 @@ impl NatsBroker {
         Ok(messages)
     }
 
-    async fn get_or_create_kv_store(&self, bucket: &str) -> Result<KvStore, NatsError> {
-        {
-            let cache = self.kv_stores.read().await;
-            if let Some(store) = cache.get(bucket) {
-                return Ok(store.clone());
-            }
-        }
+    async fn get_or_create_consumer(
+        &self,
+        stream: &async_nats::jetstream::stream::Stream,
+        subject: &str,
+    ) -> Result<PullConsumer, NatsError> {
+        let max_deliver = self.config.max_deliver.map(|n| n as i64).unwrap_or(-1);
 
-        let mut cache = self.kv_stores.write().await;
-        if let Some(store) = cache.get(bucket) {
-            return Ok(store.clone());
-        }
+        let durable_name = self.config.consumer_name.as_ref().map(|base| {
+            format!(
+                "{base}-{}",
+                subject.replace('.', "-").replace('*', "wildcard")
+            )
+        });
 
-        let store = match self.jetstream.get_key_value(bucket).await {
-            Ok(store) => store,
-            Err(_) => self
-                .jetstream
-                .create_key_value(async_nats::jetstream::kv::Config {
-                    bucket: bucket.to_string(),
-                    ..Default::default()
-                })
-                .await
-                .map_err(|e| NatsError::KvBucket {
-                    bucket: bucket.to_string(),
-                    message: e.to_string(),
-                })?,
+        let consumer_config = ConsumerConfig {
+            filter_subject: subject.to_string(),
+            ack_wait: self.config.ack_wait(),
+            max_deliver,
+            durable_name: durable_name.clone(),
+            ..Default::default()
         };
 
-        cache.insert(bucket.to_string(), store.clone());
-        Ok(store)
-    }
-
-    pub async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
-
-        match store.entry(key).await {
-            Ok(Some(entry)) => Ok(Some(KvEntry {
-                key: entry.key,
-                value: entry.value,
-                revision: entry.revision,
-            })),
-            Ok(None) => Ok(None),
-            Err(e) => Err(NatsError::KvGet {
-                bucket: bucket.to_string(),
-                key: key.to_string(),
-                message: e.to_string(),
-            }),
+        match &durable_name {
+            Some(name) => stream
+                .get_or_create_consumer(name, consumer_config)
+                .await
+                .map_err(map_subscribe_error),
+            None => stream
+                .create_consumer(consumer_config)
+                .await
+                .map_err(map_subscribe_error),
         }
-    }
-
-    pub async fn kv_put(
-        &self,
-        bucket: &str,
-        key: &str,
-        value: Bytes,
-        options: KvPutOptions,
-    ) -> Result<KvPutResult, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
-
-        if options.create_only {
-            let result = if let Some(ttl) = options.ttl {
-                store.create_with_ttl(key, value, ttl).await
-            } else {
-                store.create(key, value).await
-            };
-
-            return match result {
-                Ok(revision) => Ok(KvPutResult::Success(revision)),
-                Err(e) if e.kind() == CreateErrorKind::AlreadyExists => {
-                    Ok(KvPutResult::AlreadyExists)
-                }
-                Err(e) => Err(NatsError::KvPut {
-                    bucket: bucket.to_string(),
-                    key: key.to_string(),
-                    message: e.to_string(),
-                }),
-            };
-        }
-
-        // Optimistic concurrency control using the expected revision
-        if let Some(rev) = options.expected_revision {
-            let result = store.update(key, value, rev).await;
-            return match result {
-                Ok(revision) => Ok(KvPutResult::Success(revision)),
-                Err(e) if e.kind() == UpdateErrorKind::WrongLastRevision => {
-                    Ok(KvPutResult::RevisionMismatch)
-                }
-                Err(e) => Err(NatsError::KvPut {
-                    bucket: bucket.to_string(),
-                    key: key.to_string(),
-                    message: e.to_string(),
-                }),
-            };
-        }
-        let result = store.put(key, value).await;
-        match result {
-            Ok(revision) => Ok(KvPutResult::Success(revision)),
-            Err(e) => Err(NatsError::KvPut {
-                bucket: bucket.to_string(),
-                key: key.to_string(),
-                message: e.to_string(),
-            }),
-        }
-    }
-
-    pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
-
-        store.delete(key).await.map_err(|e| NatsError::KvDelete {
-            bucket: bucket.to_string(),
-            key: key.to_string(),
-            message: e.to_string(),
-        })
-    }
-
-    pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
-        let store = self.get_or_create_kv_store(bucket).await?;
-
-        let keys = store.keys().await.map_err(|e| NatsError::KvKeys {
-            bucket: bucket.to_string(),
-            message: e.to_string(),
-        })?;
-
-        let result: Result<Vec<String>, _> = keys.try_collect().await;
-        result.map_err(|e| NatsError::KvKeys {
-            bucket: bucket.to_string(),
-            message: e.to_string(),
-        })
     }
 }
 
-/// async_nats has no typed variant for per-subject limit rejection; it falls through to PublishErrorKind::Other.
 fn is_per_subject_limit_error(error: &PublishError) -> bool {
     use std::error::Error as _;
     let Some(source) = error.source() else {

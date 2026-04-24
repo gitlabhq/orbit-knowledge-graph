@@ -30,6 +30,7 @@ members = [
   "crates/xtask",
   "crates/integration-testkit",
   "crates/integration-tests-codegraph",
+  "crates/nats-client",
   "crates/utils",
   "crates/integration-tests",
   "crates/duckdb-client",
@@ -93,6 +94,7 @@ criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
 clickhouse-client = { path = "crates/clickhouse-client" }
+nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
 gitalisk-core = { git = "https://gitlab.com/gitlab-org/rust/gitalisk.git", tag = "v0.8.0" }
 thiserror = "2.0.18"

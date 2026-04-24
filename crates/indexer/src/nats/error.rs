@@ -69,8 +69,56 @@ pub enum NatsError {
     KvKeys { bucket: String, message: String },
 }
 
-pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {
-    NatsError::Connection(error.to_string())
+impl From<nats_client::NatsError> for NatsError {
+    fn from(error: nats_client::NatsError) -> Self {
+        match error {
+            nats_client::NatsError::Publish(msg) => NatsError::Publish(msg),
+            nats_client::NatsError::PublishDuplicate => NatsError::PublishDuplicate,
+            nats_client::NatsError::Subscribe(msg) => NatsError::Subscribe(msg),
+            nats_client::NatsError::Ack(msg) => NatsError::Ack(msg),
+            nats_client::NatsError::Nack(msg) => NatsError::Nack(msg),
+            nats_client::NatsError::Connection(msg) => NatsError::Connection(msg),
+            nats_client::NatsError::StreamNotFound { stream, source } => {
+                NatsError::StreamNotFound { stream, source }
+            }
+            nats_client::NatsError::StreamCreationFailed { stream, source } => {
+                NatsError::StreamCreationFailed { stream, source }
+            }
+            nats_client::NatsError::KvBucket { bucket, message } => {
+                NatsError::KvBucket { bucket, message }
+            }
+            nats_client::NatsError::KvGet {
+                bucket,
+                key,
+                message,
+            } => NatsError::KvGet {
+                bucket,
+                key,
+                message,
+            },
+            nats_client::NatsError::KvPut {
+                bucket,
+                key,
+                message,
+            } => NatsError::KvPut {
+                bucket,
+                key,
+                message,
+            },
+            nats_client::NatsError::KvDelete {
+                bucket,
+                key,
+                message,
+            } => NatsError::KvDelete {
+                bucket,
+                key,
+                message,
+            },
+            nats_client::NatsError::KvKeys { bucket, message } => {
+                NatsError::KvKeys { bucket, message }
+            }
+        }
+    }
 }
 
 pub(crate) fn map_subscribe_error<E: std::fmt::Display>(error: E) -> NatsError {

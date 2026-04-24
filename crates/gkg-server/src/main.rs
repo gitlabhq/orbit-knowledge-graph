@@ -192,12 +192,12 @@ async fn run_webserver(
 
     if config.query.default.graph_query_cache_enabled == Some(true) {
         info!("initializing NATS connection for graph query cache");
-        let broker = Arc::new(
-            indexer::nats::NatsBroker::connect(&config.nats)
+        let nats = Arc::new(
+            nats_client::NatsClient::connect(&config.nats)
                 .await
                 .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
         );
-        grpc_server = grpc_server.with_cache_broker(broker);
+        grpc_server = grpc_server.with_cache_broker(nats);
     }
 
     if config.billing.enabled {
