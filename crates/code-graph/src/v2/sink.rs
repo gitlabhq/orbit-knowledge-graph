@@ -9,7 +9,7 @@ use super::linker::CodeGraph;
 /// Called on the CPU thread after all phases complete. Takes ownership
 /// of the graph — convert everything, then let it drop.
 pub trait GraphConverter: Send + Sync {
-    fn convert(&self, graph: CodeGraph) -> Vec<(String, RecordBatch)>;
+    fn convert(&self, graph: CodeGraph) -> Result<Vec<(String, RecordBatch)>, SinkError>;
 }
 
 /// Receives named Arrow RecordBatches for writing to a destination

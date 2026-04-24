@@ -509,11 +509,9 @@ impl LanguageSpec {
         language: Language,
         tracer: &Tracer,
     ) -> Result<ParseFullResult, crate::v2::pipeline::PipelineError> {
-        let source_str =
-            std::str::from_utf8(source).map_err(|e| crate::v2::pipeline::PipelineError {
-                file_path: file_path.to_string(),
-                error: format!("Invalid UTF-8: {e}"),
-            })?;
+        let source_str = std::str::from_utf8(source).map_err(|e| {
+            crate::v2::pipeline::PipelineError::parse(file_path, format!("Invalid UTF-8: {e}"))
+        })?;
 
         let ast = language.parse_ast(source_str);
         let root = ast.root();

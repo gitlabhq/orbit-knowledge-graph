@@ -44,10 +44,10 @@ pub fn analyze_files(
             }))
             .unwrap_or_else(|panic_payload| {
                 let message = panic_message(&panic_payload);
-                Err(PipelineError {
-                    file_path: relative_path.clone(),
-                    error: format!("panic during analysis: {message}"),
-                })
+                Err(PipelineError::parse(
+                    relative_path.clone(),
+                    format!("panic during analysis: {message}"),
+                ))
             })
         })
         .collect();
@@ -178,15 +178,10 @@ fn sanitize_panic_message(raw: &str) -> String {
 }
 
 fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, PipelineError> {
-    let absolute_path =
-        safe_repo_join(root_path, relative_path).map_err(|error| PipelineError {
-            file_path: relative_path.to_string(),
-            error: error.to_string(),
-        })?;
-    let source = std::fs::read_to_string(&absolute_path).map_err(|error| PipelineError {
-        file_path: relative_path.to_string(),
-        error: error.to_string(),
-    })?;
+    let absolute_path = safe_repo_join(root_path, relative_path)
+        .map_err(|error| PipelineError::parse(relative_path, error.to_string()))?;
+    let source = std::fs::read_to_string(&absolute_path)
+        .map_err(|error| PipelineError::parse(relative_path, error.to_string()))?;
     let relative_path = normalize_relative_path(relative_path, root_path);
     let extension = extension_for(&relative_path);
     let language = language_for_extension(extension.as_str());
@@ -199,20 +194,14 @@ fn analyze_file(relative_path: &str, root_path: &str) -> Result<AnalyzedJsFile, 
         return Ok(stub);
     }
     let (virtual_path, source_text) = prepared_source(&relative_path, &extension, &source)
-        .map_err(|error| PipelineError {
-            file_path: relative_path.clone(),
-            error,
-        })?;
+        .map_err(|error| PipelineError::parse(relative_path.clone(), error))?;
 
     // One analyzer call per file. SFCs with multiple `<script>` blocks
     // go through `frameworks::combine_scripts` first, so the analyzer
     // never sees the N-blocks-to-merge shape that silently dropped
     // colliding bindings in the old multi-pass path.
     let mut analysis = JsAnalyzer::analyze_file(&source_text, &virtual_path, &relative_path)
-        .map_err(|error| PipelineError {
-            file_path: relative_path.clone(),
-            error,
-        })?;
+        .map_err(|error| PipelineError::parse(relative_path.clone(), error))?;
     analysis.relative_path = relative_path.clone();
 
     let phase1 = JsPhase1File {

@@ -101,8 +101,8 @@ mod tests {
         fn convert(
             &self,
             _graph: crate::v2::linker::CodeGraph,
-        ) -> Vec<(String, arrow::record_batch::RecordBatch)> {
-            Vec::new()
+        ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, crate::v2::SinkError> {
+            Ok(Vec::new())
         }
     }
 
@@ -124,7 +124,8 @@ mod tests {
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
-        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        let errors = std::sync::Mutex::new(Vec::new());
+        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
         assert!(dispatch_language(Language::JavaScript, &[], &ctx, &btx).is_some());
     }
 
@@ -138,7 +139,8 @@ mod tests {
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
-        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        let errors = std::sync::Mutex::new(Vec::new());
+        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
         assert!(dispatch_language(Language::TypeScript, &[], &ctx, &btx).is_some());
     }
 
@@ -152,7 +154,8 @@ mod tests {
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
-        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        let errors = std::sync::Mutex::new(Vec::new());
+        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
         assert!(dispatch_by_tag("js", &[], &ctx, &btx).is_some());
     }
 }

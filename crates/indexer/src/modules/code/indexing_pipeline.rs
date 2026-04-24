@@ -266,15 +266,26 @@ impl CodeIndexingPipeline {
         self.metrics
             .record_files_processed(result.stats.files_skipped as u64, "skipped");
 
-        if !result.errors.is_empty() {
+        let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
+        if parse_error_count > 0 {
             warn!(
                 project_id,
                 branch = %branch,
-                count = result.errors.len(),
+                count = parse_error_count,
                 "some files failed to parse during code indexing"
             );
             self.metrics
-                .record_files_processed(result.errors.len() as u64, "errored");
+                .record_files_processed(parse_error_count as u64, "errored");
+        }
+
+        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
+            self.metrics
+                .errors
+                .add(1, &[KeyValue::new("stage", error.stage)]);
+            return Err(HandlerError::Processing(format!(
+                "fatal code indexing pipeline error during {} for {}: {}",
+                error.stage, error.file_path, error.error
+            )));
         }
 
         context.progress.notify_in_progress().await;
