@@ -60,7 +60,7 @@ impl LanguagePipeline for JsPipeline {
 
         if !errors.is_empty() {
             for error in &errors {
-                log::warn!("[v2-js] skipped {}: {}", error.file_path, error.error);
+                tracing::warn!(path = %error.file_path, error = %error.error, "js: skipped file");
             }
         }
         Ok(())

@@ -162,7 +162,7 @@ impl BatchTx<'_> {
         self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
         for (table, batch) in self.converter.convert(graph) {
             if self.tx.send((table, batch)).is_err() {
-                log::warn!("batch channel closed — writer thread may have panicked");
+                tracing::warn!("batch channel closed — writer thread may have panicked");
                 return;
             }
         }
@@ -171,7 +171,7 @@ impl BatchTx<'_> {
     /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
         if self.tx.send((table, batch)).is_err() {
-            log::warn!("batch channel closed — writer thread may have panicked");
+            tracing::warn!("batch channel closed — writer thread may have panicked");
         }
     }
 }
@@ -326,7 +326,7 @@ impl Pipeline {
                 s.spawn(move || {
                     for (table, batch) in rx {
                         if let Err(e) = sink.write_batch(&table, &batch) {
-                            eprintln!("[v2] {language} writer error: {e}");
+                            tracing::error!(%language, error = %e, "writer batch failed");
                         }
                     }
                 });
@@ -347,9 +347,19 @@ impl Pipeline {
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
-                    let pool = pool_builder
-                        .build()
-                        .expect("failed to build per-language rayon pool");
+                    let pool = match pool_builder.build() {
+                        Ok(pool) => pool,
+                        Err(e) => {
+                            tracing::error!(
+                                %language,
+                                error = %e,
+                                "failed to create rayon pool, skipping language"
+                            );
+                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
+                            sem_tx.send(()).ok();
+                            return;
+                        }
+                    };
 
                     let btx = BatchTx {
                         tx: &tx,
@@ -359,9 +369,11 @@ impl Pipeline {
                         edges: edges_count,
                     };
 
-                    eprintln!(
-                        "[v2] processing {language}: {file_count} files ({} threads)",
-                        pool.current_num_threads()
+                    tracing::info!(
+                        %language,
+                        file_count,
+                        threads = pool.current_num_threads(),
+                        "processing language"
                     );
 
                     let result = pool.install(|| {
@@ -373,17 +385,29 @@ impl Pipeline {
 
                     match result {
                         Some(Ok(())) => {
-                            eprintln!("[v2] {language}: done in {:.2?}", t_lang.elapsed());
+                            tracing::info!(
+                                %language,
+                                elapsed_ms = t_lang.elapsed().as_millis() as u64,
+                                "language done"
+                            );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
-                            eprintln!("[v2] {language}: failed with {} errors", errors.len());
+                            tracing::warn!(
+                                %language,
+                                error_count = errors.len(),
+                                "language processing failed"
+                            );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
-                            all_errors.lock().unwrap().extend(errors);
+                            if let Ok(mut errs) = all_errors.lock() {
+                                errs.extend(errors);
+                            }
                         }
                         None => {
-                            eprintln!(
-                                "[v2] {language}: not supported, skipping {file_count} files"
+                            tracing::debug!(
+                                %language,
+                                file_count,
+                                "language not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
@@ -404,7 +428,7 @@ impl Pipeline {
                 references_count: 0,
                 edges_count: edges_count.into_inner(),
             },
-            errors: all_errors.into_inner().unwrap(),
+            errors: all_errors.into_inner().unwrap_or_default(),
             ctx,
         }
     }
@@ -488,11 +512,12 @@ where
         let rules = &lang_ctx.rules;
         let t0 = std::time::Instant::now();
 
-        // Spawn sentinel watchdog if per_file_timeout is configured
+        // Spawn sentinel watchdog if per_file_timeout is configured.
+        // Falls back to no timeout if the thread can't be spawned.
         let sentinel = rules
             .settings
             .per_file_timeout
-            .map(crate::v2::sentinel::spawn_sentinel);
+            .and_then(crate::v2::sentinel::spawn_sentinel);
 
         // ── Phase 1: parallel full walk, sequential graph build ──
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -781,7 +806,7 @@ where
                     }
                 }
                 if phase3_edges > 0 {
-                    eprintln!("[v2-sp] phase 3: {phase3_edges} cross-file edges resolved");
+                    tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
                 }
             }
         }
@@ -796,14 +821,14 @@ where
             let _ = join.join();
         }
 
-        eprintln!(
-            "[v2-sp] total: {:.2?} ({} nodes, {} edges, defs={}, imports={}, pool={})",
-            t0.elapsed(),
-            graph.graph.node_count(),
-            graph.graph.edge_count(),
-            graph.defs.len(),
-            graph.imports.len(),
-            graph.strings.len(),
+        tracing::info!(
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+            nodes = graph.graph.node_count(),
+            edges = graph.graph.edge_count(),
+            defs = graph.defs.len(),
+            imports = graph.imports.len(),
+            strings = graph.strings.len(),
+            "pipeline complete"
         );
 
         // ── Stream graph to writer thread, then drop it ─────────

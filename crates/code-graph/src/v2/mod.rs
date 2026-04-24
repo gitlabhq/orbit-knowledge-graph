@@ -1,5 +1,6 @@
 pub mod config;
 pub mod dsl;
+pub mod error;
 pub mod langs;
 pub mod linker;
 pub mod pipeline;
@@ -9,6 +10,7 @@ pub mod sink;
 pub mod trace;
 pub mod types;
 
+pub use error::CodeGraphError;
 pub use pipeline::{
     BatchTx, CancellationToken, GenericPipeline, LanguageContext, LanguagePipeline, Pipeline,
     PipelineConfig, PipelineContext, PipelineResult,
