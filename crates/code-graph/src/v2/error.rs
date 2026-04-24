@@ -78,3 +78,19 @@ impl std::error::Error for CodeGraphError {
         }
     }
 }
+
+impl CodeGraphError {
+    /// Returns a stable stage label for metrics recording.
+    pub fn stage(&self) -> &'static str {
+        match self {
+            Self::FileRead { .. } => "file_read",
+            Self::ParseFailed { .. } => "parse",
+            Self::ThreadPoolCreation { .. } => "thread_pool",
+            Self::SentinelSpawn { .. } => "sentinel",
+            Self::UnexpectedNodeType { .. } => "graph_node",
+            Self::ArrowConversion { .. } => "arrow_conversion",
+            Self::SinkWrite { .. } => "sink_write",
+            Self::Internal { .. } => "internal",
+        }
+    }
+}

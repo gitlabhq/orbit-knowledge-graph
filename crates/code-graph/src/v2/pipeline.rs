@@ -81,12 +81,22 @@ pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
     pub root_path: String,
+    /// Typed errors collected during pipeline execution.
+    /// Thread-safe — languages push errors from their CPU threads.
+    pub graph_errors: std::sync::Mutex<Vec<crate::v2::error::CodeGraphError>>,
 }
 
 impl PipelineContext {
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.config.cancel.is_cancelled()
+    }
+
+    /// Record a typed pipeline error.
+    pub fn record_error(&self, error: crate::v2::error::CodeGraphError) {
+        if let Ok(mut errors) = self.graph_errors.lock() {
+            errors.push(error);
+        }
     }
 }
 
@@ -247,6 +257,9 @@ impl Default for PipelineConfig {
 pub struct PipelineResult {
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
+    /// Typed errors from file read/parse failures, graph conversion, etc.
+    /// Each carries a `.stage()` label for metrics.
+    pub graph_errors: Vec<crate::v2::error::CodeGraphError>,
     /// The pipeline context, including the tracer with accumulated events.
     pub ctx: Arc<PipelineContext>,
 }
@@ -356,6 +369,7 @@ impl Pipeline {
             config,
             tracer,
             root_path: root_str,
+            graph_errors: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -501,6 +515,12 @@ impl Pipeline {
             }
         }); // all threads join here
 
+        let graph_errors = ctx
+            .graph_errors
+            .lock()
+            .map(|mut e| std::mem::take(&mut *e))
+            .unwrap_or_default();
+
         PipelineResult {
             stats: PipelineStats {
                 files_discovered: total_files,
@@ -513,6 +533,7 @@ impl Pipeline {
                 edges_count: edges_count.into_inner(),
             },
             errors: all_errors.into_inner().unwrap_or_default(),
+            graph_errors,
             ctx,
         }
     }
@@ -631,6 +652,13 @@ where
         // Extracts defs, imports, AND refs+SSA in a single pass.
         // Source bytes are read and dropped per-file — no bulk storage.
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::error::CodeGraphError;
+
+        enum ParseOutcome {
+            Ok(ParsedFile),
+            Err(CodeGraphError),
+        }
+
         struct ParsedFile {
             path_idx: usize,
             result: ParseFullResult,
@@ -638,7 +666,7 @@ where
             file_size: u64,
         }
 
-        let parsed: Vec<Option<ParsedFile>> = files
+        let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
             .map(|(idx, path)| {
@@ -652,7 +680,10 @@ where
                     Err(e) => {
                         tracing::debug!(path, error = %e, "failed to read file");
                         pb.inc(1);
-                        return None;
+                        return Some(ParseOutcome::Err(CodeGraphError::FileRead {
+                            path: path.to_string(),
+                            source: e,
+                        }));
                     }
                 };
 
@@ -661,7 +692,10 @@ where
                     Err(e) => {
                         tracing::debug!(path, error = %e, "failed to parse file");
                         pb.inc(1);
-                        return None;
+                        return Some(ParseOutcome::Err(CodeGraphError::ParseFailed {
+                            path: path.to_string(),
+                            message: e.error.clone(),
+                        }));
                     }
                 };
                 // source bytes dropped here — single-walk, no re-read needed
@@ -673,14 +707,36 @@ where
                     .to_string();
                 let file_size = source.len() as u64;
                 pb.inc(1);
-                Some(ParsedFile {
+                Some(ParseOutcome::Ok(ParsedFile {
                     path_idx: idx,
                     result,
                     ext,
                     file_size,
-                })
+                }))
             })
             .collect();
+
+        // Separate successes from errors. Errors are collected for
+        // reporting — their stage labels feed the ERRORS metric.
+        let mut parse_errors: Vec<CodeGraphError> = Vec::new();
+        let parsed: Vec<Option<ParsedFile>> = parse_outcomes
+            .into_iter()
+            .map(|outcome| match outcome {
+                Some(ParseOutcome::Ok(file)) => Some(file),
+                Some(ParseOutcome::Err(e)) => {
+                    parse_errors.push(e);
+                    None
+                }
+                None => None,
+            })
+            .collect();
+
+        // Push parse errors to the shared context for metrics.
+        if !parse_errors.is_empty() {
+            if let Ok(mut errs) = ctx.graph_errors.lock() {
+                errs.extend(parse_errors);
+            }
+        }
 
         // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
         struct FileWithRefs {
@@ -770,6 +826,7 @@ where
             Vec<(u32, String)>,
             Option<FileInfo>,
             Vec<FailedChain>,
+            bool, // true if file was killed by sentinel timeout
         );
 
         let resolve_results: Vec<Phase2Result> = files_with_refs
@@ -799,6 +856,7 @@ where
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
 
+                let mut killed = false;
                 for r in &fwr.refs {
                     let before = edges.len();
                     if resolver
@@ -811,6 +869,7 @@ where
                         )
                         .is_err()
                     {
+                        killed = true;
                         break; // file killed by sentinel
                     }
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
@@ -826,7 +885,13 @@ where
                 edges.extend(resolver.drain_import_edges());
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
-                (edges, fwr.inferred_returns, Some(fwr.info), failed_chains)
+                (
+                    edges,
+                    fwr.inferred_returns,
+                    Some(fwr.info),
+                    failed_chains,
+                    killed,
+                )
             })
             .collect();
 
@@ -840,7 +905,19 @@ where
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Vec<FailedChain>)> = Vec::new();
 
-        for (edges, inferred, info_opt, failed_chains) in resolve_results {
+        for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
+            if killed {
+                if let Some(ref info) = info_opt {
+                    let path = match &graph.graph[info.file_node] {
+                        crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
+                        _ => "unknown",
+                    };
+                    ctx.record_error(CodeGraphError::Internal {
+                        context: "sentinel_timeout".to_string(),
+                        message: format!("file killed by per-file timeout: {path}"),
+                    });
+                }
+            }
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
             }
@@ -979,6 +1056,7 @@ mod tests {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
+            graph_errors: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();

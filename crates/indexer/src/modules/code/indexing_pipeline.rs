@@ -284,6 +284,13 @@ impl CodeIndexingPipeline {
         self.metrics
             .record_nodes_indexed(result.stats.edges_count as u64, "edge");
 
+        // Record typed pipeline errors (file read, parse, conversion failures).
+        for graph_error in &result.graph_errors {
+            self.metrics
+                .errors
+                .add(1, &[KeyValue::new("stage", graph_error.stage())]);
+        }
+
         let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
         if parse_error_count > 0 {
             warn!(
