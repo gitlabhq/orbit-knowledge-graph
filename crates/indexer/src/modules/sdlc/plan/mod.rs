@@ -164,11 +164,13 @@ pub(in crate::modules::sdlc) fn build_plans(
     ontology: &ontology::Ontology,
     global_batch_size: u64,
     namespaced_batch_size: u64,
+    batch_size_overrides: &std::collections::HashMap<String, u64>,
 ) -> Plans {
     lower::lower(
         input::from_ontology(ontology),
         global_batch_size,
         namespaced_batch_size,
+        batch_size_overrides,
     )
 }
 

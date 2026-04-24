@@ -38,10 +38,14 @@ pub async fn register_handlers(
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
+    let mut batch_size_overrides = global_handler_config.batch_size_overrides.clone();
+    batch_size_overrides.extend(namespace_handler_config.batch_size_overrides.clone());
+
     let plans = build_plans(
         ontology,
         global_handler_config.datalake_batch_size,
         namespace_handler_config.datalake_batch_size,
+        &batch_size_overrides,
     );
 
     info!(
@@ -165,7 +169,7 @@ mod tests {
     #[test]
     fn build_plans_returns_global_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000);
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
 
         let entity_names: Vec<_> = plans.global.iter().map(|p| p.name.as_str()).collect();
         assert!(entity_names.contains(&"User"), "should include User entity");
@@ -174,7 +178,7 @@ mod tests {
     #[test]
     fn build_plans_returns_namespaced_entities() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000);
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
 
         let entity_names: Vec<_> = plans.namespaced.iter().map(|p| p.name.as_str()).collect();
         assert!(
