@@ -6,7 +6,7 @@
 //!
 //! | Query type   | Strategy                 | Why                                        |
 //! |--------------|--------------------------|--------------------------------------------|
-//! | Search       | argMaxIfOrNull + GROUP BY     | Preserves LIMIT pushdown                   |
+//! | Search       | LIMIT 1 BY subquery           | Streaming reads + early LIMIT termination  |
 //! | Traversal    | LIMIT 1 BY subquery           | Needs all columns for hydration/properties |
 //! | Aggregation  | LIMIT 1 BY subquery           | Needs property columns for countIf/sumIf   |
 //! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
@@ -137,8 +137,8 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
             let table = table.clone();
 
             match input.query_type {
-                QueryType::Search => apply_argmax_dedup(q, &alias),
-                QueryType::Traversal
+                QueryType::Search
+                | QueryType::Traversal
                 | QueryType::Aggregation
                 | QueryType::PathFinding
                 | QueryType::Neighbors => {
@@ -219,7 +219,7 @@ fn references_only_sort_key(expr: &Expr, sort_key: &HashSet<&str>) -> bool {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Strategy: argMaxIfOrNull (search)
+// Strategy: argMaxIfOrNull (hydration, _nf CTEs)
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Wrap column references in `argMaxIfOrNull(col, _version, _deleted = false)`.
@@ -295,19 +295,37 @@ fn apply_argmax_dedup(q: &mut Query, alias: &str) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Strategy: LIMIT 1 BY subquery (traversal, aggregation, neighbors, path)
+// Strategy: LIMIT 1 BY subquery (search, traversal, aggregation, neighbors, path)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn make_dedup_subquery(table_name: String, alias: &str, inner_filters: Vec<Expr>) -> TableRef {
+fn make_dedup_subquery(
+    table_name: String,
+    alias: &str,
+    inner_filters: Vec<Expr>,
+    sort_key: &[String],
+) -> TableRef {
+    // ORDER BY <sort_key columns ASC ...>, _version DESC
+    // Prefixing with the table's sort key lets ClickHouse use the primary
+    // key ordering for streaming reads (ReadType: InOrder) instead of
+    // forcing a full sort.
+    let mut order_by: Vec<OrderExpr> = sort_key
+        .iter()
+        .map(|col| OrderExpr {
+            expr: Expr::col(alias, col),
+            desc: false,
+        })
+        .collect();
+    order_by.push(OrderExpr {
+        expr: Expr::col(alias, VERSION_COLUMN),
+        desc: true,
+    });
+
     TableRef::subquery(
         Query {
             select: vec![SelectExpr::star()],
             from: TableRef::scan(table_name, alias),
             where_clause: Expr::conjoin(inner_filters),
-            order_by: vec![OrderExpr {
-                expr: Expr::col(alias, VERSION_COLUMN),
-                desc: true,
-            }],
+            order_by,
             limit_by: Some((1, vec![Expr::col(alias, "id")])),
             ..Default::default()
         },
@@ -343,7 +361,7 @@ fn wrap_scan_with_limit_by(
 
     outer_filters.insert(0, not_deleted(&alias));
     *where_clause = Expr::conjoin(outer_filters);
-    *from = make_dedup_subquery(table_name, &alias, inner_filters);
+    *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
 }
 
 /// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
@@ -448,7 +466,14 @@ mod tests {
         };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
-        assert!(inner.order_by[0].desc);
+        // ORDER BY should end with _version DESC, prefixed by sort key columns ASC
+        let last_ord = inner.order_by.last().unwrap();
+        assert!(last_ord.desc, "last ORDER BY should be _version DESC");
+        // Sort key columns come first (ASC)
+        assert!(
+            !inner.order_by[0].desc,
+            "first ORDER BY should be sort key column ASC"
+        );
         // state is a mutable column -- must stay OUTSIDE the dedup subquery
         assert!(!where_contains(&inner.where_clause, "state"));
         assert!(where_contains(&q.where_clause, "_deleted"));
@@ -755,7 +780,7 @@ mod tests {
     // ── argMaxIfOrNull tests ────────────────────────────────────────────
 
     #[test]
-    fn search_uses_argmax() {
+    fn search_uses_limit_by() {
         let ont = ontology();
         let mut node = Node::Query(Box::new(Query {
             select: vec![
@@ -779,29 +804,21 @@ mod tests {
         let Node::Query(q) = &node else {
             unreachable!()
         };
+        let inner = find_subquery(&q.from, "pipe").expect("search should wrap in subquery");
+        assert!(has_limit_by(inner), "inner subquery should have LIMIT 1 BY");
+        // ORDER BY should end with _version DESC, prefixed by sort key columns ASC
+        let last_ord = inner.order_by.last().unwrap();
+        assert!(last_ord.desc, "last ORDER BY should be _version DESC");
         assert!(
-            matches!(&q.from, TableRef::Scan { table, .. } if table == "gl_pipeline"),
-            "search should not wrap in subquery"
+            !inner.order_by[0].desc,
+            "first ORDER BY should be sort key column ASC"
         );
-        assert!(!q.group_by.is_empty(), "should add GROUP BY");
-        assert!(q.having.is_some(), "should add HAVING clause");
-        let having_str = format!("{:?}", q.having);
-        assert!(
-            having_str.contains("isNotNull") && having_str.contains("argMaxIfOrNull"),
-            "HAVING should use isNotNull(argMaxIfOrNull(...))"
-        );
-        assert!(
-            having_str.contains("failed"),
-            "HAVING should re-check value filters via argMaxIfOrNull"
-        );
-        let status_sel = &q.select[1];
-        let sel_str = format!("{:?}", status_sel.expr);
-        assert!(
-            sel_str.contains("argMaxIfOrNull"),
-            "status should use argMaxIfOrNull"
-        );
-        assert!(where_contains(&q.where_clause, "startsWith"));
+        // traversal_path is in the sort key -- pushed inside
+        assert!(where_contains(&inner.where_clause, "traversal_path"));
+        // status is mutable -- stays outside
+        assert!(!where_contains(&inner.where_clause, "status"));
         assert!(where_contains(&q.where_clause, "status"));
+        assert!(where_contains(&q.where_clause, "_deleted"));
         assert_eq!(q.limit, Some(50));
     }
 
