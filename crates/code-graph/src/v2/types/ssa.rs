@@ -9,7 +9,7 @@ pub enum ParseValue {
     /// Points to an import in this file's imports list.
     ImportRef(u32),
     /// A type FQN for nested member lookup (from self/this or type annotations).
-    Type(String),
+    Type(smol_str::SmolStr),
     /// Dead end — parameter, literal, or otherwise unresolvable.
     Opaque,
 }

@@ -18,7 +18,7 @@ use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
-    FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
+    BatchTx, FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -46,10 +46,11 @@ macro_rules! register_v2_pipelines {
             language: Language,
             files: &[FileInput],
             ctx: &Arc<PipelineContext>,
-        ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
+            btx: &BatchTx<'_>,
+        ) -> Option<Result<(), Vec<PipelineError>>> {
             #[allow(unreachable_patterns)]
             Some(match language {
-                $(Language::$variant => <$($pipeline)*>::process_files(files, ctx),)*
+                $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
         }
@@ -60,9 +61,10 @@ macro_rules! register_v2_pipelines {
             tag: &str,
             files: &[FileInput],
             ctx: &Arc<PipelineContext>,
-        ) -> Option<Result<PipelineOutput, Vec<PipelineError>>> {
+            btx: &BatchTx<'_>,
+        ) -> Option<Result<(), Vec<PipelineError>>> {
             Some(match tag {
-                $($tag => <$($pipeline)*>::process_files(files, ctx),)*
+                $($tag => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
         }
@@ -92,6 +94,17 @@ register_v2_pipelines! {
 mod tests {
     use super::*;
     use crate::v2::pipeline::PipelineConfig;
+    use std::sync::atomic::AtomicUsize;
+
+    struct NoopConverter;
+    impl crate::v2::sink::GraphConverter for NoopConverter {
+        fn convert(
+            &self,
+            _graph: crate::v2::linker::CodeGraph,
+        ) -> Vec<(String, arrow::record_batch::RecordBatch)> {
+            Vec::new()
+        }
+    }
 
     fn test_ctx() -> Arc<PipelineContext> {
         Arc::new(PipelineContext {
@@ -104,18 +117,42 @@ mod tests {
     #[test]
     fn javascript_pipeline_is_registered() {
         let ctx = test_ctx();
-        assert!(dispatch_language(Language::JavaScript, &[], &ctx).is_some());
+        let conv = NoopConverter;
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let (d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        assert!(dispatch_language(Language::JavaScript, &[], &ctx, &btx).is_some());
     }
 
     #[test]
     fn typescript_pipeline_is_registered() {
         let ctx = test_ctx();
-        assert!(dispatch_language(Language::TypeScript, &[], &ctx).is_some());
+        let conv = NoopConverter;
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let (d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        assert!(dispatch_language(Language::TypeScript, &[], &ctx, &btx).is_some());
     }
 
     #[test]
     fn js_pipeline_tag_is_registered() {
         let ctx = test_ctx();
-        assert!(dispatch_by_tag("js", &[], &ctx).is_some());
+        let conv = NoopConverter;
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let (d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
+        );
+        let btx = BatchTx::new(&tx, &conv, &d, &i, &e);
+        assert!(dispatch_by_tag("js", &[], &ctx, &btx).is_some());
     }
 }

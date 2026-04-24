@@ -203,6 +203,58 @@ pub fn convert_v2_graph(
     Ok(LocalGraphData { tables })
 }
 
+/// `GraphConverter` for DuckDB. Wraps `convert_v2_graph`.
+pub struct DuckDbConverter {
+    pub project_id: i64,
+    pub branch: String,
+    pub commit_sha: String,
+    pub ontology: std::sync::Arc<Ontology>,
+}
+
+impl code_graph::v2::GraphConverter for DuckDbConverter {
+    fn convert(&self, graph: code_graph::v2::linker::CodeGraph) -> Vec<(String, RecordBatch)> {
+        convert_v2_graph(
+            &graph,
+            self.project_id,
+            &self.branch,
+            &self.commit_sha,
+            &self.ontology,
+        )
+        .map(|data| data.tables)
+        .unwrap_or_default()
+    }
+}
+
+/// `BatchSink` implementation for DuckDB. Wraps a `DuckDbClient` behind
+/// a Mutex (DuckDB is single-writer).
+pub struct DuckDbSink {
+    client: std::sync::Mutex<crate::DuckDbClient>,
+}
+
+impl DuckDbSink {
+    pub fn new(client: crate::DuckDbClient) -> Self {
+        Self {
+            client: std::sync::Mutex::new(client),
+        }
+    }
+}
+
+impl code_graph::v2::BatchSink for DuckDbSink {
+    fn write_batch(
+        &self,
+        table: &str,
+        batch: &RecordBatch,
+    ) -> std::result::Result<(), code_graph::v2::SinkError> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        let client = self.client.lock().unwrap();
+        client
+            .insert_batch(table, batch)
+            .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

@@ -1,11 +1,8 @@
 use std::path::Path;
 
-use crate::v2::linker::CodeGraph;
 use std::sync::Arc;
 
-use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
-};
+use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use rustc_hash::FxHashMap;
 
 use super::extract::{ResolvedJsFile, analyze_files};
@@ -18,13 +15,12 @@ impl LanguagePipeline for JsPipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         if files.is_empty() {
-            return Ok(PipelineOutput::Graph(Box::new(CodeGraph::new_with_root(
-                root_path.to_string(),
-            ))));
+            return Ok(());
         }
 
         let (analyzed_files, errors) = analyze_files(files, root_path);
@@ -60,13 +56,13 @@ impl LanguagePipeline for JsPipeline {
         );
         graph.finalize(tracer);
 
-        if errors.is_empty() {
-            Ok(PipelineOutput::Graph(Box::new(graph)))
-        } else {
+        btx.send_graph(graph);
+
+        if !errors.is_empty() {
             for error in &errors {
                 log::warn!("[v2-js] skipped {}: {}", error.file_path, error.error);
             }
-            Ok(PipelineOutput::Graph(Box::new(graph)))
         }
+        Ok(())
     }
 }

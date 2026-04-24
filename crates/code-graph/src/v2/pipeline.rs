@@ -1,4 +1,7 @@
 use crate::v2::config::{Language, detect_language_from_extension};
+use crate::v2::sink::{BatchSink, GraphConverter};
+use arrow::record_batch::RecordBatch;
+use crossbeam_channel::Sender;
 use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
@@ -6,7 +9,7 @@ use rustc_hash::FxHashMap;
 use std::marker::PhantomData;
 use std::path::Path;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 use crate::v2::linker::CodeGraph;
 use crate::v2::trace::Tracer;
@@ -68,16 +71,6 @@ fn spinner(msg: &str) -> ProgressBar {
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
 
-/// Output from a language pipeline.
-///
-/// - **Graph**: the standard `CodeGraph` output (generic pipelines).
-/// - **Batches**: raw Arrow `RecordBatch`es keyed by table name (custom
-///   pipelines that bypass `CodeGraph` entirely).
-pub enum PipelineOutput {
-    Graph(Box<CodeGraph>),
-    Batches(Vec<(String, arrow::record_batch::RecordBatch)>),
-}
-
 /// Immutable context shared across the entire pipeline run.
 /// Bundles config, tracer, root path, and cancellation — everything
 /// that doesn't change per-language or per-file.
@@ -127,25 +120,85 @@ impl LanguageContext {
     }
 }
 
-/// Trait for language-specific graph production.
+/// Handle for streaming Arrow batches out of a pipeline.
 ///
-/// Two strategies:
-/// - **Generic**: `GenericPipeline<P, R>` for languages using the standard
-///   parse+walk → resolve → graph flow.
-/// - **Custom**: implement directly for languages that need full control
-///   over parsing and linking. Custom pipelines can emit `RecordBatch`es
-///   directly without going through `CodeGraph`.
+/// Wraps a channel sender, converter reference, and stat counters.
+/// Language pipelines call `send_graph()` for graph-based output
+/// or `send_raw()` for pre-built Arrow batches.
+pub struct BatchTx<'a> {
+    tx: &'a Sender<(String, RecordBatch)>,
+    converter: &'a dyn GraphConverter,
+    definitions: &'a AtomicUsize,
+    imports: &'a AtomicUsize,
+    edges: &'a AtomicUsize,
+}
+
+impl<'a> BatchTx<'a> {
+    pub fn new(
+        tx: &'a Sender<(String, RecordBatch)>,
+        converter: &'a dyn GraphConverter,
+        definitions: &'a AtomicUsize,
+        imports: &'a AtomicUsize,
+        edges: &'a AtomicUsize,
+    ) -> Self {
+        Self {
+            tx,
+            converter,
+            definitions,
+            imports,
+            edges,
+        }
+    }
+}
+
+impl BatchTx<'_> {
+    /// Count graph stats, convert to Arrow batches, and send to the
+    /// writer thread. Takes ownership — graph is dropped after conversion.
+    pub fn send_graph(&self, graph: CodeGraph) {
+        self.definitions
+            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
+        self.imports
+            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
+        self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
+        for (table, batch) in self.converter.convert(graph) {
+            if self.tx.send((table, batch)).is_err() {
+                log::warn!("batch channel closed — writer thread may have panicked");
+                return;
+            }
+        }
+    }
+
+    /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
+    pub fn send_raw(&self, table: String, batch: RecordBatch) {
+        if self.tx.send((table, batch)).is_err() {
+            log::warn!("batch channel closed — writer thread may have panicked");
+        }
+    }
+}
+
+/// Trait for language-specific pipeline execution.
+///
+/// All pipelines stream their output through a `BatchTx` handle.
+/// Graph-based pipelines use `btx.send_graph()`.
+/// Batch-based pipelines use `btx.send_raw()`.
 pub trait LanguagePipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>>;
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>>;
 }
 
 pub struct PipelineConfig {
     pub max_file_size: u64,
     pub respect_gitignore: bool,
     pub cancel: CancellationToken,
+    /// Rayon threads per language. 0 = use all available cores.
+    pub worker_threads: usize,
+    /// Max languages processing concurrently. Limits peak memory
+    /// (at most N CodeGraphs + N rayon pools alive at once).
+    /// 0 = default (2).
+    pub max_concurrent_languages: usize,
 }
 
 impl Default for PipelineConfig {
@@ -154,25 +207,19 @@ impl Default for PipelineConfig {
             max_file_size: 1_000_000,
             respect_gitignore: true,
             cancel: CancellationToken::new(),
+            worker_threads: 0,
+            max_concurrent_languages: 0,
         }
     }
 }
 
 pub struct PipelineResult {
-    pub graphs: Vec<CodeGraph>,
-    pub batches: Vec<(String, arrow::record_batch::RecordBatch)>,
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
     /// The pipeline context, including the tracer with accumulated events.
     pub ctx: Arc<PipelineContext>,
 }
 
-/// Aggregate stats from the pipeline run.
-///
-/// Note: `definitions_count`, `imports_count`, `references_count`, and
-/// `edges_count` only reflect `PipelineOutput::Graph` outputs. Custom
-/// pipelines returning `PipelineOutput::Batches` contribute to
-/// `files_parsed` but not to the entity counts.
 pub struct PipelineStats {
     pub files_parsed: usize,
     pub files_skipped: usize,
@@ -191,11 +238,28 @@ pub struct PipelineError {
 pub struct Pipeline;
 
 impl Pipeline {
-    pub fn run(root: &Path, config: PipelineConfig) -> PipelineResult {
-        Self::run_with_tracer(root, config, Tracer::new(false))
+    pub fn run(
+        root: &Path,
+        config: PipelineConfig,
+        converter: Arc<dyn GraphConverter>,
+        sink: Arc<dyn BatchSink>,
+    ) -> PipelineResult {
+        Self::run_with_tracer(root, config, Tracer::new(false), converter, sink)
     }
 
-    pub fn run_with_tracer(root: &Path, config: PipelineConfig, tracer: Tracer) -> PipelineResult {
+    /// Run the pipeline. Each language gets its own CPU thread and a
+    /// dedicated writer thread. Results stream through a per-language
+    /// channel as phases complete — nodes after Phase 1, edges after
+    /// Phase 2/3. Graphs are dropped immediately after conversion.
+    ///
+    /// Blocks until all languages finish processing and writing.
+    pub fn run_with_tracer(
+        root: &Path,
+        config: PipelineConfig,
+        tracer: Tracer,
+        converter: Arc<dyn GraphConverter>,
+        sink: Arc<dyn BatchSink>,
+    ) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
 
         // 1. Walk filesystem, group files by language
@@ -217,72 +281,130 @@ impl Pipeline {
             root_path: root_str,
         });
 
-        // 2. Process each language through its pipeline
-        let mut all_graphs: Vec<CodeGraph> = Vec::new();
-        let mut all_batches: Vec<(String, arrow::record_batch::RecordBatch)> = Vec::new();
-        let mut all_errors: Vec<PipelineError> = Vec::new();
-        let mut files_parsed = 0usize;
-        let mut files_skipped = 0usize;
+        // 2. Process languages with bounded concurrency. At most
+        //    max_concurrent_languages run at once (default 2), each
+        //    with its own rayon pool and writer thread. Limits peak
+        //    memory to N CodeGraphs + N rayon pools.
+        let max_langs = match ctx.config.max_concurrent_languages {
+            0 => 2,
+            n => n,
+        };
+        let files_parsed = AtomicUsize::new(0);
+        let files_skipped = AtomicUsize::new(0);
+        let definitions_count = AtomicUsize::new(0);
+        let imports_count = AtomicUsize::new(0);
+        let edges_count = AtomicUsize::new(0);
+        let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
 
-        for (language, files) in &files_by_language {
-            if ctx.is_cancelled() {
-                break;
-            }
-            let file_count = files.len();
-            eprintln!("[v2] processing {language}: {file_count} files");
-            let t_lang = std::time::Instant::now();
-
-            match crate::v2::registry::dispatch_language(*language, files, &ctx) {
-                Some(Ok(PipelineOutput::Graph(graph))) => {
-                    eprintln!(
-                        "[v2] {language}: done in {:.2?} ({} nodes, {} edges)",
-                        t_lang.elapsed(),
-                        graph.node_count(),
-                        graph.edge_count()
-                    );
-                    files_parsed += file_count;
-                    all_graphs.push(*graph);
-                }
-                Some(Ok(PipelineOutput::Batches(batches))) => {
-                    let row_count: usize = batches.iter().map(|(_, b)| b.num_rows()).sum();
-                    eprintln!(
-                        "[v2] {language}: done in {:.2?} ({} batches, {} total rows)",
-                        t_lang.elapsed(),
-                        batches.len(),
-                        row_count,
-                    );
-                    files_parsed += file_count;
-                    all_batches.extend(batches);
-                }
-                Some(Err(errors)) => {
-                    eprintln!("[v2] {language}: failed with {} errors", errors.len());
-                    files_skipped += file_count;
-                    all_errors.extend(errors);
-                }
-                None => {
-                    eprintln!("[v2] {language}: not supported, skipping {file_count} files");
-                    files_skipped += file_count;
-                }
-            }
+        // Bounded channel as a semaphore: N permits = N concurrent languages
+        let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
+        for _ in 0..max_langs {
+            sem_tx.send(()).unwrap();
         }
 
-        let definitions_count = all_graphs.iter().map(|g| g.definitions().count()).sum();
-        let imports_count = all_graphs.iter().map(|g| g.imports_iter().count()).sum();
-        let references_count = all_graphs.iter().map(|g| g.edges().count()).sum();
-        let edges_count = all_graphs.iter().map(|g| g.edge_count()).sum();
+        std::thread::scope(|s| {
+            for (language, files) in &files_by_language {
+                // Block until a slot opens
+                sem_rx.recv().unwrap();
+
+                let ctx = &ctx;
+                let converter = &converter;
+                let sink = &sink;
+                let sem_tx = &sem_tx;
+                let files_parsed = &files_parsed;
+                let files_skipped = &files_skipped;
+                let definitions_count = &definitions_count;
+                let imports_count = &imports_count;
+                let edges_count = &edges_count;
+                let all_errors = &all_errors;
+
+                // Per-language channel: CPU thread → writer thread.
+                // Bounded to cap memory if the writer is slower than the converter.
+                let (tx, rx) = crossbeam_channel::bounded::<(String, RecordBatch)>(8);
+
+                // Writer thread: drain channel, write each batch to sink
+                s.spawn(move || {
+                    for (table, batch) in rx {
+                        if let Err(e) = sink.write_batch(&table, &batch) {
+                            eprintln!("[v2] {language} writer error: {e}");
+                        }
+                    }
+                });
+
+                // CPU thread: acquire permit, build rayon pool, process,
+                // release permit when done
+                let worker_threads = ctx.config.worker_threads;
+                s.spawn(move || {
+                    if ctx.is_cancelled() {
+                        sem_tx.send(()).ok();
+                        return;
+                    }
+                    let file_count = files.len();
+                    let t_lang = std::time::Instant::now();
+
+                    let mut pool_builder =
+                        rayon::ThreadPoolBuilder::new().stack_size(2 * 1024 * 1024); // 2MB per worker (vs 8MB default)
+                    if worker_threads > 0 {
+                        pool_builder = pool_builder.num_threads(worker_threads);
+                    }
+                    let pool = pool_builder
+                        .build()
+                        .expect("failed to build per-language rayon pool");
+
+                    let btx = BatchTx {
+                        tx: &tx,
+                        converter: converter.as_ref(),
+                        definitions: definitions_count,
+                        imports: imports_count,
+                        edges: edges_count,
+                    };
+
+                    eprintln!(
+                        "[v2] processing {language}: {file_count} files ({} threads)",
+                        pool.current_num_threads()
+                    );
+
+                    let result = pool.install(|| {
+                        crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                    });
+
+                    // Pool dropped here — rayon threads freed
+                    drop(pool);
+
+                    match result {
+                        Some(Ok(())) => {
+                            eprintln!("[v2] {language}: done in {:.2?}", t_lang.elapsed());
+                            files_parsed.fetch_add(file_count, Ordering::Relaxed);
+                        }
+                        Some(Err(errors)) => {
+                            eprintln!("[v2] {language}: failed with {} errors", errors.len());
+                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
+                            all_errors.lock().unwrap().extend(errors);
+                        }
+                        None => {
+                            eprintln!(
+                                "[v2] {language}: not supported, skipping {file_count} files"
+                            );
+                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
+                        }
+                    }
+                    // Release permit — next language can start
+                    sem_tx.send(()).ok();
+                    // tx dropped here — writer thread exits
+                });
+            }
+        }); // all threads join here
 
         PipelineResult {
-            graphs: all_graphs,
-            batches: all_batches,
             stats: PipelineStats {
-                files_parsed,
-                files_skipped,
-                definitions_count,
-                imports_count,
-                references_count,
-                edges_count,
+                files_parsed: files_parsed.into_inner(),
+                files_skipped: files_skipped.into_inner(),
+                definitions_count: definitions_count.into_inner(),
+                imports_count: imports_count.into_inner(),
+                references_count: 0,
+                edges_count: edges_count.into_inner(),
             },
-            errors: all_errors,
+            errors: all_errors.into_inner().unwrap(),
             ctx,
         }
     }
@@ -337,9 +459,10 @@ impl Pipeline {
 
 /// Generic pipeline parameterized by language spec `P` and rules `R`.
 ///
-/// - **Phase 1** (parallel): `parse_defs_only()` → add defs/imports to graph under Mutex
-/// - **Finalize**: build ancestor chains, drop construction indexes
-/// - **Phase 2** (parallel): resolve collected refs against the graph → edges
+/// - **Phase 1** (parallel): full AST walk → defs, imports, refs
+/// - **Finalize**: build ancestor chains → stream nodes to writer
+/// - **Phase 2** (parallel): resolve refs → edges
+/// - **Phase 3**: re-resolve failed chains → stream edges to writer
 pub struct GenericPipeline<P, R>(PhantomData<(P, R)>);
 
 impl<P, R> LanguagePipeline for GenericPipeline<P, R>
@@ -350,7 +473,8 @@ where
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let lang_ctx = Arc::new(LanguageContext {
             pipeline: ctx.clone(),
             spec: P::spec(),
@@ -484,6 +608,7 @@ where
         }
 
         graph.finalize(tracer);
+        graph.drop_construction_indexes();
 
         // ── Phase 1c: patch unresolved SSA aliases via graph ────
         // Pass 1.5 equivalent: resolve alias targets that couldn't be
@@ -500,7 +625,7 @@ where
                 {
                     let fqn = graph.def_fqn(n).to_string();
                     if let Some(r) = fwr.refs.get_mut(*ref_idx) {
-                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn)];
+                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn.into())];
                     }
                 }
             }
@@ -565,7 +690,7 @@ where
                     }
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
                         failed_chains.push((
-                            r.name.clone(),
+                            r.name.to_string(),
                             r.chain.clone().unwrap(),
                             r.reaching.clone().into(),
                             r.enclosing_def,
@@ -661,6 +786,10 @@ where
             }
         }
 
+        // Free resolution-only indexes before conversion.
+        graph.indexes.definition_ranges.clear();
+        graph.indexes.definition_ranges.shrink_to_fit();
+
         // Shut down sentinel
         if let Some((handle, join)) = sentinel {
             handle.shutdown();
@@ -676,14 +805,44 @@ where
             graph.imports.len(),
             graph.strings.len(),
         );
-        Ok(PipelineOutput::Graph(Box::new(graph)))
+
+        // ── Stream graph to writer thread, then drop it ─────────
+        btx.send_graph(graph);
+
+        Ok(())
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::linker::CodeGraph;
+    use crate::v2::sink::{GraphConverter, NullSink};
     use crate::v2::types::{DefKind, NodeKind};
+
+    /// Test-only converter that captures CodeGraphs for inspection.
+    struct TestCapture {
+        graphs: std::sync::Mutex<Vec<CodeGraph>>,
+    }
+
+    impl TestCapture {
+        fn new() -> Self {
+            Self {
+                graphs: std::sync::Mutex::new(Vec::new()),
+            }
+        }
+
+        fn take(&self) -> Vec<CodeGraph> {
+            std::mem::take(&mut *self.graphs.lock().unwrap())
+        }
+    }
+
+    impl GraphConverter for TestCapture {
+        fn convert(&self, graph: CodeGraph) -> Vec<(String, RecordBatch)> {
+            self.graphs.lock().unwrap().push(graph);
+            Vec::new()
+        }
+    }
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
@@ -696,13 +855,18 @@ mod tests {
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
         });
-        let output = crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx)
+        let capture = Arc::new(TestCapture::new());
+        let (tx, _rx) = crossbeam_channel::unbounded();
+        let defs = AtomicUsize::new(0);
+        let imps = AtomicUsize::new(0);
+        let edgs = AtomicUsize::new(0);
+        let btx = BatchTx::new(&tx, capture.as_ref(), &defs, &imps, &edgs);
+        crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
-        match output {
-            PipelineOutput::Graph(g) => *g,
-            PipelineOutput::Batches(_) => panic!("expected Graph output"),
-        }
+        let mut graphs = capture.take();
+        assert!(!graphs.is_empty(), "expected graph output");
+        graphs.remove(0)
     }
 
     // ── Python fixture ──────────────────────────────────────────────
@@ -858,30 +1022,28 @@ namespace MyApp {
         )
         .unwrap();
 
+        let capture = Arc::new(TestCapture::new());
+        let sink = Arc::new(NullSink);
         let result = Pipeline::run_with_tracer(
             root,
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            sink,
         );
 
         assert_eq!(result.stats.files_parsed, 4, "Should parse 4 files");
         assert_eq!(result.errors.len(), 0, "Should have no errors");
 
-        assert!(
-            result.stats.definitions_count >= 8,
-            "Expected at least 8 definitions, got {}",
-            result.stats.definitions_count
-        );
-
-        let total_files: usize = result.graphs.iter().map(|g| g.files().count()).sum();
-        let total_dirs: usize = result.graphs.iter().map(|g| g.directories().count()).sum();
-        let total_edges: usize = result.graphs.iter().map(|g| g.edge_count()).sum();
+        let graphs = capture.take();
+        let total_files: usize = graphs.iter().map(|g| g.files().count()).sum();
+        let total_dirs: usize = graphs.iter().map(|g| g.directories().count()).sum();
+        let total_edges: usize = graphs.iter().map(|g| g.edge_count()).sum();
         assert_eq!(total_files, 4);
         assert!(total_dirs > 0);
         assert!(total_edges > 0);
 
-        let def_to_def: usize = result
-            .graphs
+        let def_to_def: usize = graphs
             .iter()
             .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {
@@ -894,8 +1056,7 @@ namespace MyApp {
             "Expected at least 4 def-to-def edges, got {def_to_def}"
         );
 
-        let file_to_def: usize = result
-            .graphs
+        let file_to_def: usize = graphs
             .iter()
             .flat_map(|g| g.edges())
             .filter(|(_, _, e)| {

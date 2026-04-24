@@ -134,13 +134,13 @@ pub struct CanonicalImport {
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub enum ExpressionStep {
     /// Bare identifier — the base of the chain.
-    Ident(String),
+    Ident(smol_str::SmolStr),
     /// Field/attribute access.
-    Field(String),
+    Field(smol_str::SmolStr),
     /// Method/function call.
-    Call(String),
+    Call(smol_str::SmolStr),
     /// Constructor invocation (`new Foo()`).
-    New(String),
+    New(smol_str::SmolStr),
     /// `this` or `self` reference.
     This,
     /// `super` reference.
