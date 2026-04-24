@@ -26,154 +26,114 @@ cat <<'EOF' | python tools/orbit_query.py query
 EOF
 ```
 
-## Query patterns
+## Query types
 
-### Search
+### Search — find entities by property filters
 
 ```json
 {"query_type":"search","node":{"id":"u","entity":"User","filters":{"username":"root"}},"limit":10}
 ```
 
-### Traversal (multi-hop joins)
+### Traversal — multi-hop joins in a single query
 
-All filtering happens in the query — do NOT search entities separately then join in Python.
+Chain up to 5 nodes with relationships. All filtering happens server-side on each node.
 
-2-node (User → MR):
+2-node:
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {"id": "u", "entity": "User", "filters": {"username": "root"}},
-    {"id": "mr", "entity": "MergeRequest"}
+    {"id": "a", "entity": "EntityA", "filters": {"prop": "value"}},
+    {"id": "b", "entity": "EntityB"}
   ],
-  "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+  "relationships": [{"type": "EDGE_NAME", "from": "a", "to": "b"}],
   "limit": 100
 }
 ```
 
-3-node with filters on each (User → open MRs → specific Project):
+3-node with mixed filters (`filters` for properties, `node_ids` for primary key):
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {"id": "u", "entity": "User", "filters": {"username": "root"}},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-    {"id": "p", "entity": "Project", "node_ids": [278964]}
+    {"id": "a", "entity": "EntityA", "filters": {"prop": "value"}},
+    {"id": "b", "entity": "EntityB", "filters": {"state": "opened"}},
+    {"id": "c", "entity": "EntityC", "node_ids": [12345]}
   ],
   "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    {"type": "EDGE_AB", "from": "a", "to": "b"},
+    {"type": "EDGE_BC", "from": "b", "to": "c"}
   ],
   "limit": 100
 }
 ```
 
-4-node chain (Finding → SecurityScan → Pipeline → MergeRequest):
+4-node chain:
 ```json
 {
   "query_type": "traversal",
   "nodes": [
-    {"id": "f", "entity": "Finding"},
-    {"id": "s", "entity": "SecurityScan"},
-    {"id": "pl", "entity": "Pipeline"},
-    {"id": "mr", "entity": "MergeRequest"}
+    {"id": "a", "entity": "EntityA"},
+    {"id": "b", "entity": "EntityB"},
+    {"id": "c", "entity": "EntityC"},
+    {"id": "d", "entity": "EntityD", "node_ids": [12345]}
   ],
   "relationships": [
-    {"type": "HAS_FINDING", "from": "s", "to": "f"},
-    {"type": "SCANS", "from": "s", "to": "pl"},
-    {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"}
+    {"type": "EDGE_AB", "from": "a", "to": "b"},
+    {"type": "EDGE_BC", "from": "b", "to": "c"},
+    {"type": "EDGE_CD", "from": "c", "to": "d"}
   ],
   "limit": 50
 }
 ```
 
-### Aggregation
+### Aggregation — counting, grouping, sorting server-side
 
-Aggregation runs server-side. Push ALL counting, grouping, and sorting into the query. Never fetch raw rows and count in Python.
+For any question involving counts, top-N, or group-by, use aggregation. The server does the work.
 
-Count MRs per project (sorted):
+Basic group-by count:
 ```json
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "mr", "entity": "MergeRequest"},
-    {"id": "p", "entity": "Project"}
+    {"id": "a", "entity": "EntityA"},
+    {"id": "b", "entity": "EntityB"}
   ],
-  "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-  "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
+  "relationships": [{"type": "EDGE_NAME", "from": "a", "to": "b"}],
+  "aggregations": [{"function": "count", "target": "a", "group_by": "b", "alias": "total"}],
   "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
   "limit": 20
 }
 ```
 
-Count MRs per label in a project:
+3-node aggregation with filter (count A per C, where B has a specific state):
 ```json
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "mr", "entity": "MergeRequest"},
-    {"id": "l", "entity": "Label"},
-    {"id": "p", "entity": "Project", "node_ids": [278964]}
+    {"id": "a", "entity": "EntityA"},
+    {"id": "b", "entity": "EntityB", "filters": {"status": "failed"}},
+    {"id": "c", "entity": "EntityC", "node_ids": [12345]}
   ],
   "relationships": [
-    {"type": "HAS_LABEL", "from": "mr", "to": "l"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+    {"type": "EDGE_AB", "from": "a", "to": "b"},
+    {"type": "EDGE_BC", "from": "b", "to": "c"}
   ],
-  "aggregations": [{"function": "count", "target": "mr", "group_by": "l", "alias": "mr_count"}],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
-  "limit": 10
-}
-```
-
-Count failed pipelines per user in a project (3-hop aggregation):
-```json
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "u", "entity": "User"},
-    {"id": "mr", "entity": "MergeRequest"},
-    {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-    {"id": "p", "entity": "Project", "node_ids": [278964]}
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "HAS_HEAD_PIPELINE", "from": "mr", "to": "pl"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "aggregations": [{"function": "count", "target": "pl", "group_by": "u", "alias": "failed_count"}],
+  "aggregations": [{"function": "count", "target": "b", "group_by": "a", "alias": "total"}],
   "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
   "limit": 20
 }
 ```
 
-Count open review assignments per user:
-```json
-{
-  "query_type": "aggregation",
-  "nodes": [
-    {"id": "u", "entity": "User"},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-    {"id": "p", "entity": "Project", "node_ids": [278964]}
-  ],
-  "relationships": [
-    {"type": "REVIEWER", "from": "u", "to": "mr"},
-    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
-  ],
-  "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "review_count"}],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
-  "limit": 20
-}
-```
+Key: `target` is what gets counted, `group_by` is what defines the groups. Both reference node IDs from the `nodes` array.
 
-### Neighbors
-
-Use this to discover all connections to a node. Do NOT manually query each edge type.
+### Neighbors — fan-out to discover all connections
 
 ```json
 {
   "query_type": "neighbors",
-  "node": {"id": "mr", "entity": "MergeRequest", "filters": {"iid": 100}},
-  "neighbors": {"node": "mr", "direction": "both"},
+  "node": {"id": "x", "entity": "EntityX", "filters": {"iid": 100}},
+  "neighbors": {"node": "x", "direction": "both"},
   "limit": 50
 }
 ```
@@ -184,8 +144,8 @@ Use this to discover all connections to a node. Do NOT manually query each edge 
 {
   "query_type": "path_finding",
   "nodes": [
-    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
-    {"id": "b", "entity": "User", "filters": {"username": "bob"}}
+    {"id": "a", "entity": "EntityA", "filters": {"prop": "value1"}},
+    {"id": "b", "entity": "EntityB", "filters": {"prop": "value2"}}
   ],
   "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3},
   "limit": 5
