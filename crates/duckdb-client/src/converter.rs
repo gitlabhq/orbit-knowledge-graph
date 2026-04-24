@@ -212,7 +212,10 @@ pub struct DuckDbConverter {
 }
 
 impl code_graph::v2::GraphConverter for DuckDbConverter {
-    fn convert(&self, graph: code_graph::v2::linker::CodeGraph) -> Vec<(String, RecordBatch)> {
+    fn convert(
+        &self,
+        graph: code_graph::v2::linker::CodeGraph,
+    ) -> std::result::Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
         convert_v2_graph(
             &graph,
             self.project_id,
@@ -221,7 +224,7 @@ impl code_graph::v2::GraphConverter for DuckDbConverter {
             &self.ontology,
         )
         .map(|data| data.tables)
-        .unwrap_or_default()
+        .map_err(|e| code_graph::v2::SinkError(format!("DuckDB conversion: {e}")))
     }
 }
 

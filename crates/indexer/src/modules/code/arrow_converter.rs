@@ -377,10 +377,13 @@ pub struct IndexerConverter {
 }
 
 impl code_graph::v2::GraphConverter for IndexerConverter {
-    fn convert(&self, graph: code_graph::v2::linker::CodeGraph) -> Vec<(String, RecordBatch)> {
-        let Ok(data) = convert_code_graph(&graph, &self.envelope, &self.ontology) else {
-            return Vec::new();
-        };
+    fn convert(
+        &self,
+        graph: code_graph::v2::linker::CodeGraph,
+    ) -> Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
+        let data = convert_code_graph(&graph, &self.envelope, &self.ontology)
+            .map_err(|e| code_graph::v2::SinkError(format!("arrow conversion: {e}")))?;
+
         let mut result = vec![
             (self.table_names.branch.clone(), data.branch),
             (self.table_names.directory.clone(), data.directories),
@@ -400,7 +403,9 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .expect("edges batch must have relationship_kind column");
+                .ok_or_else(|| {
+                    code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
+                })?;
             let rel_array = rel_col.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
@@ -412,13 +417,15 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
 
             for (table, indices) in table_rows {
                 let idx_array = arrow::array::UInt32Array::from(indices);
-                if let Ok(batch) = arrow::compute::take_record_batch(&data.edges, &idx_array) {
-                    result.push((table.to_string(), batch));
-                }
+                let batch =
+                    arrow::compute::take_record_batch(&data.edges, &idx_array).map_err(|e| {
+                        code_graph::v2::SinkError(format!("edge batch split for {table}: {e}"))
+                    })?;
+                result.push((table.to_string(), batch));
             }
         }
 
-        result
+        Ok(result)
     }
 }
 

@@ -683,6 +683,7 @@ impl LanguageSpec {
         if stacker::remaining_stack().unwrap_or(usize::MAX)
             < crate::legacy::parser::MINIMUM_STACK_REMAINING
         {
+            tracing::warn!("stack limit reached during AST walk, subtree truncated");
             return;
         }
 

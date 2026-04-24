@@ -101,8 +101,8 @@ mod tests {
         fn convert(
             &self,
             _graph: crate::v2::linker::CodeGraph,
-        ) -> Vec<(String, arrow::record_batch::RecordBatch)> {
-            Vec::new()
+        ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, crate::v2::SinkError> {
+            Ok(Vec::new())
         }
     }
 

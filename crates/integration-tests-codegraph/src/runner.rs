@@ -59,13 +59,13 @@ impl GraphConverter for LanceConverter {
     fn convert(
         &self,
         graph: code_graph::v2::linker::CodeGraph,
-    ) -> Vec<(String, arrow::record_batch::RecordBatch)> {
+    ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, code_graph::v2::SinkError> {
         let row_ctx = RowContext::empty();
-        if let Ok(ds) = to_lance_datasets(&graph, &row_ctx) {
-            let mut datasets = self.datasets.lock().unwrap();
-            extend_datasets(&mut datasets, ds);
-        }
-        Vec::new()
+        let ds = to_lance_datasets(&graph, &row_ctx)
+            .map_err(|e| code_graph::v2::SinkError(format!("lance conversion: {e}")))?;
+        let mut datasets = self.datasets.lock().unwrap();
+        extend_datasets(&mut datasets, ds);
+        Ok(Vec::new())
     }
 }
 

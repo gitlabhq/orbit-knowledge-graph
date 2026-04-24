@@ -160,7 +160,14 @@ impl BatchTx<'_> {
         self.imports
             .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
         self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
-        for (table, batch) in self.converter.convert(graph) {
+        let batches = match self.converter.convert(graph) {
+            Ok(batches) => batches,
+            Err(e) => {
+                tracing::error!(error = %e, "graph conversion failed — data dropped");
+                return;
+            }
+        };
+        for (table, batch) in batches {
             if self.tx.send((table, batch)).is_err() {
                 tracing::warn!("batch channel closed — writer thread may have panicked");
                 return;
@@ -234,6 +241,14 @@ pub struct PipelineError {
     pub file_path: String,
     pub error: String,
 }
+
+impl std::fmt::Display for PipelineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.file_path, self.error)
+    }
+}
+
+impl std::error::Error for PipelineError {}
 
 pub struct Pipeline;
 
@@ -551,7 +566,8 @@ where
                 let abs_path = format!("{root_path}/{path}");
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::debug!(path, error = %e, "failed to read file");
                         pb.inc(1);
                         return None;
                     }
@@ -559,7 +575,8 @@ where
 
                 let result = match spec.parse_full_collect(&source, path, language, tracer) {
                     Ok(r) => r,
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::debug!(path, error = %e, "failed to parse file");
                         pb.inc(1);
                         return None;
                     }
@@ -863,9 +880,12 @@ mod tests {
     }
 
     impl GraphConverter for TestCapture {
-        fn convert(&self, graph: CodeGraph) -> Vec<(String, RecordBatch)> {
+        fn convert(
+            &self,
+            graph: CodeGraph,
+        ) -> Result<Vec<(String, RecordBatch)>, crate::v2::SinkError> {
             self.graphs.lock().unwrap().push(graph);
-            Vec::new()
+            Ok(Vec::new())
         }
     }
 
