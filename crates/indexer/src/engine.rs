@@ -40,6 +40,7 @@ use tracing::{debug, error, info, warn};
 
 use crate::destination::Destination;
 use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
+use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
@@ -80,6 +81,7 @@ pub struct EngineBuilder {
     broker: Arc<NatsBroker>,
     registry: Arc<HandlerRegistry>,
     destination: Arc<dyn Destination>,
+    indexing_status: Arc<IndexingStatusStore>,
     metrics: Option<Arc<EngineMetrics>>,
     nats_services: Option<Arc<dyn NatsServices>>,
 }
@@ -89,11 +91,13 @@ impl EngineBuilder {
         broker: Arc<NatsBroker>,
         registry: Arc<HandlerRegistry>,
         destination: Arc<dyn Destination>,
+        indexing_status: Arc<IndexingStatusStore>,
     ) -> Self {
         Self {
             broker,
             registry,
             destination,
+            indexing_status,
             metrics: None,
             nats_services: None,
         }
@@ -128,6 +132,7 @@ impl EngineBuilder {
             metrics,
             nats_services,
             lock_service,
+            indexing_status: self.indexing_status,
             cancel: CancellationToken::new(),
         }
     }
@@ -159,6 +164,7 @@ pub struct Engine {
     metrics: Arc<EngineMetrics>,
     nats_services: Arc<dyn NatsServices>,
     lock_service: Arc<dyn LockService>,
+    indexing_status: Arc<IndexingStatusStore>,
     cancel: CancellationToken,
 }
 
@@ -212,7 +218,7 @@ impl Engine {
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
-                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress),
+                        HandlerContext::new(self.destination.clone(), self.nats_services.clone(), self.lock_service.clone(), progress, self.indexing_status.clone()),
                         self.broker.clone(),
                         runtime.clone(),
                         subscription.clone(),
@@ -446,11 +452,13 @@ mod tests {
     use gkg_server_config::HandlerConfiguration;
 
     fn test_context() -> HandlerContext {
+        let nats: Arc<dyn crate::nats::NatsServices> = Arc::new(MockNatsServices::new());
         HandlerContext::new(
             Arc::new(MockDestination::new()),
-            Arc::new(MockNatsServices::new()),
+            nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
+            Arc::new(IndexingStatusStore::new(nats)),
         )
     }
 

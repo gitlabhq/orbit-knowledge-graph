@@ -33,6 +33,7 @@ pub mod destination;
 pub mod engine;
 pub mod handler;
 pub mod health;
+pub mod indexing_status;
 pub mod llqm_v1;
 pub mod locking;
 pub mod metrics;
@@ -60,6 +61,7 @@ use gkg_server_config::{
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
+use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
 use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
 use modules::namespace_deletion::{
@@ -186,13 +188,18 @@ pub async fn run(
     broker
         .ensure_kv_bucket_exists(INDEXING_LOCKS_BUCKET, per_message_ttl)
         .await?;
+    broker
+        .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await?;
 
     // Run the migration orchestrator before the engine starts consuming messages.
     // This ensures no in-flight NATS messages exist during the drain phase.
     let migration_metrics = metrics::MigrationMetrics::new();
-    let lock_service: Arc<dyn locking::LockService> = Arc::new(locking::NatsLockService::new(
-        Arc::new(nats::NatsServicesImpl::new(broker.clone())),
-    ));
+    let nats_services: Arc<dyn nats::NatsServices> =
+        Arc::new(nats::NatsServicesImpl::new(broker.clone()));
+    let lock_service: Arc<dyn locking::LockService> =
+        Arc::new(locking::NatsLockService::new(nats_services.clone()));
+    let indexing_status = Arc::new(IndexingStatusStore::new(nats_services));
     info!("running schema migration check");
     schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;
@@ -237,7 +244,7 @@ pub async fn run(
     };
 
     let engine = Arc::new(
-        EngineBuilder::new(broker, registry, destination)
+        EngineBuilder::new(broker, registry, destination, indexing_status)
             .metrics(metrics)
             .build(),
     );

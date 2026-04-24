@@ -310,9 +310,12 @@ fn create_engine(
     destination: Arc<ClickHouseDestination>,
     handler: Box<dyn Handler>,
 ) -> Arc<Engine> {
+    use indexer::nats::NatsServicesImpl;
     let registry = Arc::new(HandlerRegistry::default());
     registry.register_handler(handler);
-    Arc::new(EngineBuilder::new(broker, registry, destination).build())
+    let nats = Arc::new(NatsServicesImpl::new(broker.clone()));
+    let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(nats));
+    Arc::new(EngineBuilder::new(broker, registry, destination, indexing_status).build())
 }
 
 #[tokio::test]
@@ -356,7 +359,12 @@ async fn multiple_handlers_receive_same_message() {
     registry.register_handler(Box::new(TestHandler));
     registry.register_handler(Box::new(TestHandler));
 
-    let engine = Arc::new(EngineBuilder::new(broker.clone(), registry, destination).build());
+    use indexer::nats::NatsServicesImpl;
+    let nats = Arc::new(NatsServicesImpl::new(broker.clone()));
+    let indexing_status = Arc::new(indexer::indexing_status::IndexingStatusStore::new(nats));
+    let engine = Arc::new(
+        EngineBuilder::new(broker.clone(), registry, destination, indexing_status).build(),
+    );
 
     context.publish_event(&broker, 100, "shared").await;
     run_engine_for(engine, Duration::from_secs(2)).await;

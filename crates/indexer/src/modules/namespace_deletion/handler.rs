@@ -183,11 +183,13 @@ mod tests {
     use super::super::store::test_utils::{MockNamespaceDeletionStore, failed_outcome, ok_outcome};
 
     fn handler_context() -> HandlerContext {
+        let nats: Arc<dyn NatsServices> = Arc::new(MockNatsServices::new());
         HandlerContext::new(
             Arc::new(MockDestination::new()) as Arc<dyn Destination>,
-            Arc::new(MockNatsServices::new()) as Arc<dyn NatsServices>,
+            nats.clone(),
             Arc::new(MockLockService::new()) as Arc<dyn LockService>,
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(nats)),
         )
     }
 
