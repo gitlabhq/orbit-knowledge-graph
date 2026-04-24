@@ -732,10 +732,10 @@ where
             .collect();
 
         // Push parse errors to the shared context for metrics.
-        if !parse_errors.is_empty() {
-            if let Ok(mut errs) = ctx.graph_errors.lock() {
-                errs.extend(parse_errors);
-            }
+        if !parse_errors.is_empty()
+            && let Ok(mut errs) = ctx.graph_errors.lock()
+        {
+            errs.extend(parse_errors);
         }
 
         // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
@@ -906,17 +906,15 @@ where
         let mut all_failed: Vec<(FileInfo, Vec<FailedChain>)> = Vec::new();
 
         for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
-            if killed {
-                if let Some(ref info) = info_opt {
-                    let path = match &graph.graph[info.file_node] {
-                        crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
-                        _ => "unknown",
-                    };
-                    ctx.record_error(CodeGraphError::Internal {
-                        context: "sentinel_timeout".to_string(),
-                        message: format!("file killed by per-file timeout: {path}"),
-                    });
-                }
+            if killed && let Some(ref info) = info_opt {
+                let path = match &graph.graph[info.file_node] {
+                    crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
+                    _ => "unknown",
+                };
+                ctx.record_error(CodeGraphError::Internal {
+                    context: "sentinel_timeout".to_string(),
+                    message: format!("file killed by per-file timeout: {path}"),
+                });
             }
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);

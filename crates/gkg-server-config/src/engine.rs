@@ -154,6 +154,10 @@ fn default_code_indexing_respect_gitignore() -> bool {
     true
 }
 
+fn default_code_indexing_per_file_timeout_ms() -> u64 {
+    5000
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct CodeIndexingPipelineConfig {
@@ -170,7 +174,7 @@ pub struct CodeIndexingPipelineConfig {
     /// Global per-file resolution timeout in milliseconds.
     /// Applied to all languages unless the language's own DSL rules
     /// specify a different value. 0 = no global timeout.
-    #[serde(default)]
+    #[serde(default = "default_code_indexing_per_file_timeout_ms")]
     pub per_file_timeout_ms: u64,
 }
 
@@ -182,7 +186,7 @@ impl Default for CodeIndexingPipelineConfig {
             respect_gitignore: default_code_indexing_respect_gitignore(),
             worker_threads: 0,
             max_concurrent_languages: 0,
-            per_file_timeout_ms: 0,
+            per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
         }
     }
 }
