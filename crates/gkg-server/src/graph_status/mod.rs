@@ -213,7 +213,7 @@ fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) 
                 IndexingState::Indexed
             }
         }
-        _ => IndexingState::InitialIndexing,
+        _ => IndexingState::Backfilling,
     }
 }
 
@@ -328,17 +328,14 @@ mod tests {
     }
 
     #[test]
-    fn derive_state_initial_indexing_when_started_but_not_completed() {
+    fn derive_state_backfilling_when_started_but_not_completed() {
         let progress = IndexingProgress {
             last_started_at: Utc::now(),
             last_completed_at: None,
             last_duration_ms: None,
             last_error: None,
         };
-        assert_eq!(
-            derive_indexing_state(&progress),
-            IndexingState::InitialIndexing
-        );
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
     }
 
     #[test]
@@ -378,16 +375,13 @@ mod tests {
     }
 
     #[test]
-    fn derive_state_initial_indexing_when_error_but_not_completed() {
+    fn derive_state_backfilling_when_error_but_not_completed() {
         let progress = IndexingProgress {
             last_started_at: Utc::now(),
             last_completed_at: None,
             last_duration_ms: None,
             last_error: Some("connection reset".to_string()),
         };
-        assert_eq!(
-            derive_indexing_state(&progress),
-            IndexingState::InitialIndexing
-        );
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
     }
 }

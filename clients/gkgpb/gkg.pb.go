@@ -271,28 +271,28 @@ func (SourceType) EnumDescriptor() ([]byte, []int) {
 type IndexingState int32
 
 const (
-	IndexingState_INDEXING_STATE_NOT_INDEXED      IndexingState = 0
-	IndexingState_INDEXING_STATE_INITIAL_INDEXING IndexingState = 1
-	IndexingState_INDEXING_STATE_INDEXED          IndexingState = 2
-	IndexingState_INDEXING_STATE_ERROR            IndexingState = 3
-	IndexingState_INDEXING_STATE_UNKNOWN          IndexingState = 4
+	IndexingState_INDEXING_STATE_NOT_INDEXED IndexingState = 0
+	IndexingState_INDEXING_STATE_BACKFILLING IndexingState = 1
+	IndexingState_INDEXING_STATE_INDEXED     IndexingState = 2
+	IndexingState_INDEXING_STATE_ERROR       IndexingState = 3
+	IndexingState_INDEXING_STATE_UNKNOWN     IndexingState = 4
 )
 
 // Enum value maps for IndexingState.
 var (
 	IndexingState_name = map[int32]string{
 		0: "INDEXING_STATE_NOT_INDEXED",
-		1: "INDEXING_STATE_INITIAL_INDEXING",
+		1: "INDEXING_STATE_BACKFILLING",
 		2: "INDEXING_STATE_INDEXED",
 		3: "INDEXING_STATE_ERROR",
 		4: "INDEXING_STATE_UNKNOWN",
 	}
 	IndexingState_value = map[string]int32{
-		"INDEXING_STATE_NOT_INDEXED":      0,
-		"INDEXING_STATE_INITIAL_INDEXING": 1,
-		"INDEXING_STATE_INDEXED":          2,
-		"INDEXING_STATE_ERROR":            3,
-		"INDEXING_STATE_UNKNOWN":          4,
+		"INDEXING_STATE_NOT_INDEXED": 0,
+		"INDEXING_STATE_BACKFILLING": 1,
+		"INDEXING_STATE_INDEXED":     2,
+		"INDEXING_STATE_ERROR":       3,
+		"INDEXING_STATE_UNKNOWN":     4,
 	}
 )
 
@@ -2634,10 +2634,10 @@ const file_gkg_proto_rawDesc = "" +
 	"\n" +
 	"SourceType\x12\x15\n" +
 	"\x11SOURCE_TYPE_GROUP\x10\x00\x12\x17\n" +
-	"\x13SOURCE_TYPE_PROJECT\x10\x01*\xa6\x01\n" +
+	"\x13SOURCE_TYPE_PROJECT\x10\x01*\xa1\x01\n" +
 	"\rIndexingState\x12\x1e\n" +
-	"\x1aINDEXING_STATE_NOT_INDEXED\x10\x00\x12#\n" +
-	"\x1fINDEXING_STATE_INITIAL_INDEXING\x10\x01\x12\x1a\n" +
+	"\x1aINDEXING_STATE_NOT_INDEXED\x10\x00\x12\x1e\n" +
+	"\x1aINDEXING_STATE_BACKFILLING\x10\x01\x12\x1a\n" +
 	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
 	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
 	"\x16INDEXING_STATE_UNKNOWN\x10\x042\xa0\x03\n" +

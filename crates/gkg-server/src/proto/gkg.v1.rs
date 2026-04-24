@@ -539,7 +539,7 @@ impl SourceType {
 #[repr(i32)]
 pub enum IndexingState {
     NotIndexed = 0,
-    InitialIndexing = 1,
+    Backfilling = 1,
     Indexed = 2,
     Error = 3,
     Unknown = 4,
@@ -552,7 +552,7 @@ impl IndexingState {
     pub fn as_str_name(&self) -> &'static str {
         match self {
             Self::NotIndexed => "INDEXING_STATE_NOT_INDEXED",
-            Self::InitialIndexing => "INDEXING_STATE_INITIAL_INDEXING",
+            Self::Backfilling => "INDEXING_STATE_BACKFILLING",
             Self::Indexed => "INDEXING_STATE_INDEXED",
             Self::Error => "INDEXING_STATE_ERROR",
             Self::Unknown => "INDEXING_STATE_UNKNOWN",
@@ -562,7 +562,7 @@ impl IndexingState {
     pub fn from_str_name(value: &str) -> ::core::option::Option<Self> {
         match value {
             "INDEXING_STATE_NOT_INDEXED" => Some(Self::NotIndexed),
-            "INDEXING_STATE_INITIAL_INDEXING" => Some(Self::InitialIndexing),
+            "INDEXING_STATE_BACKFILLING" => Some(Self::Backfilling),
             "INDEXING_STATE_INDEXED" => Some(Self::Indexed),
             "INDEXING_STATE_ERROR" => Some(Self::Error),
             "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),

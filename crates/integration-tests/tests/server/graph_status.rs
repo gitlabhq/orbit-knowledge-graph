@@ -166,7 +166,7 @@ async fn graph_status() {
         projects_status_scoped_by_traversal_path,
         indexing_status_absent_without_store,
         indexing_status_indexed_for_group,
-        indexing_status_initial_indexing_for_project,
+        indexing_status_backfilling_for_project,
         indexing_status_not_indexed_when_no_kv_entry,
         indexing_status_error_state,
         indexing_status_unknown_when_nats_unreachable,
@@ -293,7 +293,7 @@ async fn indexing_status_indexed_for_group(ctx: &TestContext) {
     assert!(indexing.last_error.is_none());
 }
 
-async fn indexing_status_initial_indexing_for_project(ctx: &TestContext) {
+async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     let mock_kv = MockKvServices::new();
     seed_indexing_progress(
         &mock_kv,
@@ -313,7 +313,7 @@ async fn indexing_status_initial_indexing_for_project(ctx: &TestContext) {
         .expect("should succeed");
 
     let indexing = response.indexing.expect("indexing should be present");
-    assert_eq!(indexing.state, IndexingState::InitialIndexing as i32);
+    assert_eq!(indexing.state, IndexingState::Backfilling as i32);
     assert!(indexing.last_started_at.is_some());
     assert!(indexing.last_completed_at.is_none());
 }

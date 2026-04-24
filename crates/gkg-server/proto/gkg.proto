@@ -295,7 +295,7 @@ message GetGraphStatusRequest {
 // Derived indexing lifecycle state.
 enum IndexingState {
   INDEXING_STATE_NOT_INDEXED = 0;
-  INDEXING_STATE_INITIAL_INDEXING = 1;
+  INDEXING_STATE_BACKFILLING = 1;
   INDEXING_STATE_INDEXED = 2;
   INDEXING_STATE_ERROR = 3;
   INDEXING_STATE_UNKNOWN = 4;
