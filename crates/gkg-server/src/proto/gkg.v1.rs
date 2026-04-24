@@ -542,6 +542,7 @@ pub enum IndexingState {
     InitialIndexing = 1,
     Indexed = 2,
     Error = 3,
+    Unknown = 4,
 }
 impl IndexingState {
     /// String value of the enum field names used in the ProtoBuf definition.
@@ -554,6 +555,7 @@ impl IndexingState {
             Self::InitialIndexing => "INDEXING_STATE_INITIAL_INDEXING",
             Self::Indexed => "INDEXING_STATE_INDEXED",
             Self::Error => "INDEXING_STATE_ERROR",
+            Self::Unknown => "INDEXING_STATE_UNKNOWN",
         }
     }
     /// Creates an enum from field names used in the ProtoBuf definition.
@@ -563,6 +565,7 @@ impl IndexingState {
             "INDEXING_STATE_INITIAL_INDEXING" => Some(Self::InitialIndexing),
             "INDEXING_STATE_INDEXED" => Some(Self::Indexed),
             "INDEXING_STATE_ERROR" => Some(Self::Error),
+            "INDEXING_STATE_UNKNOWN" => Some(Self::Unknown),
             _ => None,
         }
     }

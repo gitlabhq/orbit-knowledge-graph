@@ -94,7 +94,10 @@ impl GraphStatusService {
             Ok(p) => p,
             Err(error) => {
                 warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
-                return Ok(None);
+                return Ok(Some(IndexingStatus {
+                    state: IndexingState::Unknown.into(),
+                    ..Default::default()
+                }));
             }
         };
 

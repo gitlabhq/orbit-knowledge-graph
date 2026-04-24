@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
+use async_trait::async_trait;
 use bytes::Bytes;
 use chrono::{Duration, Utc};
+use nats_client::error::NatsError;
+use nats_client::kv_types::{KvEntry, KvPutOptions, KvPutResult};
 
 use crate::common::{GRAPH_SCHEMA_SQL, TestContext};
 use gkg_server::graph_status::GraphStatusService;
@@ -9,6 +12,48 @@ use gkg_server::proto::IndexingState;
 use indexer::indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingProgress, IndexingStatusStore};
 use integration_testkit::{load_ontology, run_subtests_shared, t};
 use nats_client::testkit::MockKvServices;
+
+struct FailingKvServices;
+
+#[async_trait]
+impl nats_client::KvServices for FailingKvServices {
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        Err(NatsError::KvGet {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        _value: Bytes,
+        _options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        Err(NatsError::KvPut {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        Err(NatsError::KvDelete {
+            bucket: bucket.to_string(),
+            key: key.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        Err(NatsError::KvKeys {
+            bucket: bucket.to_string(),
+            message: "connection refused".to_string(),
+        })
+    }
+}
 
 async fn setup(ctx: &TestContext) {
     ctx.execute(&format!(
@@ -124,6 +169,7 @@ async fn graph_status() {
         indexing_status_initial_indexing_for_project,
         indexing_status_not_indexed_when_no_kv_entry,
         indexing_status_error_state,
+        indexing_status_unknown_when_nats_unreachable,
     );
 }
 
@@ -302,4 +348,16 @@ async fn indexing_status_error_state(ctx: &TestContext) {
     let indexing = response.indexing.expect("indexing should be present");
     assert_eq!(indexing.state, IndexingState::Error as i32);
     assert_eq!(indexing.last_error.as_deref(), Some("deadline exceeded"));
+}
+
+async fn indexing_status_unknown_when_nats_unreachable(ctx: &TestContext) {
+    let store = IndexingStatusStore::new(Arc::new(FailingKvServices));
+    let client = Arc::new(ctx.create_client());
+    let ontology = Arc::new(load_ontology());
+    let service = GraphStatusService::new(client, ontology).with_indexing_status(store);
+
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Unknown as i32);
 }
