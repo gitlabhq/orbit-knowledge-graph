@@ -1,0 +1,28 @@
+#!/usr/bin/env bash
+# orbit-query — POST a query JSON body to /api/v4/orbit/query via glab api.
+#
+# Convenience wrapper that adds the required `Content-Type: application/json`
+# header. Without it, the API returns HTTP 415.
+#
+# Usage:
+#   orbit-query query.json
+#   cat query.json | orbit-query
+#   orbit-query -                 # explicit stdin
+#
+# The query body must be a full Orbit query object with `query` and optional
+# `response_format` top-level keys. See the skill's references/recipes.md
+# and docs/source/queries/query_language.md for details.
+#
+# Everything else (auth, hostname resolution, JSON parsing) is pass-through
+# to `glab api`. Exit code and output mirror `glab api`.
+set -euo pipefail
+
+if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
+  sed -n '2,15p' "$0" | sed 's/^# \{0,1\}//'
+  exit 0
+fi
+
+input="${1:--}"
+exec glab api --method POST orbit/query \
+  --header "Content-Type: application/json" \
+  --input "$input"

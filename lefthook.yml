@@ -23,6 +23,11 @@ pre-commit:
       glob:
         - "AGENTS.md"
         - "CLAUDE.md"
+    - name: orbit-skill-docs-sync
+      run: diff docs/source/queries/query_language.md skills/orbit/references/query_language.md
+      glob:
+        - "docs/source/queries/query_language.md"
+        - "skills/orbit/references/query_language.md"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
