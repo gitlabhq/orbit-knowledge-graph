@@ -1,7 +1,4 @@
-//! Query engine metrics.
-//!
-//! Eight counters track security-relevant events during query compilation.
-//! When no `MeterProvider` is configured, all instruments are no-ops.
+//! Query engine metrics, backed by the central `gkg-observability` catalog.
 //!
 //! Counters fired internally by [`compile`](crate::compile):
 //! - `validation_failed` — malformed query structure (schema, reference, pagination)
@@ -18,8 +15,9 @@
 use std::sync::LazyLock;
 
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::Counter;
+
+use gkg_observability::query::engine as spec;
 
 use crate::error::QueryError;
 
@@ -39,65 +37,17 @@ pub struct QueryEngineMetrics {
 
 impl QueryEngineMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg_query_engine");
-
-        let validation_failed = meter
-            .u64_counter("gkg.query.engine.threat.validation_failed")
-            .with_description(
-                "Query rejected by structural validation (schema, references, pagination)",
-            )
-            .build();
-
-        let allowlist_rejected = meter
-            .u64_counter("gkg.query.engine.threat.allowlist_rejected")
-            .with_description(
-                "Query referenced an entity, column, or relationship not in the ontology allowlist",
-            )
-            .build();
-
-        let auth_filter_missing = meter
-            .u64_counter("gkg.query.engine.threat.auth_filter_missing")
-            .with_description("Security context was invalid or absent when required")
-            .build();
-
-        let timeout = meter
-            .u64_counter("gkg.query.engine.threat.timeout")
-            .with_description("Query compilation or execution exceeded the deadline")
-            .build();
-
-        let rate_limited = meter
-            .u64_counter("gkg.query.engine.threat.rate_limited")
-            .with_description("Caller was throttled before query compilation")
-            .build();
-
-        let depth_exceeded = meter
-            .u64_counter("gkg.query.engine.threat.depth_exceeded")
-            .with_description("Traversal depth or hop count exceeded the hard cap")
-            .build();
-
-        let limit_exceeded = meter
-            .u64_counter("gkg.query.engine.threat.limit_exceeded")
-            .with_description(
-                "Array cardinality cap exceeded (node_ids count or IN filter value count)",
-            )
-            .build();
-
-        let pipeline_invariant_violated = meter
-            .u64_counter("gkg.query.engine.internal.pipeline_invariant_violated")
-            .with_description(
-                "Lowering or codegen hit a state that upstream validation should have prevented",
-            )
-            .build();
-
+        let meter = gkg_observability::meter();
         Self {
-            validation_failed,
-            allowlist_rejected,
-            auth_filter_missing,
-            timeout,
-            rate_limited,
-            depth_exceeded,
-            limit_exceeded,
-            pipeline_invariant_violated,
+            validation_failed: spec::THREAT_VALIDATION_FAILED.build_counter_u64(&meter),
+            allowlist_rejected: spec::THREAT_ALLOWLIST_REJECTED.build_counter_u64(&meter),
+            auth_filter_missing: spec::THREAT_AUTH_FILTER_MISSING.build_counter_u64(&meter),
+            timeout: spec::THREAT_TIMEOUT.build_counter_u64(&meter),
+            rate_limited: spec::THREAT_RATE_LIMITED.build_counter_u64(&meter),
+            depth_exceeded: spec::THREAT_DEPTH_EXCEEDED.build_counter_u64(&meter),
+            limit_exceeded: spec::THREAT_LIMIT_EXCEEDED.build_counter_u64(&meter),
+            pipeline_invariant_violated: spec::INTERNAL_PIPELINE_INVARIANT_VIOLATED
+                .build_counter_u64(&meter),
         }
     }
 }
@@ -138,7 +88,7 @@ impl<T, E: Into<QueryError>> CountErr<T, E> for std::result::Result<T, E> {
         self.map_err(|e| {
             let qe: QueryError = e.into();
             let (counter, reason) = counter_info(&qe);
-            counter.add(1, &[KeyValue::new("reason", reason)]);
+            counter.add(1, &[KeyValue::new(spec::labels::REASON, reason)]);
             qe
         })
     }

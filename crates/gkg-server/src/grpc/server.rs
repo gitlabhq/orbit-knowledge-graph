@@ -74,7 +74,8 @@ impl GrpcServer {
             .initial_connection_window_size(gc.connection_window_size)
             .initial_stream_window_size(gc.stream_window_size)
             .concurrency_limit_per_connection(gc.concurrency_limit)
-            .max_connection_age(Duration::from_secs(gc.max_connection_age_secs));
+            .max_connection_age(Duration::from_secs(gc.max_connection_age_secs))
+            .max_connection_age_grace(Duration::from_secs(gc.max_connection_age_grace_secs));
         if let Some(tls) = self.tls_config {
             builder = builder.tls_config(tls)?;
         }

@@ -176,6 +176,16 @@ generate-config-schema:
       - config/schemas/config.schema.json
     expire_in: 24 hours
 
+metrics-catalog-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run metrics:catalog:check
+
 ddl-freshness-check:
   stage: lint
   extends:

@@ -31,6 +31,7 @@ sqlformat = { workspace = true }
 tabled = { workspace = true }
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
+gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 ontology = { path = "../ontology" }
 schemars = { workspace = true }

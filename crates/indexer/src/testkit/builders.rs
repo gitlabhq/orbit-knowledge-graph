@@ -6,13 +6,14 @@ use crate::IndexerConfig;
 use crate::destination::Destination;
 use crate::engine::{Engine, EngineBuilder};
 use crate::handler::{Handler, HandlerRegistry};
-use crate::nats::{NatsBroker, NatsServices};
+use crate::indexing_status::IndexingStatusStore;
+use crate::nats::{NatsBroker, NatsServices, NatsServicesImpl};
 use gkg_server_config::{
     ClickHouseConfiguration, EngineConfiguration, GlobalHandlerConfig, HandlersConfiguration,
     NamespaceHandlerConfig,
 };
 
-use super::mocks::{MockDestination, MockNatsServices};
+use super::mocks::MockDestination;
 
 /// Creates an `IndexerConfig` suitable for integration tests.
 ///
@@ -95,12 +96,15 @@ impl TestEngineBuilder {
             .destination
             .unwrap_or_else(|| Arc::new(MockDestination::new()));
 
-        let nats_services = self
+        let nats_services: Arc<dyn NatsServices> = self
             .nats_services
-            .unwrap_or_else(|| Arc::new(MockNatsServices::new()));
+            .unwrap_or_else(|| Arc::new(NatsServicesImpl::new(self.broker.clone())));
 
-        let engine_builder = EngineBuilder::new(self.broker, self.registry, destination)
-            .nats_services(nats_services);
+        let indexing_status = Arc::new(IndexingStatusStore::new(nats_services.clone()));
+
+        let engine_builder =
+            EngineBuilder::new(self.broker, self.registry, destination, indexing_status)
+                .nats_services(nats_services);
 
         let engine = Arc::new(engine_builder.build());
         (engine, self.configuration)

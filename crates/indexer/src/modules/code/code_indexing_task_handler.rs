@@ -1,7 +1,7 @@
 use std::sync::Arc;
-use std::time::Instant;
 
 use async_trait::async_trait;
+use chrono::{DateTime, Utc};
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
@@ -104,7 +104,7 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
     ) -> Result<(), HandlerError> {
-        let started_at = Instant::now();
+        let started_at = Utc::now();
 
         let Some(branch) = self.resolve_branch(request).await? else {
             warn!(
@@ -115,9 +115,7 @@ impl CodeIndexingTaskHandler {
             self.metrics
                 .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
             self.metrics.record_outcome("empty_repository");
-            self.metrics
-                .handler_duration
-                .record(started_at.elapsed().as_secs_f64(), &[]);
+            self.metrics.record_handler_duration(started_at);
             return Ok(());
         };
 
@@ -133,7 +131,9 @@ impl CodeIndexingTaskHandler {
             "starting code indexing"
         );
 
-        let result = self.index_with_lock(context, request, &branch).await;
+        let result = self
+            .index_with_lock(context, request, &branch, started_at)
+            .await;
 
         let outcome = match &result {
             Ok(Some(IndexOutcome::Indexed)) => "indexed",
@@ -142,9 +142,7 @@ impl CodeIndexingTaskHandler {
             Err(_) => "error",
         };
         self.metrics.record_outcome(outcome);
-        self.metrics
-            .handler_duration
-            .record(started_at.elapsed().as_secs_f64(), &[]);
+        self.metrics.record_handler_duration(started_at);
 
         result.map(|_| ())
     }
@@ -154,6 +152,7 @@ impl CodeIndexingTaskHandler {
         context: &HandlerContext,
         request: &CodeIndexingTaskRequest,
         branch: &str,
+        started_at: DateTime<Utc>,
     ) -> Result<Option<IndexOutcome>, HandlerError> {
         let project_id = request.project_id;
 
@@ -167,6 +166,11 @@ impl CodeIndexingTaskHandler {
             return Ok(None);
         }
 
+        context
+            .indexing_status
+            .record_start(&request.traversal_path, started_at)
+            .await;
+
         let result = self
             .pipeline
             .index_project(
@@ -178,6 +182,16 @@ impl CodeIndexingTaskHandler {
                     task_id: request.task_id,
                     commit_sha: request.commit_sha.clone(),
                 },
+            )
+            .await;
+
+        context
+            .indexing_status
+            .record_completion(
+                &request.traversal_path,
+                started_at,
+                Utc::now(),
+                result.as_ref().err().map(ToString::to_string),
             )
             .await;
 
@@ -322,6 +336,9 @@ mod tests {
                 self.mock_nats.clone(),
                 self.mock_locks.clone(),
                 ProgressNotifier::noop(),
+                Arc::new(crate::indexing_status::IndexingStatusStore::new(
+                    self.mock_nats.clone(),
+                )),
             )
         }
 
