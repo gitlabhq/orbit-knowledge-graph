@@ -18,42 +18,17 @@ fi
 
 parse_gdk_value() {
   local expr="$1"
-  python3 - "$GDK_DEFAULT_YML" "$GDK_YML" "$expr" <<'PY'
-import sys
-from pathlib import Path
-
-default_path = Path(sys.argv[1])
-local_path = Path(sys.argv[2])
-expr = sys.argv[3].split('.')
-
-import yaml
-
-def load(path):
-    if not path.exists():
-        return {}
-    data = yaml.safe_load(path.read_text())
-    return data or {}
-
-def lookup(data, keys):
-    cur = data
-    for key in keys:
-        if not isinstance(cur, dict) or key not in cur:
-            return None
-        cur = cur[key]
-    return cur
-
-value = lookup(load(local_path), expr)
-if value is None:
-    value = lookup(load(default_path), expr)
-
-if value is None:
-    sys.exit(1)
-
-if isinstance(value, bool):
-    print(str(value).lower())
-else:
-    print(value)
-PY
+  local dot_expr=".${expr}"
+  local value
+  # Look up the key in the user's gdk.yml first; fall back to gdk.example.yml for
+  # keys the user hasn't overridden. yq returns "null" (not empty string) for
+  # missing keys, so we treat both as "not found".
+  value="$(yq "$dot_expr" "$GDK_YML" 2>/dev/null)"
+  if [[ "$value" == "null" || -z "$value" ]]; then
+    value="$(yq "$dot_expr" "$GDK_DEFAULT_YML" 2>/dev/null)"
+  fi
+  [[ "$value" != "null" && -n "$value" ]] || return 1
+  echo "$value"
 }
 
 gdk_enabled() {
