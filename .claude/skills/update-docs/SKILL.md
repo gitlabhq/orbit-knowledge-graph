@@ -22,6 +22,7 @@ If agent teams are available, create an agent team for each major section of the
 | `CLAUDE.md` / `AGENTS.md` | Agent context. Must stay identical — CI enforces this. |
 | `crates/*/README.md` | Per-crate docs |
 | `crates/indexer/AGENTS.md` | Indexer agent context |
+| `skills/orbit/` | Agent skill for Knowledge Graph queries. `SKILL.md`, `references/recipes.md`, `references/troubleshooting.md` are hand-written and need updates when API behavior or response shape changes. `references/query_language.md` is byte-equal-synced from `docs/source/queries/` (CI-enforced via `orbit-skill-docs-sync`, no manual action needed). |
 
 ## Gathering context
 
@@ -44,6 +45,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 - Crate renames, splits, or new crates not reflected in `CLAUDE.md`
 - People or epic changes not in `README.md`
 - Stale config references in `docs/dev/runbooks/server_configuration.md`
+- New orbit API endpoints, query types, response-format changes, or user-visible features (e.g. indexing progress added in !1015) not reflected in `skills/orbit/SKILL.md`, `references/recipes.md`, or `references/troubleshooting.md`. CI only enforces byte-equal sync of `query_language.md` — the rest of the skill's hand-written prose (discovery workflow, recipes, gotchas, agent guidelines) won't flag itself as stale.
 
 ## Fixing
 
@@ -52,6 +54,7 @@ Use `glab` to check epics, issues, and MRs for context on what shipped recently.
 3. Edit the doc to match
 4. Run `mise run lint:docs` to validate
 5. If you touched CLAUDE.md, mirror the change to AGENTS.md
+6. If your change alters orbit API behavior (new endpoint, new query type, new response field, new user-visible feature), update `skills/orbit/SKILL.md` and `skills/orbit/references/` (especially `recipes.md` and `troubleshooting.md`) to reflect it. CI only catches byte-equal drift of `query_language.md`; everything else in the skill is manual.
 
 ## Self-improvement
 

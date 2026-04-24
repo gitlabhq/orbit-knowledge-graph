@@ -359,3 +359,7 @@ description = "Check for broken links in markdown files"
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
+
+[tasks."skill:sync:orbit"]
+run = "cp docs/source/queries/query_language.md skills/orbit/references/query_language.md"
+description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"
