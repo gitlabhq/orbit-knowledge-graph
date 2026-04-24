@@ -62,8 +62,14 @@ def summarize_snapshot(snapshot: SessionSnapshot) -> SessionSummary:
         if msg.info.role == "assistant":
             steps += 1
             total_cost += msg.info.cost
-            for k in total_tokens:
-                total_tokens[k] += msg.info.tokens.get(k, 0)
+            tokens = msg.info.tokens
+            total_tokens["input"] += tokens.get("input", 0)
+            total_tokens["output"] += tokens.get("output", 0)
+            cache = tokens.get("cache", {})
+            if isinstance(cache, dict):
+                total_tokens["cache_read"] += cache.get("read", 0)
+            else:
+                total_tokens["cache_read"] += tokens.get("cache_read", 0)
             for part in msg.parts:
                 if part.type in ("tool-invocation", "tool"):
                     total_tool_calls += 1
