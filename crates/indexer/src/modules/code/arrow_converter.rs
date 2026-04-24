@@ -402,7 +402,9 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
             let rel_col = data
                 .edges
                 .column_by_name("relationship_kind")
-                .expect("edges batch must have relationship_kind column");
+                .ok_or_else(|| {
+                    code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
+                })?;
             let rel_array = rel_col.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();

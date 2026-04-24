@@ -80,7 +80,7 @@ impl LanguagePipeline for RubyPipeline {
         }
         if !errors.is_empty() {
             for e in &errors {
-                eprintln!("[ruby_prism] skipped {}: {}", e.file_path, e.error);
+                tracing::warn!(path = %e.file_path, error = %e.error, "ruby_prism: skipped file");
             }
         }
 
@@ -172,7 +172,7 @@ impl PrismVisitor<'_> {
         self.edges.push(EdgeEntry {
             source_id: parent_id,
             target_id: def_id,
-            edge_kind: "Defines",
+            edge_kind: "DEFINES",
             source_kind: parent_kind,
             target_kind: "Definition",
         });

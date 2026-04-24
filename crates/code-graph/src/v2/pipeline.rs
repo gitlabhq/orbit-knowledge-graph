@@ -81,12 +81,22 @@ pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
     pub root_path: String,
+    /// Typed errors collected during pipeline execution.
+    /// Thread-safe — languages push errors from their CPU threads.
+    pub graph_errors: std::sync::Mutex<Vec<crate::v2::error::CodeGraphError>>,
 }
 
 impl PipelineContext {
     #[inline]
     pub fn is_cancelled(&self) -> bool {
         self.config.cancel.is_cancelled()
+    }
+
+    /// Record a typed pipeline error.
+    pub fn record_error(&self, error: crate::v2::error::CodeGraphError) {
+        if let Ok(mut errors) = self.graph_errors.lock() {
+            errors.push(error);
+        }
     }
 }
 
@@ -224,6 +234,10 @@ pub struct PipelineConfig {
     /// (at most N CodeGraphs + N rayon pools alive at once).
     /// 0 = default (2).
     pub max_concurrent_languages: usize,
+    /// Global per-file resolution timeout. Applied to all languages
+    /// unless the language's own DSL rules specify a different value.
+    /// `None` = no global timeout (language rules may still set one).
+    pub per_file_timeout: Option<std::time::Duration>,
 }
 
 impl Default for PipelineConfig {
@@ -235,6 +249,7 @@ impl Default for PipelineConfig {
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
+            per_file_timeout: None,
         }
     }
 }
@@ -242,6 +257,9 @@ impl Default for PipelineConfig {
 pub struct PipelineResult {
     pub stats: PipelineStats,
     pub errors: Vec<PipelineError>,
+    /// Typed errors from file read/parse failures, graph conversion, etc.
+    /// Each carries a `.stage()` label for metrics.
+    pub graph_errors: Vec<crate::v2::error::CodeGraphError>,
     /// The pipeline context, including the tracer with accumulated events.
     pub ctx: Arc<PipelineContext>,
 }
@@ -288,6 +306,14 @@ impl PipelineError {
         }
     }
 }
+
+impl std::fmt::Display for PipelineError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}: {}", self.file_path, self.error)
+    }
+}
+
+impl std::error::Error for PipelineError {}
 
 pub struct Pipeline;
 
@@ -343,6 +369,7 @@ impl Pipeline {
             config,
             tracer,
             root_path: root_str,
+            graph_errors: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -415,9 +442,19 @@ impl Pipeline {
                     if worker_threads > 0 {
                         pool_builder = pool_builder.num_threads(worker_threads);
                     }
-                    let pool = pool_builder
-                        .build()
-                        .expect("failed to build per-language rayon pool");
+                    let pool = match pool_builder.build() {
+                        Ok(pool) => pool,
+                        Err(e) => {
+                            tracing::error!(
+                                %language,
+                                error = %e,
+                                "failed to create rayon pool, skipping language"
+                            );
+                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
+                            sem_tx.send(()).ok();
+                            return;
+                        }
+                    };
 
                     let btx = BatchTx {
                         tx: &tx,
@@ -428,9 +465,11 @@ impl Pipeline {
                         edges: edges_count,
                     };
 
-                    eprintln!(
-                        "[v2] processing {language}: {file_count} files ({} threads)",
-                        pool.current_num_threads()
+                    tracing::info!(
+                        %language,
+                        file_count,
+                        threads = pool.current_num_threads(),
+                        "processing language"
                     );
 
                     let result = pool.install(|| {
@@ -442,17 +481,29 @@ impl Pipeline {
 
                     match result {
                         Some(Ok(())) => {
-                            eprintln!("[v2] {language}: done in {:.2?}", t_lang.elapsed());
+                            tracing::info!(
+                                %language,
+                                elapsed_ms = t_lang.elapsed().as_millis() as u64,
+                                "language done"
+                            );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
-                            eprintln!("[v2] {language}: failed with {} errors", errors.len());
+                            tracing::warn!(
+                                %language,
+                                error_count = errors.len(),
+                                "language processing failed"
+                            );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
-                            all_errors.lock().unwrap().extend(errors);
+                            if let Ok(mut errs) = all_errors.lock() {
+                                errs.extend(errors);
+                            }
                         }
                         None => {
-                            eprintln!(
-                                "[v2] {language}: not supported, skipping {file_count} files"
+                            tracing::debug!(
+                                %language,
+                                file_count,
+                                "language not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
@@ -463,6 +514,12 @@ impl Pipeline {
                 });
             }
         }); // all threads join here
+
+        let graph_errors = ctx
+            .graph_errors
+            .lock()
+            .map(|mut e| std::mem::take(&mut *e))
+            .unwrap_or_default();
 
         PipelineResult {
             stats: PipelineStats {
@@ -475,7 +532,8 @@ impl Pipeline {
                 references_count: 0,
                 edges_count: edges_count.into_inner(),
             },
-            errors: all_errors.into_inner().unwrap(),
+            errors: all_errors.into_inner().unwrap_or_default(),
+            graph_errors,
             ctx,
         }
     }
@@ -489,7 +547,13 @@ impl Pipeline {
             .hidden(true)
             .build();
 
-        for entry in walker.flatten() {
+        for entry in walker.filter_map(|result| match result {
+            Ok(entry) => Some(entry),
+            Err(e) => {
+                tracing::debug!(error = %e, "directory walk error, skipping entry");
+                None
+            }
+        }) {
             if !entry.file_type().is_some_and(|ft| ft.is_file()) {
                 continue;
             }
@@ -565,11 +629,14 @@ where
         let rules = &lang_ctx.rules;
         let t0 = std::time::Instant::now();
 
-        // Spawn sentinel watchdog if per_file_timeout is configured
-        let sentinel = rules
+        // Spawn sentinel watchdog if per_file_timeout is configured.
+        // Language rules take precedence; global config is the fallback.
+        // Falls back to no timeout if the thread can't be spawned.
+        let per_file_timeout = rules
             .settings
             .per_file_timeout
-            .map(crate::v2::sentinel::spawn_sentinel);
+            .or(ctx.config.per_file_timeout);
+        let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
 
         // ── Phase 1: parallel full walk, sequential graph build ──
         let pb = progress_bar(file_count as u64, "parse + graph");
@@ -585,6 +652,13 @@ where
         // Extracts defs, imports, AND refs+SSA in a single pass.
         // Source bytes are read and dropped per-file — no bulk storage.
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::error::CodeGraphError;
+
+        enum ParseOutcome {
+            Ok(ParsedFile),
+            Err(CodeGraphError),
+        }
+
         struct ParsedFile {
             path_idx: usize,
             result: ParseFullResult,
@@ -592,7 +666,7 @@ where
             file_size: u64,
         }
 
-        let parsed: Vec<Option<ParsedFile>> = files
+        let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
             .map(|(idx, path)| {
@@ -603,17 +677,25 @@ where
                 let abs_path = format!("{root_path}/{path}");
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::debug!(path, error = %e, "failed to read file");
                         pb.inc(1);
-                        return None;
+                        return Some(ParseOutcome::Err(CodeGraphError::FileRead {
+                            path: path.to_string(),
+                            source: e,
+                        }));
                     }
                 };
 
                 let result = match spec.parse_full_collect(&source, path, language, tracer) {
                     Ok(r) => r,
-                    Err(_) => {
+                    Err(e) => {
+                        tracing::debug!(path, error = %e, "failed to parse file");
                         pb.inc(1);
-                        return None;
+                        return Some(ParseOutcome::Err(CodeGraphError::ParseFailed {
+                            path: path.to_string(),
+                            message: e.error.clone(),
+                        }));
                     }
                 };
                 // source bytes dropped here — single-walk, no re-read needed
@@ -625,14 +707,36 @@ where
                     .to_string();
                 let file_size = source.len() as u64;
                 pb.inc(1);
-                Some(ParsedFile {
+                Some(ParseOutcome::Ok(ParsedFile {
                     path_idx: idx,
                     result,
                     ext,
                     file_size,
-                })
+                }))
             })
             .collect();
+
+        // Separate successes from errors. Errors are collected for
+        // reporting — their stage labels feed the ERRORS metric.
+        let mut parse_errors: Vec<CodeGraphError> = Vec::new();
+        let parsed: Vec<Option<ParsedFile>> = parse_outcomes
+            .into_iter()
+            .map(|outcome| match outcome {
+                Some(ParseOutcome::Ok(file)) => Some(file),
+                Some(ParseOutcome::Err(e)) => {
+                    parse_errors.push(e);
+                    None
+                }
+                None => None,
+            })
+            .collect();
+
+        // Push parse errors to the shared context for metrics.
+        if !parse_errors.is_empty()
+            && let Ok(mut errs) = ctx.graph_errors.lock()
+        {
+            errs.extend(parse_errors);
+        }
 
         // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
         struct FileWithRefs {
@@ -722,6 +826,7 @@ where
             Vec<(u32, String)>,
             Option<FileInfo>,
             Vec<FailedChain>,
+            bool, // true if file was killed by sentinel timeout
         );
 
         let resolve_results: Vec<Phase2Result> = files_with_refs
@@ -751,6 +856,7 @@ where
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
 
+                let mut killed = false;
                 for r in &fwr.refs {
                     let before = edges.len();
                     if resolver
@@ -763,6 +869,7 @@ where
                         )
                         .is_err()
                     {
+                        killed = true;
                         break; // file killed by sentinel
                     }
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
@@ -778,7 +885,13 @@ where
                 edges.extend(resolver.drain_import_edges());
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
-                (edges, fwr.inferred_returns, Some(fwr.info), failed_chains)
+                (
+                    edges,
+                    fwr.inferred_returns,
+                    Some(fwr.info),
+                    failed_chains,
+                    killed,
+                )
             })
             .collect();
 
@@ -792,7 +905,17 @@ where
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
         let mut all_failed: Vec<(FileInfo, Vec<FailedChain>)> = Vec::new();
 
-        for (edges, inferred, info_opt, failed_chains) in resolve_results {
+        for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
+            if killed && let Some(ref info) = info_opt {
+                let path = match &graph.graph[info.file_node] {
+                    crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
+                    _ => "unknown",
+                };
+                ctx.record_error(CodeGraphError::Internal {
+                    context: "sentinel_timeout".to_string(),
+                    message: format!("file killed by per-file timeout: {path}"),
+                });
+            }
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
             }
@@ -858,7 +981,7 @@ where
                     }
                 }
                 if phase3_edges > 0 {
-                    eprintln!("[v2-sp] phase 3: {phase3_edges} cross-file edges resolved");
+                    tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
                 }
             }
         }
@@ -873,14 +996,14 @@ where
             let _ = join.join();
         }
 
-        eprintln!(
-            "[v2-sp] total: {:.2?} ({} nodes, {} edges, defs={}, imports={}, pool={})",
-            t0.elapsed(),
-            graph.graph.node_count(),
-            graph.graph.edge_count(),
-            graph.defs.len(),
-            graph.imports.len(),
-            graph.strings.len(),
+        tracing::info!(
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+            nodes = graph.graph.node_count(),
+            edges = graph.graph.edge_count(),
+            defs = graph.defs.len(),
+            imports = graph.imports.len(),
+            strings = graph.strings.len(),
+            "pipeline complete"
         );
 
         // ── Stream graph to writer thread, then drop it ─────────
@@ -931,6 +1054,7 @@ mod tests {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
+            graph_errors: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();

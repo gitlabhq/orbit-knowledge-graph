@@ -622,18 +622,32 @@ impl CodeGraph {
         );
     }
 
-    pub fn def(&self, idx: NodeIndex) -> &GraphDef {
+    pub fn try_def(&self, idx: NodeIndex) -> Option<&GraphDef> {
         match &self.graph[idx] {
-            GraphNode::Definition { id, .. } => &self.defs[id.0 as usize],
-            other => panic!("Expected Definition, got {other:?}"),
+            GraphNode::Definition { id, .. } => Some(&self.defs[id.0 as usize]),
+            _ => None,
+        }
+    }
+
+    pub fn def(&self, idx: NodeIndex) -> &GraphDef {
+        self.try_def(idx).unwrap_or_else(|| {
+            panic!(
+                "Expected Definition at {:?}, got {:?}",
+                idx, self.graph[idx]
+            )
+        })
+    }
+
+    pub fn try_import(&self, idx: NodeIndex) -> Option<&GraphImport> {
+        match &self.graph[idx] {
+            GraphNode::Import { id, .. } => Some(&self.imports[id.0 as usize]),
+            _ => None,
         }
     }
 
     pub fn import(&self, idx: NodeIndex) -> &GraphImport {
-        match &self.graph[idx] {
-            GraphNode::Import { id, .. } => &self.imports[id.0 as usize],
-            other => panic!("Expected Import, got {other:?}"),
-        }
+        self.try_import(idx)
+            .unwrap_or_else(|| panic!("Expected Import at {:?}, got {:?}", idx, self.graph[idx]))
     }
 
     /// Returns the definition name as `&str`.

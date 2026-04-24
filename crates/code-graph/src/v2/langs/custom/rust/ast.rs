@@ -674,6 +674,9 @@ impl RustStructureExtractor {
         visibility: ImportVisibility,
         in_group: bool,
     ) {
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < 128 * 1024 {
+            return;
+        }
         let mut combined = prefix.to_vec();
         if let Some(path) = use_tree.path() {
             combined.extend(path_segments(&path));
