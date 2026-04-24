@@ -43,9 +43,7 @@ use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
 use crate::v2::linker::CodeGraph;
 
-use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
-};
+use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
 
 mod local_flow;
@@ -112,7 +110,8 @@ impl LanguagePipeline for RustPipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &std::sync::Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let tracer = &ctx.tracer;
         let canonical_root = canonical_root_path(root_path);
@@ -152,7 +151,10 @@ impl LanguagePipeline for RustPipeline {
             }
         }
         graph.finalize(tracer);
-        Ok(PipelineOutput::Graph(Box::new(graph)))
+
+        btx.send_graph(graph);
+
+        Ok(())
     }
 }
 

@@ -588,7 +588,9 @@ fn invocation_target(
                 JsInvocationKind::Call
                 | JsInvocationKind::Construct
                 | JsInvocationKind::TaggedTemplate
-                | JsInvocationKind::Jsx => ExpressionStep::Call(member.property.name.to_string()),
+                | JsInvocationKind::Jsx => {
+                    ExpressionStep::Call(member.property.name.to_string().into())
+                }
             });
             Some((member.property.name.to_string(), Some(chain)))
         }
@@ -602,18 +604,20 @@ fn expression_steps_from_expression(expression: &Expression<'_>) -> Option<Vec<E
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
         match expression.get_inner_expression() {
             Expression::Identifier(identifier) => {
-                Some(vec![ExpressionStep::Ident(identifier.name.to_string())])
+                Some(vec![ExpressionStep::Ident(identifier.name.as_str().into())])
             }
             Expression::ThisExpression(_) => Some(vec![ExpressionStep::This]),
             Expression::Super(_) => Some(vec![ExpressionStep::Super]),
             Expression::StaticMemberExpression(member) => {
                 let mut chain = expression_steps_from_expression(&member.object)?;
-                chain.push(ExpressionStep::Field(member.property.name.to_string()));
+                chain.push(ExpressionStep::Field(
+                    member.property.name.to_string().into(),
+                ));
                 Some(chain)
             }
             Expression::CallExpression(call) => bare_invocation_steps(&call.callee),
             Expression::NewExpression(new_expr) => new_expression_type_name(new_expr)
-                .map(ExpressionStep::New)
+                .map(|name| ExpressionStep::New(name.into()))
                 .map(|step| vec![step]),
             _ => None,
         }
@@ -623,11 +627,13 @@ fn expression_steps_from_expression(expression: &Expression<'_>) -> Option<Vec<E
 fn bare_invocation_steps(callee: &Expression<'_>) -> Option<Vec<ExpressionStep>> {
     match callee.get_inner_expression() {
         Expression::Identifier(identifier) => {
-            Some(vec![ExpressionStep::Call(identifier.name.to_string())])
+            Some(vec![ExpressionStep::Call(identifier.name.as_str().into())])
         }
         Expression::StaticMemberExpression(member) => {
             let mut chain = expression_steps_from_expression(&member.object)?;
-            chain.push(ExpressionStep::Call(member.property.name.to_string()));
+            chain.push(ExpressionStep::Call(
+                member.property.name.to_string().into(),
+            ));
             Some(chain)
         }
         _ => None,
@@ -644,7 +650,9 @@ fn jsx_invocation_target(
         JSXElementName::ThisExpression(_) => None,
         JSXElementName::MemberExpression(member) => {
             let mut chain = jsx_member_object_steps(&member.object)?;
-            chain.push(ExpressionStep::Call(member.property.name.to_string()));
+            chain.push(ExpressionStep::Call(
+                member.property.name.to_string().into(),
+            ));
             Some((member.property.name.to_string(), Some(chain)))
         }
         _ => None,
@@ -654,11 +662,13 @@ fn jsx_invocation_target(
 fn jsx_member_object_steps(object: &JSXMemberExpressionObject<'_>) -> Option<Vec<ExpressionStep>> {
     stacker::maybe_grow(32 * 1024, 1024 * 1024, || match object {
         JSXMemberExpressionObject::IdentifierReference(identifier) => {
-            Some(vec![ExpressionStep::Ident(identifier.name.to_string())])
+            Some(vec![ExpressionStep::Ident(identifier.name.as_str().into())])
         }
         JSXMemberExpressionObject::MemberExpression(member) => {
             let mut chain = jsx_member_object_steps(&member.object)?;
-            chain.push(ExpressionStep::Field(member.property.name.to_string()));
+            chain.push(ExpressionStep::Field(
+                member.property.name.to_string().into(),
+            ));
             Some(chain)
         }
         JSXMemberExpressionObject::ThisExpression(_) => Some(vec![ExpressionStep::This]),

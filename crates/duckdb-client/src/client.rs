@@ -182,13 +182,23 @@ impl DuckDbClient {
     /// the ontology during conversion.
     pub fn insert_graph(&self, data: LocalGraphData) -> Result<()> {
         for (table, batch) in data.tables {
-            if batch.num_rows() == 0 {
-                continue;
-            }
-            let mut appender = self.conn.appender(&table)?;
-            appender.append_record_batch(batch)?;
-            appender.flush()?;
+            self.insert_batch(&table, &batch)?;
         }
+        Ok(())
+    }
+
+    /// Insert a single Arrow RecordBatch into a table.
+    pub fn insert_batch(
+        &self,
+        table: &str,
+        batch: &arrow::record_batch::RecordBatch,
+    ) -> Result<()> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        let mut appender = self.conn.appender(table)?;
+        appender.append_record_batch(batch.clone())?;
+        appender.flush()?;
         Ok(())
     }
 

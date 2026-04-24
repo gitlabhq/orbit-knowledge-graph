@@ -11,9 +11,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ruby_prism::Visit;
 
-use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
-};
+use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 
 pub struct RubyPipeline;
 
@@ -21,7 +19,8 @@ impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();
@@ -92,11 +91,11 @@ impl LanguagePipeline for RubyPipeline {
         let def_batch = build_def_batch(&defs)?;
         let edge_batch = build_edge_batch(&edges)?;
 
-        Ok(PipelineOutput::Batches(vec![
-            ("File".to_string(), file_batch),
-            ("Definition".to_string(), def_batch),
-            ("DefinitionToDefinition".to_string(), edge_batch),
-        ]))
+        btx.send_raw("File".to_string(), file_batch);
+        btx.send_raw("Definition".to_string(), def_batch);
+        btx.send_raw("DefinitionToDefinition".to_string(), edge_batch);
+
+        Ok(())
     }
 }
 

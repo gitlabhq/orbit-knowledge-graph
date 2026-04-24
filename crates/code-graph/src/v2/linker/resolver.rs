@@ -884,7 +884,7 @@ impl<'a> ResolveCtx<'a> {
                                     result: format!("base type -> {fqn}"),
                                 }
                             );
-                            types.push(fqn.clone());
+                            types.push(fqn.to_string());
                         }
                         ParseValue::LocalDef(i) => {
                             if let Some(&node) = self.def_nodes.get(*i as usize)
@@ -1046,7 +1046,7 @@ impl<'a> ResolveCtx<'a> {
             ExpressionStep::Super => Ok(reaching
                 .iter()
                 .filter_map(|v| match v {
-                    ParseValue::Type(fqn) => Some(fqn.clone()),
+                    ParseValue::Type(fqn) => Some(fqn.to_string()),
                     _ => None,
                 })
                 .collect()),
@@ -1057,7 +1057,7 @@ impl<'a> ResolveCtx<'a> {
                     })
                 });
                 if !fqn_matches.is_empty() {
-                    return Ok(vec![type_name.clone()]);
+                    return Ok(vec![type_name.to_string()]);
                 }
                 let name_matches = self.graph.indexes.by_name.lookup(type_name, |idx| {
                     self.graph.graph[idx].def_id().is_some_and(|d| {
