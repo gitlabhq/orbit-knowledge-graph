@@ -164,6 +164,11 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
+      pipeline:
+        max_file_size_bytes: 5000000
+        respect_gitignore: true
+        worker_threads: 0
+        max_concurrent_languages: 0
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1
@@ -182,6 +187,15 @@ engine:
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `engine.handlers.namespace-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+
+#### Code indexing task handler
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `engine.handlers.code-indexing-task.pipeline.max_file_size_bytes` | `5,000,000` | Largest source file the v2 pipeline will parse |
+| `engine.handlers.code-indexing-task.pipeline.respect_gitignore` | `true` | Whether repository `.gitignore` rules apply during discovery |
+| `engine.handlers.code-indexing-task.pipeline.worker_threads` | `0` | Rayon workers per language; `0` uses Rayon default |
+| `engine.handlers.code-indexing-task.pipeline.max_concurrent_languages` | `0` | Concurrent language pipelines; `0` uses the pipeline default |
 
 ### Retry strategy by handler type
 
@@ -521,6 +535,11 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
+      pipeline:
+        max_file_size_bytes: 5000000
+        respect_gitignore: true
+        worker_threads: 0
+        max_concurrent_languages: 0
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1

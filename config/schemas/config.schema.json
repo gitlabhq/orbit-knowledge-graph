@@ -52,6 +52,12 @@
           "code-indexing-task": {
             "concurrency_group": null,
             "max_attempts": null,
+            "pipeline": {
+              "max_concurrent_languages": 0,
+              "max_file_size_bytes": 5000000,
+              "respect_gitignore": true,
+              "worker_threads": 0
+            },
             "retry_interval_secs": null
           },
           "global-handler": {
@@ -309,6 +315,34 @@
         "username"
       ]
     },
+    "CodeIndexingPipelineConfig": {
+      "type": "object",
+      "properties": {
+        "max_concurrent_languages": {
+          "type": "integer",
+          "format": "uint",
+          "default": 0,
+          "minimum": 0
+        },
+        "max_file_size_bytes": {
+          "type": "integer",
+          "format": "uint64",
+          "default": 5000000,
+          "minimum": 0
+        },
+        "respect_gitignore": {
+          "type": "boolean",
+          "default": true
+        },
+        "worker_threads": {
+          "type": "integer",
+          "format": "uint",
+          "default": 0,
+          "minimum": 0
+        }
+      },
+      "additionalProperties": false
+    },
     "CodeIndexingTaskHandlerConfig": {
       "description": "Per-handler engine configuration (retry policy, concurrency group).\n\nEach handler embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe engine reads it via `handler.engine_config()`.\n\nRetries are opt-in: a handler with no retry config will ack on failure.",
       "type": "object",
@@ -330,6 +364,15 @@
           "format": "uint32",
           "default": null,
           "minimum": 0
+        },
+        "pipeline": {
+          "$ref": "#/$defs/CodeIndexingPipelineConfig",
+          "default": {
+            "max_concurrent_languages": 0,
+            "max_file_size_bytes": 5000000,
+            "respect_gitignore": true,
+            "worker_threads": 0
+          }
         },
         "retry_interval_secs": {
           "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
@@ -394,6 +437,12 @@
             "code-indexing-task": {
               "concurrency_group": null,
               "max_attempts": null,
+              "pipeline": {
+                "max_concurrent_languages": 0,
+                "max_file_size_bytes": 5000000,
+                "respect_gitignore": true,
+                "worker_threads": 0
+              },
               "retry_interval_secs": null
             },
             "global-handler": {
@@ -575,6 +624,12 @@
           "default": {
             "concurrency_group": null,
             "max_attempts": null,
+            "pipeline": {
+              "max_concurrent_languages": 0,
+              "max_file_size_bytes": 5000000,
+              "respect_gitignore": true,
+              "worker_threads": 0
+            },
             "retry_interval_secs": null
           }
         },

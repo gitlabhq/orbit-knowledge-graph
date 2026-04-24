@@ -13,7 +13,9 @@ use clickhouse_client::ClickHouseConfigurationExt;
 use flate2::Compression;
 use flate2::write::GzEncoder;
 use gitlab_client::GitlabClient;
-use gkg_server_config::{CodeIndexingTaskHandlerConfig, GitlabClientConfiguration};
+use gkg_server_config::{
+    CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, GitlabClientConfiguration,
+};
 use indexer::handler::HandlerContext;
 use indexer::modules::code::{
     ClickHouseCodeCheckpointStore, ClickHouseStaleDataCleaner, CodeIndexingPipeline,
@@ -66,6 +68,7 @@ impl CodeIndexingDeps {
             metrics.clone(),
             table_names,
             Arc::new(ontology),
+            CodeIndexingPipelineConfig::default(),
         ));
 
         Self {

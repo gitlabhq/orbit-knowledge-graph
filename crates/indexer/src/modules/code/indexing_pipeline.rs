@@ -4,6 +4,7 @@ use std::time::Instant;
 
 use chrono::{DateTime, Utc};
 use code_graph::v2::{Pipeline, PipelineConfig};
+use gkg_server_config::CodeIndexingPipelineConfig;
 use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
@@ -43,6 +44,7 @@ pub struct CodeIndexingPipeline {
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
     ontology: Arc<ontology::Ontology>,
+    pipeline_config: CodeIndexingPipelineConfig,
 }
 
 impl CodeIndexingPipeline {
@@ -53,6 +55,7 @@ impl CodeIndexingPipeline {
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
         ontology: Arc<ontology::Ontology>,
+        pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
         Self {
             resolver,
@@ -61,6 +64,7 @@ impl CodeIndexingPipeline {
             metrics,
             table_names,
             ontology,
+            pipeline_config,
         }
     }
 
@@ -214,7 +218,10 @@ impl CodeIndexingPipeline {
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
         let config = PipelineConfig {
-            max_file_size: 5_000_000,
+            max_file_size: self.pipeline_config.max_file_size_bytes,
+            respect_gitignore: self.pipeline_config.respect_gitignore,
+            worker_threads: self.pipeline_config.worker_threads,
+            max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
