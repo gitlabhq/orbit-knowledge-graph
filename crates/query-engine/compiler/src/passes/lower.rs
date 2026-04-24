@@ -461,7 +461,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     // aggregations with relationships. No-rel (single-node) and multi-hop
     // fall back to the standard join approach.
     let has_multi_hop = input.relationships.iter().any(|r| r.max_hops > 1);
-    let can_edge_only = !input.relationships.is_empty() && !has_multi_hop;
+    // Edge-only optimization only works for single-relationship aggregations
+    // because node_edge_col mapping (which rewrites COUNT(n.id) to
+    // COUNT(e0.target_id)) is only populated for single-relationship queries.
+    let can_edge_only =
+        input.relationships.len() == 1 && !input.relationships.is_empty() && !has_multi_hop;
 
     let mut edge_only_targets: HashSet<String> = HashSet::new();
     if can_edge_only {
@@ -469,12 +473,16 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             if group_by_ids.contains(&node.id) {
                 continue;
             }
-            let all_property_less = input
+            let targeting_aggs: Vec<_> = input
                 .aggregations
                 .iter()
                 .filter(|a| a.target.as_deref() == Some(&node.id))
-                .all(|a| a.property.is_none());
-            if all_property_less {
+                .collect();
+            // A node is edge-only when it IS an aggregation target and all
+            // those aggregations are property-less (e.g. COUNT without a
+            // property field). Nodes that are not targeted by any aggregation
+            // (intermediate join nodes) must keep their table scan in FROM.
+            if !targeting_aggs.is_empty() && targeting_aggs.iter().all(|a| a.property.is_none()) {
                 edge_only_targets.insert(node.id.clone());
             }
         }
