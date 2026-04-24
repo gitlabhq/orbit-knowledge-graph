@@ -52,10 +52,19 @@ pub const GITALY_CALLS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const MR_DIFF_CALLS: MetricSpec = MetricSpec::counter(
+    "gkg.content.mr_diff.calls",
+    "Total HTTP calls issued to the merge_request_diffs internal API.",
+    None,
+    &[],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &RESOLVE_DURATION,
     &RESOLVE_TOTAL,
     &BATCH_SIZE_METRIC,
     &BLOB_BYTES_METRIC,
     &GITALY_CALLS,
+    &MR_DIFF_CALLS,
 ];

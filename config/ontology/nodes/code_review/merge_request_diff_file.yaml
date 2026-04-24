@@ -114,7 +114,6 @@ properties:
     virtual:
       service: mr_diff
       lookup: patch
-      disabled: true
       depends_on:
         - project_id
         - merge_request_diff_id

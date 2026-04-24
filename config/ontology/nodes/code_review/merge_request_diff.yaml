@@ -117,7 +117,6 @@ properties:
     virtual:
       service: mr_diff
       lookup: raw_patch
-      disabled: true
       depends_on: [project_id, id]
     description: "Full unified patch for this MR snapshot. Resolved from GitLab at query time."
 

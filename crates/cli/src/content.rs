@@ -105,6 +105,20 @@ fn slice_content(content: &str, start_byte: Option<i64>, end_byte: Option<i64>) 
     }
 }
 
+struct NoopResolver;
+
+#[async_trait]
+impl ColumnResolver for NoopResolver {
+    async fn resolve_batch(
+        &self,
+        _lookup: &str,
+        rows: &[&PropertyRow],
+        _ctx: &ResolverContext,
+    ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
+        Ok(vec![None; rows.len()])
+    }
+}
+
 /// Build a [`LocalContentService`] and wrap it in a
 /// [`ColumnResolverRegistry`] under the `"gitaly"` service name
 /// (matching the ontology's `virtual.service` field).
@@ -116,6 +130,7 @@ pub fn local_resolver_registry(
         "gitaly",
         std::sync::Arc::new(LocalContentService::new(project_roots)),
     );
+    registry.register("mr_diff", std::sync::Arc::new(NoopResolver));
     registry
 }
 

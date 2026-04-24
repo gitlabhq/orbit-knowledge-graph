@@ -165,6 +165,12 @@ async fn run_webserver(
             gitlab_client.clone(),
         )),
     );
+    resolver_registry.register(
+        "mr_diff",
+        Arc::new(content::mr_diff::MergeRequestDiffContentService::new(
+            gitlab_client.clone(),
+        )),
+    );
     info!("Content resolution enabled (GitlabClient configured)");
 
     let graph_client = config.graph.build_client();
