@@ -75,6 +75,26 @@ WHERE _siphon_deleted = false \
     WHERE deleted = false \
   )";
 
+/// SQL to count code-eligible projects in the datalake: projects belonging to
+/// any enabled namespace. This is the denominator of the code-coverage check
+/// that gates migration promotion (see `code_coverage_threshold`).
+const COUNT_CODE_ELIGIBLE_PROJECTS: &str = "\
+SELECT count(DISTINCT id) AS ns_count \
+FROM project_namespace_traversal_paths \
+WHERE deleted = false \
+  AND toInt64OrZero(splitByChar('/', traversal_path)[2]) IN ( \
+    SELECT root_namespace_id \
+    FROM siphon_knowledge_graph_enabled_namespaces \
+    WHERE _siphon_deleted = false \
+  )";
+
+/// SQL to count distinct projects that have a checkpoint row in the new-prefix
+/// code indexing checkpoint table. The numerator of the code-coverage check.
+const COUNT_CODE_CHECKPOINT_PROJECTS: &str = "\
+SELECT count(DISTINCT project_id) AS ns_count \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false";
+
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
     graph: ArrowClickHouseClient,
@@ -284,18 +304,47 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| format!("count code checkpoint namespaces: {e}"))?;
 
+        // Project-level coverage gate: even when every enabled namespace has
+        // produced at least one checkpoint row, the migration is only useful
+        // once the bulk of projects within those namespaces are indexed.
+        // Without this gate, completion fires after a single project per
+        // namespace lands in the checkpoint table, leaving the rest unindexed
+        // on the newly-active schema until organic pushes trickle them in.
+        let eligible_projects = self
+            .count_datalake_namespaces(COUNT_CODE_ELIGIBLE_PROJECTS)
+            .await
+            .map_err(|e| format!("count code-eligible projects: {e}"))?;
+
+        let indexed_projects = self
+            .count_table_namespaces(COUNT_CODE_CHECKPOINT_PROJECTS, &code_table)
+            .await
+            .map_err(|e| format!("count code-indexed projects: {e}"))?;
+
+        let coverage = if eligible_projects == 0 {
+            1.0
+        } else {
+            indexed_projects as f64 / eligible_projects as f64
+        };
+        let threshold = self.config.code_coverage_threshold;
+
         info!(
             version,
             sdlc_indexed_namespaces = sdlc_count,
             code_indexed_namespaces = code_count,
             enabled_namespaces = enabled_count,
             code_eligible_enabled_namespaces = code_eligible_count,
+            code_indexed_projects = indexed_projects,
+            code_eligible_projects = eligible_projects,
+            code_coverage = coverage,
+            code_coverage_threshold = threshold,
             "migration completion status"
         );
 
-        // SDLC must cover every enabled namespace; code only needs to cover
-        // the subset that has projects.
-        Ok(sdlc_count >= enabled_count && code_count >= code_eligible_count)
+        // SDLC must cover every enabled namespace; code must cover both the
+        // namespace set and `threshold` fraction of eligible projects.
+        Ok(sdlc_count >= enabled_count
+            && code_count >= code_eligible_count
+            && coverage >= threshold)
     }
 
     /// Counts distinct namespaces in a checkpoint table using the given query.
@@ -495,5 +544,57 @@ mod tests {
     #[test]
     fn migration_lock_key_matches_schema_migration() {
         assert_eq!(MIGRATION_LOCK_KEY, "schema_migration");
+    }
+
+    #[test]
+    fn count_code_eligible_projects_query_filters_deleted() {
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("deleted = false"));
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("_siphon_deleted = false"));
+    }
+
+    #[test]
+    fn count_code_eligible_projects_query_counts_distinct_project_ids() {
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("count(DISTINCT id)"));
+    }
+
+    #[test]
+    fn count_code_checkpoint_projects_query_uses_identifier_param() {
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("{table:Identifier}"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("count(DISTINCT project_id)"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("_deleted = false"));
+    }
+
+    #[test]
+    fn default_config_has_a_code_coverage_threshold() {
+        let config = MigrationCompletionConfig::default();
+        assert!(config.code_coverage_threshold > 0.0);
+        assert!(config.code_coverage_threshold <= 1.0);
+    }
+
+    /// Coverage math is the load-bearing predicate for migration completion.
+    /// These cases lock in the boundary behavior so a future change to the
+    /// formula (or to the threshold default) won't silently regress it.
+    #[test]
+    fn code_coverage_math_thresholding() {
+        fn coverage(indexed: u64, eligible: u64) -> f64 {
+            if eligible == 0 {
+                1.0
+            } else {
+                indexed as f64 / eligible as f64
+            }
+        }
+
+        // Empty datalake: trivially "complete" so completion isn't blocked
+        // forever on a brand-new install with no enabled namespaces yet.
+        assert_eq!(coverage(0, 0), 1.0);
+
+        // Below threshold: not complete.
+        assert!(coverage(14, 8602) < 0.95);
+
+        // Exactly at threshold: complete.
+        assert!(coverage(95, 100) >= 0.95);
+
+        // Above threshold: complete.
+        assert!(coverage(99, 100) >= 0.95);
     }
 }

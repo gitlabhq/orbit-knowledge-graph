@@ -1,3 +1,4 @@
+use std::collections::HashSet;
 use std::sync::Arc;
 use std::time::Instant;
 
@@ -10,11 +11,23 @@ use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
-use crate::schema::version::read_migrating_version;
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Subscription};
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{NamespaceCodeBackfillDispatcherConfig, ScheduleConfiguration};
+
+const CODE_INDEXING_CHECKPOINT_TABLE: &str = "code_indexing_checkpoint";
+
+/// Project IDs that already have a checkpoint row under a given namespace's
+/// traversal-path scope. Used to filter the dispatch list down to projects
+/// that still need indexing for the current schema version.
+const CHECKPOINTED_PROJECT_IDS_QUERY: &str = r#"
+SELECT DISTINCT project_id
+FROM {table:Identifier} FINAL
+WHERE _deleted = false
+  AND startsWith(traversal_path, {traversal_path:String})
+"#;
 
 const NAMESPACE_TRAVERSAL_PATH_QUERY: &str = r#"
 SELECT traversal_path
@@ -113,7 +126,7 @@ struct PendingProject {
 impl NamespaceCodeBackfillDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
         self.dispatch_cdc_events().await?;
-        self.dispatch_migration_backfill().await?;
+        self.dispatch_active_backfill().await?;
         Ok(())
     }
 
@@ -171,34 +184,34 @@ impl NamespaceCodeBackfillDispatcher {
         Ok(())
     }
 
-    /// When a schema migration is in progress, dispatch code backfill for
-    /// all enabled namespaces so the new-prefix checkpoint table gets
-    /// populated. Without this, migration completion blocks indefinitely
-    /// because the code checkpoint table stays empty.
-    async fn dispatch_migration_backfill(&self) -> Result<(), TaskError> {
-        let migrating = match read_migrating_version(&self.graph).await {
-            Ok(v) => v,
+    /// Dispatches code backfill for every enabled namespace, every tick.
+    ///
+    /// Coverage-driven: for each namespace, the project list is filtered
+    /// against the indexer's current-version checkpoint table so the
+    /// dispatcher only publishes work that hasn't been done yet. Once a
+    /// namespace's projects are fully checkpointed, this loop produces no
+    /// publishes for it (the filter empties the project list).
+    ///
+    /// Replaces the prior "only when a `migrating` row exists" gate, which
+    /// silently no-op'd after a migration completed and stranded any
+    /// projects that hadn't been indexed during the brief migration window.
+    async fn dispatch_active_backfill(&self) -> Result<(), TaskError> {
+        let version = *SCHEMA_VERSION;
+
+        // Datalake unreachable is a transient issue, not a task error. Mirror
+        // the tolerance the old `read_migrating_version` gate had: log and
+        // try again next tick.
+        let namespace_ids = match self.fetch_enabled_namespace_ids().await {
+            Ok(ids) => ids,
             Err(e) => {
-                self.metrics.record_error(self.name(), "migration_status");
-                warn!(error = %e, "failed to check migration status, skipping migration backfill");
+                warn!(error = %e, "failed to fetch enabled namespaces, skipping backfill");
                 return Ok(());
             }
         };
 
-        let Some(version) = migrating else {
-            return Ok(());
-        };
-
-        let namespace_ids = self.fetch_enabled_namespace_ids().await?;
         if namespace_ids.is_empty() {
             return Ok(());
         }
-
-        info!(
-            version,
-            namespace_count = namespace_ids.len(),
-            "schema migration in progress, dispatching code backfill for all enabled namespaces"
-        );
 
         let mut total = DispatchOutcome {
             dispatched: 0,
@@ -221,11 +234,34 @@ impl NamespaceCodeBackfillDispatcher {
                 version,
                 dispatched = total.dispatched,
                 skipped = total.skipped,
-                "dispatched migration code backfill requests"
+                "dispatched code backfill requests"
             );
         }
 
         Ok(())
+    }
+
+    /// Returns the set of project IDs whose checkpoint row already exists
+    /// under `traversal_path` for the indexer's current schema version.
+    async fn fetch_checkpointed_project_ids(
+        &self,
+        traversal_path: &str,
+    ) -> Result<HashSet<i64>, TaskError> {
+        let table = prefixed_table_name(CODE_INDEXING_CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let batches = self
+            .graph
+            .query(CHECKPOINTED_PROJECT_IDS_QUERY)
+            .param("table", &table)
+            .param("traversal_path", traversal_path)
+            .fetch_arrow()
+            .await
+            .map_err(|error| {
+                self.metrics.record_error(self.name(), "query");
+                TaskError::new(error)
+            })?;
+
+        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+        Ok(ids.into_iter().collect())
     }
 
     async fn fetch_enabled_namespace_ids(&self) -> Result<Vec<i64>, TaskError> {
@@ -324,10 +360,28 @@ impl NamespaceCodeBackfillDispatcher {
             return Ok(no_work);
         }
 
+        // Skip projects that already have a checkpoint for the current
+        // schema version. Filtering here keeps the publish loop bounded by
+        // the un-indexed remainder rather than the full project set, which
+        // matters at scale: a namespace with thousands of projects produces
+        // O(remaining) NATS publishes per tick, not O(total).
+        let checkpointed = self.fetch_checkpointed_project_ids(&traversal_path).await?;
+        let pending_count_before_filter = projects.len();
+        let projects: Vec<PendingProject> = projects
+            .into_iter()
+            .filter(|p| !checkpointed.contains(&p.project_id))
+            .collect();
+
+        if projects.is_empty() {
+            debug!(namespace_id, "all projects already checkpointed");
+            return Ok(no_work);
+        }
+
         info!(
             namespace_id,
             count = projects.len(),
-            "namespace enabled, dispatching code backfill"
+            already_checkpointed = pending_count_before_filter - projects.len(),
+            "dispatching code backfill for pending projects"
         );
 
         let mut outcome = DispatchOutcome {
