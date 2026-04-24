@@ -14,8 +14,8 @@ glab api --method POST orbit/query \
   --header "Content-Type: application/json" \
   --input /tmp/q.json
 
-# or
-scripts/orbit-query /tmp/q.json
+# or (adjust path to wherever the skill is installed):
+~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
 ```
 
 ## `{"error":"404 Not Found"}`
@@ -99,7 +99,8 @@ always current:
 glab api orbit/tools | jq '.[] | select(.name=="query_graph") | .description' -r
 ```
 
-The `description` field embeds the full JSON Schema. Full field reference in
+The `description` field embeds the full JSON Schema (inside a `<toon>` block
+for compact transport — still parseable). Full field reference in
 [`query_language.md`](query_language.md).
 
 ## `HTTP 503 Service Unavailable`

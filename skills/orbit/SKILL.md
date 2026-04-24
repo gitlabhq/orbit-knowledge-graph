@@ -70,12 +70,16 @@ glab api --method POST orbit/query \
   --input /tmp/q.json
 ```
 
-Or use the bundled wrapper, which injects the header automatically:
+Or use the bundled wrapper, which injects the header automatically.
+Invoke it by its absolute path (or put the skill's `scripts/` dir on `PATH`) —
+the skill can be installed anywhere, so relative `scripts/orbit-query` only
+works from inside the skill directory:
 
 ```bash
-scripts/orbit-query /tmp/q.json
-# or
-cat /tmp/q.json | scripts/orbit-query
+# Adjust path to wherever the skill is installed:
+~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
+# or via stdin:
+cat /tmp/q.json | ~/.config/opencode/skills/orbit/scripts/orbit-query
 ```
 
 `response_format`:
@@ -114,6 +118,9 @@ External links (require internet):
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
 8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
 9. **Read-only.** All endpoints are idempotent queries — no data is modified.
+10. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
+    (see `HTTP 429` in troubleshooting). Prefer aggregation/traversal in one
+    query over N separate queries.
 
 ## Contributing improvements
 

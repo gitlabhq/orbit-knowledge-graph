@@ -14,10 +14,13 @@ glab api --method POST orbit/query \
   --input /tmp/q.json
 ```
 
-Or use the bundled wrapper (injects the header):
+Or use the bundled wrapper (injects the header). Use the absolute path — the
+skill can be installed anywhere, so relative `scripts/orbit-query` only works
+from inside the skill directory:
 
 ```bash
-scripts/orbit-query /tmp/q.json
+# Adjust path to wherever the skill is installed:
+~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
 ```
 
 For the full field reference see [`query_language.md`](query_language.md).
