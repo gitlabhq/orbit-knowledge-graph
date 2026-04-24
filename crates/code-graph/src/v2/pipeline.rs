@@ -221,6 +221,8 @@ pub struct PipelineResult {
 }
 
 pub struct PipelineStats {
+    pub files_discovered: usize,
+    pub bytes_discovered: u64,
     pub files_parsed: usize,
     pub files_skipped: usize,
     pub definitions_count: usize,
@@ -266,6 +268,16 @@ impl Pipeline {
         let pb_discover = spinner("Discovering files...");
         let files_by_language = Self::walk_and_group(root, &config);
         let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
+        let total_bytes: u64 = files_by_language
+            .values()
+            .flatten()
+            .filter_map(|path| {
+                root.join(path)
+                    .metadata()
+                    .ok()
+                    .map(|metadata| metadata.len())
+            })
+            .sum();
         let lang_summary: Vec<String> = files_by_language
             .iter()
             .map(|(l, f)| format!("{l}: {}", f.len()))
@@ -397,6 +409,8 @@ impl Pipeline {
 
         PipelineResult {
             stats: PipelineStats {
+                files_discovered: total_files,
+                bytes_discovered: total_bytes,
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
                 definitions_count: definitions_count.into_inner(),

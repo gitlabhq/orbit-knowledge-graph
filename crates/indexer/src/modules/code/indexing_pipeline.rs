@@ -254,9 +254,19 @@ impl CodeIndexingPipeline {
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
         self.metrics
+            .record_files_processed(result.stats.files_discovered as u64, "discovered");
+        self.metrics
+            .record_repository_source_size(result.stats.bytes_discovered);
+        self.metrics
             .record_files_processed(result.stats.files_parsed as u64, "parsed");
         self.metrics
             .record_files_processed(result.stats.files_skipped as u64, "skipped");
+        self.metrics
+            .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
+        self.metrics
+            .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
+        self.metrics
+            .record_nodes_indexed(result.stats.edges_count as u64, "edge");
 
         if !result.errors.is_empty() {
             warn!(

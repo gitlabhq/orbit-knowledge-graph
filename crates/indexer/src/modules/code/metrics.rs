@@ -14,8 +14,11 @@ pub struct CodeMetrics {
     pub(super) repository_resolution_strategy: Counter<u64>,
     pub(super) repository_cleanup: Counter<u64>,
     pub(super) repository_empty: Counter<u64>,
+    pub(super) repository_indexing_completed: Counter<u64>,
+    pub(super) repository_source_size: Histogram<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
+    pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
 }
 
@@ -34,8 +37,12 @@ impl CodeMetrics {
                 .build_counter_u64(meter),
             repository_cleanup: code::REPOSITORY_CLEANUP.build_counter_u64(meter),
             repository_empty: code::REPOSITORY_EMPTY.build_counter_u64(meter),
+            repository_indexing_completed: code::REPOSITORY_INDEXING_COMPLETED
+                .build_counter_u64(meter),
+            repository_source_size: code::REPOSITORY_SOURCE_SIZE.build_histogram_u64(meter),
             indexing_duration: code::INDEXING_DURATION.build_histogram_f64(meter),
             files_processed: code::FILES_PROCESSED.build_counter_u64(meter),
+            nodes_indexed: code::NODES_INDEXED.build_counter_u64(meter),
             errors: code::ERRORS.build_counter_u64(meter),
         }
     }
@@ -67,9 +74,23 @@ impl CodeMetrics {
             .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
     }
 
+    pub(super) fn record_repository_indexed(&self, outcome: &'static str) {
+        self.repository_indexing_completed
+            .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
+    }
+
+    pub(super) fn record_repository_source_size(&self, bytes: u64) {
+        self.repository_source_size.record(bytes, &[]);
+    }
+
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
         self.files_processed
             .add(count, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
+    }
+
+    pub(super) fn record_nodes_indexed(&self, count: u64, kind: &'static str) {
+        self.nodes_indexed
+            .add(count, &[KeyValue::new(code::labels::KIND, kind)]);
     }
 }
 
