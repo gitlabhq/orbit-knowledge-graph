@@ -206,14 +206,10 @@ impl GraphStatusService {
 
 fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) -> IndexingState {
     match progress.last_completed_at {
-        Some(completed) if progress.last_started_at <= completed => {
-            if progress.last_error.is_some() {
-                IndexingState::Error
-            } else {
-                IndexingState::Indexed
-            }
-        }
-        _ => IndexingState::Backfilling,
+        None => IndexingState::Backfilling,
+        Some(completed) if progress.last_started_at > completed => IndexingState::Indexing,
+        Some(_) if progress.last_error.is_some() => IndexingState::Error,
+        Some(_) => IndexingState::Indexed,
     }
 }
 
@@ -383,5 +379,17 @@ mod tests {
             last_error: Some("connection reset".to_string()),
         };
         assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
+    }
+
+    #[test]
+    fn derive_state_indexing_when_started_after_completion() {
+        let completed = Utc::now() - Duration::seconds(60);
+        let progress = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: Some(completed),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexing);
     }
 }

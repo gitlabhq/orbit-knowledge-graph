@@ -299,6 +299,7 @@ enum IndexingState {
   INDEXING_STATE_INDEXED = 2;
   INDEXING_STATE_ERROR = 3;
   INDEXING_STATE_UNKNOWN = 4;
+  INDEXING_STATE_INDEXING = 5;
 }
 
 // Indexing progress metadata from the most recent indexing run.

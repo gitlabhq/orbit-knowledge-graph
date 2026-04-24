@@ -168,6 +168,7 @@ async fn graph_status() {
         indexing_status_indexed_for_group,
         indexing_status_backfilling_for_project,
         indexing_status_not_indexed_when_no_kv_entry,
+        indexing_status_indexing_when_reindex_in_flight,
         indexing_status_error_state,
         indexing_status_unknown_when_nats_unreachable,
     );
@@ -316,6 +317,27 @@ async fn indexing_status_backfilling_for_project(ctx: &TestContext) {
     assert_eq!(indexing.state, IndexingState::Backfilling as i32);
     assert!(indexing.last_started_at.is_some());
     assert!(indexing.last_completed_at.is_none());
+}
+
+async fn indexing_status_indexing_when_reindex_in_flight(ctx: &TestContext) {
+    let mock_kv = MockKvServices::new();
+    let previous_completion = Utc::now() - Duration::seconds(60);
+    seed_indexing_progress(
+        &mock_kv,
+        "1/100/",
+        &IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: Some(previous_completion),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        },
+    );
+
+    let service = build_service_with_indexing_status(ctx, mock_kv);
+    let response = service.get_status("1/100/").await.expect("should succeed");
+
+    let indexing = response.indexing.expect("indexing should be present");
+    assert_eq!(indexing.state, IndexingState::Indexing as i32);
 }
 
 async fn indexing_status_not_indexed_when_no_kv_entry(ctx: &TestContext) {

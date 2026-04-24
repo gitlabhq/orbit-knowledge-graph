@@ -276,6 +276,7 @@ const (
 	IndexingState_INDEXING_STATE_INDEXED     IndexingState = 2
 	IndexingState_INDEXING_STATE_ERROR       IndexingState = 3
 	IndexingState_INDEXING_STATE_UNKNOWN     IndexingState = 4
+	IndexingState_INDEXING_STATE_INDEXING    IndexingState = 5
 )
 
 // Enum value maps for IndexingState.
@@ -286,6 +287,7 @@ var (
 		2: "INDEXING_STATE_INDEXED",
 		3: "INDEXING_STATE_ERROR",
 		4: "INDEXING_STATE_UNKNOWN",
+		5: "INDEXING_STATE_INDEXING",
 	}
 	IndexingState_value = map[string]int32{
 		"INDEXING_STATE_NOT_INDEXED": 0,
@@ -293,6 +295,7 @@ var (
 		"INDEXING_STATE_INDEXED":     2,
 		"INDEXING_STATE_ERROR":       3,
 		"INDEXING_STATE_UNKNOWN":     4,
+		"INDEXING_STATE_INDEXING":    5,
 	}
 )
 
@@ -2634,13 +2637,14 @@ const file_gkg_proto_rawDesc = "" +
 	"\n" +
 	"SourceType\x12\x15\n" +
 	"\x11SOURCE_TYPE_GROUP\x10\x00\x12\x17\n" +
-	"\x13SOURCE_TYPE_PROJECT\x10\x01*\xa1\x01\n" +
+	"\x13SOURCE_TYPE_PROJECT\x10\x01*\xbe\x01\n" +
 	"\rIndexingState\x12\x1e\n" +
 	"\x1aINDEXING_STATE_NOT_INDEXED\x10\x00\x12\x1e\n" +
 	"\x1aINDEXING_STATE_BACKFILLING\x10\x01\x12\x1a\n" +
 	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
 	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
-	"\x16INDEXING_STATE_UNKNOWN\x10\x042\xa0\x03\n" +
+	"\x16INDEXING_STATE_UNKNOWN\x10\x04\x12\x1b\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x052\xa0\x03\n" +
 	"\x15KnowledgeGraphService\x12@\n" +
 	"\tListTools\x12\x18.gkg.v1.ListToolsRequest\x1a\x19.gkg.v1.ListToolsResponse\x12L\n" +
 	"\fExecuteQuery\x12\x1b.gkg.v1.ExecuteQueryMessage\x1a\x1b.gkg.v1.ExecuteQueryMessage(\x010\x01\x12O\n" +
