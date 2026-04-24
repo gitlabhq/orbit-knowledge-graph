@@ -155,29 +155,27 @@ tests:
 
   # ── Containment (DEFINES edges) ────────────────────────────────
   - name: "Class defines method"
-    skip: true  # TODO: debug edge lance conversion
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'MyApp.Controllers.UserController'
         AND child.fqn = 'MyApp.Controllers.UserController.GetUser'
-        AND e.edge_kind = 'DEFINES'
+        AND e.edge_kind = 'Defines'
       RETURN parent.fqn AS parent, child.fqn AS child
     assert:
       - { row_count: 1 }
 
   - name: "Enum defines members"
-    skip: true  # TODO: debug edge lance conversion
     query: |
       MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
       WHERE parent.fqn = 'MyApp.Models.Role'
-        AND e.edge_kind = 'DEFINES'
+        AND e.edge_kind = 'Defines'
       RETURN child.fqn AS fqn
     assert:
       - { row_count: 3 }
 
   # ── CALLS edges (cross-file resolution) ────────────────────────
   - name: "Controller calls UserService.FindById"
-    skip: true  # TODO: debug cross-file resolution
+    skip: true  # C# cross-file resolution not yet producing CALLS edges
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
@@ -188,7 +186,7 @@ tests:
       - { row_count: 1 }
 
   - name: "Controller calls UserService.Save"
-    skip: true  # TODO: debug cross-file resolution
+    skip: true  # C# cross-file resolution not yet producing CALLS edges
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
