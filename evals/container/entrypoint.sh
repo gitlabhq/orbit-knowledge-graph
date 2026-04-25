@@ -2,11 +2,9 @@
 set -e
 
 # /mnt/workspace is the read-only bind mount from the host.
-# Copy it to /workspace so the agent can read/write freely.
+# /workspace is a writable tmpfs. Copy contents so the agent can read/write.
 if [ -d /mnt/workspace ]; then
-    cp -a /mnt/workspace /workspace
-else
-    mkdir -p /workspace
+    cp -a /mnt/workspace/. /workspace/
 fi
 
 cd /workspace

@@ -19,6 +19,15 @@ logger = logging.getLogger(__name__)
 EVAL_IMAGE = "gkg-eval"
 
 
+def _resolve_host(hostname: str) -> str:
+    """Resolve hostname to IP for --add-host. Falls back to hostname if resolution fails."""
+    import socket
+    try:
+        return socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
+    except (socket.gaierror, IndexError):
+        return hostname
+
+
 @dataclass
 class ServerHandle:
     arm: str
@@ -77,10 +86,14 @@ class ServerManager:
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
         name = f"eval-{arm.name}"
         workspace = str(Path(work_dir).resolve())
+        gitlab_host = arm.env.get("GITLAB_HOST", "staging.gitlab.com")
         r = subprocess.run(
             ["docker", "run", "--rm", "-d", "--name", name,
              "-p", f"{arm.port}:4096",
              "-v", f"{workspace}:/mnt/workspace:ro",
+             # network: pin gitlab host IP, null out DNS to block everything else
+             "--add-host", f"{gitlab_host}:{_resolve_host(gitlab_host)}",
+             "--dns", "0.0.0.0",
              *env_args, EVAL_IMAGE],
             capture_output=True, text=True,
         )
