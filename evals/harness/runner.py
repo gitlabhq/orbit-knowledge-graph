@@ -121,16 +121,22 @@ class EvalRunner:
                             continue
         return None
 
-    async def _execute_task(self, client, demuxer, task: EvalTask, arm: ArmConfig) -> TaskResult:
+    async def _execute_task(self, task: EvalTask, arm: ArmConfig) -> TaskResult:
         started_at = datetime.now(timezone.utc)
         timeout = task.timeout_override or self.config.run.timeouts.task
         session_id = None
         event_queue = None
+        demuxer = None
 
         log.event("task", "starting", arm=arm.name, task_id=task.id,
                   data={"category": task.category, "timeout": timeout})
+
+        handle = await self.mgr.start(arm, self.work_dir, timeout=self.config.run.timeouts.server_start)
+        demuxer = EventDemuxer(base_url=f"http://localhost:{arm.port}")
+        await demuxer.start()
+
         try:
-            session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
+            session = await handle.client.create_session(title=f"eval:{arm.name}:{task.id}")
             session_id = session.id
 
             def _on_event(_sid, evt):
@@ -140,20 +146,20 @@ class EvalRunner:
 
             try:
                 await asyncio.wait_for(
-                    client.send_message(
+                    handle.client.send_message(
                         session_id, self._render_prompt(task),
                         agent=arm.agent,
                         model={"providerID": arm.model.provider, "modelID": arm.model.model}),
                     timeout=timeout)
             except asyncio.TimeoutError:
-                await client.abort_session(session_id)
-                _, summary = await self._capture_and_save(client, arm.name, task.id, event_queue, started_at)
+                await handle.client.abort_session(session_id)
+                _, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
                 return TaskResult(task_id=task.id, arm=arm.name, status=TaskStatus.TIMEOUT,
                                   timestamp=started_at.isoformat(),
                                   error=f"timed out after {timeout}s", error_type="TimeoutError",
                                   session_summary=summary)
 
-            snapshot, summary = await self._capture_and_save(client, arm.name, task.id, event_queue, started_at)
+            snapshot, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
             log.event("task", "success", arm=arm.name, task_id=task.id,
                       duration_ms=summary.duration_ms if summary else 0,
                       data={"steps": summary.steps if summary else 0,
@@ -168,7 +174,7 @@ class EvalRunner:
             log.event("task", f"failed: {etype}: {e}", arm=arm.name, task_id=task.id, level="error")
             summary = None
             if session_id and event_queue:
-                _, summary = await self._capture_and_save(client, arm.name, task.id, event_queue, started_at)
+                _, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
             status = (TaskStatus.AGENT_ERROR
                       if "structured" in etype.lower() or "step" in str(e).lower()
                       else TaskStatus.INFRA_ERROR)
@@ -176,12 +182,11 @@ class EvalRunner:
                               timestamp=started_at.isoformat(),
                               error=str(e), error_type=etype, session_summary=summary)
         finally:
-            if session_id:
+            if session_id and demuxer:
                 demuxer.unsubscribe(session_id)
-                try:
-                    await client.delete_session(session_id)
-                except Exception:
-                    pass
+            if demuxer:
+                await demuxer.stop()
+            await self.mgr.stop(arm.name)
 
     async def _run_arm(self, arm: ArmConfig) -> list[TaskResult]:
         completed = self.store.completed_task_ids(arm.name)
@@ -192,26 +197,18 @@ class EvalRunner:
         log.event("arm", "starting", arm=arm.name,
                   data={"remaining": len(remaining), "done": len(completed)})
 
-        handle = await self.mgr.start(arm, self.work_dir, timeout=self.config.run.timeouts.server_start)
-        demuxer = EventDemuxer(base_url=f"http://localhost:{arm.port}")
-        await demuxer.start()
-
         results, consecutive_failures = [], 0
-        try:
-            for i, task in enumerate(remaining):
-                result = await self._execute_task(handle.client, demuxer, task, arm)
-                self.store.write_result(result)
-                results.append(result)
-                consecutive_failures = 0 if result.status in (TaskStatus.SUCCESS, TaskStatus.TIMEOUT) else consecutive_failures + 1
-                if consecutive_failures >= 10:
-                    log.event("arm", "aborting: 10 consecutive failures", arm=arm.name, level="error")
-                    break
-                log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name, task_id=task.id,
-                          data={"status": result.status.value,
-                                "cost": result.session_summary.cost if result.session_summary else 0})
-        finally:
-            await demuxer.stop()
-            await self.mgr.stop(arm.name)
+        for i, task in enumerate(remaining):
+            result = await self._execute_task(task, arm)
+            self.store.write_result(result)
+            results.append(result)
+            consecutive_failures = 0 if result.status in (TaskStatus.SUCCESS, TaskStatus.TIMEOUT) else consecutive_failures + 1
+            if consecutive_failures >= 10:
+                log.event("arm", "aborting: 10 consecutive failures", arm=arm.name, level="error")
+                break
+            log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name, task_id=task.id,
+                      data={"status": result.status.value,
+                            "cost": result.session_summary.cost if result.session_summary else 0})
         return results
 
     async def run(self) -> dict[str, list[TaskResult]]:
@@ -264,8 +261,6 @@ class EvalRunner:
             except Exception:
                 self.mgr.end_run(run_id, "failed")
                 raise
-            finally:
-                await self.mgr.stop_all()
 
             total = sum(len(v) for v in all_results.values())
             ok = sum(1 for rs in all_results.values() for r in rs if r.status == TaskStatus.SUCCESS)
