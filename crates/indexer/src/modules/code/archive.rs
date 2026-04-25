@@ -466,15 +466,18 @@ mod tests {
     }
 
     #[test]
-    fn rejects_dangling_symlink() {
+    fn tolerates_dangling_symlink() {
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
             Entry::File("root/legit.txt", b"hello"),
             Entry::Symlink("root/dangling", "nonexistent/file.rs"),
         ]);
 
-        let result = extract_tar_gz(&data, dir.path());
-        assert!(result.is_err());
-        assert!(result.unwrap_err().to_string().contains("dangling symlink"));
+        extract_tar_gz(&data, dir.path()).unwrap();
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("legit.txt")).unwrap(),
+            "hello"
+        );
+        assert!(!dir.path().join("dangling").exists());
     }
 }

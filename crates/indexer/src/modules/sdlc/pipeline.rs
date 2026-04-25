@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::compute::concat_batches;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
@@ -19,6 +18,7 @@ use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
 use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
+use gkg_server_config::DatalakeRetryConfig;
 const MAX_RETRIES: u32 = 3;
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -31,6 +31,7 @@ pub(in crate::modules::sdlc) struct Pipeline {
     datalake: Arc<dyn DatalakeQuery>,
     checkpoint_store: Arc<dyn CheckpointStore>,
     metrics: SdlcMetrics,
+    retry_config: DatalakeRetryConfig,
 }
 
 impl Pipeline {
@@ -38,11 +39,13 @@ impl Pipeline {
         datalake: Arc<dyn DatalakeQuery>,
         checkpoint_store: Arc<dyn CheckpointStore>,
         metrics: SdlcMetrics,
+        retry_config: DatalakeRetryConfig,
     ) -> Self {
         Self {
             datalake,
             checkpoint_store,
             metrics,
+            retry_config,
         }
     }
 
@@ -186,6 +189,11 @@ impl Pipeline {
         params: Value,
     ) -> Result<Vec<RecordBatch>, HandlerError> {
         let mut last_error = None;
+        // First attempt uses the datalake's default `max_block_size`.
+        // Subsequent attempts seed and then halve a per-call override so a
+        // ClickHouse-side Arrow String offset overflow self-corrects without
+        // bouncing the message to the dead letter stream.
+        let mut current_block_size: Option<u64> = None;
 
         for attempt in 0..=MAX_RETRIES {
             if attempt > 0 {
@@ -194,7 +202,11 @@ impl Pipeline {
             }
 
             let query_start = Instant::now();
-            match self.datalake.query_batches(sql, params.clone()).await {
+            match self
+                .datalake
+                .query_batches(sql, params.clone(), current_block_size)
+                .await
+            {
                 Ok(batches) => {
                     let bytes: u64 = batches
                         .iter()
@@ -211,12 +223,23 @@ impl Pipeline {
                     warn!(
                         attempt,
                         max_retries = MAX_RETRIES,
+                        max_block_size = ?current_block_size,
                         %err,
                         "datalake query failed, retrying"
                     );
                     last_error = Some(HandlerError::Processing(format!(
                         "datalake query failed: {err}"
                     )));
+                    // Adaptive halving: shrink the next attempt's block size
+                    // so an Arrow String offset overflow on a too-large block
+                    // can self-correct without bouncing the message to the
+                    // dead letter stream. Bounds come from configuration so
+                    // operators can tune the seed and floor without a
+                    // release.
+                    current_block_size = Some(match current_block_size {
+                        Some(size) => (size / 2).max(self.retry_config.halving_min_block_size),
+                        None => self.retry_config.halving_initial_block_size,
+                    });
                 }
             }
         }
@@ -254,7 +277,7 @@ impl Pipeline {
 
         for transform in transforms {
             let transform_start = Instant::now();
-            let result_batch = self
+            let result_batches = self
                 .execute_transform(session, &transform.to_sql())
                 .await
                 .map_err(|err| {
@@ -265,7 +288,8 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
-            if result_batch.num_rows() == 0 {
+            let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
+            if row_count == 0 {
                 continue;
             }
 
@@ -279,7 +303,7 @@ impl Pipeline {
                     ))
                 })?;
 
-            writer.write_batch(&[result_batch]).await.map_err(|err| {
+            writer.write_batch(&result_batches).await.map_err(|err| {
                 HandlerError::Processing(format!(
                     "failed to write to {}: {err}",
                     transform.destination_table
@@ -297,16 +321,9 @@ impl Pipeline {
         &self,
         session: &SessionContext,
         sql: &str,
-    ) -> Result<RecordBatch, datafusion::error::DataFusionError> {
+    ) -> Result<Vec<RecordBatch>, datafusion::error::DataFusionError> {
         let dataframe = session.sql(sql).await?;
-        let schema = Arc::new(dataframe.schema().as_arrow().clone());
-        let batches = dataframe.collect().await?;
-
-        if batches.is_empty() {
-            return Ok(RecordBatch::new_empty(schema));
-        }
-
-        concat_batches(&schema, &batches).map_err(Into::into)
+        dataframe.collect().await
     }
 
     async fn load_checkpoint(&self, position_key: &str) -> Checkpoint {
@@ -466,6 +483,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
+            _max_block_size: Option<u64>,
         ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
             Ok(Box::pin(futures::stream::empty()))
         }
@@ -474,6 +492,7 @@ mod tests {
             &self,
             _sql: &str,
             _params: Value,
+            _max_block_size: Option<u64>,
         ) -> Result<Vec<RecordBatch>, DatalakeError> {
             let mut count = self.call_count.lock().unwrap();
             *count += 1;
@@ -538,6 +557,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
+            Default::default(),
         );
         let destination = MockDestination::new();
 
@@ -565,6 +585,7 @@ mod tests {
             }),
             store.clone(),
             test_metrics(),
+            Default::default(),
         );
         let destination = MockDestination::new();
 
@@ -589,6 +610,7 @@ mod tests {
             Arc::new(FailingDatalake),
             Arc::new(RecordingCheckpointStore::new()),
             test_metrics(),
+            Default::default(),
         );
         let destination = MockDestination::new();
 
@@ -608,6 +630,163 @@ mod tests {
         assert!(err_msg.contains("Second"), "should mention second failure");
     }
 
+    /// Records every `max_block_size` it sees and replays a configurable
+    /// success/failure pattern. Lets us assert that the per-plan override
+    /// flows through and that the adaptive halving on retry halves on each
+    /// attempt.
+    struct RecordingDatalake {
+        calls: Mutex<Vec<Option<u64>>>,
+        responses: Mutex<Vec<Result<Vec<RecordBatch>, &'static str>>>,
+    }
+
+    impl RecordingDatalake {
+        fn with_responses(responses: Vec<Result<Vec<RecordBatch>, &'static str>>) -> Self {
+            Self {
+                calls: Mutex::new(Vec::new()),
+                responses: Mutex::new(responses),
+            }
+        }
+
+        fn observed_block_sizes(&self) -> Vec<Option<u64>> {
+            self.calls.lock().unwrap().clone()
+        }
+    }
+
+    #[async_trait]
+    impl DatalakeQuery for RecordingDatalake {
+        async fn query_arrow(
+            &self,
+            _sql: &str,
+            _params: Value,
+            _max_block_size: Option<u64>,
+        ) -> Result<crate::modules::sdlc::datalake::RecordBatchStream<'_>, DatalakeError> {
+            Ok(Box::pin(futures::stream::empty()))
+        }
+
+        async fn query_batches(
+            &self,
+            _sql: &str,
+            _params: Value,
+            max_block_size: Option<u64>,
+        ) -> Result<Vec<RecordBatch>, DatalakeError> {
+            self.calls.lock().unwrap().push(max_block_size);
+            let mut responses = self.responses.lock().unwrap();
+            if responses.is_empty() {
+                return Ok(vec![]);
+            }
+            match responses.remove(0) {
+                Ok(batches) => Ok(batches),
+                Err(msg) => Err(DatalakeError::Query(msg.to_string())),
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn extract_first_attempt_uses_datalake_default() {
+        let datalake = Arc::new(RecordingDatalake::with_responses(vec![Ok(vec![
+            test_batch(1),
+        ])]));
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            Default::default(),
+        );
+
+        let _ = pipeline
+            .run(
+                &[simple_plan("Test")],
+                &test_context(),
+                &MockDestination::new(),
+                &ProgressNotifier::noop(),
+            )
+            .await;
+
+        let observed = datalake.observed_block_sizes();
+        assert_eq!(
+            observed.first().copied(),
+            Some(None),
+            "first attempt should pass None so the datalake default applies; observed: {observed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_halves_max_block_size_on_each_retry() {
+        // Three failures then a success on the fourth attempt. The first
+        // attempt uses the datalake default (None). Subsequent attempts seed
+        // at retry_config.halving_initial_block_size (8000 here) and halve
+        // from there: 8000 → 4000 → 2000.
+        let datalake = Arc::new(RecordingDatalake::with_responses(vec![
+            Err("simulated arrow capacity overflow"),
+            Err("simulated arrow capacity overflow"),
+            Err("simulated arrow capacity overflow"),
+            Ok(vec![test_batch(1)]),
+        ]));
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            DatalakeRetryConfig {
+                halving_initial_block_size: 8_000,
+                halving_min_block_size: 1024,
+            },
+        );
+
+        let result = pipeline
+            .run(
+                &[simple_plan("Test")],
+                &test_context(),
+                &MockDestination::new(),
+                &ProgressNotifier::noop(),
+            )
+            .await;
+        assert!(result.is_ok(), "should recover after halving: {result:?}");
+
+        let observed = datalake.observed_block_sizes();
+        assert_eq!(
+            observed,
+            vec![None, Some(8_000), Some(4_000), Some(2_000)],
+            "block size should halve on each retry; observed: {observed:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_halving_respects_min_block_size_floor() {
+        // Halving stops at halving_min_block_size and stays there for
+        // subsequent retries.
+        let datalake = Arc::new(RecordingDatalake::with_responses(vec![
+            Err("simulated arrow capacity overflow"),
+            Err("simulated arrow capacity overflow"),
+            Err("simulated arrow capacity overflow"),
+            Ok(vec![test_batch(1)]),
+        ]));
+        let pipeline = Pipeline::new(
+            datalake.clone(),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            DatalakeRetryConfig {
+                halving_initial_block_size: 4_096,
+                halving_min_block_size: 2_048,
+            },
+        );
+
+        let _ = pipeline
+            .run(
+                &[simple_plan("Test")],
+                &test_context(),
+                &MockDestination::new(),
+                &ProgressNotifier::noop(),
+            )
+            .await;
+
+        let observed = datalake.observed_block_sizes();
+        assert_eq!(
+            observed,
+            vec![None, Some(4_096), Some(2_048), Some(2_048)],
+            "halving should clamp at the configured floor; observed: {observed:?}"
+        );
+    }
+
     #[tokio::test]
     async fn resumes_from_stored_cursor() {
         let store = Arc::new(RecordingCheckpointStore {
@@ -617,7 +796,12 @@ mod tests {
             })),
         });
 
-        let pipeline = Pipeline::new(Arc::new(EmptyDatalake), store, test_metrics());
+        let pipeline = Pipeline::new(
+            Arc::new(EmptyDatalake),
+            store,
+            test_metrics(),
+            Default::default(),
+        );
         let destination = MockDestination::new();
 
         let result = pipeline
