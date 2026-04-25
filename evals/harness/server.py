@@ -166,7 +166,7 @@ class ServerManager:
                 "question": "deny",
                 "skill": skill_perms,
             },
-            "default_agent": arm.agent,
+            "default_agent": "build",
         }
         config_path = workspace / ".opencode" / "opencode.json"
         config_path.parent.mkdir(parents=True, exist_ok=True)
