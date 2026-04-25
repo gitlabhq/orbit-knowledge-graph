@@ -1,17 +1,9 @@
 """
 Core orchestration loop for the eval harness.
 
-Per arm:
-  1. Start Docker container running opencode serve
-  2. Health-poll until ready
-  3. Start EventDemuxer (single SSE connection)
-  4. Execute tasks sequentially
-  5. Capture snapshot + write results after each task
-  6. Tear down container
-
+Per arm: start Docker container, execute tasks sequentially, capture snapshots.
 All DuckDB writes go through the db server (db_server.py).
 Prompt execution is NOT retried (non-deterministic).
-Session create and data extraction GETs are retried via httpx defaults.
 """
 
 from __future__ import annotations
@@ -20,15 +12,16 @@ import asyncio
 import json
 import os
 import re
+import signal
 import subprocess
 import sys
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 import yaml
-
 
 import harness.log as log
 from harness.config import ArmConfig, EvalConfig
@@ -39,10 +32,6 @@ from harness.store import ResultStore, TaskResult, TaskStatus, summarize_snapsho
 if TYPE_CHECKING:
     from harness.server import ServerManager
 
-
-# ---------------------------------------------------------------------------
-# Task loading
-# ---------------------------------------------------------------------------
 
 @dataclass
 class EvalTask:
@@ -57,146 +46,131 @@ class EvalTask:
 
 
 def load_tasks(config: EvalConfig) -> list[EvalTask]:
-    """Load and filter tasks from YAML files matching config paths."""
     tasks: list[EvalTask] = []
-    evals_dir = Path(".")
-
     for pattern in config.run.tasks.paths:
-        for path in sorted(evals_dir.glob(pattern)):
-            with path.open() as f:
-                data = yaml.safe_load(f)
+        for path in sorted(Path(".").glob(pattern)):
+            data = yaml.safe_load(path.read_text())
             if not data:
                 continue
-
-            task_list = data if isinstance(data, list) else [data]
-            for t in task_list:
+            for t in (data if isinstance(data, list) else [data]):
                 tasks.append(EvalTask(
-                    id=t["id"],
-                    prompt=t["prompt"],
-                    category=t["category"],
+                    id=t["id"], prompt=t["prompt"], category=t["category"],
                     difficulty=t.get("difficulty", "medium"),
                     description=t.get("description", ""),
                     structured_output_schema=t.get("structured_output_schema"),
-                    tags=t.get("tags"),
-                    timeout_override=t.get("timeout_override"),
+                    tags=t.get("tags"), timeout_override=t.get("timeout_override"),
                 ))
 
     filt = config.run.tasks.filter
     if filt.categories:
         tasks = [t for t in tasks if t.category in filt.categories]
-
     difficulty_order = ["easy", "medium", "hard", "very-hard"]
     min_idx = difficulty_order.index(filt.min_difficulty.value)
-    tasks = [t for t in tasks if t.difficulty in difficulty_order and difficulty_order.index(t.difficulty) >= min_idx]
-
-    return tasks
+    return [t for t in tasks if t.difficulty in difficulty_order
+            and difficulty_order.index(t.difficulty) >= min_idx]
 
 
 def render_prompt(task: EvalTask, fixtures_path: str) -> str:
-    """Render a task prompt, substituting {{param}} from params.json if present."""
     params_file = Path(fixtures_path) / task.id / "params.json"
-    if params_file.exists():
-        with params_file.open() as f:
-            params = json.load(f)
-        prompt = task.prompt
-        for key, val in params.items():
-            prompt = prompt.replace(f"{{{{{key}}}}}", str(val))
-        return prompt
-    return task.prompt
+    if not params_file.exists():
+        return task.prompt
+    params = json.loads(params_file.read_text())
+    prompt = task.prompt
+    for key, val in params.items():
+        prompt = prompt.replace(f"{{{{{key}}}}}", str(val))
+    return prompt
 
-async def execute_task(
-    client: OpenCodeClient,
-    demuxer: EventDemuxer,
-    task: EvalTask,
-    arm: ArmConfig,
-    config: EvalConfig,
-    store: ResultStore,
-) -> TaskResult:
-    """Execute a single task against an OpenCode server. Always returns a TaskResult."""
+
+def _build_system_prompt(arm: ArmConfig) -> str | None:
+    parts = []
+    agent_path = Path(arm.agent)
+    if agent_path.exists():
+        parts.append(agent_path.read_text())
+    for skill_path in arm.skills:
+        skill_file = Path(skill_path) / "SKILL.md"
+        if skill_file.exists():
+            name = Path(skill_path).name
+            parts.append(f"\n<skill_content name=\"{name}\">\n{skill_file.read_text()}\n</skill_content>\n")
+    return "".join(parts) if parts else None
+
+
+async def _capture_and_save(client, store, arm_name, task_id, event_queue, started_at):
+    """Capture snapshot, save it, return summary. Returns None on failure."""
+    try:
+        snapshot = await capture_snapshot(client, task_id, event_queue, started_at)
+        store.write_snapshot(arm_name, task_id, snapshot)
+        return snapshot, summarize_snapshot(snapshot)
+    except Exception:
+        log.event("snapshot", "capture failed", arm=arm_name, task_id=task_id, level="warn")
+        return None, None
+
+
+_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
+
+
+def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
+    for msg in reversed(snapshot.messages):
+        if msg.info.role != "assistant":
+            continue
+        for part in msg.parts:
+            if part.type in ("tool-invocation", "tool") and part.tool == "StructuredOutput":
+                if isinstance(part.input, dict):
+                    return part.input
+            if part.type == "text" and part.text:
+                try:
+                    return json.loads(part.text)
+                except (json.JSONDecodeError, TypeError):
+                    pass
+                for m in _JSON_FENCE_RE.finditer(part.text):
+                    try:
+                        return json.loads(m.group(1))
+                    except (json.JSONDecodeError, TypeError):
+                        continue
+    return None
+
+
+async def execute_task(client, demuxer, task, arm, config, store) -> TaskResult:
     started_at = datetime.now(timezone.utc)
     timeout = task.timeout_override or config.run.timeouts.task
-
-    session_id: str | None = None
+    session_id = None
     event_queue = None
 
     log.event("task", "starting", arm=arm.name, task_id=task.id,
               data={"category": task.category, "timeout": timeout})
-
     try:
-        with log.timed("session", "create", arm=arm.name, task_id=task.id) as ctx:
-            session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
-            session_id = session.id
-            ctx["session_id"] = session_id
+        session = await client.create_session(title=f"eval:{arm.name}:{task.id}")
+        session_id = session.id
 
-        def _on_event(_sid: str, evt: dict) -> None:
+        def _on_event(_sid, evt):
             store.write_live_event(arm.name, task.id, evt)
 
         event_queue = demuxer.subscribe(session_id, on_event=_on_event)
-
         prompt = render_prompt(task, config.run.scoring.fixtures_path)
+        system_prompt = _build_system_prompt(arm)
 
-        system_prompt: str | None = None
-        agent_path = Path(arm.agent)
-        if agent_path.exists():
-            system_prompt = agent_path.read_text()
-
-        # Pre-load skill content into system prompt so the agent doesn't
-        # waste a turn calling the skill tool.
-        for skill_path in arm.skills:
-            skill_file = Path(skill_path) / "SKILL.md"
-            if skill_file.exists():
-                skill_name = Path(skill_path).name
-                content = skill_file.read_text()
-                skill_block = (
-                    f"\n<skill_content name=\"{skill_name}\">\n"
-                    f"{content}\n"
-                    f"</skill_content>\n"
-                )
-                system_prompt = (system_prompt or "") + skill_block
-
-        # Send prompt with timeout -- NOT retried
         try:
-            with log.timed("llm", "prompt", arm=arm.name, task_id=task.id) as ctx:
-                await asyncio.wait_for(
-                    client.send_message(
-                        session_id,
-                        prompt,
-                        system=system_prompt,
-                        model={"providerID": arm.model.provider, "modelID": arm.model.model},
-                    ),
-                    timeout=timeout,
-                )
-                ctx["status"] = "ok"
+            await asyncio.wait_for(
+                client.send_message(session_id, prompt, system=system_prompt,
+                    model={"providerID": arm.model.provider, "modelID": arm.model.model}),
+                timeout=timeout,
+            )
         except asyncio.TimeoutError:
-            log.event("llm", "timeout", arm=arm.name, task_id=task.id, level="warn",
-                      data={"timeout": timeout})
             await client.abort_session(session_id)
-            with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
-                snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-            store.write_snapshot(arm.name, task.id, snapshot)
-            summary = summarize_snapshot(snapshot)
-            log.event("task", "timeout", arm=arm.name, task_id=task.id, level="warn",
-                      data={"steps": summary.steps, "tool_calls": summary.tool_calls})
+            _, summary = await _capture_and_save(client, store, arm.name, task.id, event_queue, started_at)
             return TaskResult(
                 task_id=task.id, arm=arm.name, status=TaskStatus.TIMEOUT,
                 timestamp=started_at.isoformat(),
-                error=f"task timed out after {timeout}s", error_type="TimeoutError",
+                error=f"timed out after {timeout}s", error_type="TimeoutError",
                 session_summary=summary,
             )
 
-        with log.timed("snapshot", "capture", arm=arm.name, task_id=task.id):
-            snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
-        store.write_snapshot(arm.name, task.id, snapshot)
-
-        structured = _extract_structured_output(snapshot)
-        summary = summarize_snapshot(snapshot)
+        snapshot, summary = await _capture_and_save(client, store, arm.name, task.id, event_queue, started_at)
+        structured = _extract_structured_output(snapshot) if snapshot else None
 
         log.event("task", "success", arm=arm.name, task_id=task.id,
-                  duration_ms=summary.duration_ms,
-                  data={
-                      "steps": summary.steps, "tool_calls": summary.tool_calls,
-                      "cost": summary.cost, "tokens": summary.tokens,
-                  })
+                  duration_ms=summary.duration_ms if summary else 0,
+                  data={"steps": summary.steps if summary else 0,
+                        "cost": summary.cost if summary else 0})
 
         return TaskResult(
             task_id=task.id, arm=arm.name, status=TaskStatus.SUCCESS,
@@ -206,34 +180,19 @@ async def execute_task(
 
     except Exception as e:
         error_type = type(e).__name__
-        log.event("task", f"failed: {error_type}: {e}", arm=arm.name, task_id=task.id,
-                  level="error", data={"error_type": error_type})
-
+        log.event("task", f"failed: {error_type}: {e}", arm=arm.name,
+                  task_id=task.id, level="error")
         summary = None
         if session_id and event_queue:
-            try:
-                snapshot = await capture_snapshot(
-                    client, session_id, event_queue, started_at
-                )
-                store.write_snapshot(arm.name, task.id, snapshot)
-                summary = summarize_snapshot(snapshot)
-            except Exception:
-                log.event("snapshot", "capture failed", arm=arm.name, task_id=task.id,
-                          level="warn")
-
-        status = (
-            TaskStatus.AGENT_ERROR
-            if "structured" in error_type.lower() or "step" in str(e).lower()
-            else TaskStatus.INFRA_ERROR
-        )
-
+            _, summary = await _capture_and_save(client, store, arm.name, task.id, event_queue, started_at)
+        status = (TaskStatus.AGENT_ERROR
+                  if "structured" in error_type.lower() or "step" in str(e).lower()
+                  else TaskStatus.INFRA_ERROR)
         return TaskResult(
             task_id=task.id, arm=arm.name, status=status,
             timestamp=started_at.isoformat(),
-            error=str(e), error_type=error_type,
-            session_summary=summary,
+            error=str(e), error_type=error_type, session_summary=summary,
         )
-
     finally:
         if session_id:
             demuxer.unsubscribe(session_id)
@@ -243,192 +202,105 @@ async def execute_task(
                 pass
 
 
-_JSON_FENCE_RE = re.compile(r"```(?:json)?\s*\n(.*?)```", re.DOTALL)
-
-
-def _extract_structured_output(snapshot: Any) -> dict[str, Any] | None:
-    """Extract structured output from the last assistant message parts."""
-    for msg in reversed(snapshot.messages):
-        if msg.info.role != "assistant":
-            continue
-        for part in msg.parts:
-            if part.type in ("tool-invocation", "tool") and part.tool == "StructuredOutput":
-                if isinstance(part.input, dict):
-                    return part.input
-            if part.type == "text" and part.text:
-                # Try raw JSON first
-                try:
-                    return json.loads(part.text)
-                except (json.JSONDecodeError, TypeError):
-                    pass
-                # Try extracting from ```json ... ``` fences
-                for m in _JSON_FENCE_RE.finditer(part.text):
-                    try:
-                        return json.loads(m.group(1))
-                    except (json.JSONDecodeError, TypeError):
-                        continue
-    return None
-
-
-# ---------------------------------------------------------------------------
-# Run orchestration
-# ---------------------------------------------------------------------------
-
-async def run_arm(
-    arm: ArmConfig,
-    tasks: list[EvalTask],
-    config: EvalConfig,
-    store: ResultStore,
-    work_dir: str,
-    mgr: ServerManager,
-) -> list[TaskResult]:
-    """Run all tasks for a single arm."""
+async def run_arm(arm, tasks, config, store, work_dir, mgr) -> list[TaskResult]:
     completed = store.completed_task_ids(arm.name)
     remaining = [t for t in tasks if t.id not in completed]
     if not remaining:
-        log.event("arm", "all tasks already completed", arm=arm.name,
-                  data={"total": len(tasks)})
         return store.read_results(arm.name)
 
     log.event("arm", "starting", arm=arm.name,
               data={"remaining": len(remaining), "done": len(completed)})
 
-
-    with log.timed("server", "start", arm=arm.name):
-        handle = await mgr.start(arm, work_dir, timeout=config.run.timeouts.server_start)
-    client = handle.client
+    handle = await mgr.start(arm, work_dir, timeout=config.run.timeouts.server_start)
     demuxer = EventDemuxer(base_url=f"http://localhost:{arm.port}")
     await demuxer.start()
 
-    sem = asyncio.Semaphore(config.run.concurrency)
-    results: list[TaskResult] = []
-    consecutive_failures = 0
-
+    results, consecutive_failures = [], 0
     try:
         for i, task in enumerate(remaining):
-            async with sem:
-                result = await execute_task(client, demuxer, task, arm, config, store)
-                store.write_result(result)
-                results.append(result)
-
-                if result.status in (TaskStatus.SUCCESS, TaskStatus.TIMEOUT):
-                    consecutive_failures = 0
-                else:
-                    consecutive_failures += 1
-
-                if consecutive_failures >= 10:
-                    log.event("arm", "aborting: 10 consecutive failures",
-                              arm=arm.name, level="error")
-                    break
-
-                log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name,
-                          task_id=task.id,
-                          data={"status": result.status.value,
-                                "cost": result.session_summary.cost if result.session_summary else 0})
+            result = await execute_task(handle.client, demuxer, task, arm, config, store)
+            store.write_result(result)
+            results.append(result)
+            consecutive_failures = 0 if result.status in (TaskStatus.SUCCESS, TaskStatus.TIMEOUT) else consecutive_failures + 1
+            if consecutive_failures >= 10:
+                log.event("arm", "aborting: 10 consecutive failures", arm=arm.name, level="error")
+                break
+            log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name, task_id=task.id,
+                      data={"status": result.status.value,
+                            "cost": result.session_summary.cost if result.session_summary else 0})
     finally:
         await demuxer.stop()
         await mgr.stop(arm.name)
-
     return results
 
 
+@contextmanager
+def _db_server(port: int):
+    proc = subprocess.Popen(
+        [sys.executable, "-m", "uvicorn", "harness.db_server:app",
+         "--port", str(port), "--log-level", "warning"],
+        env={**os.environ, "PYTHONPATH": "."},
+        stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    )
+    try:
+        yield proc
+    finally:
+        proc.send_signal(signal.SIGTERM)
+        try:
+            proc.wait(timeout=5)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+
+
 async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str, list[TaskResult]]:
-    """Run the full evaluation across all arms."""
-    from harness.db import DbClient, default_db_path, DB_SERVER_PORT
+    from harness.db import DbClient, DB_SERVER_PORT
     from harness.server import ServerManager
 
     work_dir = work_dir or os.getcwd()
     run_id = ResultStore.make_run_id()
 
-    # Start db server
-    db_path = default_db_path()
-    db_proc = _start_db_server(db_path, DB_SERVER_PORT)
-    db = DbClient()
-    # Wait for db server to be ready
-    for _ in range(50):
-        if db.is_alive():
-            break
-        await asyncio.sleep(0.1)
-    else:
-        raise RuntimeError("db server failed to start")
+    with _db_server(DB_SERVER_PORT):
+        db = DbClient()
+        for _ in range(50):
+            if db.is_alive():
+                break
+            await asyncio.sleep(0.1)
+        else:
+            raise RuntimeError("db server failed to start")
 
-    mgr = ServerManager(db=db)
-    store = ResultStore(db=db, run_id=run_id)
-    tasks = load_tasks(config)
+        mgr = ServerManager(db=db)
+        store = ResultStore(db=db, run_id=run_id)
+        tasks = load_tasks(config)
 
-    log.setup(run_id)
+        log.setup(run_id)
+        if not tasks:
+            log.event("run", "no tasks matched filters", level="warn")
+            return {}
 
-    if not tasks:
-        log.event("run", "no tasks matched filters", level="warn")
-        return {}
+        config_hash = store.snapshot_config(config)
+        log.event("run", "starting", data={
+            "run_id": run_id, "tasks": len(tasks),
+            "arms": [a.name for a in config.arms],
+            "config_hash": config_hash,
+        })
+        mgr.begin_run(run_id, config.arms, len(tasks))
 
-    config_hash = store.snapshot_config(config)
-
-    log.event("run", "starting", data={
-        "run_id": run_id, "tasks": len(tasks),
-        "arms": [a.name for a in config.arms],
-        "model": config.arms[0].model.model if config.arms else "?",
-        "config_hash": config_hash,
-    })
-
-    mgr.begin_run(run_id, config.arms, len(tasks))
-
-    all_results: dict[str, list[TaskResult]] = {}
-    try:
-        for arm in config.arms:
-            with log.timed("arm", "completed", arm=arm.name) as ctx:
+        all_results: dict[str, list[TaskResult]] = {}
+        try:
+            for arm in config.arms:
                 results = await run_arm(arm, tasks, config, store, work_dir, mgr)
                 all_results[arm.name] = results
-                successes = sum(1 for r in results if r.status == TaskStatus.SUCCESS)
-                ctx["successes"] = successes
-                ctx["total"] = len(results)
-        mgr.end_run(run_id, "completed")
-    except Exception:
-        mgr.end_run(run_id, "failed")
-        raise
-    finally:
-        await mgr.stop_all()
+            mgr.end_run(run_id, "completed")
+        except Exception:
+            mgr.end_run(run_id, "failed")
+            raise
+        finally:
+            await mgr.stop_all()
 
-    total = sum(len(v) for v in all_results.values())
-    successes = sum(1 for rs in all_results.values() for r in rs if r.status == TaskStatus.SUCCESS)
-    total_cost = sum(
-        r.session_summary.cost for rs in all_results.values()
-        for r in rs if r.session_summary
-    )
-    log.event("run", "complete", data={
-        "run_id": run_id, "successes": successes, "total": total,
-        "cost": round(total_cost, 4),
-    })
-
-    # Stop db server
-    db.close()
-    _stop_db_server(db_proc)
-
+        total = sum(len(v) for v in all_results.values())
+        successes = sum(1 for rs in all_results.values() for r in rs if r.status == TaskStatus.SUCCESS)
+        cost = sum(r.session_summary.cost for rs in all_results.values() for r in rs if r.session_summary)
+        log.event("run", "complete", data={"run_id": run_id, "successes": successes,
+                                           "total": total, "cost": round(cost, 4)})
+        db.close()
     return all_results
-
-
-def _start_db_server(db_path: Path, port: int) -> subprocess.Popen:
-    """Start the DuckDB proxy server as a subprocess."""
-    import subprocess
-    env = {**os.environ, "PYTHONPATH": "."}
-    proc = subprocess.Popen(
-        [
-            sys.executable, "-m", "uvicorn",
-            "harness.db_server:app",
-            "--port", str(port),
-            "--log-level", "warning",
-        ],
-        env=env,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-    )
-    return proc
-
-
-def _stop_db_server(proc: subprocess.Popen) -> None:
-    import signal
-    try:
-        proc.send_signal(signal.SIGTERM)
-        proc.wait(timeout=5)
-    except Exception:
-        proc.kill()

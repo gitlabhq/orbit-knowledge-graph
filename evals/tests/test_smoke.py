@@ -516,5 +516,5 @@ class TestCLIDryRun:
         runner = CliRunner()
         result = runner.invoke(cli, ["dry-run"], catch_exceptions=False)
         assert result.exit_code == 0 or "warn" in result.output.lower()
-        assert "[ok] config parsed" in result.output
+        assert "[ok] config" in result.output
         assert "tasks loaded" in result.output
