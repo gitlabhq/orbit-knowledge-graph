@@ -25,6 +25,7 @@ arms:
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     model:
       provider: anthropic
       model: claude-haiku-4-5
@@ -37,6 +38,7 @@ arms:
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
     model:
       provider: anthropic
       model: claude-haiku-4-5
