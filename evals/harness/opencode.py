@@ -176,6 +176,9 @@ class OpenCodeClient:
             body["tools"] = tools
         if system:
             body["system"] = system
+
+        # POST /message blocks until the LLM finishes (may take minutes).
+        # If it returns empty, the session errored — fetch messages to get what we can.
         r = await self._http.post(
             f"/session/{session_id}/message",
             json=body,
@@ -186,24 +189,11 @@ class OpenCodeClient:
         if content:
             return MessageWithParts.model_validate(r.json())
 
-        # API returned async — poll until the last assistant message is done
-        return await self._poll_completion(session_id)
-
-    _TERMINAL_FINISH = {"stop", "end_turn", "max_tokens", "error"}
-
-    async def _poll_completion(
-        self, session_id: str, poll_interval: float = 1.0
-    ) -> MessageWithParts:
-        """Poll messages until the last assistant message has a terminal finish reason."""
-        while True:
-            msgs = await self.list_messages(session_id)
-            for msg in reversed(msgs):
-                if msg.info.role != "assistant":
-                    continue
-                if msg.info.finish in self._TERMINAL_FINISH:
-                    return msg
-                break  # last assistant msg not done yet
-            await asyncio.sleep(poll_interval)
+        msgs = await self.list_messages(session_id)
+        for msg in reversed(msgs):
+            if msg.info.role == "assistant":
+                return msg
+        return MessageWithParts(info=MessageInfo(id="", role="assistant"))
 
     # -- session artifacts ----------------------------------------------------
 
