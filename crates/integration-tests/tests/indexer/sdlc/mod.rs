@@ -7,6 +7,7 @@
 mod ci;
 mod deployments;
 mod environments;
+mod etl_perf;
 mod global;
 mod groups;
 mod labels;
@@ -84,5 +85,8 @@ async fn namespace_indexing() {
         security::processes_security_scans,
         security::processes_security_scan_finding_edges,
         watermarking::uses_watermark_for_incremental_processing,
+        etl_perf::namespace_handler_ignores_sibling_subtree,
+        etl_perf::project_handler_ignores_sibling_subtree,
+        etl_perf::namespace_handler_excludes_soft_deleted_routes,
     );
 }

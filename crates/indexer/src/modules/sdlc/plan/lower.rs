@@ -369,6 +369,76 @@ mod tests {
         )
     }
 
+    /// Asserts the Group and Project namespaced plans use the CTE-driven
+    /// shape that bounds every source-table scan to the requested subtree.
+    /// The pre-2026-04-25 shape full-scanned siphon_routes and
+    /// siphon_namespace_details and OOMed analytics ClickHouse on prd at
+    /// ~128M read_rows / 6.4 GiB; if this regresses, the indexer would
+    /// silently fall back to that shape.
+    #[test]
+    fn group_and_project_plans_use_cte_shape() {
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1_000_000);
+
+        for name in ["Group", "Project"] {
+            let plan = plans
+                .namespaced
+                .iter()
+                .find(|p| p.name == name)
+                .unwrap_or_else(|| panic!("{name} plan should exist"));
+            let sql = plan.extract_query.to_sql();
+
+            assert!(
+                sql.contains("WITH subtree AS"),
+                "{name} extract must declare a `subtree` CTE; got SQL:\n{sql}"
+            );
+            assert!(
+                sql.contains("FROM subtree"),
+                "{name} extract must drive the inner SELECT FROM the small `subtree` CTE; got SQL:\n{sql}"
+            );
+            assert!(
+                sql.contains("argMax(path, _siphon_replicated_at)"),
+                "{name} extract must pre-aggregate routes via argMax; got SQL:\n{sql}"
+            );
+            assert!(
+                sql.contains("AND NOT _siphon_deleted"),
+                "{name} routes CTE must filter soft-deleted routes; got SQL:\n{sql}"
+            );
+        }
+
+        let group_sql = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "Group")
+            .unwrap()
+            .extract_query
+            .to_sql();
+        assert!(
+            group_sql.contains("FROM siphon_namespace_details")
+                && group_sql.contains("WHERE namespace_id IN (SELECT id FROM subtree)"),
+            "Group extract must narrow siphon_namespace_details by IN(subtree); the prior \
+             shape `INNER JOIN siphon_namespace_details` full-scanned the table. SQL:\n{group_sql}"
+        );
+        assert!(
+            group_sql.contains("FROM siphon_namespaces")
+                && group_sql.contains("WHERE id IN (SELECT id FROM subtree)"),
+            "Group extract must narrow siphon_namespaces by IN(subtree). SQL:\n{group_sql}"
+        );
+
+        let project_sql = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "Project")
+            .unwrap()
+            .extract_query
+            .to_sql();
+        assert!(
+            project_sql.contains("FROM siphon_projects")
+                && project_sql.contains("WHERE id IN (SELECT id FROM subtree)"),
+            "Project extract must narrow siphon_projects by IN(subtree). SQL:\n{project_sql}"
+        );
+    }
+
     #[test]
     fn build_plans_partitions_by_scope() {
         let ontology = ontology::Ontology::load_embedded().expect("should load ontology");

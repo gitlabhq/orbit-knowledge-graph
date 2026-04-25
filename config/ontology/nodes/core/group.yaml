@@ -71,36 +71,79 @@ properties:
     description: "Namespace traversal path for authentication and authorization."
 
 etl:
+  # Pre-aggregate every siphon source in its own CTE before joining.
+  # `subtree` is bounded to ≤100k rows; namespace, details, and routes are then
+  # narrowed by an `id IN subtree` predicate (PK lookup) or by a
+  # `startsWith(traversal_path, ...)` prefix scan (siphon_routes PK starts with
+  # traversal_path). The driving relation in the final SELECT is the small
+  # `subtree`, which keeps every hash-join build side small.
+  # Per Adam Hegyi's 2026-04-25 review of the prior namespace extractor (~128M
+  # rows / 6.4 GiB on prd analytics ClickHouse).
   type: query
   scope: namespaced
   select: >-
-    namespace.id AS id, namespace.name AS name,
-    namespace_details.description AS description,
-    namespace.visibility_level AS visibility_level,
-    if(isNotNull(route.source_id), route.path, namespace.path) AS full_path,
-    namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
-    namespace.created_at AS created_at, namespace.updated_at AS updated_at,
-    traversal_paths.traversal_path AS traversal_path
+    namespace_extract.id AS id,
+    namespace_extract.name AS name,
+    namespace_extract.description AS description,
+    namespace_extract.visibility_level AS visibility_level,
+    if(isNotNull(namespace_extract.route_source_id), namespace_extract.route_path, namespace_extract.path) AS full_path,
+    namespace_extract.parent_id AS parent_id,
+    namespace_extract.owner_id AS owner_id,
+    namespace_extract.created_at AS created_at,
+    namespace_extract.updated_at AS updated_at,
+    namespace_extract.traversal_path AS traversal_path
   from: >-
-    siphon_namespaces namespace
-    INNER JOIN siphon_namespace_details namespace_details
-    ON namespace.id = namespace_details.namespace_id
-    INNER JOIN (
-      SELECT id, traversal_path
-      FROM namespace_traversal_paths
-      WHERE startsWith(traversal_path, {traversal_path:String})
-    ) traversal_paths
-    ON namespace.id = traversal_paths.id
-    LEFT JOIN (
-      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
-      FROM siphon_routes
-      WHERE startsWith(traversal_path, {traversal_path:String})
-        AND source_type = 'Namespace' AND NOT _siphon_deleted
-      GROUP BY source_id
-    ) route ON namespace.id = route.source_id
-  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
-  watermark: namespace._siphon_replicated_at
-  deleted: namespace._siphon_deleted
+    (
+      WITH subtree AS (
+        SELECT id, traversal_path
+        FROM namespace_traversal_paths
+        WHERE startsWith(traversal_path, {traversal_path:String})
+      ),
+      namespace AS (
+        SELECT id, name, path, parent_id, owner_id, created_at, updated_at,
+               visibility_level, _siphon_replicated_at, _siphon_deleted
+        FROM siphon_namespaces
+        WHERE id IN (SELECT id FROM subtree)
+      ),
+      details AS (
+        SELECT namespace_id,
+               argMax(description, _siphon_replicated_at) AS description
+        FROM siphon_namespace_details
+        WHERE namespace_id IN (SELECT id FROM subtree)
+        GROUP BY namespace_id
+      ),
+      routes AS (
+        SELECT toNullable(source_id) AS source_id,
+               argMax(path, _siphon_replicated_at) AS path
+        FROM siphon_routes
+        WHERE startsWith(traversal_path, {traversal_path:String})
+          AND source_type = 'Namespace'
+          AND NOT _siphon_deleted
+        GROUP BY source_id
+      )
+      SELECT
+        namespace.id AS id,
+        namespace.name AS name,
+        namespace.path AS path,
+        namespace.parent_id AS parent_id,
+        namespace.owner_id AS owner_id,
+        namespace.created_at AS created_at,
+        namespace.updated_at AS updated_at,
+        namespace.visibility_level AS visibility_level,
+        details.description AS description,
+        route.source_id AS route_source_id,
+        route.path AS route_path,
+        subtree.traversal_path AS traversal_path,
+        namespace._siphon_replicated_at AS _siphon_replicated_at,
+        namespace._siphon_deleted AS _siphon_deleted
+      FROM subtree
+      INNER JOIN namespace ON namespace.id = subtree.id
+      LEFT JOIN details ON details.namespace_id = subtree.id
+      LEFT JOIN routes route ON route.source_id = subtree.id
+    ) namespace_extract
+  traversal_path_filter: "startsWith(namespace_extract.traversal_path, {traversal_path:String})"
+  watermark: namespace_extract._siphon_replicated_at
+  deleted: namespace_extract._siphon_deleted
   edges:
     owner_id:
       to: User

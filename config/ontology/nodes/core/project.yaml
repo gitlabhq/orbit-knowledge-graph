@@ -89,35 +89,75 @@ properties:
     description: "Namespace traversal path for authentication and authorization."
 
 etl:
+  # Mirrors the group ETL shape: pre-aggregate each siphon source in its own
+  # CTE, narrow by `id IN subtree` (PK lookup) or `startsWith(traversal_path, …)`
+  # (siphon_routes PK starts with traversal_path), then drive the final SELECT
+  # from the small `subtree`. See the comment in core/group.yaml for the
+  # full motivation.
   type: query
   scope: namespaced
   select: >-
-    project.id AS id, project.name AS name, project.description AS description,
-    project.visibility_level AS visibility_level,
-    if(isNotNull(route.source_id), route.path, project.path) AS full_path,
-    project.namespace_id AS namespace_id, project.creator_id AS creator_id,
-    project.created_at AS created_at, project.updated_at AS updated_at,
-    project.archived AS archived, project.star_count AS star_count,
-    project.last_activity_at AS last_activity_at,
-    traversal_paths.traversal_path AS traversal_path
+    project_extract.id AS id,
+    project_extract.name AS name,
+    project_extract.description AS description,
+    project_extract.visibility_level AS visibility_level,
+    if(isNotNull(project_extract.route_source_id), project_extract.route_path, project_extract.path) AS full_path,
+    project_extract.namespace_id AS namespace_id,
+    project_extract.creator_id AS creator_id,
+    project_extract.created_at AS created_at,
+    project_extract.updated_at AS updated_at,
+    project_extract.archived AS archived,
+    project_extract.star_count AS star_count,
+    project_extract.last_activity_at AS last_activity_at,
+    project_extract.traversal_path AS traversal_path
   from: >-
-    siphon_projects project
-    INNER JOIN (
-      SELECT id, traversal_path
-      FROM project_namespace_traversal_paths
-      WHERE startsWith(traversal_path, {traversal_path:String})
-    ) traversal_paths
-    ON project.id = traversal_paths.id
-    LEFT JOIN (
-      SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
-      FROM siphon_routes
-      WHERE startsWith(traversal_path, {traversal_path:String})
-        AND source_type = 'Project' AND NOT _siphon_deleted
-      GROUP BY source_id
-    ) route ON project.id = route.source_id
-  traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
-  watermark: project._siphon_replicated_at
-  deleted: project._siphon_deleted
+    (
+      WITH subtree AS (
+        SELECT id, traversal_path
+        FROM project_namespace_traversal_paths
+        WHERE startsWith(traversal_path, {traversal_path:String})
+      ),
+      project AS (
+        SELECT id, name, description, path, namespace_id, creator_id,
+               created_at, updated_at, archived, star_count, last_activity_at,
+               visibility_level, _siphon_replicated_at, _siphon_deleted
+        FROM siphon_projects
+        WHERE id IN (SELECT id FROM subtree)
+      ),
+      routes AS (
+        SELECT toNullable(source_id) AS source_id,
+               argMax(path, _siphon_replicated_at) AS path
+        FROM siphon_routes
+        WHERE startsWith(traversal_path, {traversal_path:String})
+          AND source_type = 'Project'
+          AND NOT _siphon_deleted
+        GROUP BY source_id
+      )
+      SELECT
+        project.id AS id,
+        project.name AS name,
+        project.description AS description,
+        project.path AS path,
+        project.namespace_id AS namespace_id,
+        project.creator_id AS creator_id,
+        project.created_at AS created_at,
+        project.updated_at AS updated_at,
+        project.archived AS archived,
+        project.star_count AS star_count,
+        project.last_activity_at AS last_activity_at,
+        project.visibility_level AS visibility_level,
+        route.source_id AS route_source_id,
+        route.path AS route_path,
+        subtree.traversal_path AS traversal_path,
+        project._siphon_replicated_at AS _siphon_replicated_at,
+        project._siphon_deleted AS _siphon_deleted
+      FROM subtree
+      INNER JOIN project ON project.id = subtree.id
+      LEFT JOIN routes route ON route.source_id = subtree.id
+    ) project_extract
+  traversal_path_filter: "startsWith(project_extract.traversal_path, {traversal_path:String})"
+  watermark: project_extract._siphon_replicated_at
+  deleted: project_extract._siphon_deleted
   edges:
     creator_id:
       to: User
