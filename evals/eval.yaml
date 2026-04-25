@@ -8,7 +8,7 @@ run:
       - tasks/*.yaml
     filter:
       ids:
-        - mr-review-chain
+        - mr-count-by-project
       categories: []
       min_difficulty: easy
 
