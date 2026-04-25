@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
-use crate::modules::code::archive::extract_tar_gz_from_reader;
+use crate::modules::code::archive::{ArchiveError, extract_tar_gz_from_reader};
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryCacheError {
@@ -15,6 +15,12 @@ pub enum RepositoryCacheError {
 
     #[error("archive extraction failed: {0}")]
     Archive(String),
+
+    /// Archive stream ended before any entry was extracted. Surfaced so the
+    /// resolver can classify this as an empty-repository outcome instead of
+    /// a retryable processing failure.
+    #[error("archive contained no entries (empty or truncated stream)")]
+    EmptyArchive,
 }
 
 #[async_trait]
@@ -91,7 +97,10 @@ impl RepositoryCache for LocalRepositoryCache {
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
-        .map_err(|e| RepositoryCacheError::Archive(e.to_string()))?;
+        .map_err(|e| match e {
+            ArchiveError::EmptyArchive => RepositoryCacheError::EmptyArchive,
+            other => RepositoryCacheError::Archive(other.to_string()),
+        })?;
 
         Ok(repo_dir)
     }
@@ -276,6 +285,40 @@ mod tests {
 
         let expected_hash = hashed_branch_name("main");
         assert_eq!(path, dir.path().join(format!("42/{expected_hash}")));
+    }
+
+    #[tokio::test]
+    async fn extract_archive_reports_empty_archive_for_empty_body() {
+        let (_dir, cache) = create_cache();
+
+        let err = cache
+            .extract_archive(42, "main", archive_stream(Vec::new()))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, RepositoryCacheError::EmptyArchive),
+            "expected EmptyArchive, got {err:?}"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_archive_reports_empty_archive_for_truncated_gzip() {
+        // First 3 bytes of a gzip header only. GzDecoder fails mid-read with
+        // an UnexpectedEof-shaped error, which we classify as EmptyArchive.
+        let truncated: Vec<u8> = vec![0x1f, 0x8b, 0x08];
+
+        let (_dir, cache) = create_cache();
+
+        let err = cache
+            .extract_archive(42, "main", archive_stream(truncated))
+            .await
+            .unwrap_err();
+
+        assert!(
+            matches!(err, RepositoryCacheError::EmptyArchive),
+            "expected EmptyArchive, got {err:?}"
+        );
     }
 
     #[tokio::test]
