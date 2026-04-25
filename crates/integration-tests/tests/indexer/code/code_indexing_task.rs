@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{BooleanArray, Int64Array, StringArray};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use gkg_utils::arrow::ArrowUtils;
@@ -337,6 +337,93 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
             .as_deref()
             .is_some_and(|error| error.contains("fatal code indexing pipeline error")),
         "failed run should record the fatal pipeline error in indexing progress, got {progress:?}"
+    );
+}
+
+#[tokio::test]
+async fn empty_200_archive_checkpoints_as_empty_repository() {
+    let project_id: i64 = 7;
+    let traversal_path = "/empty-archive-test";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_empty_archive(project_id, "main");
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    let context = handler_context(&clickhouse);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+
+    let result = handler.handle(context, envelope).await;
+    assert!(
+        result.is_ok(),
+        "empty 200 archive should ack on first attempt, got {:?}",
+        result
+    );
+
+    // Checkpoint is set with no commit, marking the project as indexed-empty.
+    let checkpoint_rows = clickhouse
+        .query(&format!(
+            "SELECT last_task_id, last_commit FROM {} FINAL \
+             WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
+             AND branch = 'main' AND _deleted = false",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    let batch = checkpoint_rows
+        .first()
+        .expect("checkpoint row must exist after empty-archive ack");
+    assert_eq!(batch.num_rows(), 1, "expected exactly one checkpoint row");
+    let task_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "last_task_id")
+        .expect("last_task_id column");
+    assert_eq!(task_ids.value(0), 11);
+    let last_commits = ArrowUtils::get_column_by_name::<StringArray>(batch, "last_commit")
+        .expect("last_commit column");
+    assert!(
+        last_commits.is_null(0) || last_commits.value(0).is_empty(),
+        "empty-archive checkpoint should record no commit, got {:?}",
+        last_commits.value(0)
+    );
+
+    // No graph rows should have been written for this project.
+    let files = clickhouse
+        .query(&format!(
+            "SELECT path FROM {} WHERE project_id = {project_id}",
+            t("gl_file")
+        ))
+        .await;
+    assert!(
+        files.first().is_none_or(|b| b.num_rows() == 0),
+        "no files should be written for an empty-archive project"
+    );
+    let definitions = clickhouse
+        .query(&format!(
+            "SELECT name FROM {} WHERE project_id = {project_id}",
+            t("gl_definition")
+        ))
+        .await;
+    assert!(
+        definitions.first().is_none_or(|b| b.num_rows() == 0),
+        "no definitions should be written for an empty-archive project"
+    );
+    let ontology = integration_testkit::load_ontology();
+    let defines_edges = clickhouse
+        .query(&format!(
+            "SELECT source_id FROM {} \
+             WHERE relationship_kind = 'DEFINES' \
+             AND source_id IN (SELECT id FROM {} WHERE project_id = {project_id})",
+            ontology.edge_table_for_relationship("DEFINES"),
+            t("gl_definition")
+        ))
+        .await;
+    assert!(
+        defines_edges.first().is_none_or(|b| b.num_rows() == 0),
+        "no DEFINES edges should be written for an empty-archive project"
     );
 }
 
