@@ -138,8 +138,9 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = dead_letter_subject(original_subscription);
-        self.inner
+        let subject = dead_letter_subject(original_subscription, envelope);
+        let ack_future = self
+            .inner
             .jetstream()
             .publish(subject.clone(), payload)
             .await
@@ -148,6 +149,12 @@ impl NatsBroker {
                     "failed to publish dead letter to '{subject}': {error}"
                 ))
             })?;
+
+        ack_future.await.map_err(|error| {
+            NatsError::Publish(format!(
+                "dead letter publish ack failed for '{subject}': {error}"
+            ))
+        })?;
 
         Ok(())
     }

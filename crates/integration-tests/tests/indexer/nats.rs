@@ -2,11 +2,13 @@
 //!
 //! These tests require a Docker-compatible runtime (Docker, Colima, etc).
 
+use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::Duration;
 
-use futures::StreamExt;
+use futures::{StreamExt, TryStreamExt};
 use gkg_server_config::NatsConfiguration;
+use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::metrics::EngineMetrics;
 use indexer::nats::NatsBroker;
 use indexer::types::{Envelope, Event, Subscription};
@@ -18,6 +20,8 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 const TEST_STREAM: &str = "test_stream";
 const TEST_SUBJECT: &str = "test.events";
+const DLQ_SOURCE_STREAM: &str = "dlq_source_stream";
+const DLQ_SOURCE_SUBJECT_FILTER: &str = "code.task.indexing.requested.*.*";
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -99,6 +103,17 @@ async fn publish_event(broker: &NatsBroker, subscription: &Subscription, id: &st
         .expect("failed to publish");
 }
 
+fn delivered_envelope(subject: &str, id: &str) -> Envelope {
+    let event = TestEvent {
+        id: id.to_string(),
+        value: 1,
+    };
+    let mut envelope = Envelope::new(&event).expect("failed to create envelope");
+    envelope.subject = Arc::from(subject);
+    envelope.attempt = 5;
+    envelope
+}
+
 async fn receive_event(
     subscription: &mut (
              impl StreamExt<Item = Result<indexer::nats::NatsMessage, indexer::nats::NatsError>> + Unpin
@@ -143,11 +158,110 @@ async fn assert_stream_has_subjects(url: &str, stream_name: &str, expected_subje
     }
 }
 
+async fn get_dead_letter(
+    url: &str,
+    subject: &str,
+) -> async_nats::jetstream::message::StreamMessage {
+    let jetstream = jetstream_client(url).await;
+    let stream = jetstream
+        .get_stream(DEAD_LETTER_STREAM)
+        .await
+        .expect("dead letter stream should exist");
+
+    stream
+        .get_last_raw_message_by_subject(subject)
+        .await
+        .unwrap_or_else(|_| panic!("dead letter subject '{subject}' should exist"))
+}
+
+async fn dead_letter_subject_counts(url: &str) -> BTreeMap<String, usize> {
+    let jetstream = jetstream_client(url).await;
+    let stream = jetstream
+        .get_stream(DEAD_LETTER_STREAM)
+        .await
+        .expect("dead letter stream should exist");
+
+    let mut subjects = stream
+        .info_with_subjects("dlq.dlq_source_stream.>")
+        .await
+        .expect("failed to fetch dead letter subjects");
+
+    let mut counts = BTreeMap::new();
+    while let Some((subject, count)) = subjects
+        .try_next()
+        .await
+        .expect("failed to read dead letter subject")
+    {
+        counts.insert(subject, count);
+    }
+
+    counts
+}
+
 async fn jetstream_client(url: &str) -> async_nats::jetstream::Context {
     let client = async_nats::connect(format!("nats://{url}"))
         .await
         .expect("failed to connect to NATS");
     async_nats::jetstream::new(client)
+}
+
+#[tokio::test]
+async fn dead_letters_use_delivered_subject_for_wildcard_subscriptions() {
+    let (_container, url) = start_nats_container().await;
+    let broker = connect_broker(&default_config(&url)).await;
+    let subscription = Subscription::new(DLQ_SOURCE_STREAM, DLQ_SOURCE_SUBJECT_FILTER)
+        .dead_letter_on_exhaustion(true);
+
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("failed to create streams");
+
+    let first = delivered_envelope("code.task.indexing.requested.278964.bWFzdGVy", "a");
+    broker
+        .publish_dead_letter(&subscription, &first, "first failure")
+        .await
+        .expect("failed to publish first dead letter");
+
+    let second = delivered_envelope("code.task.indexing.requested.80602550.bWFpbg", "b");
+    broker
+        .publish_dead_letter(&subscription, &second, "second failure")
+        .await
+        .expect("failed to publish second dead letter");
+
+    let first_subject = "dlq.dlq_source_stream.code.task.indexing.requested.278964.bWFzdGVy";
+    let first_dead_letter = get_dead_letter(&url, first_subject).await;
+    assert_eq!(first_dead_letter.subject.to_string(), first_subject);
+    let first_payload: DeadLetterEnvelope =
+        serde_json::from_slice(&first_dead_letter.payload).expect("failed to parse dead letter");
+    assert_eq!(
+        first_payload.original_subject,
+        "code.task.indexing.requested.278964.bWFzdGVy"
+    );
+
+    let second_subject = "dlq.dlq_source_stream.code.task.indexing.requested.80602550.bWFpbg";
+    let second_dead_letter = get_dead_letter(&url, second_subject).await;
+    assert_eq!(second_dead_letter.subject.to_string(), second_subject);
+    let second_payload: DeadLetterEnvelope =
+        serde_json::from_slice(&second_dead_letter.payload).expect("failed to parse dead letter");
+    assert_eq!(
+        second_payload.original_subject,
+        "code.task.indexing.requested.80602550.bWFpbg"
+    );
+
+    let wildcard_subject = "dlq.dlq_source_stream.code.task.indexing.requested.*.*";
+    let subject_counts = dead_letter_subject_counts(&url).await;
+    assert_eq!(
+        subject_counts,
+        BTreeMap::from([
+            (first_subject.to_string(), 1),
+            (second_subject.to_string(), 1),
+        ])
+    );
+    assert!(
+        !subject_counts.contains_key(wildcard_subject),
+        "dead letters should not be stored under the wildcard subscription subject"
+    );
 }
 
 #[tokio::test]
