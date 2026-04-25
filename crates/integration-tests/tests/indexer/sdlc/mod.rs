@@ -62,6 +62,7 @@ async fn namespace_indexing() {
         work_items::processes_work_item_multi_target_edges,
         work_items::processes_work_item_parent_links,
         work_items::processes_issue_links,
+        work_items::clamps_out_of_range_due_date_to_null,
         ci::processes_pipelines,
         ci::processes_stages,
         ci::processes_jobs,

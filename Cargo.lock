@@ -6274,6 +6274,7 @@ dependencies = [
  "prost 0.14.3",
  "query-engine",
  "rcgen",
+ "reqwest 0.13.2",
  "rustls",
  "serde",
  "serde_json",
