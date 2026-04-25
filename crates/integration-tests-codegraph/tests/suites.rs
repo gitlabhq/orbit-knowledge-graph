@@ -212,6 +212,7 @@ yaml_test!(
     csharp_advanced_resolution,
     "csharp/advanced_resolution.yaml"
 );
+yaml_test!(csharp_edge_cases, "csharp/edge_cases.yaml");
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
