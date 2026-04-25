@@ -30,6 +30,9 @@ pub enum ResolveError {
 pub enum EmptyRepositoryReason {
     NotFound,
     ServerError,
+    /// HTTP 200 OK with an empty or truncated archive body. Distinct from
+    /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
+    EmptyArchive,
 }
 
 impl EmptyRepositoryReason {
@@ -37,6 +40,7 @@ impl EmptyRepositoryReason {
         match self {
             EmptyRepositoryReason::NotFound => "not_found",
             EmptyRepositoryReason::ServerError => "server_error",
+            EmptyRepositoryReason::EmptyArchive => "empty_archive",
         }
     }
 }
@@ -140,7 +144,7 @@ impl RepositoryResolver {
         {
             Ok(path) => Ok(path),
             Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
-                reason: EmptyRepositoryReason::NotFound,
+                reason: EmptyRepositoryReason::EmptyArchive,
                 detail: format!(
                     "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
                 ),
@@ -436,7 +440,7 @@ mod tests {
 
         match err {
             ResolveError::EmptyRepository { reason, detail } => {
-                assert_eq!(reason, EmptyRepositoryReason::NotFound);
+                assert_eq!(reason, EmptyRepositoryReason::EmptyArchive);
                 assert!(
                     detail.contains("no entries") || detail.contains("empty body"),
                     "detail was {detail}"

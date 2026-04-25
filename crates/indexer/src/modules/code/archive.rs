@@ -3,6 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
+use tracing::warn;
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -24,14 +25,19 @@ impl From<std::io::Error> for ArchiveError {
     }
 }
 
+/// True when the tar crate's iterator failed because the archive body ended
+/// before a tar header could be read.
+///
+/// Verified empirically against `tar = "0.4.45"` + `flate2 = "1.x"`:
+/// - 200 OK with a zero-byte body produces `ErrorKind::UnexpectedEof` from
+///   `GzDecoder` (gzip header parser hits EOF immediately).
+/// - A body truncated mid-header also produces `ErrorKind::UnexpectedEof`.
+///
+/// The `truncation_io_error_kinds_are_stable` test pins this shape so future
+/// tar/flate2 upgrades that change wrapping fail loudly instead of silently
+/// leaking real EOFs through as generic `Archive` errors.
 fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
-    if err.kind() == std::io::ErrorKind::UnexpectedEof {
-        return true;
-    }
-    // The tar crate wraps its internal errors as io::Error with Other kind and
-    // a message like "unexpected end of file" or "failed to fill whole buffer".
-    let msg = err.to_string();
-    msg.contains("unexpected end of file") || msg.contains("failed to fill whole buffer")
+    err.kind() == std::io::ErrorKind::UnexpectedEof
 }
 
 #[cfg(test)]
@@ -72,13 +78,11 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     // ended before any tar header could be read.
     let mut any_entry_seen = false;
 
-    let entries = archive.entries().map_err(|e| {
-        if looks_like_truncated_stream(&e) {
-            ArchiveError::EmptyArchive
-        } else {
-            ArchiveError::Archive(e.to_string())
-        }
-    })?;
+    // tar::Archive::entries() does no I/O for fresh archives; truncation-
+    // shaped errors surface from the iterator below, not here.
+    let entries = archive
+        .entries()
+        .map_err(|e| ArchiveError::Archive(e.to_string()))?;
 
     for entry in entries {
         let mut entry = match entry {
@@ -87,6 +91,12 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
                 e
             }
             Err(e) if !any_entry_seen && looks_like_truncated_stream(&e) => {
+                warn!(
+                    error = %e,
+                    kind = ?e.kind(),
+                    stage = "first_entry",
+                    "archive stream truncated before first tar entry; classifying as empty archive"
+                );
                 return Err(ArchiveError::EmptyArchive);
             }
             Err(e) => return Err(ArchiveError::Archive(e.to_string())),
@@ -497,6 +507,76 @@ mod tests {
         assert_eq!(
             std::fs::read_to_string(dir.path().join("bin/run")).unwrap(),
             "real content"
+        );
+    }
+
+    #[test]
+    fn empty_body_is_classified_as_empty_archive() {
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_tar_gz(&[], dir.path());
+        assert!(
+            matches!(result, Err(ArchiveError::EmptyArchive)),
+            "got {result:?}"
+        );
+    }
+
+    #[test]
+    fn truncated_body_is_classified_as_empty_archive() {
+        // Build a real archive then truncate it so the gzip stream ends
+        // mid-header. The tar iterator must surface an UnexpectedEof error,
+        // which we classify as EmptyArchive.
+        let full = build_archive(&[Entry::File("project-main/src/main.rs", b"fn main() {}")]);
+        let truncated = &full[..full.len() / 2];
+        let dir = tempfile::tempdir().unwrap();
+        let result = extract_tar_gz(truncated, dir.path());
+        assert!(
+            matches!(result, Err(ArchiveError::EmptyArchive)),
+            "got {result:?}"
+        );
+    }
+
+    /// Pins the io::Error shape produced by the tar/flate2 stack for the two
+    /// truncation cases we classify as `EmptyArchive`. A future tar or flate2
+    /// upgrade that rewraps these as `ErrorKind::Other` (or anything else)
+    /// will fail this test loudly instead of silently turning real EOFs into
+    /// generic `Archive` errors.
+    #[test]
+    fn truncation_io_error_kinds_are_stable() {
+        // Empty body: gzip header parser hits EOF before any byte.
+        // tar::Archive::entries() does no I/O; the error surfaces on next().
+        let mut archive = tar::Archive::new(GzDecoder::new(&[][..]));
+        let mut iter = archive.entries().expect("entries() does no I/O");
+        let kind = match iter.next() {
+            Some(Err(e)) => e.kind(),
+            other => panic!(
+                "expected empty body to surface as Some(Err), got {}",
+                match other {
+                    Some(Ok(_)) => "Some(Ok(_))",
+                    None => "None",
+                    _ => unreachable!(),
+                }
+            ),
+        };
+        assert_eq!(
+            kind,
+            std::io::ErrorKind::UnexpectedEof,
+            "empty body must surface as UnexpectedEof"
+        );
+
+        // Mid-stream truncation: real archive cut in half.
+        let full = build_archive(&[Entry::File("project-main/x.rs", b"x")]);
+        let truncated = &full[..full.len() / 2];
+        let mut archive = tar::Archive::new(GzDecoder::new(truncated));
+        let mut iter = archive.entries().expect("entries() does no I/O");
+        let kind = match iter.next() {
+            Some(Err(e)) => e.kind(),
+            Some(Ok(_)) => panic!("expected truncated archive to error, got Ok entry"),
+            None => panic!("expected truncated archive to error, got None"),
+        };
+        assert_eq!(
+            kind,
+            std::io::ErrorKind::UnexpectedEof,
+            "mid-stream truncation must surface as UnexpectedEof"
         );
     }
 
