@@ -75,29 +75,41 @@ etl:
   scope: namespaced
   select: >-
     namespace.id AS id, namespace.name AS name,
-    namespace_details.description AS description,
+    details.description AS description,
     namespace.visibility_level AS visibility_level,
-    if(isNotNull(route.source_id), route.path, namespace.path) AS full_path,
+    if(isNotNull(routes.source_id), routes.path, namespace.path) AS full_path,
     namespace.parent_id AS parent_id, namespace.owner_id AS owner_id,
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
     traversal_paths.traversal_path AS traversal_path
   from: >-
-    siphon_namespaces namespace
-    INNER JOIN siphon_namespace_details namespace_details
-    ON namespace.id = namespace_details.namespace_id
+    (
+      SELECT id, name, visibility_level, path, parent_id, owner_id,
+             created_at, updated_at, _siphon_replicated_at, _siphon_deleted
+      FROM siphon_namespaces
+      WHERE id IN (
+        SELECT id FROM namespace_traversal_paths
+        WHERE startsWith(traversal_path, {traversal_path:String})
+      )
+    ) namespace
     INNER JOIN (
       SELECT id, traversal_path
       FROM namespace_traversal_paths
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) traversal_paths
     ON namespace.id = traversal_paths.id
+    INNER JOIN (
+      SELECT namespace_id, argMax(description, _siphon_replicated_at) AS description
+      FROM siphon_namespace_details
+      WHERE startsWith(traversal_path, {traversal_path:String})
+      GROUP BY namespace_id
+    ) details ON namespace.id = details.namespace_id
     LEFT JOIN (
       SELECT toNullable(source_id) AS source_id, argMax(path, _siphon_replicated_at) AS path
       FROM siphon_routes
       WHERE startsWith(traversal_path, {traversal_path:String})
         AND source_type = 'Namespace' AND NOT _siphon_deleted
       GROUP BY source_id
-    ) route ON namespace.id = route.source_id
+    ) routes ON namespace.id = routes.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted
