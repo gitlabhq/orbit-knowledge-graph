@@ -1,15 +1,7 @@
 # SSOT for the eval container runtime.
-# `mise install && mise trust` inside the container bootstraps everything.
+# System python + node come from alpine packages.
+# mise manages opencode and glab only.
 
 [tools]
-python = "3.14"
-node = "22"
 "npm:opencode" = "1.4"
 glab = "1.85"
-
-[env]
-OPENCODE_DISABLE_EXTERNAL_SKILLS = "true"
-
-[tasks.serve]
-description = "Start OpenCode server"
-run = "opencode serve --port ${PORT:-4096} --print-logs"
