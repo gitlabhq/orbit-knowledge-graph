@@ -321,6 +321,15 @@ fn lower_extract_column(column: &ExtractColumn) -> SelectExpr {
             Expr::func("toString", vec![Expr::col("", name)]),
             name.clone(),
         ),
+        // Clamp Postgres dates outside ClickHouse Date32 range (1900-01-01..2299-12-31)
+        // to NULL so a single bad row cannot poison the Arrow batch. Using >=/<= (rather
+        // than BETWEEN) lets NULL inputs short-circuit to NULL, matching Nullable(Date32).
+        ExtractColumn::DateClamp(name) => SelectExpr::new(
+            Expr::raw(format!(
+                "if({name} >= toDate('1900-01-01') AND {name} <= toDate('2299-12-31'), {name}, NULL)"
+            )),
+            name.clone(),
+        ),
     }
 }
 
@@ -695,6 +704,28 @@ mod tests {
         assert!(sql.contains("FROM siphon_user"), "sql: {sql}");
         assert!(sql.contains("ORDER BY id"), "sql: {sql}");
         assert!(sql.contains("LIMIT 1000"), "sql: {sql}");
+    }
+
+    #[test]
+    fn extract_query_clamps_date_columns_to_date32_range() {
+        let extract = ExtractPlan {
+            destination_table: "gl_work_item".to_string(),
+            columns: vec![ExtractColumn::DateClamp("due_date".to_string())],
+            source: ExtractSource::Table("siphon_work_items".to_string()),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+            namespaced: false,
+            traversal_path_filter: None,
+            additional_where: None,
+        };
+
+        let sql = lower_extract_plan(extract, 1000).to_sql();
+
+        assert!(
+            sql.contains("if(due_date >= toDate('1900-01-01') AND due_date <= toDate('2299-12-31'), due_date, NULL) AS due_date"),
+            "sql: {sql}"
+        );
     }
 
     #[test]
