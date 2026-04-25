@@ -102,6 +102,10 @@ impl DslLanguage for CDsl {
         None
     }
 
+    fn file_scope() -> bool {
+        true
+    }
+
     fn bindings() -> Vec<BindingRule> {
         vec![
             // Variable declarations: int x = foo();

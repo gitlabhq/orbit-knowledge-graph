@@ -208,6 +208,7 @@ yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 
 // C
 yaml_test!(c_resolution, "c/resolution.yaml");
+yaml_test!(c_hardcore, "c/hardcore.yaml");
 
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");

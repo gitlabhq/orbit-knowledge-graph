@@ -446,6 +446,12 @@ pub trait DslLanguage: Send + Sync + Default {
         None
     }
 
+    /// Use the filename (without extension) as the root scope.
+    /// For C/C++ where the file is the only namespace.
+    fn file_scope() -> bool {
+        false
+    }
+
     fn hooks() -> LanguageHooks {
         LanguageHooks::default()
     }
@@ -480,6 +486,7 @@ pub trait DslLanguage: Send + Sync + Default {
         if let Some((kind, extract)) = Self::package_node() {
             spec = spec.package(kind, extract);
         }
+        spec.file_scope = Self::file_scope();
         spec
     }
 }
@@ -834,6 +841,10 @@ pub struct LanguageSpec {
     pub loops: Vec<LoopRule>,
     pub chain_config: Option<ChainConfig>,
     pub(crate) package_node: Option<(&'static str, Extract)>,
+    /// Use the filename (without extension) as the root scope for all
+    /// top-level definitions. For languages without namespaces/modules
+    /// (C, header files) where the file IS the scope.
+    pub(crate) file_scope: bool,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
 
@@ -867,6 +878,7 @@ impl LanguageSpec {
             loops: Vec::new(),
             chain_config: None,
             package_node: None,
+            file_scope: false,
             hooks: LanguageHooks::default(),
             ssa_config: SsaConfig::default(),
             scope_dispatch,
