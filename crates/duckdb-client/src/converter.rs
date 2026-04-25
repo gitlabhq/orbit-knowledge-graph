@@ -13,18 +13,9 @@ pub struct LocalGraphData {
     pub tables: Vec<(String, RecordBatch)>,
 }
 
-/// Fields with a small set of distinct values — stored as dictionary-encoded
-/// Arrow arrays (integer indices + unique value table) instead of plain strings.
-const DICT_ENCODED_FIELDS: &[&str] = &[
-    "definition_type",
-    "language",
-    "relationship_kind",
-    "source_node_kind",
-    "target_node_kind",
-    "import_type",
-];
-
 /// Map ontology fields to BatchBuilder column specs.
+/// DuckDB's Appender does not support dictionary-encoded Arrow arrays,
+/// so all string columns use plain Utf8.
 fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
     ontology
         .local_entity_fields(entity)
@@ -34,7 +25,6 @@ fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
             name: f.name.clone(),
             col_type: match f.data_type {
                 OntDataType::Int => ColumnType::Int,
-                _ if DICT_ENCODED_FIELDS.contains(&f.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: f.nullable,
@@ -50,7 +40,6 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
             name: c.name.clone(),
             col_type: match c.data_type {
                 OntDataType::Int => ColumnType::Int,
-                _ if DICT_ENCODED_FIELDS.contains(&c.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: false,
