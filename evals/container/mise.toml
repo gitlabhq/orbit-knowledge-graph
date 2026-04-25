@@ -1,7 +1,6 @@
 # SSOT for the eval container runtime.
-# System python + node come from alpine packages.
-# mise manages opencode and glab only.
+# System python comes from alpine packages.
+# opencode installed via its own installer in Dockerfile.
 
 [tools]
-"npm:opencode" = "1.4"
 glab = "1.85"
