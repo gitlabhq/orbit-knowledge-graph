@@ -149,10 +149,13 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     config = c.config
     click.echo(f"[ok] config: {c.config_path}")
 
+    container = Path("container")
     for arm in config.arms:
-        if not Path(arm.agent).exists(): errors.append(f"agent not found: {arm.agent}")
+        agent_path = container / ".opencode" / "agents" / f"{arm.agent}.md"
+        if not agent_path.exists(): errors.append(f"agent not found: {agent_path}")
         for s in arm.skills:
-            if not (Path(s) / "SKILL.md").exists(): errors.append(f"skill not found: {s}/SKILL.md")
+            skill_path = container / ".opencode" / "skills" / s / "SKILL.md"
+            if not skill_path.exists(): errors.append(f"skill not found: {skill_path}")
     click.echo(f"[{'FAIL' if errors else 'ok'}] file refs ({len(errors)} errors)")
 
     from harness.runner import load_tasks

@@ -97,6 +97,8 @@ class ServerManager:
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
         name = f"eval-{arm.name}"
         workspace = str((Path(work_dir) / "container").resolve())
+        # Write agent-specific opencode.json with skill permissions
+        self._write_opencode_config(Path(workspace), arm)
         # Network allowlist: gitlab host + model provider
         allowed_hosts = {
             arm.env.get("GITLAB_HOST", "staging.gitlab.com"),
@@ -149,6 +151,26 @@ class ServerManager:
 
     def _kill_container(self, arm: str) -> None:
         subprocess.run(["docker", "kill", f"eval-{arm}"], capture_output=True)
+
+    @staticmethod
+    def _write_opencode_config(workspace: Path, arm: ArmConfig) -> None:
+        """Generate opencode.json with skill permissions from arm config."""
+        import json
+        skill_perms = {"*": "deny"}
+        for skill in arm.skills:
+            skill_perms[skill] = "allow"
+        config = {
+            "$schema": "https://opencode.ai/config.json",
+            "permission": {
+                "*": "allow",
+                "question": "deny",
+                "skill": skill_perms,
+            },
+            "default_agent": arm.agent,
+        }
+        config_path = workspace / ".opencode" / "opencode.json"
+        config_path.parent.mkdir(parents=True, exist_ok=True)
+        config_path.write_text(json.dumps(config, indent=2))
 
     def status(self) -> list[dict]:
         cols = ["arm", "status", "port", "pid", "started_at", "stopped_at", "error", "log_path"]

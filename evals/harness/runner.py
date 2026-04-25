@@ -87,18 +87,6 @@ class EvalRunner:
     def _render_prompt(self, task: EvalTask) -> str:
         return render_prompt(task, self.config.run.scoring.fixtures_path)
 
-    def _build_system_prompt(self, arm: ArmConfig) -> str | None:
-        parts = []
-        p = Path(arm.agent)
-        if p.exists():
-            parts.append(p.read_text())
-        for skill_path in arm.skills:
-            sf = Path(skill_path) / "SKILL.md"
-            if sf.exists():
-                parts.append(f"\n<skill_content name=\"{Path(skill_path).name}\">"
-                             f"\n{sf.read_text()}\n</skill_content>\n")
-        return "".join(parts) if parts else None
-
     async def _capture_and_save(self, client, arm_name, task_id, event_queue, started_at):
         try:
             snapshot = await capture_snapshot(client, task_id, event_queue, started_at)
@@ -152,7 +140,7 @@ class EvalRunner:
                 await asyncio.wait_for(
                     client.send_message(
                         session_id, self._render_prompt(task),
-                        system=self._build_system_prompt(arm),
+                        agent=arm.agent,
                         model={"providerID": arm.model.provider, "modelID": arm.model.model}),
                     timeout=timeout)
             except asyncio.TimeoutError:

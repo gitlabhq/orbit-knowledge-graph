@@ -319,8 +319,8 @@ class TestStore:
             assert loaded["config_name"] == "orbit-vs-glab-baseline"
             assert loaded["config_version"] == "0.1.0"
             assert loaded["config"]["run"]["name"] == "orbit-vs-glab-baseline"
-            assert "container/agents/orbit.md" in loaded["files"]
-            assert "container/agents/glab.md" in loaded["files"]
+            assert "container/.opencode/agents/orbit.md" in loaded["files"]
+            assert "container/.opencode/agents/glab.md" in loaded["files"]
 
             # Same config -> same hash
             store2 = ResultStore(db=_make_test_db(db_path), run_id="run-2")

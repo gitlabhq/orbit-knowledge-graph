@@ -120,10 +120,11 @@ class ResultStore:
                         image_hash: str | None = None) -> str:
         base = base_dir or Path(".")
         files: dict[str, str] = {}
+        container = base / "container"
         for arm in config.arms:
-            _collect_file(files, base / arm.agent)
+            _collect_file(files, container / ".opencode" / "agents" / f"{arm.agent}.md")
             for skill in arm.skills:
-                _collect_file(files, base / skill / "SKILL.md")
+                _collect_file(files, container / ".opencode" / "skills" / skill / "SKILL.md")
         for pattern in config.run.tasks.paths:
             for p in sorted(base.glob(pattern)):
                 _collect_file(files, p)
