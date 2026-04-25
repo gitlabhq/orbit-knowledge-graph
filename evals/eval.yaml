@@ -16,7 +16,7 @@ run:
     fixtures_path: fixtures
 
   timeouts:
-    task: 300
+    task: 45
     server_start: 30
 
 arms:
