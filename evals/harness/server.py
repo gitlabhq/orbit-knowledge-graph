@@ -76,9 +76,12 @@ class ServerManager:
 
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
         name = f"eval-{arm.name}"
+        workspace = str(Path(work_dir).resolve())
         r = subprocess.run(
             ["docker", "run", "--rm", "-d", "--name", name,
-             "-p", f"{arm.port}:4096", *env_args, EVAL_IMAGE],
+             "-p", f"{arm.port}:4096",
+             "-v", f"{workspace}:/mnt/workspace:ro",
+             *env_args, EVAL_IMAGE],
             capture_output=True, text=True,
         )
         if r.returncode != 0:
