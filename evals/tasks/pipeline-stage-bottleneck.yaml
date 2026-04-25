@@ -1,0 +1,41 @@
+id: pipeline-stage-bottleneck
+prompt: |
+  For a recent failed pipeline in project {{project_id}}, trace the full
+  failure chain: find the pipeline, list all its stages with their status,
+  and for each failed stage list the failed jobs with their names and
+  failure reasons. Identify which stage is the bottleneck (most failed jobs).
+category: research
+difficulty: hard
+description: Pipeline->Stage->Job 3-hop traversal with status filters at each level
+structured_output_schema:
+  type: object
+  required: [pipeline_id, stages]
+  properties:
+    pipeline_id:
+      type: string
+    stages:
+      type: array
+      items:
+        type: object
+        required: [name, status]
+        properties:
+          name:
+            type: string
+          status:
+            type: string
+          failed_jobs:
+            type: array
+            items:
+              type: object
+              required: [name, failure_reason]
+              properties:
+                name:
+                  type: string
+                failure_reason:
+                  type: string
+                  nullable: true
+    bottleneck_stage:
+      type: string
+      nullable: true
+tags: [research, pipelines, debugging]
+timeout_override: 600

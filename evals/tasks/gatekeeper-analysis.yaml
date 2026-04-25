@@ -1,0 +1,28 @@
+id: gatekeeper-analysis
+prompt: |
+  Identify the top 5 "gatekeepers" in project {{project_id}}: users who merge
+  other people's work but rarely have their own work merged by others.
+  For each gatekeeper, return their username, the number of MRs they merged
+  (authored by someone else), and the number of their own MRs merged by others.
+  Sort by merge count descending.
+category: research
+difficulty: hard
+description: Requires two traversals (User-MERGED->MR, User-AUTHORED->MR) and cross-referencing to find asymmetric merge relationships
+structured_output_schema:
+  type: object
+  required: [gatekeepers]
+  properties:
+    gatekeepers:
+      type: array
+      items:
+        type: object
+        required: [username, merged_others, own_merged_by_others]
+        properties:
+          username:
+            type: string
+          merged_others:
+            type: integer
+          own_merged_by_others:
+            type: integer
+tags: [research, collaboration, organizational]
+timeout_override: 600

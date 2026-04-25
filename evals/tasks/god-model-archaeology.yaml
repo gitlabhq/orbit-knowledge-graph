@@ -1,0 +1,42 @@
+id: god-model-archaeology
+prompt: |
+  The file "app/models/project.rb" is the largest model in GitLab.
+  Find all merge requests that changed this file, and for each MR return:
+  the MR iid, title, author username, and the labels on that MR.
+  Group the labels to find which categories of work most frequently touch
+  this file. Return both the MR list and the top 5 label categories.
+category: research
+difficulty: very-hard
+description: Crosses code graph (DiffFile) to SDLC (MR->User, MR->Label) via 5-node traversal
+structured_output_schema:
+  type: object
+  required: [mrs, top_labels]
+  properties:
+    mrs:
+      type: array
+      items:
+        type: object
+        required: [iid, title, author, labels]
+        properties:
+          iid:
+            type: integer
+          title:
+            type: string
+          author:
+            type: string
+          labels:
+            type: array
+            items:
+              type: string
+    top_labels:
+      type: array
+      items:
+        type: object
+        required: [label, count]
+        properties:
+          label:
+            type: string
+          count:
+            type: integer
+tags: [research, code-to-sdlc, archaeology]
+timeout_override: 600

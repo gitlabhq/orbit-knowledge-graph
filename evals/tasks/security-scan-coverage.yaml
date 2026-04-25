@@ -1,0 +1,30 @@
+id: security-scan-coverage
+prompt: |
+  Analyze security scan coverage for project {{project_id}}. Find all
+  security scans, group them by scan_type (sast, dast, dependency_scanning,
+  etc.), and for each type report: the count of scans, the number of
+  distinct pipelines scanned, and the number of findings detected.
+  Sort by finding count descending.
+category: research
+difficulty: very-hard
+description: SecurityScan aggregation by type, plus SecurityScan->Finding count and SecurityScan->Pipeline count
+structured_output_schema:
+  type: object
+  required: [scan_coverage]
+  properties:
+    scan_coverage:
+      type: array
+      items:
+        type: object
+        required: [scan_type, scan_count, pipeline_count, finding_count]
+        properties:
+          scan_type:
+            type: string
+          scan_count:
+            type: integer
+          pipeline_count:
+            type: integer
+          finding_count:
+            type: integer
+tags: [research, security, coverage]
+timeout_override: 600

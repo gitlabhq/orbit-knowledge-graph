@@ -116,7 +116,8 @@ class ResultStore:
         if stmts:
             self.db.write_batch(stmts)
 
-    def snapshot_config(self, config: Any, base_dir: Path | None = None) -> str:
+    def snapshot_config(self, config: Any, base_dir: Path | None = None,
+                        image_hash: str | None = None) -> str:
         base = base_dir or Path(".")
         files: dict[str, str] = {}
         for arm in config.arms:
@@ -137,8 +138,10 @@ class ResultStore:
 
         self.db.write(
             "INSERT OR REPLACE INTO run_configs "
-            "(run_id,config_name,config_version,config_hash,config,files) VALUES (?,?,?,?,?,?)",
-            [self.run_id, config.run.name, config.run.version, config_hash, config_json, files_json],
+            "(run_id,config_name,config_version,config_hash,image_hash,config,files) "
+            "VALUES (?,?,?,?,?,?,?)",
+            [self.run_id, config.run.name, config.run.version, config_hash,
+             image_hash, config_json, files_json],
         )
         return config_hash
 
@@ -169,7 +172,7 @@ class ResultStore:
         if not row:
             return None
         return {"config_name": row[0], "config_version": row[1], "config_hash": row[2],
-                "config": json.loads(row[3]), "files": json.loads(row[4])}
+                "image_hash": row[3], "config": json.loads(row[4]), "files": json.loads(row[5])}
 
     def find_runs_by_config(self, config_hash: str) -> list[str]:
         return [r[0] for r in self.db.query("FROM run_ids_by_config(?)", [config_hash])]

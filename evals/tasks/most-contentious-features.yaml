@@ -1,0 +1,35 @@
+id: most-contentious-features
+prompt: |
+  Find the top 5 most discussed merge requests in project {{project_id}} by
+  note count. For each MR, return: the MR iid, title, author username,
+  note count, number of diff revisions, and the milestone title (if any).
+  This reveals which features generated the most debate.
+category: research
+difficulty: hard
+description: Aggregation (MR->Note count) plus multi-hop traversal for author, milestone, and diff count
+structured_output_schema:
+  type: object
+  required: [contentious_mrs]
+  properties:
+    contentious_mrs:
+      type: array
+      items:
+        type: object
+        required: [iid, title, author, note_count]
+        properties:
+          iid:
+            type: integer
+          title:
+            type: string
+          author:
+            type: string
+          note_count:
+            type: integer
+          diff_count:
+            type: integer
+            nullable: true
+          milestone:
+            type: string
+            nullable: true
+tags: [research, discussion, features]
+timeout_override: 600

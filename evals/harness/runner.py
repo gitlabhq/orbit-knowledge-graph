@@ -262,7 +262,7 @@ class EvalRunner:
                     "config_hash": config_hash})
 
             self.store = ResultStore(db=self.db, run_id=run_id)
-            self.store.snapshot_config(self.config)
+            self.store.snapshot_config(self.config, image_hash=self.mgr.image_hash())
             if not resumed_id:
                 self.mgr.begin_run(run_id, self.config.arms, len(self.tasks))
 

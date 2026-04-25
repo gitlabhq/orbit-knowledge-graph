@@ -1,217 +1,153 @@
 # GKG Agent Evaluation Harness
 
-Compares AI agent performance on graph tasks: **Orbit** (structured Knowledge Graph queries via GitLab REST API) vs **glab CLI** (manual GitLab REST/GraphQL access). Both arms hit the same GitLab instance -- the variable is the access method.
+Compares AI agent performance on graph tasks: **Orbit** (structured Knowledge Graph queries) vs **glab CLI** (GitLab REST/GraphQL). Both arms hit the same GitLab instance -- the variable is the access method.
 
-Uses OpenCode's HTTP API for agent orchestration with full glass-box trace capture.
+Each arm runs in an isolated Docker container. All state lives in DuckDB via a proxy server. Runs auto-resume on crash.
 
 ## Setup
 
 ```bash
-cd evals/
-cp .env.example .env
+cp evals/.env.example evals/.env
 # fill in GITLAB_TOKEN and ANTHROPIC_API_KEY
-mise setup        # or: uv sync --extra dev
+mise eval:build    # build Docker image (requires colima)
 ```
 
 ## Usage
 
+From the repo root:
+
 ```bash
-# Validate config, tasks, fixtures without running
-mise dry-run
+mise eval:dry-run       # validate config, tasks, fixtures, Docker
+mise eval:run           # run full evaluation
+mise eval:run:bg        # run detached in background
+mise eval:score         # score latest run
+mise eval:report        # generate markdown report
+mise eval:full          # build -> run -> score -> report
+```
 
-# Run full evaluation (all arms)
-mise run
+Or from `evals/`:
 
-# Run a single arm
-mise run:orbit
+```bash
+mise run                # same as eval:run
+mise run:orbit          # single arm
 mise run:glab
-
-# Score + report
-mise score
-mise report
-
-# All three in sequence
-mise full
 ```
 
 ## Architecture
 
 ```
-eval.yaml (SSOT config)
+eval.yaml (SSOT)
     │
     ▼
-harness/runner.py
-    │  per arm: spawn opencode serve on dedicated port
-    │  per task: create session → send prompt → capture snapshot
+EvalRunner (runner.py)
     │
-    ├── tools/orbit_query.py     Orbit arm: REST wrapper for /api/v4/orbit/
-    └── glab CLI                 glab arm: glab commands + GraphQL
+    ├── db_server.py (:5555)          DuckDB proxy (single writer, MVCC reads)
+    │       │
+    │       ▼
+    │   eval.duckdb                   all state (7 tables, ~20 macros)
     │
-    ▼
-harness/store.py  ──►  .eval-servers/eval.duckdb
-    │                     ├── task_results    per-task results + session stats
-    │                     ├── snapshots       full session traces (JSON, end-of-task)
-    │                     ├── live_events     raw SSE events (real-time)
-    │                     ├── live_messages   message info extracted from SSE (real-time)
-    │                     ├── live_parts      tool calls + text extracted from SSE (real-time)
-    │                     ├── scores          evaluator scores per task
-    │                     ├── run_configs     config snapshots + file content hashes
-    │                     ├── runs            run metadata
-    │                     └── servers         OpenCode server process state
+    ├── Docker: eval-orbit (:4096)    isolated container, ephemeral workspace
+    │       │
+    │       ▼ SSE events
+    │   EventDemuxer (session.py)  ──► live_events table (real-time)
     │
-    ▼
-harness/evaluators/     per-task scoring (graph, efficiency, behavior)
-harness/aggregators/    cross-arm analysis (descriptive, comparative, distributional)
-harness/report.py       markdown report
+    └── Docker: eval-glab (:4097)     same image, different agent/skills
+            │
+            ▼ SSE events
+        EventDemuxer               ──► live_events table (real-time)
 ```
 
-## State management
+### Container isolation
 
-All harness state lives in a single DuckDB file at `.eval-servers/eval.duckdb`. Schema is defined in `harness/sql/ddl.sql`, reusable query macros in `harness/sql/helpers.sql`.
+Each arm runs in a Docker container built from `container/` (alpine + mise + opencode + glab). The host bind-mounts the eval workspace read-only at `/mnt/workspace`. The entrypoint copies it to `/workspace` (writable, ephemeral) and starts `opencode serve`. The agent discovers skills naturally via `.opencode/skills/` in the copied workspace. Everything the agent writes dies with `--rm`.
 
-You can connect directly for ad-hoc analysis:
+### DuckDB proxy
 
-```bash
-duckdb .eval-servers/eval.duckdb
-```
+During runs, all reads and writes go through `db_server.py` (FastAPI on :5555). Writes are batched (flush every 100ms or 200 items). Reads use separate MVCC cursors for snapshot isolation. This allows concurrent CLI queries during active runs.
 
-### Useful macros
+Offline (no server running), CLI commands fall back to `DirectClient` for direct file access.
 
-```sql
--- Overview of all runs with config hash, cost, success count
-FROM run_overview();
+### State tables
 
--- Per-arm summary for a run (successes, cost, avg duration, etc.)
-FROM arm_summary('20260423_120000');
+| Table | Written when | Purpose |
+|---|---|---|
+| `runs` | begin/end of run | run lifecycle |
+| `run_configs` | before first task | config + files + SHA256 hash + Docker image hash |
+| `servers` | each state change | container lifecycle |
+| `live_events` | per SSE event | real-time agent activity |
+| `task_results` | per task completion | results + token/cost stats |
+| `snapshots` | per task completion | full session trace for scoring |
+| `scores` | score command | evaluator scores |
 
--- Head-to-head task comparison between two arms
-FROM compare_arms('20260423_120000', 'orbit', 'glab');
+### Auto-resume
 
--- Task results with evaluator scores
-FROM task_detail('20260423_120000', 'orbit');
-
--- Find all runs that used the same config
-FROM runs_by_config('a1b2c3d4e5f6g7h8');
-
--- Scalar helpers
-SELECT run_cost('20260423_120000');
-SELECT success_rate('20260423_120000', 'orbit');
-```
+If a run crashes, the next `mise eval:run` with the same `eval.yaml` detects the incomplete run via `config_hash` match and resumes from where it stopped. `completed_task_ids` per arm means only the in-flight task is re-run.
 
 ### Real-time observability
 
-SSE events are streamed to DuckDB as they arrive. Message and tool-call data is extracted into queryable tables so you can observe agent behavior mid-task:
-
 ```sql
--- Per-task progress (messages, tool calls, last activity)
+-- connect during a run:
+-- curl localhost:5555/query -d '{"sql": "FROM task_progress(...)"}'
+-- or after: duckdb .eval-servers/eval.duckdb
+
 FROM task_progress('20260423_120000');
-
--- Watch tool calls for a specific task as they happen
 FROM part_stream('20260423_120000', 'orbit', 'mr-neighbors');
-
--- See message costs accumulating live
 FROM msg_stream('20260423_120000', 'orbit', 'mr-neighbors');
-
--- Raw event stream
-FROM live('20260423_120000', 'orbit');
-
--- Quick event count (is anything happening?)
-SELECT event_count('20260423_120000');
+FROM arm_summary('20260423_120000');
+FROM compare_arms('20260423_120000', 'orbit', 'glab');
+FROM run_overview();
 ```
 
-Data flows in three tiers:
-1. **Real-time** -- `live_events`, `live_messages`, `live_parts` written per-SSE-event
-2. **Per-task** -- `task_results` written when each task completes
-3. **End-of-task** -- `snapshots` captured via API call after task finishes (full trace for scoring/replay)
+## Tasks
 
-### Config versioning
+19 tasks across 4 difficulty levels:
 
-Each run snapshots the full eval config (parsed YAML), all referenced files (agent prompts, skills, task YAMLs, fixtures), and a SHA256 hash of the bundle. This lets you detect config drift between runs:
+| Category | Count | Examples |
+|---|---|---|
+| search | 1 | search-user |
+| traversal | 2 | mr-review-chain, mr-neighbors |
+| aggregation | 4 | mr-count-by-project, label-hotspots, reviewer-workload, pipeline-failure-authors |
+| multi-hop | 3 | vulnerability-blast-radius, issue-to-deployment, cross-project-collaborators |
+| path-finding | 1 | path-between-users |
+| research | 7 | gatekeeper-analysis, god-model-archaeology, co-change-coupling, most-contentious-features, security-scan-coverage, release-velocity, pipeline-stage-bottleneck |
 
-```sql
--- Compare config hashes across runs
-SELECT run_id, config_name, config_version, config_hash FROM run_configs;
-
--- See what files were used in a specific run
-SELECT json_keys(files) FROM run_configs WHERE run_id = '20260423_120000';
-```
-
-The `run.version` field in `eval.yaml` is a semver string you bump manually when making intentional config changes. The `config_hash` is computed automatically and catches any change (including file content).
-
-## Key design decisions
-
-- **All Python.** OpenCode SDK is 10 HTTP endpoints; hand-written httpx client.
-- **Full agent trace.** SessionSnapshot captures every message, tool call, event, diff, todo.
-- **Incremental snapshots.** SSE events write message/part data to DuckDB in real-time; full snapshot captured at task end for scoring.
-- **Skill pre-loading.** Skill content is inlined into the system prompt so agents don't waste a turn calling the skill tool.
-- **Prompt not retried.** Non-deterministic; only session create + data extraction retried.
-- **Shared SSE.** One connection per arm, EventDemuxer routes events by session_id with per-session callbacks.
-- **DuckDB for all state.** Results, snapshots, scores, config snapshots, server state -- single file, queryable with SQL macros. Read queries use macros from `helpers.sql`.
-- **Resume via completed_task_ids.** Queries DuckDB for already-completed tasks, skips them on restart.
-- **4-state error model.** SUCCESS | TIMEOUT | AGENT_ERROR | INFRA_ERROR, raw error always stored.
+Research tasks require crossing code graph and SDLC boundaries (DiffFile -> MR -> User -> Label) and are where orbit's graph advantage is most pronounced.
 
 ## Directory layout
 
 ```
 evals/
-├── eval.yaml                SSOT config (name, version, arms, tasks, evaluators)
-├── pyproject.toml           dependencies
-├── mise.toml                task runner
-├── .env                     secrets (not committed)
-├── harness/                 core framework
-│   ├── config.py            pydantic models + env var resolution
-│   ├── db.py                shared DuckDB connection management
-│   ├── sql/
-│   │   ├── ddl.sql          table definitions
-│   │   └── helpers.sql      reusable scalar + table macros
-│   ├── opencode.py          httpx async client for OpenCode API
-│   ├── session.py           snapshot capture + SSE event demuxer
-│   ├── store.py             DuckDB-backed result/snapshot/score storage
-│   ├── server.py            OpenCode server process manager (DuckDB-backed)
-│   ├── runner.py            orchestration loop
-│   ├── cli.py               CLI entry point
-│   ├── report.py            report generation
-│   ├── evaluators/          per-task scoring
-│   └── aggregators/         cross-arm analysis
-├── tools/
-│   └── orbit_query.py       agent-callable REST wrapper
-├── agents/                  agent system prompts per arm
-├── tasks/                   task YAML definitions
-├── fixtures/                expected results + params per task
-├── tests/                   smoke tests
-└── .eval-servers/           runtime state (gitignored)
-    ├── eval.duckdb          all harness state
-    └── logs/                server stdout/stderr
-```
-
-## Adding tasks
-
-Create a YAML file in `tasks/`:
-
-```yaml
-id: my-task
-prompt: |
-  Find all {{entity}} in project {{project_id}}.
-category: search
-difficulty: easy
-structured_output_schema:
-  type: object
-  required: [results]
-  properties:
-    results:
-      type: array
-```
-
-Then add fixtures:
-
-```
-fixtures/my-task/
-├── params.json       {"entity": "Issue", "project_id": 278964}
-└── expected.json     {"results": [...]}
+├── eval.yaml                config (arms, tasks, evaluators)
+├── container/
+│   ├── Dockerfile           alpine + mise bootstrap
+│   ├── mise.toml            tool versions (SSOT)
+│   └── entrypoint.sh        cp workspace + exec opencode
+├── harness/
+│   ├── runner.py            EvalRunner class (orchestration)
+│   ├── db.py                DbClient + DirectClient
+│   ├── db_server.py         FastAPI DuckDB proxy
+│   ├── store.py             ResultStore (reads/writes via macros)
+│   ├── server.py            ServerManager (Docker lifecycle)
+│   ├── session.py           SSE demuxer + snapshot capture
+│   ├── cli.py               click CLI + Ctx class
+│   ├── config.py            pydantic models
+│   ├── report.py            markdown generation
+│   ├── sql/{ddl,helpers}.sql
+│   ├── evaluators/          graph, efficiency, behavior
+│   └── aggregators/         descriptive, comparative, distributional
+├── tools/orbit_query.py     orbit API wrapper (toon format, query-schema)
+├── agents/                  system prompts per arm
+├── .opencode/skills/        orbit-query, glab-data
+├── tasks/*.yaml             task definitions
+├── fixtures/<task>/         params.json + expected.json
+├── tests/test_smoke.py      28 tests
+└── .eval-servers/           runtime (gitignored)
+    ├── eval.duckdb
+    └── logs/
 ```
 
 ## Tests
 
 ```bash
-uv run --extra dev pytest tests/ -v
+cd evals && uv run --extra dev pytest tests/ -v
 ```

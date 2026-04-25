@@ -1,0 +1,29 @@
+id: release-velocity
+prompt: |
+  Analyze release velocity for project {{project_id}} by examining milestones.
+  For each milestone, return: the milestone title, the number of merged MRs,
+  the number of distinct authors, and the number of distinct reviewers.
+  Sort by MR count descending. Limit to top 10 milestones.
+category: research
+difficulty: hard
+description: Milestone->MR aggregation with fan-out to distinct authors and reviewers per milestone
+structured_output_schema:
+  type: object
+  required: [milestones]
+  properties:
+    milestones:
+      type: array
+      items:
+        type: object
+        required: [title, mr_count, author_count, reviewer_count]
+        properties:
+          title:
+            type: string
+          mr_count:
+            type: integer
+          author_count:
+            type: integer
+          reviewer_count:
+            type: integer
+tags: [research, velocity, milestones]
+timeout_override: 600

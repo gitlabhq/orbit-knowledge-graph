@@ -1,0 +1,26 @@
+id: co-change-coupling
+prompt: |
+  Find which files are most frequently changed together with
+  "app/models/user.rb" in project {{project_id}}.
+  For each co-changed file, return the file path and the number of
+  MRs that modified both files. Return the top 10 most coupled files.
+  Exclude test files (paths containing "spec/" or "test/").
+category: research
+difficulty: very-hard
+description: DiffFile co-occurrence via DiffFile->Diff<-DiffFile, counting shared MR diffs
+structured_output_schema:
+  type: object
+  required: [coupled_files]
+  properties:
+    coupled_files:
+      type: array
+      items:
+        type: object
+        required: [file_path, shared_mr_count]
+        properties:
+          file_path:
+            type: string
+          shared_mr_count:
+            type: integer
+tags: [research, code-to-sdlc, coupling]
+timeout_override: 600

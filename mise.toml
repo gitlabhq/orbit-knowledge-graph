@@ -366,16 +366,19 @@ description = "Sync upstream docs into the Orbit agent skill (skills/orbit/refer
 
 [tasks."eval:build"]
 run = "docker build -t gkg-eval evals/container"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Build the eval harness Docker image"
 
 [tasks."eval:run"]
 run = "uv run python -m harness.cli run"
 dir = "evals"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run full evaluation"
 
 [tasks."eval:run:bg"]
 run = "uv run python -m harness.cli run --bg"
 dir = "evals"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run evaluation detached in background"
 
 [tasks."eval:score"]

@@ -74,6 +74,7 @@ CREATE TABLE IF NOT EXISTS run_configs (
     config_name VARCHAR NOT NULL,
     config_version VARCHAR NOT NULL,
     config_hash VARCHAR NOT NULL,
+    image_hash VARCHAR,
     config JSON NOT NULL,
     files JSON NOT NULL,
     PRIMARY KEY (run_id)

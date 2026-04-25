@@ -45,6 +45,7 @@ CREATE OR REPLACE MACRO run_overview() AS TABLE (
         rc.config_name,
         rc.config_version,
         rc.config_hash,
+        rc.image_hash,
         round(coalesce((SELECT sum(cost) FROM task_results t WHERE t.run_id = r.run_id), 0), 4) AS total_cost,
         (SELECT count(*) FILTER (WHERE status = 'success') FROM task_results t WHERE t.run_id = r.run_id) AS successes
     FROM runs r
@@ -200,7 +201,7 @@ CREATE OR REPLACE MACRO all_run_ids() AS TABLE (
 
 -- Table: config snapshot for a run
 CREATE OR REPLACE MACRO run_config(rid) AS TABLE (
-    SELECT config_name, config_version, config_hash, config, files
+    SELECT config_name, config_version, config_hash, image_hash, config, files
     FROM run_configs
     WHERE run_id = rid
 );
