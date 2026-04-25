@@ -25,7 +25,7 @@ use crate::locking::LockService;
 use crate::metrics::CompletionMetrics;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{
-    VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
+    SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
 };
 
@@ -82,6 +82,15 @@ SELECT count(DISTINCT project_id) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE _deleted = false \
   AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+
+/// SQL to read the wall-clock age of the row that marked the given version
+/// as `migrating`. Used to populate the `migrating_age_seconds` gauge so
+/// operators can alert on migrations stuck in the migrating state for too
+/// long.
+const READ_MIGRATING_AGE: &str = "\
+SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
+FROM gkg_schema_version FINAL \
+WHERE status = 'migrating' AND version = {version:UInt32}";
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -172,8 +181,19 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
+            // No migration in progress — keep the age gauge accurate so an
+            // alert on `migrating_age_seconds > N` doesn't fire on the
+            // post-promotion last-recorded value.
+            self.metrics.record_migrating_age(0);
             return Ok(None);
         };
+
+        // Surface "is migration stuck?" as a direct gauge. A bounded query
+        // failure here shouldn't block completion; log and continue with an
+        // unrecorded age this tick.
+        if let Ok(age) = self.fetch_migrating_age(migrating_version).await {
+            self.metrics.record_migrating_age(age);
+        }
 
         info!(
             version = migrating_version,
@@ -308,10 +328,43 @@ impl MigrationCompletionChecker {
             "migration completion status"
         );
 
+        // Story-telling gauges: indexed/eligible per scope, labeled by
+        // version_band. Dashboards compute the ratio; alerts fire on
+        // per-scope thresholds (sdlc < 100% during migration window, code
+        // < 95% for >24h post-promotion, etc.).
+        let current = *SCHEMA_VERSION;
+        self.metrics
+            .record_units("sdlc", version, current, sdlc_count, enabled_count);
+        self.metrics.record_units(
+            "code",
+            version,
+            current,
+            indexed_projects,
+            eligible_projects,
+        );
+
         // Promotion fires as soon as SDLC has covered every enabled
         // namespace. Code coverage is tracked in `coverage` above for
         // observability, but it explicitly does NOT block promotion.
         Ok(sdlc_count >= enabled_count)
+    }
+
+    /// Reads the wall-clock age (in seconds) of the row that marked the
+    /// given version as `migrating`. Used to populate the
+    /// `gkg.schema.migrating_age_seconds` gauge.
+    async fn fetch_migrating_age(&self, version: u32) -> Result<u64, String> {
+        let batches = self
+            .graph
+            .query(READ_MIGRATING_AGE)
+            .param("version", version)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "age_seconds", 0))
+            .ok_or_else(|| "no age_seconds in result".to_string())
     }
 
     /// Returns `(eligible_projects, indexed_projects, coverage_ratio)` for

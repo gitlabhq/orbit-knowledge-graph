@@ -1193,6 +1193,40 @@
       "domain": "indexer.migration"
     },
     {
+      "otel_name": "gkg.schema.eligible_units",
+      "prom_name": "gkg_schema_eligible_units",
+      "description": "Distinct units under enabled namespaces. Denominator of the migration-readiness ratio.",
+      "kind": "gauge",
+      "labels": [
+        "scope",
+        "version_band"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.indexed_units",
+      "prom_name": "gkg_schema_indexed_units",
+      "description": "Distinct units with a checkpoint on the migrating schema version. Numerator of the migration-readiness ratio.",
+      "kind": "gauge",
+      "labels": [
+        "scope",
+        "version_band"
+      ],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
+      "otel_name": "gkg.schema.migrating_age_seconds",
+      "prom_name": "gkg_schema_migrating_age_seconds_seconds",
+      "description": "Seconds since the current migrating version's row was created. Zero when no version is migrating.",
+      "kind": "gauge",
+      "unit": "s",
+      "labels": [],
+      "stability": "stable",
+      "domain": "indexer.migration"
+    },
+    {
       "otel_name": "gkg.schema.migration.completed",
       "prom_name": "gkg_schema_migration_completed_total",
       "description": "Total successful schema migration completions.",
