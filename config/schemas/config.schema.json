@@ -210,7 +210,6 @@
             "cron": null
           },
           "migration-completion": {
-            "code_coverage_threshold": 0.95,
             "cron": "0 */5 * * * *"
           },
           "namespace": {
@@ -752,12 +751,6 @@
       "description": "Per-task schedule configuration.\n\nEach scheduled task embeds this via `#[serde(flatten)]` in its own typed config struct.\nThe scheduler reads it via `task.schedule()`.",
       "type": "object",
       "properties": {
-        "code_coverage_threshold": {
-          "description": "Minimum fraction of code-eligible projects that must have a v{N}\ncheckpoint before a migration is considered complete. Defaults to 0.95\nso the new schema is allowed to promote with a small tail of un-indexed\nor unindexable projects (gone from Rails, archive 404, etc.).",
-          "type": "number",
-          "format": "double",
-          "default": 0.95
-        },
         "cron": {
           "description": "Cron expression with seconds field (6-field: `sec min hour dom mon dow`).\nWhen absent, the task runs on a default 60-second interval.",
           "type": [
@@ -1211,7 +1204,6 @@
               "cron": null
             },
             "migration-completion": {
-              "code_coverage_threshold": 0.95,
               "cron": "0 */5 * * * *"
             },
             "namespace": {
@@ -1254,7 +1246,6 @@
         "migration-completion": {
           "$ref": "#/$defs/MigrationCompletionConfig",
           "default": {
-            "code_coverage_threshold": 0.95,
             "cron": "0 */5 * * * *"
           }
         },

@@ -322,17 +322,6 @@ impl Default for NamespaceDeletionSchedulerConfig {
 pub struct MigrationCompletionConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
-
-    /// Minimum fraction of code-eligible projects that must have a v{N}
-    /// checkpoint before a migration is considered complete. Defaults to 0.95
-    /// so the new schema is allowed to promote with a small tail of un-indexed
-    /// or unindexable projects (gone from Rails, archive 404, etc.).
-    #[serde(default = "default_code_coverage_threshold")]
-    pub code_coverage_threshold: f64,
-}
-
-fn default_code_coverage_threshold() -> f64 {
-    0.95
 }
 
 impl Default for MigrationCompletionConfig {
@@ -341,7 +330,6 @@ impl Default for MigrationCompletionConfig {
             schedule: ScheduleConfiguration {
                 cron: Some("0 */5 * * * *".into()),
             },
-            code_coverage_threshold: default_code_coverage_threshold(),
         }
     }
 }
