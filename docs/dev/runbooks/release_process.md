@@ -61,20 +61,20 @@ Two facts about how this is gated:
 
 If a release ships a broken schema, revert the argocd-apps MR and manually reset the `gkg_schema_version` active row in ClickHouse to the pre-release version. Treat this as last-resort surgery and coordinate with the indexer crate owner before running it.
 
-## Capacity reference (orbit-prd at the time of v0.32.0)
+## Capacity reference (orbit-prd as of HEAD)
 
-Sourced from [services/gkg/env/orbit-prd/values.yaml](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/blob/main/services/gkg/env/orbit-prd/values.yaml). Values change per release; treat this as the shape, not the live numbers.
+Sourced from [services/gkg/env/orbit-prd/values.yaml](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/blob/main/services/gkg/env/orbit-prd/values.yaml). Values change per release; treat this as the shape, not the live numbers. The shape below has been stable from v0.32.0 through v0.33.0.
 
 | Knob | Value | Reasoning |
 |---|---|---|
 | `indexer.replicas` | 5 | Throughput for code backfill; multiplies fleet-wide Gitaly fetch cap |
 | `engine.max_concurrent_workers` | 3 | Total per-pod worker slots |
-| `engine.concurrency_groups.code` | 2 | Per-pod cap on code-indexing tasks; combined with replicas gives fleet cap of 10 concurrent Gitaly archive fetches |
+| `engine.concurrency_groups.code` | 2 | Per-pod cap on code-indexing tasks; combined with replicas gives fleet cap of 10 concurrent Gitaly archive fetches. History: shipped at 1 in !1467 (GKG 0.29.0), bumped to 3 with the v0.30.0 capacity tune in !1500, lowered to 2 the same day to enforce the fleet cap of 10 |
 | `engine.concurrency_groups.sdlc` | 1 | One SDLC dispatcher pass per pod; concurrency is at the top-level namespace |
 | `indexer.tmpSizeLimit` | 30Gi | Plan for ~10Gi disk per concurrent code task |
 | Indexer `requests` | cpu 2, memory 16Gi, ephemeral-storage 30Gi | Guaranteed QoS to avoid noisy-neighbor OOM |
 | Indexer `limits` | cpu 8, memory 16Gi, ephemeral-storage 40Gi | Ephemeral-storage limit must exceed request to leave headroom for logs and the writable layer |
-| `schedule.tasks.global.cron`, `namespace.cron` | `*/30 * * * * *` | 30s SDLC dispatcher tick; ClickHouse query is fast and NATS dedupes any double-publish |
+| `schedule.tasks.global.cron`, `namespace.cron` | `*/30 * * * * *` | 30s SDLC dispatcher tick. The chart default in [config/default.yaml](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/config/default.yaml) is `0 */1 * * * *` (1 minute); the 30s value is a prd argocd-apps override. ClickHouse query is fast and NATS dedupes any double-publish |
 
 ## Observability
 
@@ -106,7 +106,7 @@ These are real failure modes we have hit. Each one has a specific check.
 
 A new image can introduce an unconditional dependency that older chart templates do not render. Symptom: webserver pods crashloop with a connection or address error immediately after the bump.
 
-Past incident: v0.31.x made the NATS connection unconditional, but [chart/templates/webserver/configmap.yaml](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts/-/blob/main/chart/templates/webserver/configmap.yaml) at chart 0.18.1 had no `nats:` block, so webserver pods could not reach NATS and crashlooped with `Cannot assign requested address (os error 99)`. Resolved by chart 0.18.2 (see [argocd-apps!1504](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1504)) rather than reverting the image.
+Past incident: v0.31.x made the NATS connection unconditional, but [chart/templates/webserver/configmap.yaml](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts/-/blob/main/chart/templates/webserver/configmap.yaml) at chart 0.18.1 had no `nats:` block (and the webserver `deployment.yaml` did not include the `gkg.natsTlsVolume` and `gkg.natsTlsVolumeMount` partials), so webserver pods could not reach NATS and crashlooped with `Cannot assign requested address (os error 99)`. The team opened a revert MR ([argocd-apps!1503](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1503)) to roll the image back to 0.30.0, then closed it in favor of rolling forward via a chart fix in [argocd-apps!1504](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1504) (chart 0.18.2). The fix is on lines 16-22 of [chart/templates/webserver/configmap.yaml](https://gitlab.com/gitlab-org/orbit/gkg-helm-charts/-/blob/main/chart/templates/webserver/configmap.yaml).
 
 Default response: roll forward with a chart fix instead of reverting the image. Image reverts are slower and lose the migration work that already promoted.
 
@@ -120,15 +120,19 @@ A new schema version will not promote in prd until at least one namespace is ena
 
 ### Checkpoint `_version: 0` rows
 
-`set_checkpoint` in `crates/indexer/src/checkpoint_store.rs` does not set `_version` on the INSERT, so every `v7_code_indexing_checkpoint` row defaults to 0. ReplacingMergeTree cannot pick a latest because all rows tie at version 0; merges happen by physical position. Any tombstone with `_version > 0` wins permanently, and the project becomes un-checkpointable. Verify after a rollout that checkpoints advance, not just that they exist.
+`set_checkpoint` in [crates/indexer/src/modules/code/checkpoint_store.rs](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/crates/indexer/src/modules/code/checkpoint_store.rs) does not set `_version` on the INSERT, so every `v7_code_indexing_checkpoint` row defaults to 0. ReplacingMergeTree cannot pick a latest because all rows tie at version 0; merges happen by physical position. Any tombstone with `_version > 0` wins permanently, and the project becomes un-checkpointable. Verify after a rollout that checkpoints advance, not just that they exist.
+
+### NATS abandoned messages after a schema bump
+
+A NATS message that fails `max_deliver` times (5 by default) is abandoned: it stays in the stream but is no longer eligible for redelivery, and `delivered.stream_seq` advances past it. During the v0.31.x rollout, the migration-completion check failed because the stream contained abandoned messages from before the schema bump. Recovery is to purge the stream's pending messages or temporarily raise `max_deliver` so the queue drains. Watch NATS consumer lag and `num_redelivered` on `code-indexing-task` and `migration-completion` after any schema bump.
 
 ### Manual ClickHouse edits
 
-We have hit cases where someone re-creates a table directly in ClickHouse during a hotfix and forgets to repopulate it. Symptom: migration runs but produces an empty backfill because `enabled_namespaces` is empty. The fix is to re-enable the namespace via chatops, which re-publishes the row through Siphon.
+We have hit cases where a Siphon-side hotfix recreates a table directly in ClickHouse and does not repopulate the rows. The v0.31.x rollout symptom was a `enabled_namespaces` table with no rows after Adam's hotfix on the Siphon side, which dropped the row J-G had added. The migration ran but produced an empty backfill. The fix is to disable then re-enable the namespace via chatops, which re-publishes the row through Siphon.
 
-### Bohdan's eviction worry
+### Eviction risk at scale
 
-Indexer pods scaled to 5 replicas with sustained code-indexing tasks have run with 0 restarts so far at the v0.32.0 shape. The worry was real before the ephemeral-storage limit was widened in !1501; check eviction rate on the namespace dashboard at the start of every prd rollout anyway.
+Indexer pods scaled to 5 replicas with sustained code-indexing tasks have run with 0 restarts so far through v0.33.0. Bohdan flagged the risk at v0.30.0 rollout when `limits.ephemeral-storage` equaled `tmpSizeLimit`; widening the limit in !1501 closed the gap. Check eviction rate on the namespace dashboard at the start of every prd rollout anyway.
 
 ## Worked example: cutting v0.33.0
 
@@ -143,5 +147,5 @@ This is the actual sequence used for v0.33.0 on 2026-04-25.
 ## References
 
 - Production CR: [gitlab-com/gl-infra/production#21860](https://gitlab.com/gitlab-com/gl-infra/production/-/issues/21860)
-- Last image bumps in argocd-apps: [!1467](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1467), [!1500](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1500), [!1501](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1501), [!1502](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1502), [!1504](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1504), [!1528](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1528)
+- Last image bumps in argocd-apps: [!1467](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1467) (0.29.0, prior-art template for the rollout shape), [!1500](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1500) (0.30.0 + capacity tune), [!1501](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1501) (ephemeral-storage limit widen), [!1502](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1502) (0.31.1), [!1503](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1503) (closed; abandoned revert in favor of !1504), [!1504](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1504) (chart 0.18.2 NATS fix), [!1505](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1505) (0.32.0), [!1528](https://gitlab.com/gitlab-com/gl-infra/argocd/apps/-/merge_requests/1528) (0.33.0)
 - Related runbooks: [code indexing](code_indexing.md), [SDLC indexing](sdlc_indexing.md), [server configuration](server_configuration.md)
