@@ -19,24 +19,7 @@ logger = logging.getLogger(__name__)
 EVAL_IMAGE = "gkg-eval"
 
 
-PROVIDER_HOSTS = {
-    "anthropic": "api.anthropic.com",
-    "openai": "api.openai.com",
-    "google": "generativelanguage.googleapis.com",
-}
 
-
-def _provider_host(provider: str) -> str | None:
-    return PROVIDER_HOSTS.get(provider)
-
-
-def _resolve_host(hostname: str) -> str:
-    """Resolve hostname to IP for --add-host. Falls back to hostname if resolution fails."""
-    import socket
-    try:
-        return socket.getaddrinfo(hostname, None, socket.AF_INET)[0][4][0]
-    except (socket.gaierror, IndexError):
-        return hostname
 
 
 @dataclass
@@ -99,18 +82,10 @@ class ServerManager:
         workspace = str((Path(work_dir) / "container").resolve())
         # Write agent-specific opencode.json with skill permissions
         self._write_opencode_config(Path(workspace), arm)
-        # Network allowlist: gitlab host + model provider
-        allowed_hosts = {
-            arm.env.get("GITLAB_HOST", "staging.gitlab.com"),
-            _provider_host(arm.model.provider),
-        }
-        host_args = [x for h in allowed_hosts if h
-                     for x in ("--add-host", f"{h}:{_resolve_host(h)}")]
         r = subprocess.run(
             ["docker", "run", "--rm", "-d", "--name", name,
              "-p", f"{arm.port}:4096",
              "-v", f"{workspace}:/mnt/workspace:ro",
-             *host_args, "--dns", "0.0.0.0",
              *env_args, EVAL_IMAGE],
             capture_output=True, text=True,
         )
@@ -154,7 +129,7 @@ class ServerManager:
 
     @staticmethod
     def _write_opencode_config(workspace: Path, arm: ArmConfig) -> None:
-        """Generate opencode.json with skill permissions from arm config."""
+        """Generate opencode.json with permissions from arm config."""
         import json
         skill_perms = {"*": "deny"}
         for skill in arm.skills:
@@ -164,6 +139,14 @@ class ServerManager:
             "permission": {
                 "*": "allow",
                 "question": "deny",
+                "bash": {
+                    "*": "deny",
+                    "python tools/*": "allow",
+                    "python3 tools/*": "allow",
+                    "glab *": "allow",
+                    "cat *": "allow",
+                    "echo *": "allow",
+                },
                 "skill": skill_perms,
             },
             "default_agent": arm.agent,
