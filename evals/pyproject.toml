@@ -12,6 +12,8 @@ dependencies = [
     "pyyaml>=6.0",
     "click>=8.1",
     "scipy>=1.14",
+    "fastapi>=0.115",
+    "uvicorn>=0.34",
 ]
 
 [project.optional-dependencies]

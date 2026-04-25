@@ -2,13 +2,14 @@
 Core orchestration loop for the eval harness.
 
 Per arm:
-  1. Spawn scode + opencode serve on a dedicated port
+  1. Start Docker container running opencode serve
   2. Health-poll until ready
   3. Start EventDemuxer (single SSE connection)
-  4. Execute tasks in batches (asyncio.gather + semaphore)
+  4. Execute tasks sequentially
   5. Capture snapshot + write results after each task
-  6. Tear down server
+  6. Tear down container
 
+All DuckDB writes go through the db server (db_server.py).
 Prompt execution is NOT retried (non-deterministic).
 Session create and data extraction GETs are retried via httpx defaults.
 """
@@ -19,6 +20,8 @@ import asyncio
 import json
 import os
 import re
+import subprocess
+import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -277,11 +280,9 @@ async def run_arm(
     config: EvalConfig,
     store: ResultStore,
     work_dir: str,
-    mgr: ServerManager | None = None,
+    mgr: ServerManager,
 ) -> list[TaskResult]:
     """Run all tasks for a single arm."""
-    from harness.server import ServerManager
-
     completed = store.completed_task_ids(arm.name)
     remaining = [t for t in tasks if t.id not in completed]
     if not remaining:
@@ -292,8 +293,6 @@ async def run_arm(
     log.event("arm", "starting", arm=arm.name,
               data={"remaining": len(remaining), "done": len(completed)})
 
-    if mgr is None:
-        mgr = ServerManager()
 
     with log.timed("server", "start", arm=arm.name):
         handle = await mgr.start(arm, work_dir, timeout=config.run.timeouts.server_start)
@@ -335,12 +334,26 @@ async def run_arm(
 
 async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str, list[TaskResult]]:
     """Run the full evaluation across all arms."""
+    from harness.db import DbClient, default_db_path, DB_SERVER_PORT
     from harness.server import ServerManager
 
     work_dir = work_dir or os.getcwd()
     run_id = ResultStore.make_run_id()
-    mgr = ServerManager()
-    store = ResultStore(db_path=mgr.db_path, run_id=run_id)
+
+    # Start db server
+    db_path = default_db_path()
+    db_proc = _start_db_server(db_path, DB_SERVER_PORT)
+    db = DbClient()
+    # Wait for db server to be ready
+    for _ in range(50):
+        if db.is_alive():
+            break
+        await asyncio.sleep(0.1)
+    else:
+        raise RuntimeError("db server failed to start")
+
+    mgr = ServerManager(db=db)
+    store = ResultStore(db=db, run_id=run_id)
     tasks = load_tasks(config)
 
     log.setup(run_id)
@@ -386,4 +399,36 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
         "run_id": run_id, "successes": successes, "total": total,
         "cost": round(total_cost, 4),
     })
+
+    # Stop db server
+    db.close()
+    _stop_db_server(db_proc)
+
     return all_results
+
+
+def _start_db_server(db_path: Path, port: int) -> subprocess.Popen:
+    """Start the DuckDB proxy server as a subprocess."""
+    import subprocess
+    env = {**os.environ, "PYTHONPATH": "."}
+    proc = subprocess.Popen(
+        [
+            sys.executable, "-m", "uvicorn",
+            "harness.db_server:app",
+            "--port", str(port),
+            "--log-level", "warning",
+        ],
+        env=env,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+    )
+    return proc
+
+
+def _stop_db_server(proc: subprocess.Popen) -> None:
+    import signal
+    try:
+        proc.send_signal(signal.SIGTERM)
+        proc.wait(timeout=5)
+    except Exception:
+        proc.kill()

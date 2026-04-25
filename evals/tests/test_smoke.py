@@ -28,6 +28,37 @@ def _chdir():
     os.chdir(orig)
 
 
+def _make_test_db(db_path: Path):
+    """Create a direct-mode DbClient adapter for tests (no server needed)."""
+    from harness.db import ensure_schema, direct_connect
+
+    ensure_schema(db_path)
+
+    class _TestDb:
+        def write(self, sql, params=None):
+            with direct_connect(db_path) as conn:
+                conn.execute(sql, params or [])
+
+        def write_batch(self, statements):
+            with direct_connect(db_path) as conn:
+                for stmt in statements:
+                    conn.execute(stmt["sql"], stmt.get("params", []))
+
+        def query(self, sql, params=None):
+            with direct_connect(db_path, read_only=True) as conn:
+                rows = conn.execute(sql, params or []).fetchall()
+                return [list(r) for r in rows]
+
+        def query_one(self, sql, params=None):
+            rows = self.query(sql, params)
+            return rows[0] if rows else None
+
+        def is_alive(self):
+            return True
+
+    return _TestDb()
+
+
 @pytest.fixture(autouse=True)
 def _set_env(monkeypatch):
     """Set required env vars so config loading doesn't fail."""
@@ -177,7 +208,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="test-run")
+            store = ResultStore(db=_make_test_db(db_path), run_id="test-run")
             result = TaskResult(
                 task_id="search-user",
                 arm="orbit",
@@ -212,7 +243,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="test-run")
+            store = ResultStore(db=_make_test_db(db_path), run_id="test-run")
 
             session = MagicMock()
             session.id = "sess_123"
@@ -238,7 +269,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="test-run")
+            store = ResultStore(db=_make_test_db(db_path), run_id="test-run")
             for tid in ["task-a", "task-b", "task-c"]:
                 store.write_result(TaskResult(
                     task_id=tid, arm="orbit", status=TaskStatus.SUCCESS,
@@ -251,7 +282,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="test-run")
+            store = ResultStore(db=_make_test_db(db_path), run_id="test-run")
             store.write_result(TaskResult(
                 task_id="done-task", arm="orbit", status=TaskStatus.SUCCESS,
                 timestamp="2026-04-21T12:00:00Z",
@@ -266,12 +297,12 @@ class TestStore:
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
             for rid in ["20260421_120000", "20260422_130000"]:
-                store = ResultStore(db_path=db_path, run_id=rid)
+                store = ResultStore(db=_make_test_db(db_path), run_id=rid)
                 store.write_result(TaskResult(
                     task_id="t1", arm="orbit", status=TaskStatus.SUCCESS,
                     timestamp="2026-04-21T12:00:00Z",
                 ))
-            store = ResultStore(db_path=db_path, run_id="any")
+            store = ResultStore(db=_make_test_db(db_path), run_id="any")
             run_ids = store.list_run_ids()
             assert "20260421_120000" in run_ids
             assert "20260422_130000" in run_ids
@@ -281,7 +312,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="test-run")
+            store = ResultStore(db=_make_test_db(db_path), run_id="test-run")
             store.write_scores("orbit", [
                 {"task_id": "t1", "scores": {"graph": [{"name": "correctness", "value": 1.0}]}},
                 {"task_id": "t2", "scores": {"graph": [{"name": "correctness", "value": 0.5}]}},
@@ -299,7 +330,7 @@ class TestStore:
 
         with tempfile.TemporaryDirectory() as tmpdir:
             db_path = Path(tmpdir) / "eval.duckdb"
-            store = ResultStore(db_path=db_path, run_id="run-1")
+            store = ResultStore(db=_make_test_db(db_path), run_id="run-1")
             hash1 = store.snapshot_config(config)
 
             assert len(hash1) == 16
@@ -314,7 +345,7 @@ class TestStore:
             assert "agents/glab.md" in loaded["files"]
 
             # Same config -> same hash
-            store2 = ResultStore(db_path=db_path, run_id="run-2")
+            store2 = ResultStore(db=_make_test_db(db_path), run_id="run-2")
             hash2 = store2.snapshot_config(config)
             assert hash1 == hash2
 

@@ -30,7 +30,9 @@ def generate_report(config: EvalConfig, run_id: str, store: ResultStore) -> None
 
     md = _render_markdown(config, run_id, scores, all_aggregates, arm_results)
 
-    output_dir = store.db_path.parent
+    from harness.db import WORKSPACE_DIR
+    output_dir = Path(WORKSPACE_DIR)
+    output_dir.mkdir(parents=True, exist_ok=True)
     md_path = output_dir / f"report_{run_id}.md"
     md_path.write_text(md)
 

@@ -14,7 +14,6 @@ import asyncio
 import json
 import logging
 import os
-import shutil
 import sys
 from pathlib import Path
 
@@ -24,7 +23,6 @@ from harness.config import load_config
 
 
 def _setup_logging(verbose: bool) -> None:
-    """Minimal fallback for non-run commands. run_eval calls log.setup() itself."""
     if not logging.root.handlers:
         level = logging.DEBUG if verbose else logging.INFO
         logging.basicConfig(
@@ -34,6 +32,49 @@ def _setup_logging(verbose: bool) -> None:
         )
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("httpcore").setLevel(logging.WARNING)
+
+
+def _get_db():
+    """Get a DbClient. Uses db server if running, direct mode otherwise."""
+    from harness.db import DbClient
+    db = DbClient()
+    if db.is_alive():
+        return db
+    # Fallback to direct mode for offline CLI commands
+    from harness.db import default_db_path, ensure_schema, direct_connect
+    db_path = default_db_path()
+    ensure_schema(db_path)
+    return _DirectDbAdapter(db_path)
+
+
+class _DirectDbAdapter:
+    """Adapts direct DuckDB connection to the DbClient interface for offline use."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._db_path = db_path
+
+    def write(self, sql: str, params: list | None = None) -> None:
+        from harness.db import direct_connect
+        with direct_connect(self._db_path) as conn:
+            conn.execute(sql, params or [])
+
+    def write_batch(self, statements: list) -> None:
+        from harness.db import direct_connect
+        with direct_connect(self._db_path) as conn:
+            for stmt in statements:
+                conn.execute(stmt["sql"], stmt.get("params", []))
+
+    def query(self, sql: str, params: list | None = None) -> list:
+        from harness.db import direct_connect
+        with direct_connect(self._db_path, read_only=True) as conn:
+            return conn.execute(sql, params or []).fetchall()
+
+    def query_one(self, sql: str, params: list | None = None) -> list | None:
+        rows = self.query(sql, params)
+        return list(rows[0]) if rows else None
+
+    def is_alive(self) -> bool:
+        return True
 
 
 @click.group()
@@ -86,12 +127,9 @@ def run(ctx: click.Context, arm_name: str | None, run_id: str | None, bg: bool) 
         )
         click.echo(f"eval running in background (pid={proc.pid}, log={log_path})")
         click.echo(f"  tail -f {log_path}")
-        click.echo(f"  gkg-eval servers")
-        click.echo(f"  gkg-eval servers --logs orbit")
         return
 
     from harness.runner import run_eval
-
     results = asyncio.run(run_eval(config))
 
     total = sum(len(v) for v in results.values())
@@ -113,21 +151,19 @@ def score(ctx: click.Context, run_id: str | None) -> None:
     """Score evaluation results."""
     config = load_config(ctx.obj["config_path"])
 
-    from harness.db import default_db_path
     from harness.evaluators import load_evaluators
     from harness.store import ResultStore, list_run_ids
 
-    db_path = default_db_path()
+    db = _get_db()
 
     if run_id is None:
-        run_ids = list_run_ids(db_path)
+        run_ids = list_run_ids(db)
         if not run_ids:
             click.echo("error: no runs found", err=True)
             sys.exit(1)
         run_id = run_ids[0]
 
-    store = ResultStore(db_path=db_path, run_id=run_id)
-
+    store = ResultStore(db=db, run_id=run_id)
     click.echo(f"scoring run {run_id}")
 
     evaluators = load_evaluators(config.evaluators)
@@ -160,13 +196,12 @@ def report(ctx: click.Context, run_id: str | None) -> None:
     """Generate report from scored run."""
     config = load_config(ctx.obj["config_path"])
 
-    from harness.db import default_db_path
     from harness.store import ResultStore, list_run_ids
 
-    db_path = default_db_path()
+    db = _get_db()
 
     if run_id is None:
-        run_ids = list_run_ids(db_path)
+        run_ids = list_run_ids(db)
         if not run_ids:
             click.echo("error: no runs found", err=True)
             sys.exit(1)
@@ -174,7 +209,7 @@ def report(ctx: click.Context, run_id: str | None) -> None:
 
     from harness.report import generate_report
 
-    store = ResultStore(db_path=db_path, run_id=run_id)
+    store = ResultStore(db=db, run_id=run_id)
     generate_report(config, run_id, store)
     click.echo(f"report generated for run {run_id}")
 
@@ -187,7 +222,6 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     errors: list[str] = []
     warnings: list[str] = []
 
-    # 1. Parse + validate config
     try:
         config = load_config(ctx.obj["config_path"])
         click.echo(f"[ok] config parsed: {ctx.obj['config_path']}")
@@ -195,7 +229,6 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
         click.echo(f"[FAIL] config parse error: {e}", err=True)
         sys.exit(1)
 
-    # 2. Resolve file refs
     for arm in config.arms:
         agent_path = Path(arm.agent)
         if not agent_path.exists():
@@ -212,7 +245,6 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     else:
         click.echo("[ok] all file refs resolve")
 
-    # 3. Load + validate tasks
     from harness.runner import load_tasks
     try:
         tasks = load_tasks(config)
@@ -221,7 +253,6 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
         errors.append(f"task loading failed: {e}")
         tasks = []
 
-    # 4. Check fixtures
     fixtures_path = Path(config.run.scoring.fixtures_path)
     missing_fixtures = 0
     for task in tasks:
@@ -234,7 +265,6 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     else:
         click.echo(f"[ok] all {len(tasks)} task fixtures found")
 
-    # 5. Check evaluators/aggregators resolve
     from harness.evaluators import load_evaluators
     from harness.aggregators import load_aggregators
     try:
@@ -249,27 +279,19 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     except Exception as e:
         errors.append(f"aggregator loading failed: {e}")
 
-    # 6. Check tools
-    if shutil.which("scode"):
-        click.echo("[ok] scode found")
+    # Check Docker
+    import subprocess as _sp
+    docker_ok = _sp.run(["docker", "info"], capture_output=True).returncode == 0
+    if docker_ok:
+        click.echo("[ok] docker available")
     else:
-        warnings.append("scode not found (sandboxing disabled)")
-        click.echo("[warn] scode not found")
+        errors.append("docker not available")
 
-    if shutil.which("opencode"):
-        click.echo("[ok] opencode found")
-    else:
-        errors.append("opencode not found in PATH")
-
-    # 7. Infrastructure checks
+    # Check infrastructure
     if check_infra:
         click.echo("\nchecking infrastructure...")
         import httpx
-
         for arm in config.arms:
-            grpc_ep = arm.env.get("GRPC_ENDPOINT")
-            if grpc_ep:
-                click.echo(f"  [{arm.name}] GRPC_ENDPOINT={grpc_ep} (connectivity not checked)")
             gitlab_host = arm.env.get("GITLAB_HOST")
             if gitlab_host:
                 try:
@@ -279,17 +301,12 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
                     warnings.append(f"{gitlab_host} unreachable: {e}")
                     click.echo(f"  [{arm.name}] {gitlab_host}: unreachable")
 
-    # Summary
     click.echo(f"\n{'='*50}")
     click.echo(f"arms:        {len(config.arms)} ({', '.join(a.name for a in config.arms)})")
     click.echo(f"tasks:       {len(tasks)}")
     click.echo(f"evaluators:  {len(config.evaluators)}")
     click.echo(f"aggregators: {len(config.aggregators)}")
-    click.echo(f"concurrency: {config.run.concurrency}")
     click.echo(f"ports:       {', '.join(str(a.port) for a in config.arms)}")
-
-    est_time = len(tasks) * config.run.timeouts.task / config.run.concurrency * len(config.arms)
-    click.echo(f"est. time:   {est_time/60:.0f}min (worst case)")
 
     if errors:
         click.echo(f"\n{len(errors)} errors, {len(warnings)} warnings")
@@ -304,21 +321,22 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
 @click.option("--logs", "log_arm", default=None, help="Tail logs for a specific arm")
 @click.option("--tail", default=50, help="Number of log lines to show")
 @click.option("--kill", "kill_arm", default=None, is_flag=False, flag_value="__all__",
-              help="Kill server(s). No value = all, or specify arm name")
+              help="Kill containers. No value = all, or specify arm name")
 @click.option("--runs", "show_runs", is_flag=True, help="Show recent eval runs")
 def servers(log_arm: str | None, tail: int, kill_arm: str | None, show_runs: bool) -> None:
-    """Manage eval server processes."""
-    from harness.server import ServerManager
+    """Manage eval containers."""
+    db = _get_db()
 
-    mgr = ServerManager()
+    from harness.server import ServerManager
+    mgr = ServerManager(db=db)
 
     if kill_arm:
         if kill_arm == "__all__":
             asyncio.run(mgr.stop_all())
-            click.echo("all servers stopped")
+            click.echo("all containers stopped")
         else:
             asyncio.run(mgr.stop(kill_arm))
-            click.echo(f"server {kill_arm} stopped")
+            click.echo(f"container {kill_arm} stopped")
         return
 
     if log_arm:
@@ -340,17 +358,16 @@ def servers(log_arm: str | None, tail: int, kill_arm: str | None, show_runs: boo
                 )
         return
 
-    # Default: show server status
     statuses = mgr.status()
     if not statuses:
-        click.echo("no servers tracked")
+        click.echo("no containers tracked")
     else:
-        click.echo(f"{'arm':<12} {'status':<10} {'port':<7} {'pid':<8} {'started'}")
-        click.echo("-" * 65)
+        click.echo(f"{'arm':<12} {'status':<10} {'port':<7} {'started'}")
+        click.echo("-" * 55)
         for s in statuses:
             click.echo(
                 f"{s['arm']:<12} {s['status']:<10} {s['port']:<7} "
-                f"{s['pid'] or '-':<8} {s['started_at'] or '-'}"
+                f"{s['started_at'] or '-'}"
             )
 
 
