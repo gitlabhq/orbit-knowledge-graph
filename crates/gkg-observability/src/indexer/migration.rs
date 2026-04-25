@@ -67,8 +67,11 @@ pub const ELIGIBLE_UNITS: MetricSpec = MetricSpec::gauge(
 
 /// Wall-clock seconds since the current migrating version's row was created.
 /// Zero when no version is migrating. Direct alert target for stuck migrations.
+///
+/// Otel name is suffix-free so the Prometheus exporter appends `_seconds`
+/// itself; see [`no_banned_suffix_in_otel_name`] in the crate's tests.
 pub const MIGRATING_AGE: MetricSpec = MetricSpec::gauge(
-    "gkg.schema.migrating_age_seconds",
+    "gkg.schema.migrating_age",
     "Seconds since the current migrating version's row was created. \
      Zero when no version is migrating.",
     Some("s"),

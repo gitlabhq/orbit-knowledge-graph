@@ -1217,8 +1217,8 @@
       "domain": "indexer.migration"
     },
     {
-      "otel_name": "gkg.schema.migrating_age_seconds",
-      "prom_name": "gkg_schema_migrating_age_seconds_seconds",
+      "otel_name": "gkg.schema.migrating_age",
+      "prom_name": "gkg_schema_migrating_age_seconds",
       "description": "Seconds since the current migrating version's row was created. Zero when no version is migrating.",
       "kind": "gauge",
       "unit": "s",
