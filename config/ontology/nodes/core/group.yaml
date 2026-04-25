@@ -105,6 +105,7 @@ etl:
         AND source_type = 'Namespace' AND NOT _siphon_deleted
       GROUP BY source_id
     ) routes ON namespace.id = routes.source_id
+  where_clause: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
   deleted: namespace._siphon_deleted
