@@ -1,3 +1,12 @@
 {
-  "$schema": "https://opencode.ai/config.json"
+  "$schema": "https://opencode.ai/config.json",
+  "permission": {
+    "*": "allow",
+    "question": "deny",
+    "skill": {
+      "*": "deny",
+      "glab-data": "allow"
+    }
+  },
+  "default_agent": "glab"
 }

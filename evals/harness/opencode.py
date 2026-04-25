@@ -182,9 +182,25 @@ class OpenCodeClient:
         )
         r.raise_for_status()
         content = r.text.strip()
-        if not content:
-            return MessageWithParts(info=MessageInfo(id="", role="assistant"))
-        return MessageWithParts.model_validate(r.json())
+        if content:
+            return MessageWithParts.model_validate(r.json())
+
+        # API returned async — poll until the last assistant message is done
+        return await self._poll_completion(session_id)
+
+    async def _poll_completion(
+        self, session_id: str, poll_interval: float = 1.0
+    ) -> MessageWithParts:
+        """Poll messages until the last assistant message has a finish reason."""
+        while True:
+            msgs = await self.list_messages(session_id)
+            for msg in reversed(msgs):
+                if msg.info.role != "assistant":
+                    continue
+                if msg.info.finish and msg.info.finish != "":
+                    return msg
+                break
+            await asyncio.sleep(poll_interval)
 
     # -- session artifacts ----------------------------------------------------
 
