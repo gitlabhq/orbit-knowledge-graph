@@ -133,6 +133,7 @@ These repositories on [ops.gitlab.net](https://ops.gitlab.net) manage the Kubern
 | [orbit-artifacts](https://gitlab.com/gitlab-org/orbit/documentation/orbit-artifacts) | Offsite transcripts and summary (Feb 3-5, 2026): architecture, indexing, query engine, infra, DIP, deployment, billing |
 | [Readiness reviews (old)](https://gitlab.com/gitlab-com/gl-infra/readiness) | Legacy readiness repo. Siphon review [MR !231](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/231) (open, 78 comments), NATS review [MR !240](https://gitlab.com/gitlab-com/gl-infra/readiness/-/merge_requests/240) (merged). |
 | Server configuration | [docs/dev/runbooks/server_configuration.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) -- config loading, env vars, tuning, Helm chart mapping |
+| Release process | [docs/dev/runbooks/release_process.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/release_process.md) -- end-to-end release flow across knowledge-graph, gkg-helm-charts, and argocd-apps |
 | Operational runbooks | [docs/dev/runbooks/](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/docs/dev/runbooks) -- indexing pipelines, configuration, troubleshooting |
 | Local GDK-connected development | [docs/dev/local-development.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/local-development.md) -- `mise run dev` to launch the full local stack against an existing GDK |
 | E2E testing harness | [docs/dev/e2e-testing.md](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/e2e-testing.md) -- full-stack e2e tests on GKE (GitLab + Siphon + GKG), runs in CI on MRs |
@@ -266,6 +267,7 @@ Jerome Ng (@jeromezng, usage billing system architect).
 | SDLC indexing | [`docs/dev/runbooks/sdlc_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/sdlc_indexing.md) |
 | Code indexing | [`docs/dev/runbooks/code_indexing.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/code_indexing.md) |
 | Server configuration | [`docs/dev/runbooks/server_configuration.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/server_configuration.md) |
+| Release process | [`docs/dev/runbooks/release_process.md`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/dev/runbooks/release_process.md) -- semantic-release tag, chart bump, argocd-apps MR, schema migration, Grafana and log entry points, common failure modes |
 | Production runbook | TODO |
 
 ### Observability
