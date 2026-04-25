@@ -19,8 +19,8 @@ pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 
 pub(super) use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
+    load_ontology, run_redaction, test_security_context,
 };
 pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::redaction::QueryResult;

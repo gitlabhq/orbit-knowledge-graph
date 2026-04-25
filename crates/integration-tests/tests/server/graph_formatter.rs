@@ -8,13 +8,13 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
+    load_ontology, run_redaction, test_security_context,
 };
 use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::{run_subtests, run_subtests_shared, t};
-use query_engine::compiler::compile;
+use query_engine::compiler::{SecurityContext, compile};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -156,9 +156,17 @@ async fn seed(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn run_pipeline(ctx: &TestContext, json: &str, svc: &MockRedactionService) -> Value {
+    run_pipeline_with_security(ctx, json, svc, test_security_context()).await
+}
+
+async fn run_pipeline_with_security(
+    ctx: &TestContext,
+    json: &str,
+    svc: &MockRedactionService,
+    security_ctx: SecurityContext,
+) -> Value {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let security_ctx = test_security_context();
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
@@ -1696,7 +1704,10 @@ async fn search_nullable_columns(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 async fn search_wildcard_columns(ctx: &TestContext) {
-    let value = run_pipeline(
+    // Admin context so the wildcard expansion includes admin_only columns
+    // (email, first_name, last_name, etc.). The non-admin behavior is covered
+    // by the compiler-level RestrictPass tests.
+    let value = run_pipeline_with_security(
         ctx,
         r#"{
             "query_type": "search",
@@ -1704,6 +1715,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
             "limit": 10
         }"#,
         &allow_all(),
+        admin_security_context(),
     )
     .await;
 
@@ -1719,7 +1731,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     assert_eq!(alice["name"].as_str().unwrap(), "Alice Admin");
     assert!(
         alice.get("email").is_some(),
-        "wildcard should include email"
+        "wildcard should include email for admin"
     );
 
     assert!(
