@@ -65,6 +65,13 @@ macro_rules! define_languages {
 }
 
 define_languages! {
+    C => {
+        support_lang: C,
+        extensions: ["c", "h"],
+        exclude: [],
+        separator: "::",
+        names: ["c"],
+    },
     Ruby => {
         support_lang: Ruby,
         extensions: ["rb", "rbw", "rake", "gemspec"],

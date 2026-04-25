@@ -1,0 +1,213 @@
+name: "C resolution — functions, structs, enums, calls"
+
+fixtures:
+  - path: math.h
+    content: |
+      #ifndef MATH_H
+      #define MATH_H
+
+      struct Vector {
+          double x;
+          double y;
+      };
+
+      double vec_length(struct Vector v);
+      struct Vector vec_add(struct Vector a, struct Vector b);
+      struct Vector vec_normalize(struct Vector v);
+
+      #endif
+
+  - path: math.c
+    content: |
+      #include "math.h"
+
+      double vec_length(struct Vector v) {
+          return 0.0;
+      }
+
+      struct Vector vec_add(struct Vector a, struct Vector b) {
+          struct Vector result;
+          result.x = a.x + b.x;
+          result.y = a.y + b.y;
+          return result;
+      }
+
+      struct Vector vec_normalize(struct Vector v) {
+          double len = vec_length(v);
+          struct Vector result;
+          result.x = v.x / len;
+          result.y = v.y / len;
+          return result;
+      }
+
+  - path: shapes.h
+    content: |
+      #ifndef SHAPES_H
+      #define SHAPES_H
+
+      enum ShapeType { CIRCLE, RECTANGLE, TRIANGLE };
+
+      typedef struct {
+          enum ShapeType type;
+          double area;
+      } Shape;
+
+      Shape create_circle(double radius);
+      double get_area(Shape s);
+
+      #endif
+
+  - path: shapes.c
+    content: |
+      #include "shapes.h"
+      #include "math.h"
+
+      Shape create_circle(double radius) {
+          Shape s;
+          s.type = CIRCLE;
+          s.area = 3.14159 * radius * radius;
+          return s;
+      }
+
+      double get_area(Shape s) {
+          return s.area;
+      }
+
+  - path: main.c
+    content: |
+      #include "math.h"
+      #include "shapes.h"
+
+      int main() {
+          struct Vector a;
+          a.x = 1.0;
+          a.y = 2.0;
+
+          struct Vector b;
+          b.x = 3.0;
+          b.y = 4.0;
+
+          struct Vector sum = vec_add(a, b);
+          struct Vector norm = vec_normalize(sum);
+          double len = vec_length(norm);
+
+          Shape circle = create_circle(5.0);
+          double area = get_area(circle);
+
+          return 0;
+      }
+
+tests:
+  # ── Definitions ───────────────────────────────────────────────
+  - name: "Function definitions (from .c files, not prototypes)"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { no_nulls: fqn }
+      - { row: { fqn: vec_length } }
+      - { row: { fqn: vec_add } }
+      - { row: { fqn: vec_normalize } }
+      - { row: { fqn: create_circle } }
+      - { row: { fqn: get_area } }
+      - { row: { fqn: main } }
+
+  - name: "Struct definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Vector'
+        AND d.definition_type = 'Struct'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Vector, type: Struct } }
+
+  - name: "Enum definition"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'ShapeType'
+        AND d.definition_type = 'Enum'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: ShapeType, type: Enum } }
+
+  - name: "Enum constants scoped under enum"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumConstant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "ShapeType::CIRCLE" } }
+      - { row: { fqn: "ShapeType::RECTANGLE" } }
+      - { row: { fqn: "ShapeType::TRIANGLE" } }
+
+  - name: "Typedef"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Shape'
+        AND d.definition_type = 'Typedef'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Shape, type: Typedef } }
+
+  # ── CALLS edges ───────────────────────────────────────────────
+  - name: "vec_normalize calls vec_length"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'vec_normalize'
+        AND callee.fqn = 'vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: vec_normalize, callee: vec_length, kind: Calls } }
+
+  - name: "main calls vec_add"
+    skip: true  # C cross-file resolution needs GlobalBareName strategy
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main'
+        AND callee.fqn = 'vec_add'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: main, callee: vec_add, kind: Calls } }
+
+  - name: "main calls create_circle"
+    skip: true  # C cross-file resolution needs GlobalBareName strategy
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main'
+        AND callee.fqn = 'create_circle'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: main, callee: create_circle, kind: Calls } }
+
+  - name: "main calls get_area"
+    skip: true  # C cross-file resolution needs GlobalBareName strategy
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main'
+        AND callee.fqn = 'get_area'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: main, callee: get_area, kind: Calls } }
+
+  # ── Files ─────────────────────────────────────────────────────
+  - name: "All C files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path, f.language AS lang
+    assert:
+      - { row_count: 5 }
+      - { row: { path: main.c, lang: c } }
+      - { row: { path: math.c, lang: c } }
+      - { row: { path: math.h, lang: c } }
+      - { row: { path: shapes.c, lang: c } }
+      - { row: { path: shapes.h, lang: c } }
