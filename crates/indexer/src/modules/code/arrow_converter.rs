@@ -372,6 +372,16 @@ fn convert_edges(
         });
     }
 
+    // Sort edges by low-cardinality columns so run-length encoding
+    // (and dictionary encoding) on relationship_kind, source_kind,
+    // target_kind produce long runs of identical values.
+    edge_rows.sort_by(|a, b| {
+        a.edge_kind
+            .cmp(b.edge_kind)
+            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
+            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
+    });
+
     IndexerEdgeRow::to_record_batch(&edge_rows, &specs, &())
 }
 

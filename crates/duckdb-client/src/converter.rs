@@ -195,7 +195,7 @@ pub fn convert_v2_graph(
         .expect("local_db.edge_table.name must be configured")
         .to_string();
 
-    let edge_rows: Vec<_> = graph
+    let mut edge_rows: Vec<_> = graph
         .graph
         .edge_indices()
         .map(|ei| {
@@ -210,6 +210,15 @@ pub fn convert_v2_graph(
             }
         })
         .collect();
+
+    // Sort edges by low-cardinality columns for better encoding.
+    edge_rows.sort_by(|a, b| {
+        a.edge_kind
+            .cmp(b.edge_kind)
+            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
+            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
+    });
+
     let edge_batch = EdgeRow::to_record_batch(&edge_rows, &edge_specs(ontology), &())?;
     tables.push((edge_table, edge_batch));
 
