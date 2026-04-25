@@ -301,17 +301,35 @@ impl<'a> ImportResolver<'a> {
             return Vec::new();
         }
 
-        // Find file nodes matching include paths, then search for
-        // the bare name in those files' definitions
+        // For each included header, also try the corresponding source
+        // file (e.g. math.h → math.c, math.cc, math.cpp, math.m).
+        // Header declarations are prototypes; definitions live in the
+        // paired source file.
+        const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".m"];
+        let mut paired_stems: Vec<String> = Vec::new();
+        for p in &included_paths {
+            if let Some(stem) = p.strip_suffix(".h").or_else(|| p.strip_suffix(".hpp")) {
+                paired_stems.push(stem.to_string());
+            }
+        }
+
+        // Find file nodes matching include paths or paired source files,
+        // then search for the bare name in those files' definitions
         let mut results = Vec::new();
         for (file_idx, file) in self.graph.files() {
             if file_idx == self.file_node {
                 continue;
             }
-            if !included_paths
+            let is_included = included_paths
                 .iter()
-                .any(|p| file.path.ends_with(p.as_str()))
-            {
+                .any(|p| file.path.ends_with(p.as_str()));
+            let is_paired = !is_included
+                && paired_stems.iter().any(|stem| {
+                    SOURCE_EXTENSIONS
+                        .iter()
+                        .any(|ext| file.path.ends_with(&format!("{stem}{ext}")))
+                });
+            if !is_included && !is_paired {
                 continue;
             }
             for &idx in self

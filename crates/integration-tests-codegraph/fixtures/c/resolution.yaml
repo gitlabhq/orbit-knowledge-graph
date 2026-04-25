@@ -167,7 +167,6 @@ tests:
       - { row: { caller: vec_normalize, callee: vec_length, kind: Calls } }
 
   - name: "main calls vec_add"
-    skip: true  # definition in math.c, but main.c includes math.h (declaration only)
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main'
@@ -178,7 +177,6 @@ tests:
       - { row: { caller: main, callee: vec_add, kind: Calls } }
 
   - name: "main calls create_circle"
-    skip: true  # definition in shapes.c, but main.c includes shapes.h (declaration only)
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main'
@@ -189,7 +187,6 @@ tests:
       - { row: { caller: main, callee: create_circle, kind: Calls } }
 
   - name: "main calls get_area"
-    skip: true  # definition in shapes.c, but main.c includes shapes.h (declaration only)
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main'
