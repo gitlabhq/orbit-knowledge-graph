@@ -191,6 +191,16 @@ metrics-catalog-check:
   script:
     - mise run metrics:catalog:check
 
+dashboards-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run dashboards:check
+
 ddl-freshness-check:
   stage: lint
   extends:

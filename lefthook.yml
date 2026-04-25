@@ -48,3 +48,11 @@ pre-commit:
         - "crates/gkg-observability/**/*.rs"
         - "crates/xtask/src/metrics_catalog.rs"
         - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+    - name: dashboards-check
+      run: mise run dashboards:check
+      glob:
+        - "dashboards/orbit/**/*.jsonnet"
+        - "dashboards/orbit/**/*.libsonnet"
+        - "dashboards/orbit/*.dashboard.json"
+        - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+        - "crates/xtask/src/dashboards.rs"
