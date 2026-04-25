@@ -368,20 +368,34 @@ impl HasRules for KotlinRules {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         KotlinDsl::spec()
-            .parse_defs_only(
+            .parse_full_collect(
                 code.as_bytes(),
                 "Test.kt",
                 crate::v2::config::Language::Kotlin,
+                &Tracer::new(false),
             )
-            .unwrap()
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
+            .map_err(|e| {
+                crate::v2::pipeline::PipelineError::parse(
+                    "Test.kt",
+                    format!("Invalid UTF-8: {:?}", e),
+                )
+            })
     }
 
     #[test]
     fn class_with_methods() {
-        let result = parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n");
+        let result =
+            parse("class Calculator {\n    fun add(a: Int, b: Int): Int = a + b\n}\n").unwrap();
         assert_eq!(result.definitions.len(), 2);
         assert_eq!(result.definitions[0].name, "Calculator");
         assert_eq!(result.definitions[0].kind, DefKind::Class);
@@ -389,7 +403,8 @@ mod tests {
 
     #[test]
     fn package_scoping() {
-        let result = parse("package com.example\n\nclass Service {\n    fun run() {}\n}\n");
+        let result =
+            parse("package com.example\n\nclass Service {\n    fun run() {}\n}\n").unwrap();
         let service = result
             .definitions
             .iter()
@@ -400,7 +415,7 @@ mod tests {
 
     #[test]
     fn super_types() {
-        let result = parse("open class Animal\nclass Dog : Animal() {\n}\n");
+        let result = parse("open class Animal\nclass Dog : Animal() {\n}\n").unwrap();
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         if let Some(meta) = &dog.metadata {
             assert!(!meta.super_types.is_empty());

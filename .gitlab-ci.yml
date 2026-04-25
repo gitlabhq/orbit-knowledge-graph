@@ -45,7 +45,12 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
-  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/components/lgtm-agent/lgtm-agent@main
+  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
+    inputs:
+      automatic: manual
+      labels_enabled: "false"
+      model: "anthropic/claude-opus-4-7"
+      variant: "xhigh"
 
 stages:
   - lint
@@ -175,6 +180,16 @@ generate-config-schema:
     paths:
       - config/schemas/config.schema.json
     expire_in: 24 hours
+
+metrics-catalog-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run metrics:catalog:check
 
 ddl-freshness-check:
   stage: lint

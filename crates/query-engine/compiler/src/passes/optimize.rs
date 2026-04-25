@@ -729,10 +729,14 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         //   - references multiple aliases (cross-table predicate)
         //   - references a group_by alias (group node filter must stay)
         //   - references an alias that isn't an aggregation target
+        //   - is a SIP/cascade subquery filter (structural optimization, not a
+        //     user property filter — folding it into countIf would reference a
+        //     node alias that only exists as a CTE, not in the FROM clause)
         let should_keep = aliases.is_empty()
             || aliases.len() > 1
             || aliases.iter().any(|a| group_aliases.contains(a.as_str()))
-            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()));
+            || aliases.iter().any(|a| !target_aliases.contains(a.as_str()))
+            || matches!(&conjunct, Expr::InSubquery { .. });
 
         if should_keep {
             remaining.push(conjunct);

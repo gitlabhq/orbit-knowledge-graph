@@ -2270,6 +2270,7 @@ dependencies = [
  "serde_json",
  "serde_yaml",
  "smallvec",
+ "smol_str",
  "stacker",
  "strum 0.28.0",
  "swc_atoms",
@@ -2339,6 +2340,7 @@ name = "compiler"
 version = "0.1.0"
 dependencies = [
  "compiler-pipeline-macros",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "jsonschema",
@@ -5262,6 +5264,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-observability"
+version = "0.1.0"
+dependencies = [
+ "opentelemetry",
+ "serde",
+]
+
+[[package]]
 name = "gkg-server"
 version = "0.1.0"
 dependencies = [
@@ -5275,6 +5285,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitlab-client",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "health-check",
@@ -5282,7 +5293,9 @@ dependencies = [
  "jsonschema",
  "jsonwebtoken 10.3.0",
  "labkit",
+ "labkit-events",
  "mimalloc",
+ "nats-client",
  "ontology",
  "opentelemetry",
  "prost 0.14.3",
@@ -5330,6 +5343,7 @@ dependencies = [
  "serde_json",
  "strum 0.28.0",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -6103,10 +6117,12 @@ dependencies = [
  "futures",
  "gitaly-protos",
  "gitlab-client",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "internment",
  "moka",
+ "nats-client",
  "ontology",
  "opentelemetry",
  "parking_lot",
@@ -6250,6 +6266,7 @@ dependencies = [
  "integration-testkit",
  "jsonschema",
  "labkit",
+ "nats-client",
  "ontology",
  "opentelemetry",
  "opentelemetry_sdk",
@@ -6284,6 +6301,7 @@ dependencies = [
  "arrow 58.1.0",
  "arrow-ipc 58.1.0",
  "code-graph",
+ "crossbeam-channel",
  "globset",
  "lance-graph",
  "petgraph 0.8.3",
@@ -6797,7 +6815,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=594f02c#594f02c842bcfcb9fd2d45a16533ba72e0d9df81"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
 dependencies = [
  "axum",
  "futures-util",
@@ -6826,9 +6844,27 @@ dependencies = [
 ]
 
 [[package]]
+name = "labkit-events"
+version = "0.1.0"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
+dependencies = [
+ "base64 0.22.1",
+ "chrono",
+ "parking_lot",
+ "rand 0.9.4",
+ "reqwest 0.12.28",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tracing",
+ "url",
+ "uuid",
+]
+
+[[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=594f02c#594f02c842bcfcb9fd2d45a16533ba72e0d9df81"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
 
 [[package]]
 name = "lance"
@@ -7827,6 +7863,21 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "tempfile",
+]
+
+[[package]]
+name = "nats-client"
+version = "0.1.0"
+dependencies = [
+ "async-nats",
+ "async-trait",
+ "bytes",
+ "futures",
+ "gkg-server-config",
+ "parking_lot",
+ "thiserror 2.0.18",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -9379,6 +9430,7 @@ name = "pipeline"
 version = "0.1.0"
 dependencies = [
  "compiler",
+ "gkg-utils",
  "ontology",
  "thiserror 2.0.18",
 ]
@@ -14804,6 +14856,7 @@ dependencies = [
  "clickhouse",
  "clickhouse-client",
  "futures",
+ "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
  "ontology",

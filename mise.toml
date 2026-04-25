@@ -92,6 +92,10 @@ description = "Fuzz indexer message deserialization"
 run = "cargo build --release"
 description = "Build the crates"
 
+[tasks."build:cli"]
+run = "cargo build --bin orbit --release --features duckdb-client/bundled"
+description = "Build the CLI"
+
 [tasks.test]
 run = "./scripts/run-unit-tests.sh"
 description = "Run unit + non-Docker integration tests (auto-discovers test targets)"
@@ -131,6 +135,11 @@ description = "Run data correctness integration tests"
 run = "cargo nextest run --all-features --test containers --no-fail-fast --retries 0 -E 'test(indexer::)'"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Run indexer integration tests (schema migration, engine, NATS, namespace deletion)"
+
+[tasks."test:integration:indexer:code"]
+run = "cargo nextest run -p integration-tests --retries 0 -E 'test(code_indexing_task)'"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run indexer integration tests (code indexing)"
 
 [tasks.clean]
 run = ["cargo clean", "rm -rf lib/*/"]
@@ -319,6 +328,14 @@ description = "Validate ontology YAML files against JSON schema"
 run = "cargo xtask schema -o config/schemas/config.schema.json"
 description = "Generate JSON Schema for the server configuration"
 
+[tasks."metrics:catalog"]
+run = "cargo xtask metrics-catalog"
+description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
+
+[tasks."metrics:catalog:check"]
+run = "cargo xtask metrics-catalog --check"
+description = "Fail if the committed metrics catalog is out of date"
+
 [tasks."schema:generate:ddl"]
 run = """
 cargo run --bin orbit -- debug ddl 2>/dev/null > config/graph.sql.tmp && mv config/graph.sql.tmp config/graph.sql
@@ -342,3 +359,7 @@ description = "Check for broken links in markdown files"
 depends = ["lint:markdown", "lint:vale", "lint:links"]
 run = "echo 'All doc linters passed'"
 description = "Run all documentation linters"
+
+[tasks."skill:sync:orbit"]
+run = "cp docs/source/queries/query_language.md skills/orbit/references/query_language.md"
+description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"

@@ -363,20 +363,34 @@ fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::trace::Tracer;
 
-    fn parse(code: &str) -> crate::v2::dsl::engine::ParsedDefs {
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
         PythonDsl::spec()
-            .parse_defs_only(
+            .parse_full_collect(
                 code.as_bytes(),
                 "test.py",
                 crate::v2::config::Language::Python,
+                &Tracer::new(false),
             )
-            .unwrap()
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
+            .map_err(|e| {
+                crate::v2::pipeline::PipelineError::parse(
+                    "test.py",
+                    format!("Invalid UTF-8: {:?}", e),
+                )
+            })
     }
 
     #[test]
     fn classes_and_methods() {
-        let result = parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n");
+        let result =
+            parse("class Calculator:\n    def add(self, a, b):\n        return a + b\n").unwrap();
 
         assert_eq!(result.definitions.len(), 2);
         assert_eq!(result.definitions[0].name, "Calculator");
@@ -390,7 +404,7 @@ mod tests {
 
     #[test]
     fn super_types() {
-        let result = parse("class Dog(Animal, Serializable):\n    pass\n");
+        let result = parse("class Dog(Animal, Serializable):\n    pass\n").unwrap();
         let dog = result.definitions.iter().find(|d| d.name == "Dog").unwrap();
         let meta = dog.metadata.as_ref().expect("should have metadata");
         assert_eq!(meta.super_types.len(), 2);
@@ -398,7 +412,7 @@ mod tests {
 
     #[test]
     fn return_type_annotation() {
-        let result = parse("def greet(name: str) -> str:\n    return f'Hello, {name}'\n");
+        let result = parse("def greet(name: str) -> str:\n    return f'Hello, {name}'\n").unwrap();
         let greet = result
             .definitions
             .iter()
@@ -411,25 +425,23 @@ mod tests {
 
     #[test]
     fn call_references() {
-        let mut ref_names = Vec::new();
         let tracer = crate::v2::trace::Tracer::new(false);
-        PythonDsl::spec()
-            .parse_full_and_resolve(
+        let result = PythonDsl::spec()
+            .parse_full_collect(
                 b"def foo():\n    bar()\n",
                 "test.py",
                 crate::v2::config::Language::Python,
-                &mut |name: &str, _, _, _, _| ref_names.push(name.to_string()),
                 &tracer,
-                None,
             )
             .unwrap();
+        let ref_names: Vec<_> = result.refs.iter().map(|r| r.name.as_str()).collect();
         assert!(!ref_names.is_empty());
-        assert!(ref_names.iter().any(|n| n == "bar"));
+        assert!(ref_names.contains(&"bar"));
     }
 
     #[test]
     fn imports() {
-        let result = parse("import os\nfrom pathlib import Path\n");
+        let result = parse("import os\nfrom pathlib import Path\n").unwrap();
         assert!(result.imports.len() >= 2);
         assert!(result.imports.iter().any(|i| i.path == "os"));
         assert!(

@@ -34,6 +34,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
 - Markdown files must pass markdownlint, Vale, and lychee checks (`check-docs`)
 - Response format version bumped when formatter code or response schema changes (`response-schema-version-check`)
+- Metrics catalog regenerated in sync with `gkg-observability` source (`metrics-catalog-check`)
 
 ## Where to find things
 
@@ -88,6 +89,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 | `query-engine/pipeline` | Pipeline abstraction (stages, observers, context) |
 | `query-engine/shared` | Shared pipeline stages (compilation, extraction, output), virtual column resolution (`ColumnResolver` trait, `ColumnResolverRegistry`, `resolve_virtual_columns`) |
 | `query-engine/formatters` | Result formatters (graph, raw row, goon) |
+| `gkg-observability` | Central metric catalog: `MetricSpec` consts + typed `build_*` instrument factories, shared bucket sets, per-domain modules (indexer, query, server). `catalog()` feeds the xtask catalog generator; consumers call `meter()` and the typed builders instead of constructing instruments inline |
 | `indexer` | NATS consumer, SDLC + code + namespace deletion handler modules, worker pools, scheduler, `testkit/`, schema version tracking (`schema_version.rs`), migration orchestrator (`schema_migration.rs`), migration completion detection and table cleanup (`migration_completion.rs`) |
 | `ontology` | Loads/validates YAML ontology, query validation helpers |
 | `code-graph` | Single crate split into `src/v2/` (current pipeline: `pipeline`, `registry`, `config`, `types`, `linker`, `dsl`, `langs/{generic,custom}`) and `src/legacy/` (old `parser` + `linker` paths kept for the existing indexer path). Shared `Range`/`Position`/`IntervalTree` live at `src/utils.rs`. |

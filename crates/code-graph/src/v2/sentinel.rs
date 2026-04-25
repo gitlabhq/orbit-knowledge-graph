@@ -96,7 +96,7 @@ struct ActiveFile {
 
 /// Spawn the sentinel thread. Returns a handle for workers and a
 /// `JoinHandle` for the caller to join on shutdown.
-pub fn spawn_sentinel(timeout: Duration) -> (SentinelHandle, std::thread::JoinHandle<()>) {
+pub fn spawn_sentinel(timeout: Duration) -> Option<(SentinelHandle, std::thread::JoinHandle<()>)> {
     let (tx, rx) = crossbeam_channel::unbounded();
     let handle = SentinelHandle {
         tx,
@@ -139,8 +139,13 @@ pub fn spawn_sentinel(timeout: Duration) -> (SentinelHandle, std::thread::JoinHa
                     }
                 }
             }
-        })
-        .expect("failed to spawn sentinel thread");
+        });
 
-    (handle, join)
+    match join {
+        Ok(join) => Some((handle, join)),
+        Err(e) => {
+            tracing::warn!("failed to spawn sentinel thread: {e}, running without file timeouts");
+            None
+        }
+    }
 }

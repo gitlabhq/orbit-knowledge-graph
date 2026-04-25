@@ -7,6 +7,7 @@ use std::time::Duration;
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
 use gkg_server::auth::JwtValidator;
+use gkg_server::billing::SnowplowBillingTracker;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;
@@ -189,14 +190,34 @@ async fn run_webserver(
     )
     .with_resolver_registry(Arc::new(resolver_registry));
 
+    info!("initializing NATS connection");
+    let nats = Arc::new(
+        nats_client::NatsClient::connect(&config.nats)
+            .await
+            .map_err(|e| anyhow::anyhow!("NATS connection failed: {e}"))?,
+    );
+
+    let kv_services: Arc<dyn nats_client::KvServices> =
+        Arc::new(nats_client::KvServicesImpl::new(Arc::clone(&nats)));
+    let indexing_status_store = indexer::indexing_status::IndexingStatusStore::new(kv_services);
+    grpc_server = grpc_server.with_indexing_status(indexing_status_store);
+
     if config.query.default.graph_query_cache_enabled == Some(true) {
-        info!("initializing NATS connection for graph query cache");
-        let broker = Arc::new(
-            indexer::nats::NatsBroker::connect(&config.nats)
-                .await
-                .map_err(|e| anyhow::anyhow!("NATS connection for query cache failed: {e}"))?,
-        );
-        grpc_server = grpc_server.with_cache_broker(broker);
+        info!("graph query cache enabled");
+        grpc_server = grpc_server.with_cache_broker(nats);
+    }
+
+    if config.billing.enabled {
+        if config.billing.collector_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "billing.enabled=true but billing.collector_url is empty — \
+                 set GKG_BILLING__COLLECTOR_URL"
+            ));
+        }
+        info!(collector_url = %config.billing.collector_url, "initializing billing event tracker");
+        let tracker = SnowplowBillingTracker::from_config(&config.billing)
+            .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_billing(Arc::new(tracker));
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");

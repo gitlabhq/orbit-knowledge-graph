@@ -161,9 +161,10 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
     )
     .await;
 
-    // Unpinned search uses argMaxIfOrNull. Our test user 9010 has latest
-    // version state='active', so it should appear. Other seed users with
-    // state='active' also appear -- we just verify 9010 is among them.
+    // Search uses LIMIT 1 BY to pick the latest version per user. Our test
+    // user 9010 has latest version state='active', so it should appear.
+    // Other seed users with state='active' also appear -- we just verify
+    // 9010 is among them.
     resp.skip_requirement(Requirement::NodeCount);
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
     let node = resp.find_node("User", 9010).unwrap();
@@ -171,9 +172,9 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
 }
 
 /// Search with filter: latest version does NOT match, but a stale version does.
-/// Value filters are checked in both WHERE (prewhere pruning) and HAVING
-/// (argMaxIfOrNull verifies the latest version). The row should be excluded
-/// because the latest version's state is 'blocked', not 'active'.
+/// LIMIT 1 BY picks the latest version per user, then the outer WHERE
+/// checks mutable filters against the deduplicated row. The row should be
+/// excluded because the latest version's state is 'blocked', not 'active'.
 pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (id, username, name, state, user_type, _version, _deleted) VALUES
@@ -196,9 +197,8 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     )
     .await;
 
-    // v1 (state='active') passes WHERE, but HAVING checks argMaxIfOrNull(state)
-    // which returns 'blocked' (latest version). The HAVING filter rejects the group.
-    // User 9011 should NOT appear in results.
+    // LIMIT 1 BY picks the latest version (state='blocked'), then the outer
+    // WHERE state='active' rejects it. User 9011 should NOT appear in results.
     resp.skip_requirement(Requirement::NodeCount);
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
@@ -624,7 +624,7 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     control.assert_str("state", "merged");
 }
 
-/// Aggregation excludes deleted entities from count via _nf_* CTE argMax.
+/// Aggregation excludes deleted entities from count via _nf_* CTE dedup.
 /// MR 9900 has latest version _deleted=true. It should not be counted.
 /// MR 9901 is alive and serves as the control (should be counted).
 pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {

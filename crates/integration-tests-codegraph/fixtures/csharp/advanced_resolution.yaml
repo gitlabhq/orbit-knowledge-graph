@@ -1,0 +1,292 @@
+name: "C# advanced resolution — this/base, static, var inference, nested, chains"
+
+fixtures:
+  - path: Models/Animal.cs
+    content: |
+      namespace Zoo.Models
+      {
+          public class Animal
+          {
+              public string Name { get; set; }
+
+              public virtual string Speak()
+              {
+                  return "...";
+              }
+
+              public void Eat()
+              {
+              }
+          }
+      }
+
+  - path: Models/Dog.cs
+    content: |
+      namespace Zoo.Models
+      {
+          public class Dog : Animal
+          {
+              private int _age;
+
+              public Dog(string name, int age)
+              {
+                  Name = name;
+                  _age = age;
+              }
+
+              public override string Speak()
+              {
+                  return "Woof";
+              }
+
+              public void Fetch()
+              {
+                  this.Speak();
+                  base.Eat();
+              }
+
+              public int GetAge()
+              {
+                  return _age;
+              }
+          }
+      }
+
+  - path: Services/Kennel.cs
+    content: |
+      using Zoo.Models;
+
+      namespace Zoo.Services
+      {
+          public class Kennel
+          {
+              public static Kennel Create()
+              {
+                  return new Kennel();
+              }
+
+              public Dog Register(string name)
+              {
+                  var dog = new Dog(name, 1);
+                  dog.Fetch();
+                  return dog;
+              }
+
+              public void ProcessAll()
+              {
+                  var kennel = Kennel.Create();
+                  var dog = kennel.Register("Rex");
+                  dog.Speak();
+                  dog.GetAge();
+              }
+          }
+      }
+
+  - path: Services/Outer.cs
+    content: |
+      namespace Zoo.Services
+      {
+          public class Outer
+          {
+              public class Inner
+              {
+                  public void InnerMethod() {}
+              }
+
+              public void OuterMethod()
+              {
+                  var inner = new Inner();
+                  inner.InnerMethod();
+              }
+          }
+      }
+
+  - path: Services/Helpers.cs
+    content: |
+      namespace Zoo.Services
+      {
+          public static class Helpers
+          {
+              public static string Format(string input)
+              {
+                  return input.ToUpper();
+              }
+
+              public static int Count(string input)
+              {
+                  return input.Length;
+              }
+          }
+      }
+
+  - path: App/Program.cs
+    content: |
+      using Zoo.Models;
+      using Zoo.Services;
+
+      namespace Zoo.App
+      {
+          public class Program
+          {
+              public void Run()
+              {
+                  var dog = new Dog("Rex", 3);
+                  dog.Speak();
+                  dog.Fetch();
+
+                  var kennel = Kennel.Create();
+                  var registered = kennel.Register("Buddy");
+
+                  Helpers.Format("hello");
+                  Helpers.Count("world");
+              }
+          }
+      }
+
+tests:
+  # ── this.Method() ────────────────────────────────────────────
+  - name: "this.Speak() in Dog.Fetch resolves to Dog.Speak"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
+        AND callee.fqn = 'Zoo.Models.Dog.Speak'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Models.Dog.Fetch, callee: Zoo.Models.Dog.Speak, kind: Calls } }
+
+  # ── base.Method() ────────────────────────────────────────────
+  - name: "base.Eat() in Dog.Fetch resolves to Animal.Eat"
+    skip: true  # base is anonymous in C# tree-sitter
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Models.Dog.Fetch'
+        AND callee.fqn = 'Zoo.Models.Animal.Eat'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Models.Dog.Fetch, callee: Zoo.Models.Animal.Eat, kind: Calls } }
+
+  # ── var type inference from constructor ───────────────────────
+  - name: "var dog = new Dog() → dog.Fetch() in Kennel.Register"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Services.Kennel.Register'
+        AND callee.fqn = 'Zoo.Models.Dog.Fetch'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Services.Kennel.Register, callee: Zoo.Models.Dog.Fetch, kind: Calls } }
+
+  - name: "var dog = new Dog() → dog.Speak() in Program.Run"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.App.Program.Run'
+        AND callee.fqn = 'Zoo.Models.Dog.Speak'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Speak, kind: Calls } }
+
+  - name: "var dog = new Dog() → dog.Fetch() in Program.Run"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.App.Program.Run'
+        AND callee.fqn = 'Zoo.Models.Dog.Fetch'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog.Fetch, kind: Calls } }
+
+  # ── Constructor CALLS edge ────────────────────────────────────
+  - name: "new Dog() in Program.Run produces CALLS to Dog class"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.App.Program.Run'
+        AND callee.fqn = 'Zoo.Models.Dog'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Models.Dog, kind: Calls } }
+
+  # ── Static method calls ──────────────────────────────────────
+  - name: "Kennel.Create() same-namespace static call"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
+        AND callee.fqn = 'Zoo.Services.Kennel.Create'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Services.Kennel.Create, kind: Calls } }
+
+  - name: "Helpers.Format() cross-namespace static call"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.App.Program.Run'
+        AND callee.fqn = 'Zoo.Services.Helpers.Format'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Services.Helpers.Format, kind: Calls } }
+
+  - name: "Helpers.Count() cross-namespace static call"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.App.Program.Run'
+        AND callee.fqn = 'Zoo.Services.Helpers.Count'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.App.Program.Run, callee: Zoo.Services.Helpers.Count, kind: Calls } }
+
+  # ── Chained calls with var inference ──────────────────────────
+  - name: "var kennel = Kennel.Create() → kennel.Register()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
+        AND callee.fqn = 'Zoo.Services.Kennel.Register'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Services.Kennel.Register, kind: Calls } }
+
+  - name: "Return type inference: dog = kennel.Register() → dog.Speak()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Services.Kennel.ProcessAll'
+        AND callee.fqn = 'Zoo.Models.Dog.Speak'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Services.Kennel.ProcessAll, callee: Zoo.Models.Dog.Speak, kind: Calls } }
+
+  # ── Nested class ──────────────────────────────────────────────
+  - name: "Nested Inner class with correct FQN and type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Zoo.Services.Outer.Inner'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Zoo.Services.Outer.Inner, type: Class } }
+
+  - name: "Nested Inner.InnerMethod with correct FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Zoo.Services.Outer.Inner.InnerMethod'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Zoo.Services.Outer.Inner.InnerMethod, type: Method } }
+
+  - name: "inner.InnerMethod() resolves from OuterMethod"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Zoo.Services.Outer.OuterMethod'
+        AND callee.fqn = 'Zoo.Services.Outer.Inner.InnerMethod'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Zoo.Services.Outer.OuterMethod, callee: Zoo.Services.Outer.Inner.InnerMethod, kind: Calls } }

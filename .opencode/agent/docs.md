@@ -36,6 +36,7 @@ Use `AGENTS.md` "Where to find things" as your index. Examples of drift to watch
 
 - MR adds a new crate → `AGENTS.md` crate map and `README.md` architecture section need updating
 - MR changes the query DSL or proto definitions → `docs/design-documents/querying/` may describe old behavior
+- MR adds/changes public API surface or user-visible features → `skills/orbit/SKILL.md`, `skills/orbit/references/recipes.md`, `skills/orbit/references/troubleshooting.md` may need new content. CI only enforces byte-equal sync of `query_language.md`; the rest of the hand-written skill prose (discovery workflow, recipes, gotchas, agent guidelines) won't flag itself as stale. Example: indexing progress added in !1015.
 - MR modifies auth or redaction logic → `docs/design-documents/security.md` may be stale
 - MR adds a CI job or changes enforcement → `AGENTS.md` "What CI enforces" list is incomplete
 - MR changes Helm charts or infra → `README.md` Helm Charts table and `docs/dev/runbooks/server_configuration.md` may drift
@@ -51,6 +52,7 @@ Only flag real drift. Skip cosmetic issues, formatting, and things markdownlint/
 - **SSOT desync**: `README.md` tables (repos, epics, infra, people, helm charts) don't reflect structural changes in the MR
 - **AGENTS.md desync**: crate map, CI enforcement list, or "where to find things" table is outdated after the MR
 - **New undocumented surface**: new gRPC endpoint, server mode, config option, or ontology node/edge type with no doc coverage
+- **Stale agent skill**: hand-written parts of `skills/orbit/` (SKILL.md, recipes.md, troubleshooting.md) don't reflect new API behavior. Byte-equal `query_language.md` is CI-enforced separately; this bullet is for the prose that isn't.
 
 ## Commenting
 

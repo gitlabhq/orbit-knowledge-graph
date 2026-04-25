@@ -1,0 +1,20 @@
+[package]
+name = "nats-client"
+version.workspace = true
+edition = "2024"
+license = "LicenseRef-EE"
+
+[features]
+default = []
+testkit = []
+
+[dependencies]
+async-nats = { workspace = true }
+async-trait = { workspace = true }
+bytes = { workspace = true }
+futures = { workspace = true }
+gkg-server-config = { path = "../gkg-server-config" }
+parking_lot = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tracing = { workspace = true }

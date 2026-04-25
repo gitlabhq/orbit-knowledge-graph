@@ -1,6 +1,7 @@
 use crate::utils::Range;
-use oxc_resolver::{ResolveOptions, Resolver};
+use oxc_resolver::{FileMetadata, FileSystem, FileSystemOs, ResolveOptions, ResolverGeneric};
 use std::collections::HashSet;
+use std::io;
 use std::path::{Path, PathBuf};
 
 use super::super::types::{
@@ -11,13 +12,115 @@ use super::super::{JsExportName, JsModuleBinding, JsModuleIndex, JsModuleRecord,
 use super::webpack::load_project_aliases;
 
 pub struct JsCrossFileResolver {
-    import_resolver: Resolver,
-    require_resolver: Resolver,
+    import_resolver: ResolverGeneric<RepoFileSystem>,
+    require_resolver: ResolverGeneric<RepoFileSystem>,
     root_dir: PathBuf,
 }
 
 const MAX_EXPORT_RESOLUTION_DEPTH: usize = 10;
+const MAX_RESOLVER_READ_BYTES: u64 = 512 * 1024;
 type ResolvedBinding = (String, ExportedBinding);
+
+struct RepoFileSystem {
+    root_dir: PathBuf,
+}
+
+impl RepoFileSystem {
+    fn new_for_root(root_dir: &Path) -> Self {
+        Self {
+            root_dir: root_dir
+                .canonicalize()
+                .unwrap_or_else(|_| root_dir.to_path_buf()),
+        }
+    }
+
+    fn candidate_path(&self, path: &Path) -> PathBuf {
+        if path.is_absolute() {
+            path.to_path_buf()
+        } else {
+            self.root_dir.join(path)
+        }
+    }
+
+    fn existing_contained_path(&self, path: &Path) -> io::Result<PathBuf> {
+        let path = self.candidate_path(path);
+        gkg_utils::fs::contained_canonical_path(&self.root_dir, &path).ok_or_else(|| {
+            io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!("resolver path outside repository: {}", path.display()),
+            )
+        })
+    }
+
+    fn contained_or_missing_path(&self, path: &Path) -> io::Result<PathBuf> {
+        let path = self.candidate_path(path);
+        if let Some(path) = gkg_utils::fs::contained_canonical_path(&self.root_dir, &path) {
+            return Ok(path);
+        }
+
+        let ancestor = gkg_utils::fs::longest_existing_ancestor(&path);
+        let ancestor = ancestor.canonicalize()?;
+        if ancestor.starts_with(&self.root_dir) {
+            return Ok(path);
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::PermissionDenied,
+            format!("resolver path outside repository: {}", path.display()),
+        ))
+    }
+
+    fn check_read_size(&self, path: &Path) -> io::Result<()> {
+        let len = std::fs::metadata(path)?.len();
+        if len > MAX_RESOLVER_READ_BYTES {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!(
+                    "resolver metadata file too large: {} bytes, max {MAX_RESOLVER_READ_BYTES}",
+                    len
+                ),
+            ));
+        }
+        Ok(())
+    }
+}
+
+impl FileSystem for RepoFileSystem {
+    fn new() -> Self {
+        Self {
+            root_dir: PathBuf::new(),
+        }
+    }
+
+    fn read(&self, path: &Path) -> io::Result<Vec<u8>> {
+        let path = self.existing_contained_path(path)?;
+        self.check_read_size(&path)?;
+        std::fs::read(path)
+    }
+
+    fn read_to_string(&self, path: &Path) -> io::Result<String> {
+        FileSystemOs::validate_string(self.read(path)?)
+    }
+
+    fn metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        let path = self.contained_or_missing_path(path)?;
+        FileSystemOs::metadata(&path)
+    }
+
+    fn symlink_metadata(&self, path: &Path) -> io::Result<FileMetadata> {
+        let path = self.contained_or_missing_path(path)?;
+        FileSystemOs::symlink_metadata(&path)
+    }
+
+    fn read_link(&self, path: &Path) -> Result<PathBuf, oxc_resolver::ResolveError> {
+        let path = self.existing_contained_path(path)?;
+        FileSystemOs::read_link(&path)
+    }
+
+    fn canonicalize(&self, path: &Path) -> io::Result<PathBuf> {
+        self.existing_contained_path(path)
+    }
+}
 
 impl JsCrossFileResolver {
     pub fn new(probe: &WorkspaceProbe) -> Self {
@@ -148,7 +251,10 @@ impl JsCrossFileResolver {
             .resolve_file(abs_path, specifier)
     }
 
-    fn resolver_for_mode(&self, resolution_mode: JsResolutionMode) -> &Resolver {
+    fn resolver_for_mode(
+        &self,
+        resolution_mode: JsResolutionMode,
+    ) -> &ResolverGeneric<RepoFileSystem> {
         match resolution_mode {
             JsResolutionMode::Import => &self.import_resolver,
             JsResolutionMode::Require => &self.require_resolver,
@@ -387,13 +493,11 @@ fn create_resolver(
     root_dir: &Path,
     resolution_mode: JsResolutionMode,
     aliases: Vec<(String, Vec<oxc_resolver::AliasValue>)>,
-) -> Resolver {
-    Resolver::new(base_resolve_options(
-        probe,
-        root_dir,
-        resolution_mode,
-        aliases,
-    ))
+) -> ResolverGeneric<RepoFileSystem> {
+    ResolverGeneric::new_with_file_system(
+        RepoFileSystem::new_for_root(root_dir),
+        base_resolve_options(probe, root_dir, resolution_mode, aliases),
+    )
 }
 
 fn base_resolve_options(
@@ -442,7 +546,14 @@ fn base_resolve_options(
     // check containment ourselves.
     let root_owned = root_dir.to_path_buf();
     let restrictions = vec![oxc_resolver::Restriction::Fn(std::sync::Arc::new(
-        move |path: &Path| path.starts_with(&root_owned),
+        move |path: &Path| {
+            let path = if path.is_absolute() {
+                path.to_path_buf()
+            } else {
+                root_owned.join(path)
+            };
+            path.starts_with(&root_owned)
+        },
     ))];
 
     ResolveOptions {
@@ -454,5 +565,62 @@ fn base_resolve_options(
         alias,
         restrictions,
         ..ResolveOptions::default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{MAX_RESOLVER_READ_BYTES, RepoFileSystem};
+    use oxc_resolver::FileSystem;
+    use std::io::ErrorKind;
+    use tempfile::tempdir;
+
+    #[test]
+    fn repo_file_system_rejects_reads_outside_repo_root() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let outside_root = temp.path().join("outside");
+        std::fs::create_dir_all(&repo_root).unwrap();
+        std::fs::create_dir_all(&outside_root).unwrap();
+
+        let outside_file = outside_root.join("package.json");
+        std::fs::write(&outside_file, "{}").unwrap();
+
+        let fs = RepoFileSystem::new_for_root(&repo_root);
+        let err = fs.read(&outside_file).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::PermissionDenied);
+    }
+
+    #[test]
+    fn repo_file_system_caps_resolver_metadata_reads() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        let package_dir = repo_root.join("node_modules/pkg");
+        std::fs::create_dir_all(&package_dir).unwrap();
+
+        let package_json = package_dir.join("package.json");
+        std::fs::write(
+            &package_json,
+            vec![b'a'; MAX_RESOLVER_READ_BYTES as usize + 1],
+        )
+        .unwrap();
+
+        let fs = RepoFileSystem::new_for_root(&repo_root);
+        let err = fs.read(&package_json).unwrap_err();
+        assert_eq!(err.kind(), ErrorKind::InvalidData);
+    }
+
+    #[test]
+    fn repo_file_system_resolves_relative_paths_under_repo_root() {
+        let temp = tempdir().unwrap();
+        let repo_root = temp.path().join("repo");
+        std::fs::create_dir_all(repo_root.join("src")).unwrap();
+        std::fs::write(repo_root.join("src/index.js"), "export const ok = true;").unwrap();
+
+        let fs = RepoFileSystem::new_for_root(&repo_root);
+        let content = fs
+            .read_to_string(std::path::Path::new("src/index.js"))
+            .unwrap();
+        assert_eq!(content, "export const ok = true;");
     }
 }

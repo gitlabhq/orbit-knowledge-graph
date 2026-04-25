@@ -23,6 +23,11 @@ pre-commit:
       glob:
         - "AGENTS.md"
         - "CLAUDE.md"
+    - name: orbit-skill-docs-sync
+      run: diff docs/source/queries/query_language.md skills/orbit/references/query_language.md
+      glob:
+        - "docs/source/queries/query_language.md"
+        - "skills/orbit/references/query_language.md"
     - name: ontology-schema
       run: mise run ontology:validate
       glob: "fixtures/ontology/**/*.yaml"
@@ -37,3 +42,9 @@ pre-commit:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/lib.rs"
         - "crates/gkg-server/schemas/query_response.json"
+    - name: metrics-catalog-check
+      run: mise run metrics:catalog:check
+      glob:
+        - "crates/gkg-observability/**/*.rs"
+        - "crates/xtask/src/metrics_catalog.rs"
+        - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"

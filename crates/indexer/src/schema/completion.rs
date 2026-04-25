@@ -25,7 +25,7 @@ use crate::locking::LockService;
 use crate::metrics::CompletionMetrics;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{
-    VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
+    SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,
     read_all_versions, read_migrating_version, table_prefix,
 };
 
@@ -42,38 +42,55 @@ SELECT count(DISTINCT extractAll(key, '^ns\\.(\\d+)')[1]) AS ns_count \
 FROM {table:Identifier} FINAL \
 WHERE key LIKE 'ns.%' AND _deleted = false";
 
-/// SQL to count distinct namespaces in the new-prefix code indexing checkpoint table.
-/// The `traversal_path` column has the form `org_id/namespace_id/...`. We extract the
-/// second path segment (the root namespace ID) and count distinct values.
-const COUNT_CODE_CHECKPOINT_NAMESPACES: &str = "\
-SELECT count(DISTINCT splitByChar('/', traversal_path)[2]) AS ns_count \
-FROM {table:Identifier} FINAL \
-WHERE _deleted = false AND traversal_path != ''";
-
 /// SQL to count enabled namespaces from the datalake.
 const COUNT_ENABLED_NAMESPACES: &str = "\
 SELECT count(DISTINCT root_namespace_id) AS ns_count \
 FROM siphon_knowledge_graph_enabled_namespaces \
 WHERE _siphon_deleted = false";
 
-/// SQL to count enabled namespaces that have at least one project in the
-/// datalake. A namespace with zero projects never publishes code indexing
-/// tasks, so it can never produce a checkpoint row. Without this filter the
-/// code-completion predicate would be unsatisfiable whenever an enabled
-/// namespace is empty — blocking schema migration promotion indefinitely.
-///
-/// The `[2]` index on `splitByChar('/', traversal_path)` extracts the root
-/// namespace ID from a project path of the form `org_id/root_ns_id/...`,
-/// matching the convention used by `COUNT_CODE_CHECKPOINT_NAMESPACES`.
-const COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES: &str = "\
-SELECT count(DISTINCT root_namespace_id) AS ns_count \
+/// SQL to count code-eligible projects in the datalake: projects belonging
+/// to any enabled namespace. The denominator of the code-coverage telemetry
+/// emitted from `is_migration_complete` (the predicate doesn't gate on
+/// coverage; see the doc comment there).
+const COUNT_CODE_ELIGIBLE_PROJECTS: &str = "\
+SELECT count(DISTINCT p.id) AS ns_count \
+FROM project_namespace_traversal_paths AS p \
+INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
+  ON startsWith(p.traversal_path, enabled.traversal_path) \
+WHERE p.deleted = false \
+  AND enabled._siphon_deleted = false";
+
+/// SQL to fetch enabled namespaces' traversal paths from the datalake. Used
+/// to bridge the cluster boundary: the checkpoint table lives in the graph
+/// DB and cannot join to the datalake, so we pull the small enabled-path set
+/// first and pass it as an Array(String) parameter to the graph-side count.
+const FETCH_ENABLED_TRAVERSAL_PATHS: &str = "\
+SELECT DISTINCT traversal_path \
 FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false \
-  AND root_namespace_id IN ( \
-    SELECT DISTINCT toInt64OrZero(splitByChar('/', traversal_path)[2]) \
-    FROM project_namespace_traversal_paths \
-    WHERE deleted = false \
-  )";
+WHERE _siphon_deleted = false";
+
+/// SQL to count distinct projects in the new-prefix code indexing
+/// checkpoint table that fall under at least one currently-enabled
+/// namespace traversal path. The numerator of the code-coverage telemetry.
+///
+/// Scoping by the enabled-path set keeps the reported coverage honest:
+/// without it, leftover checkpoint rows from disabled namespaces would
+/// inflate the numerator and produce a misleading "approaching 100%" log
+/// line while currently-enabled namespaces were still under-indexed.
+const COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: &str = "\
+SELECT count(DISTINCT project_id) AS ns_count \
+FROM {table:Identifier} FINAL \
+WHERE _deleted = false \
+  AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+
+/// SQL to read the wall-clock age of the row that marked the given version
+/// as `migrating`. Used to populate the `migrating_age_seconds` gauge so
+/// operators can alert on migrations stuck in the migrating state for too
+/// long.
+const READ_MIGRATING_AGE: &str = "\
+SELECT toUInt64(dateDiff('second', created_at, now())) AS age_seconds \
+FROM gkg_schema_version FINAL \
+WHERE status = 'migrating' AND version = {version:UInt32}";
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -164,8 +181,19 @@ impl MigrationCompletionChecker {
             .map_err(|e| TaskError::new(format!("read migrating version: {e}")))?;
 
         let Some(migrating_version) = migrating else {
+            // No migration in progress — keep the age gauge accurate so an
+            // alert on `migrating_age_seconds > N` doesn't fire on the
+            // post-promotion last-recorded value.
+            self.metrics.record_migrating_age(0);
             return Ok(None);
         };
+
+        // Surface "is migration stuck?" as a direct gauge. A bounded query
+        // failure here shouldn't block completion; log and continue with an
+        // unrecorded age this tick.
+        if let Ok(age) = self.fetch_migrating_age(migrating_version).await {
+            self.metrics.record_migrating_age(age);
+        }
 
         info!(
             version = migrating_version,
@@ -235,13 +263,23 @@ impl MigrationCompletionChecker {
     /// Returns `true` if all enabled namespaces have checkpoint entries in both
     /// the new-prefix SDLC and code indexing checkpoint tables.
     ///
-    /// Completion is checkpoint-based, not row-count-based. A checkpoint entry
-    /// means the indexing pipeline ran for that scope — it does not validate
-    /// that the output tables contain the expected number of rows. This is the
-    /// standard pattern for CDC/ETL systems: the checkpoint proves the pipeline
-    /// executed and committed, but silent data-loss bugs (e.g. an upstream
-    /// source returning empty results) would not be caught. Full data
-    /// correctness validation is deferred to staging E2E tests (issue #443).
+    /// Migration completion is **SDLC-only**. Code-indexing coverage is
+    /// observed and reported but does not gate promotion: code data fills
+    /// `v{N}_code_indexing_checkpoint` continuously via
+    /// `NamespaceCodeBackfillDispatcher` regardless of migration state, so
+    /// gating promotion on it would couple a slow process (per-repo archive
+    /// download + indexing) to a fast one (per-namespace SDLC pull) and risk
+    /// stalling rollouts indefinitely when individual projects can't be
+    /// indexed (see the analysis on gitlab-org/orbit/knowledge-graph!1035
+    /// note 3286051182).
+    ///
+    /// Completion is checkpoint-based, not row-count-based. A checkpoint
+    /// entry means the SDLC pipeline ran for that namespace; it does not
+    /// validate the output tables contain the expected number of rows. This
+    /// is the standard pattern for CDC/ETL systems: the checkpoint proves
+    /// the pipeline executed and committed, but silent data-loss bugs
+    /// would not be caught. Full data correctness validation is deferred
+    /// to staging E2E tests (issue #443).
     async fn is_migration_complete(&self, version: u32) -> Result<bool, String> {
         let prefix = table_prefix(version);
 
@@ -260,42 +298,101 @@ impl MigrationCompletionChecker {
             return Ok(false);
         }
 
-        // Code-eligible enabled namespaces: those with at least one project.
-        // Empty namespaces never publish code tasks and cannot produce
-        // checkpoint rows, so they must be excluded from the code side of
-        // the completion predicate.
-        let code_eligible_count = self
-            .count_datalake_namespaces(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES)
-            .await
-            .map_err(|e| format!("count code-eligible enabled namespaces: {e}"))?;
-
-        // SDLC completeness: namespaces with entries in the new checkpoint table.
+        // SDLC completeness: namespaces with entries in the new checkpoint
+        // table. This is the *only* gate for promotion.
         let sdlc_table = format!("{prefix}checkpoint");
         let sdlc_count = self
             .count_table_namespaces(COUNT_SDLC_CHECKPOINT_NAMESPACES, &sdlc_table)
             .await
             .map_err(|e| format!("count SDLC checkpoint namespaces: {e}"))?;
 
-        // Code indexing completeness: namespaces with entries in the new
-        // code_indexing_checkpoint table.
+        // Code-indexing telemetry. Computed for visibility and emitted as a
+        // structured log field below; explicitly NOT part of the promotion
+        // predicate. The backfill dispatcher fills
+        // `v{N}_code_indexing_checkpoint` after promotion until coverage
+        // approaches 100%, and operators watch the `code_coverage` field on
+        // the "migration completion status" log line to track progress.
         let code_table = format!("{prefix}code_indexing_checkpoint");
-        let code_count = self
-            .count_table_namespaces(COUNT_CODE_CHECKPOINT_NAMESPACES, &code_table)
+        let (eligible_projects, indexed_projects, coverage) = self
+            .compute_code_coverage(&code_table)
             .await
-            .map_err(|e| format!("count code checkpoint namespaces: {e}"))?;
+            .map_err(|e| format!("compute code coverage: {e}"))?;
 
         info!(
             version,
             sdlc_indexed_namespaces = sdlc_count,
-            code_indexed_namespaces = code_count,
             enabled_namespaces = enabled_count,
-            code_eligible_enabled_namespaces = code_eligible_count,
+            code_indexed_projects = indexed_projects,
+            code_eligible_projects = eligible_projects,
+            code_coverage = coverage,
             "migration completion status"
         );
 
-        // SDLC must cover every enabled namespace; code only needs to cover
-        // the subset that has projects.
-        Ok(sdlc_count >= enabled_count && code_count >= code_eligible_count)
+        // Story-telling gauges: indexed/eligible per scope, labeled by
+        // version_band. Dashboards compute the ratio; alerts fire on
+        // per-scope thresholds (sdlc < 100% during migration window, code
+        // < 95% for >24h post-promotion, etc.).
+        let current = *SCHEMA_VERSION;
+        self.metrics
+            .record_units("sdlc", version, current, sdlc_count, enabled_count);
+        self.metrics.record_units(
+            "code",
+            version,
+            current,
+            indexed_projects,
+            eligible_projects,
+        );
+
+        // Promotion fires as soon as SDLC has covered every enabled
+        // namespace. Code coverage is tracked in `coverage` above for
+        // observability, but it explicitly does NOT block promotion.
+        Ok(sdlc_count >= enabled_count)
+    }
+
+    /// Reads the wall-clock age (in seconds) of the row that marked the
+    /// given version as `migrating`. Used to populate the
+    /// `gkg.schema.migrating_age_seconds` gauge.
+    async fn fetch_migrating_age(&self, version: u32) -> Result<u64, String> {
+        let batches = self
+            .graph
+            .query(READ_MIGRATING_AGE)
+            .param("version", version)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "age_seconds", 0))
+            .ok_or_else(|| "no age_seconds in result".to_string())
+    }
+
+    /// Returns `(eligible_projects, indexed_projects, coverage_ratio)` for
+    /// the given checkpoint table. Used for telemetry only — the migration
+    /// promotion predicate does not gate on coverage. See [`is_migration_complete`]
+    /// for the rationale.
+    async fn compute_code_coverage(&self, code_table: &str) -> Result<(u64, u64, f64), String> {
+        let eligible_projects = self
+            .count_datalake_namespaces(COUNT_CODE_ELIGIBLE_PROJECTS)
+            .await
+            .map_err(|e| format!("count code-eligible projects: {e}"))?;
+
+        let enabled_paths = self
+            .fetch_enabled_traversal_paths()
+            .await
+            .map_err(|e| format!("fetch enabled traversal paths: {e}"))?;
+
+        let indexed_projects = self
+            .count_scoped_checkpoint_projects(code_table, &enabled_paths)
+            .await
+            .map_err(|e| format!("count code-indexed projects: {e}"))?;
+
+        let coverage = if eligible_projects == 0 {
+            1.0
+        } else {
+            indexed_projects as f64 / eligible_projects as f64
+        };
+        Ok((eligible_projects, indexed_projects, coverage))
     }
 
     /// Counts distinct namespaces in a checkpoint table using the given query.
@@ -327,6 +424,47 @@ impl MigrationCompletionChecker {
             .ok_or_else(|| "no ns_count in result".to_string())
     }
 
+    /// Pulls the (small) set of enabled-namespace traversal paths from the
+    /// datalake. The cluster boundary forces this to be a separate query
+    /// from the checkpoint count.
+    async fn fetch_enabled_traversal_paths(&self) -> Result<Vec<String>, String> {
+        let batches = self
+            .datalake
+            .query(FETCH_ENABLED_TRAVERSAL_PATHS)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).map_err(|e| e.to_string())
+    }
+
+    /// Counts distinct projects in `code_table` whose `traversal_path` falls
+    /// under at least one of `enabled_paths`. Empty `enabled_paths` short-
+    /// circuits to 0 so the coverage ratio behaves correctly when no
+    /// namespaces are enabled.
+    async fn count_scoped_checkpoint_projects(
+        &self,
+        code_table: &str,
+        enabled_paths: &[String],
+    ) -> Result<u64, String> {
+        if enabled_paths.is_empty() {
+            return Ok(0);
+        }
+        let batches = self
+            .graph
+            .query(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED)
+            .param("table", code_table)
+            .param("paths", enabled_paths)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+            .ok_or_else(|| "no ns_count in result".to_string())
+    }
+
     /// Drops tables for retired versions outside the retention window, then
     /// marks them `dropped`.
     async fn cleanup_old_versions(
@@ -349,6 +487,7 @@ impl MigrationCompletionChecker {
             return Ok(());
         }
 
+        let current_version = retained.first().map(|v| v.version).unwrap_or(0);
         let to_cleanup: Vec<&VersionEntry> = retained[max..].to_vec();
 
         for entry in to_cleanup {
@@ -369,14 +508,16 @@ impl MigrationCompletionChecker {
                         .map_err(|e| {
                             TaskError::new(format!("mark v{} dropped: {e}", entry.version))
                         })?;
-                    self.metrics.record_cleanup(entry.version, "success");
+                    self.metrics
+                        .record_cleanup(entry.version, current_version, "success");
                     info!(
                         version = entry.version,
                         "version tables dropped and marked as dropped"
                     );
                 }
                 Err(e) => {
-                    self.metrics.record_cleanup(entry.version, "failure");
+                    self.metrics
+                        .record_cleanup(entry.version, current_version, "failure");
                     warn!(
                         version = entry.version,
                         error = %e,
@@ -446,51 +587,82 @@ mod tests {
     }
 
     #[test]
-    fn code_checkpoint_query_uses_identifier_param() {
-        assert!(
-            COUNT_CODE_CHECKPOINT_NAMESPACES.contains("{table:Identifier}"),
-            "code checkpoint query must use Identifier param for table name"
-        );
-    }
-
-    #[test]
-    fn code_checkpoint_query_filters_deleted() {
-        assert!(COUNT_CODE_CHECKPOINT_NAMESPACES.contains("_deleted = false"));
-    }
-
-    #[test]
-    fn code_checkpoint_query_extracts_namespace_from_traversal_path() {
-        assert!(
-            COUNT_CODE_CHECKPOINT_NAMESPACES.contains("splitByChar"),
-            "code checkpoint query must extract namespace ID from traversal_path"
-        );
-    }
-
-    #[test]
     fn count_enabled_namespaces_query_filters_deleted() {
         assert!(COUNT_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
     }
 
     #[test]
-    fn count_code_eligible_enabled_namespaces_query_filters_deleted() {
-        assert!(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("_siphon_deleted = false"));
-        assert!(COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("deleted = false"));
-    }
-
-    #[test]
-    fn count_code_eligible_enabled_namespaces_query_filters_on_projects() {
-        assert!(
-            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("project_namespace_traversal_paths"),
-            "code-eligible count must restrict to namespaces with at least one project"
-        );
-        assert!(
-            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("splitByChar"),
-            "code-eligible count must extract root namespace ID from project traversal_path"
-        );
-    }
-
-    #[test]
     fn migration_lock_key_matches_schema_migration() {
         assert_eq!(MIGRATION_LOCK_KEY, "schema_migration");
+    }
+
+    #[test]
+    fn count_code_eligible_projects_query_filters_deleted() {
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("p.deleted = false"));
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("enabled._siphon_deleted = false"));
+    }
+
+    #[test]
+    fn count_code_eligible_projects_query_counts_distinct_project_ids() {
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("count(DISTINCT p.id)"));
+    }
+
+    #[test]
+    fn count_code_eligible_projects_uses_traversal_path_join() {
+        assert!(
+            COUNT_CODE_ELIGIBLE_PROJECTS
+                .contains("startsWith(p.traversal_path, enabled.traversal_path)"),
+            "eligible-projects must join via traversal_path, not splitByChar"
+        );
+        assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("splitByChar"));
+    }
+
+    #[test]
+    fn count_code_checkpoint_projects_scoped_query_shape() {
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{table:Identifier}"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("count(DISTINCT project_id)"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("_deleted = false"));
+    }
+
+    #[test]
+    fn count_code_checkpoint_projects_scoped_filters_by_enabled_paths() {
+        assert!(
+            COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{paths:Array(String)}"),
+            "scoped checkpoint count must take an Array(String) param to filter by enabled namespaces — \
+             without it, leftover checkpoint rows from disabled namespaces inflate coverage"
+        );
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
+    }
+
+    #[test]
+    fn fetch_enabled_traversal_paths_query_filters_deleted() {
+        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("_siphon_deleted = false"));
+        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("DISTINCT traversal_path"));
+    }
+
+    /// Coverage math is informational (the predicate doesn't gate on it),
+    /// but the math is still load-bearing for the structured log line that
+    /// operators watch to track backfill progress on the active version.
+    #[test]
+    fn code_coverage_math_thresholding() {
+        fn coverage(indexed: u64, eligible: u64) -> f64 {
+            if eligible == 0 {
+                1.0
+            } else {
+                indexed as f64 / eligible as f64
+            }
+        }
+
+        // Empty eligibility: short-circuits to 1.0 so the structured log
+        // doesn't emit NaN on a brand-new install with no enabled namespaces.
+        assert_eq!(coverage(0, 0), 1.0);
+
+        // Mid-rollout coverage stays below 1.0 while backfill is in flight.
+        // 14 of ~8,602 was the actual orbit-prd state right after v7
+        // promoted; this asserts the ratio reflects that progress.
+        assert!(coverage(14, 8602) < 0.01);
+
+        // Saturated coverage approaches 1.0 once the backfill catches up.
+        assert!((coverage(8600, 8602) - 0.9998).abs() < 0.001);
     }
 }

@@ -106,6 +106,44 @@ fn default_datalake_batch_size() -> u64 {
     1_000_000
 }
 
+fn default_halving_initial_block_size() -> u64 {
+    100_000
+}
+
+fn default_halving_min_block_size() -> u64 {
+    1024
+}
+
+/// Tuning for the SDLC datalake extract retry loop.
+///
+/// The first attempt uses the datalake's configured `max_block_size`
+/// (typically `datalake_batch_size`). After a failure, subsequent attempts
+/// seed at `halving_initial_block_size` and halve on each retry, with
+/// `halving_min_block_size` as the floor.
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct DatalakeRetryConfig {
+    /// Starting `max_block_size` (in rows) for the halving series after the
+    /// first failure. Sized to stay safely under the Arrow String int32
+    /// offset cap even on unexpectedly heavy text columns.
+    #[serde(default = "default_halving_initial_block_size")]
+    pub halving_initial_block_size: u64,
+
+    /// Floor for the halving series. Prevents pathologically tiny scans
+    /// after repeated retries.
+    #[serde(default = "default_halving_min_block_size")]
+    pub halving_min_block_size: u64,
+}
+
+impl Default for DatalakeRetryConfig {
+    fn default() -> Self {
+        Self {
+            halving_initial_block_size: default_halving_initial_block_size(),
+            halving_min_block_size: default_halving_min_block_size(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct GlobalHandlerConfig {
     #[serde(flatten)]
@@ -113,6 +151,9 @@ pub struct GlobalHandlerConfig {
 
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
 }
 
 impl Default for GlobalHandlerConfig {
@@ -120,6 +161,7 @@ impl Default for GlobalHandlerConfig {
         Self {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
         }
     }
 }
@@ -131,6 +173,9 @@ pub struct NamespaceHandlerConfig {
 
     #[serde(default = "default_datalake_batch_size")]
     pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
 }
 
 impl Default for NamespaceHandlerConfig {
@@ -138,6 +183,56 @@ impl Default for NamespaceHandlerConfig {
         Self {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
+        }
+    }
+}
+
+fn default_code_indexing_max_file_size_bytes() -> u64 {
+    5_000_000
+}
+
+fn default_code_indexing_max_files() -> usize {
+    1_000_000
+}
+
+fn default_code_indexing_respect_gitignore() -> bool {
+    true
+}
+
+fn default_code_indexing_per_file_timeout_ms() -> u64 {
+    5000
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+#[schemars(deny_unknown_fields)]
+pub struct CodeIndexingPipelineConfig {
+    #[serde(default = "default_code_indexing_max_file_size_bytes")]
+    pub max_file_size_bytes: u64,
+    #[serde(default = "default_code_indexing_max_files")]
+    pub max_files: usize,
+    #[serde(default = "default_code_indexing_respect_gitignore")]
+    pub respect_gitignore: bool,
+    #[serde(default)]
+    pub worker_threads: usize,
+    #[serde(default)]
+    pub max_concurrent_languages: usize,
+    /// Global per-file resolution timeout in milliseconds.
+    /// Applied to all languages unless the language's own DSL rules
+    /// specify a different value. 0 = no global timeout.
+    #[serde(default = "default_code_indexing_per_file_timeout_ms")]
+    pub per_file_timeout_ms: u64,
+}
+
+impl Default for CodeIndexingPipelineConfig {
+    fn default() -> Self {
+        Self {
+            max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
+            max_files: default_code_indexing_max_files(),
+            respect_gitignore: default_code_indexing_respect_gitignore(),
+            worker_threads: 0,
+            max_concurrent_languages: 0,
+            per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),
         }
     }
 }
@@ -146,6 +241,8 @@ impl Default for NamespaceHandlerConfig {
 pub struct CodeIndexingTaskHandlerConfig {
     #[serde(flatten)]
     pub engine: HandlerConfiguration,
+    #[serde(default)]
+    pub pipeline: CodeIndexingPipelineConfig,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
@@ -328,6 +425,10 @@ pub struct EngineConfiguration {
     /// Per-handler configuration.
     #[serde(default)]
     pub handlers: HandlersConfiguration,
+
+    /// Datalake retry tuning shared by all SDLC pipelines.
+    #[serde(default)]
+    pub datalake_retry: DatalakeRetryConfig,
 }
 
 impl Default for EngineConfiguration {
@@ -336,6 +437,7 @@ impl Default for EngineConfiguration {
             max_concurrent_workers: Self::default_max_concurrent_workers(),
             concurrency_groups: HashMap::new(),
             handlers: HandlersConfiguration::default(),
+            datalake_retry: DatalakeRetryConfig::default(),
         }
     }
 }

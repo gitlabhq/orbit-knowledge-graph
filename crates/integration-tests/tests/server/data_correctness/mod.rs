@@ -78,6 +78,7 @@ async fn data_correctness() {
         aggregation::aggregation_nested_path_includes_child_projects,
         aggregation::aggregation_non_nested_path_only,
         aggregation::aggregation_group_by_non_default_redaction_id_column,
+        aggregation::aggregation_three_node_with_cascade_intermediate,
         aggregation::aggregation_empty_security_context_rejects_at_compile,
         aggregation::aggregation_no_group_by_with_filtered_other_node,
         aggregation::aggregation_no_group_by_preserves_relationship_kind,

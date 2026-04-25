@@ -8,23 +8,37 @@ use arrow::array::{Array, StringArray, UInt64Array};
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
+use indexer::indexing_status::IndexingStatusStore;
 use ontology::Ontology;
 use query_engine::compiler::{ResultContext, codegen};
 use tonic::Status;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
-use crate::proto::{GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, ProjectsStatus};
+use crate::proto::{
+    GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
+    ProjectsStatus,
+};
 
 use self::input::GraphStatusInput;
 
 pub struct GraphStatusService {
     client: Arc<ArrowClickHouseClient>,
     ontology: Arc<Ontology>,
+    indexing_status: Option<IndexingStatusStore>,
 }
 
 impl GraphStatusService {
     pub fn new(client: Arc<ArrowClickHouseClient>, ontology: Arc<Ontology>) -> Self {
-        Self { client, ontology }
+        Self {
+            client,
+            ontology,
+            indexing_status: None,
+        }
+    }
+
+    pub fn with_indexing_status(mut self, store: IndexingStatusStore) -> Self {
+        self.indexing_status = Some(store);
+        self
     }
 
     pub async fn get_status(&self, traversal_path: &str) -> Result<GetGraphStatusResponse, Status> {
@@ -47,12 +61,16 @@ impl GraphStatusService {
             self.execute_projects_query(&ast).await
         };
 
-        let (entity_counts, projects) = tokio::try_join!(entity_counts_future, projects_future)?;
+        let indexing_future = self.fetch_indexing_status(traversal_path);
+
+        let (entity_counts, projects, indexing) =
+            tokio::try_join!(entity_counts_future, projects_future, indexing_future)?;
 
         info!(
             entity_count = entity_counts.len(),
             projects_indexed = projects.indexed,
             projects_total = projects.total_known,
+            indexing_state = ?IndexingState::try_from(indexing.as_ref().map_or(0, |s| s.state)).ok(),
             "Graph status fetched"
         );
 
@@ -60,7 +78,45 @@ impl GraphStatusService {
         Ok(GetGraphStatusResponse {
             projects: Some(projects),
             domains,
+            indexing,
         })
+    }
+
+    async fn fetch_indexing_status(
+        &self,
+        traversal_path: &str,
+    ) -> Result<Option<IndexingStatus>, Status> {
+        let Some(store) = &self.indexing_status else {
+            return Ok(None);
+        };
+
+        let progress = match store.get(traversal_path).await {
+            Ok(p) => p,
+            Err(error) => {
+                warn!(%error, traversal_path, "failed to read indexing progress from NATS KV");
+                return Ok(Some(IndexingStatus {
+                    state: IndexingState::Unknown.into(),
+                    ..Default::default()
+                }));
+            }
+        };
+
+        Ok(Some(match progress {
+            None => IndexingStatus {
+                state: IndexingState::NotIndexed.into(),
+                ..Default::default()
+            },
+            Some(p) => {
+                let state = derive_indexing_state(&p);
+                IndexingStatus {
+                    state: state.into(),
+                    last_started_at: Some(p.last_started_at.to_rfc3339()),
+                    last_completed_at: p.last_completed_at.map(|t| t.to_rfc3339()),
+                    last_duration_ms: p.last_duration_ms,
+                    last_error: p.last_error,
+                }
+            }
+        }))
     }
 
     async fn execute_count_query(
@@ -148,6 +204,15 @@ impl GraphStatusService {
     }
 }
 
+fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) -> IndexingState {
+    match progress.last_completed_at {
+        None => IndexingState::Backfilling,
+        Some(completed) if progress.last_started_at > completed => IndexingState::Indexing,
+        Some(_) if progress.last_error.is_some() => IndexingState::Error,
+        Some(_) => IndexingState::Indexed,
+    }
+}
+
 fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
@@ -175,7 +240,9 @@ fn present_domain_response(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use chrono::{Duration, Utc};
     use clickhouse_client::ClickHouseConfigurationExt;
+    use indexer::indexing_status::IndexingProgress;
 
     fn test_ontology() -> Arc<Ontology> {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
@@ -245,5 +312,84 @@ mod tests {
         let status = result.unwrap_err();
         assert_eq!(status.code(), tonic::Code::InvalidArgument);
         assert!(status.message().contains("traversal_path"));
+    }
+
+    #[test]
+    fn derive_state_not_indexed_when_no_progress() {
+        let status = IndexingStatus {
+            state: IndexingState::NotIndexed.into(),
+            ..Default::default()
+        };
+        assert_eq!(status.state, IndexingState::NotIndexed as i32);
+    }
+
+    #[test]
+    fn derive_state_backfilling_when_started_but_not_completed() {
+        let progress = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: None,
+            last_duration_ms: None,
+            last_error: None,
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
+    }
+
+    #[test]
+    fn derive_state_indexed_when_completed_successfully() {
+        let started = Utc::now();
+        let progress = IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(started + Duration::seconds(5)),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexed);
+    }
+
+    #[test]
+    fn derive_state_indexed_when_started_equals_completed() {
+        let now = Utc::now();
+        let progress = IndexingProgress {
+            last_started_at: now,
+            last_completed_at: Some(now),
+            last_duration_ms: Some(0),
+            last_error: None,
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexed);
+    }
+
+    #[test]
+    fn derive_state_error_when_completed_with_error() {
+        let started = Utc::now();
+        let progress = IndexingProgress {
+            last_started_at: started,
+            last_completed_at: Some(started + Duration::seconds(1)),
+            last_duration_ms: Some(1000),
+            last_error: Some("deadline exceeded".to_string()),
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Error);
+    }
+
+    #[test]
+    fn derive_state_backfilling_when_error_but_not_completed() {
+        let progress = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: None,
+            last_duration_ms: None,
+            last_error: Some("connection reset".to_string()),
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Backfilling);
+    }
+
+    #[test]
+    fn derive_state_indexing_when_started_after_completion() {
+        let completed = Utc::now() - Duration::seconds(60);
+        let progress = IndexingProgress {
+            last_started_at: Utc::now(),
+            last_completed_at: Some(completed),
+            last_duration_ms: Some(5000),
+            last_error: None,
+        };
+        assert_eq!(derive_indexing_state(&progress), IndexingState::Indexing);
     }
 }

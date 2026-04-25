@@ -14,6 +14,8 @@ pub struct LocalGraphData {
 }
 
 /// Map ontology fields to BatchBuilder column specs.
+/// DuckDB's Appender does not support dictionary-encoded Arrow arrays,
+/// so all string columns use plain Utf8.
 fn entity_specs(ontology: &Ontology, entity: &str) -> Vec<ColumnSpec> {
     ontology
         .local_entity_fields(entity)
@@ -182,7 +184,7 @@ pub fn convert_v2_graph(
         .expect("local_db.edge_table.name must be configured")
         .to_string();
 
-    let edge_rows: Vec<_> = graph
+    let mut edge_rows: Vec<_> = graph
         .graph
         .edge_indices()
         .map(|ei| {
@@ -197,10 +199,74 @@ pub fn convert_v2_graph(
             }
         })
         .collect();
+
+    // Sort edges by low-cardinality columns for better encoding.
+    edge_rows.sort_by(|a, b| {
+        a.edge_kind
+            .cmp(b.edge_kind)
+            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
+            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
+    });
+
     let edge_batch = EdgeRow::to_record_batch(&edge_rows, &edge_specs(ontology), &())?;
     tables.push((edge_table, edge_batch));
 
     Ok(LocalGraphData { tables })
+}
+
+/// `GraphConverter` for DuckDB. Wraps `convert_v2_graph`.
+pub struct DuckDbConverter {
+    pub project_id: i64,
+    pub branch: String,
+    pub commit_sha: String,
+    pub ontology: std::sync::Arc<Ontology>,
+}
+
+impl code_graph::v2::GraphConverter for DuckDbConverter {
+    fn convert(
+        &self,
+        graph: code_graph::v2::linker::CodeGraph,
+    ) -> std::result::Result<Vec<(String, RecordBatch)>, code_graph::v2::SinkError> {
+        convert_v2_graph(
+            &graph,
+            self.project_id,
+            &self.branch,
+            &self.commit_sha,
+            &self.ontology,
+        )
+        .map(|data| data.tables)
+        .map_err(|e| code_graph::v2::SinkError(format!("DuckDB graph conversion: {e}")))
+    }
+}
+
+/// `BatchSink` implementation for DuckDB. Wraps a `DuckDbClient` behind
+/// a Mutex (DuckDB is single-writer).
+pub struct DuckDbSink {
+    client: std::sync::Mutex<crate::DuckDbClient>,
+}
+
+impl DuckDbSink {
+    pub fn new(client: crate::DuckDbClient) -> Self {
+        Self {
+            client: std::sync::Mutex::new(client),
+        }
+    }
+}
+
+impl code_graph::v2::BatchSink for DuckDbSink {
+    fn write_batch(
+        &self,
+        table: &str,
+        batch: &RecordBatch,
+    ) -> std::result::Result<(), code_graph::v2::SinkError> {
+        if batch.num_rows() == 0 {
+            return Ok(());
+        }
+        let client = self.client.lock().unwrap();
+        client
+            .insert_batch(table, batch)
+            .map_err(|e| code_graph::v2::SinkError(format!("DuckDB write to {table}: {e}")))
+    }
 }
 
 #[cfg(test)]

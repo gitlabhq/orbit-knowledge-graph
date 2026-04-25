@@ -104,12 +104,13 @@ mod tests {
     #[tokio::test]
     async fn handle_processes_pipelines() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000);
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
 
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore),
             test_metrics(),
+            Default::default(),
         ));
 
         let handler = GlobalHandler::new(
@@ -126,11 +127,13 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
+        let mock_nats = Arc::new(MockNatsServices::new());
         let context = HandlerContext::new(
             destination,
-            Arc::new(MockNatsServices::new()),
+            mock_nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         );
 
         let result = handler.handle(context, envelope).await;

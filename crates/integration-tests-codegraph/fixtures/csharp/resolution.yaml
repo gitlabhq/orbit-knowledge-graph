@@ -1,0 +1,204 @@
+name: "C# resolution — definitions, containment, calls, imports"
+
+fixtures:
+  - path: Controllers/UserController.cs
+    content: |
+      using MyApp.Services;
+      using MyApp.Models;
+
+      namespace MyApp.Controllers
+      {
+          public class UserController
+          {
+              private readonly UserService _userService;
+
+              public UserController()
+              {
+                  _userService = new UserService();
+              }
+
+              public User GetUser(int id)
+              {
+                  return _userService.FindById(id);
+              }
+
+              public void CreateUser(string name)
+              {
+                  var user = new User(name);
+                  _userService.Save(user);
+              }
+          }
+      }
+
+  - path: Services/UserService.cs
+    content: |
+      using MyApp.Models;
+
+      namespace MyApp.Services
+      {
+          public class UserService
+          {
+              public User FindById(int id)
+              {
+                  return new User("test");
+              }
+
+              public void Save(User user)
+              {
+              }
+          }
+      }
+
+  - path: Models/User.cs
+    content: |
+      namespace MyApp.Models
+      {
+          public class User
+          {
+              public string Name { get; set; }
+              public int Age { get; set; }
+
+              public User(string name)
+              {
+                  Name = name;
+              }
+
+              public string GetDisplayName()
+              {
+                  return Name;
+              }
+          }
+      }
+
+  - path: Models/Role.cs
+    content: |
+      namespace MyApp.Models
+      {
+          public enum Role
+          {
+              Admin,
+              Editor,
+              Viewer
+          }
+
+          public interface IPermission
+          {
+              bool CanEdit();
+          }
+      }
+
+tests:
+  # ── Definition types ──────────────────────────────────────────
+  - name: "All class definitions with correct FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { row: { fqn: MyApp.Controllers.UserController } }
+      - { row: { fqn: MyApp.Services.UserService } }
+      - { row: { fqn: MyApp.Models.User } }
+
+  - name: "Enum with correct type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'MyApp.Models.Role'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: MyApp.Models.Role, type: Enum } }
+
+  - name: "Interface with correct type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'MyApp.Models.IPermission'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: MyApp.Models.IPermission, type: Interface } }
+
+  - name: "Method definitions with correct FQNs and types"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Method'
+        AND d.fqn STARTS WITH 'MyApp.'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 6 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+      - { row: { fqn: MyApp.Controllers.UserController.GetUser, type: Method } }
+      - { row: { fqn: MyApp.Controllers.UserController.CreateUser, type: Method } }
+      - { row: { fqn: MyApp.Services.UserService.FindById, type: Method } }
+      - { row: { fqn: MyApp.Services.UserService.Save, type: Method } }
+      - { row: { fqn: MyApp.Models.User.GetDisplayName, type: Method } }
+      - { row: { fqn: MyApp.Models.IPermission.CanEdit, type: Method } }
+
+  - name: "Property definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Property'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: MyApp.Models.User.Name, type: Property } }
+      - { row: { fqn: MyApp.Models.User.Age, type: Property } }
+
+  - name: "Enum members with correct FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumMember'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: MyApp.Models.Role.Admin } }
+      - { row: { fqn: MyApp.Models.Role.Editor } }
+      - { row: { fqn: MyApp.Models.Role.Viewer } }
+
+  # ── Containment (DEFINES edges) ────────────────────────────────
+  - name: "Class defines method with correct edge"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'MyApp.Controllers.UserController'
+        AND child.fqn = 'MyApp.Controllers.UserController.GetUser'
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: MyApp.Controllers.UserController, child: MyApp.Controllers.UserController.GetUser, kind: Defines } }
+
+  - name: "Enum defines all members"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'MyApp.Models.Role'
+        AND e.edge_kind = 'Defines'
+      RETURN child.fqn AS fqn, e.edge_kind AS kind
+    assert:
+      - { row_count: 3 }
+      - { no_nulls: fqn }
+      - { row: { fqn: MyApp.Models.Role.Admin, kind: Defines } }
+      - { row: { fqn: MyApp.Models.Role.Editor, kind: Defines } }
+      - { row: { fqn: MyApp.Models.Role.Viewer, kind: Defines } }
+
+  # ── CALLS edges (cross-file resolution) ────────────────────────
+  - name: "Controller.GetUser calls UserService.FindById"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MyApp.Controllers.UserController.GetUser'
+        AND callee.fqn = 'MyApp.Services.UserService.FindById'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: MyApp.Controllers.UserController.GetUser, callee: MyApp.Services.UserService.FindById, kind: Calls } }
+
+  - name: "Controller.CreateUser calls UserService.Save"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'MyApp.Controllers.UserController.CreateUser'
+        AND callee.fqn = 'MyApp.Services.UserService.Save'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: MyApp.Controllers.UserController.CreateUser, callee: MyApp.Services.UserService.Save, kind: Calls } }

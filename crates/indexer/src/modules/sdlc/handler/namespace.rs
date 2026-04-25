@@ -1,11 +1,11 @@
 use std::collections::BTreeMap;
 use std::sync::Arc;
-use std::time::Instant;
 
 use crate::checkpoint::namespace_position_key;
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::types::{Envelope, Event, SerializationError, Subscription};
 use async_trait::async_trait;
+use chrono::Utc;
 use gkg_server_config::{HandlerConfiguration, NamespaceHandlerConfig};
 use tracing::info;
 
@@ -57,7 +57,7 @@ impl Handler for NamespaceHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
 
-        let started_at = Instant::now();
+        let started_at = Utc::now();
         info!(
             namespace_id = payload.namespace,
             organization_id = payload.organization,
@@ -66,11 +66,18 @@ impl Handler for NamespaceHandler {
         );
 
         let traversal_path = format!("{}/{}/", payload.organization, payload.namespace);
+        context
+            .indexing_status
+            .record_start(&traversal_path, started_at)
+            .await;
 
         let pipeline_context = PipelineContext {
             watermark: payload.watermark,
             position_key: namespace_position_key(payload.namespace),
-            base_conditions: BTreeMap::from([("traversal_path".to_string(), traversal_path)]),
+            base_conditions: BTreeMap::from([(
+                "traversal_path".to_string(),
+                traversal_path.clone(),
+            )]),
         };
 
         let result = self
@@ -83,9 +90,23 @@ impl Handler for NamespaceHandler {
             )
             .await;
 
-        let elapsed = started_at.elapsed();
+        let completed_at = Utc::now();
+        let elapsed = completed_at
+            .signed_duration_since(started_at)
+            .to_std()
+            .unwrap_or_default();
         self.metrics
             .record_handler_duration("namespace_handler", elapsed.as_secs_f64());
+
+        context
+            .indexing_status
+            .record_completion(
+                &traversal_path,
+                started_at,
+                completed_at,
+                result.as_ref().err().map(ToString::to_string),
+            )
+            .await;
 
         if result.is_ok() {
             info!(
@@ -111,12 +132,13 @@ mod tests {
     #[tokio::test]
     async fn handle_processes_pipelines() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000);
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
 
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore),
             test_metrics(),
+            Default::default(),
         ));
 
         let handler = NamespaceHandler::new(
@@ -135,11 +157,13 @@ mod tests {
         let envelope = TestEnvelopeFactory::simple(&payload);
 
         let destination = Arc::new(MockDestination::new());
+        let mock_nats = Arc::new(MockNatsServices::new());
         let context = HandlerContext::new(
             destination,
-            Arc::new(MockNatsServices::new()),
+            mock_nats.clone(),
             Arc::new(MockLockService::new()),
             ProgressNotifier::noop(),
+            Arc::new(crate::indexing_status::IndexingStatusStore::new(mock_nats)),
         );
 
         let result = handler.handle(context, envelope).await;

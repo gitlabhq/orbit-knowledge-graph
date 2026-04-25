@@ -3,12 +3,11 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use chrono::{DateTime, Utc};
-use code_graph::legacy::linker::analysis::types::GraphData;
-use code_graph::legacy::linker::indexer::{IndexingConfig, RepositoryIndexer};
-use code_graph::legacy::linker::loading::DirectoryFileSource;
-use tracing::{debug, info, warn};
+use code_graph::v2::{Pipeline, PipelineConfig};
+use gkg_server_config::CodeIndexingPipelineConfig;
+use tracing::{info, warn};
 
-use super::arrow_converter::ArrowConverter;
+use super::arrow_converter::{self, IndexerEnvelope};
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
@@ -44,6 +43,8 @@ pub struct CodeIndexingPipeline {
     stale_data_cleaner: Arc<dyn StaleDataCleaner>,
     metrics: CodeMetrics,
     table_names: Arc<CodeTableNames>,
+    ontology: Arc<ontology::Ontology>,
+    pipeline_config: CodeIndexingPipelineConfig,
 }
 
 impl CodeIndexingPipeline {
@@ -53,6 +54,8 @@ impl CodeIndexingPipeline {
         stale_data_cleaner: Arc<dyn StaleDataCleaner>,
         metrics: CodeMetrics,
         table_names: Arc<CodeTableNames>,
+        ontology: Arc<ontology::Ontology>,
+        pipeline_config: CodeIndexingPipelineConfig,
     ) -> Self {
         Self {
             resolver,
@@ -60,6 +63,8 @@ impl CodeIndexingPipeline {
             stale_data_cleaner,
             metrics,
             table_names,
+            ontology,
+            pipeline_config,
         }
     }
 
@@ -211,60 +216,104 @@ impl CodeIndexingPipeline {
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
     ) -> Result<(), HandlerError> {
-        let repo_path = repo_dir.to_string_lossy().to_string();
-        let indexer = RepositoryIndexer::with_graph_identity(
-            format!("project-{project_id}"),
-            repo_path.clone(),
+        let indexing_start = Instant::now();
+        let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
+            Some(std::time::Duration::from_millis(
+                self.pipeline_config.per_file_timeout_ms,
+            ))
+        } else {
+            None
+        };
+        let config = PipelineConfig {
+            max_file_size: self.pipeline_config.max_file_size_bytes,
+            max_files: self.pipeline_config.max_files,
+            respect_gitignore: self.pipeline_config.respect_gitignore,
+            worker_threads: self.pipeline_config.worker_threads,
+            max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
+            per_file_timeout,
+            ..Default::default()
+        };
+        let tracer = code_graph::v2::trace::Tracer::new(false);
+
+        let envelope = IndexerEnvelope::new(
+            traversal_path.to_string(),
             project_id,
             branch.to_string(),
+            commit_sha.to_string(),
+            indexed_at,
         );
-        let file_source = DirectoryFileSource::new(repo_path);
 
-        let indexing_start = Instant::now();
-        let result = indexer
-            .index_files(file_source, &IndexingConfig::default())
-            .await
-            .map_err(|e| HandlerError::Processing(format!("failed to index code: {e}")))
-            .record_error_stage(&self.metrics, "indexing")?;
+        let converter: Arc<dyn code_graph::v2::GraphConverter> =
+            Arc::new(arrow_converter::IndexerConverter {
+                envelope,
+                ontology: self.ontology.clone(),
+                table_names: self.table_names.clone(),
+            });
+        let sink: Arc<dyn code_graph::v2::BatchSink> =
+            Arc::new(arrow_converter::ClickHouseSink::new(
+                context.destination.clone(),
+                tokio::runtime::Handle::current(),
+            ));
+
+        // Run the synchronous pipeline on a blocking thread so the tokio
+        // worker is freed. The writer thread inside the pipeline calls
+        // runtime.block_on() which would deadlock a single-threaded
+        // tokio runtime if we blocked the worker here.
+        let repo_dir_owned = repo_dir.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            Pipeline::run_with_tracer(&repo_dir_owned, config, tracer, converter, sink)
+        })
+        .await
+        .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;
         self.metrics
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
         self.metrics
-            .record_files_processed(result.skipped_files.len() as u64, "skipped");
+            .record_files_processed(result.stats.files_discovered as u64, "discovered");
         self.metrics
-            .record_files_processed(result.errored_files.len() as u64, "errored");
+            .record_repository_source_size(result.stats.bytes_discovered);
+        self.metrics
+            .record_files_processed(result.stats.files_parsed as u64, "parsed");
+        self.metrics
+            .record_files_processed(result.stats.files_skipped as u64, "skipped");
+        self.metrics
+            .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
+        self.metrics
+            .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
+        self.metrics
+            .record_nodes_indexed(result.stats.edges_count as u64, "edge");
 
-        if !result.errored_files.is_empty() {
+        // Record typed pipeline errors (file read, parse, conversion failures).
+        for graph_error in &result.graph_errors {
+            self.metrics
+                .errors
+                .add(1, &[KeyValue::new("stage", graph_error.stage())]);
+        }
+
+        let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
+        if parse_error_count > 0 {
             warn!(
                 project_id,
                 branch = %branch,
-                count = result.errored_files.len(),
+                count = parse_error_count,
                 "some files failed to parse during code indexing"
             );
+            self.metrics
+                .record_files_processed(parse_error_count as u64, "errored");
+        }
+
+        if let Some(error) = result.errors.iter().find(|error| error.fatal) {
+            self.metrics
+                .errors
+                .add(1, &[KeyValue::new("stage", error.stage)]);
+            return Err(HandlerError::Processing(format!(
+                "fatal code indexing pipeline error during {} for {}: {}",
+                error.stage, error.file_path, error.error
+            )));
         }
 
         context.progress.notify_in_progress().await;
-
-        let Some(graph_data) = result.graph_data else {
-            debug!(project_id, branch = %branch, "indexing produced no graph data, skipping write");
-            return Ok(());
-        };
-
-        self.metrics
-            .record_files_processed(graph_data.file_nodes.len() as u64, "parsed");
-        self.metrics.record_node_counts(&graph_data);
-
-        self.write_graph_data(
-            context,
-            project_id,
-            branch,
-            commit_sha,
-            traversal_path,
-            indexed_at,
-            &graph_data,
-        )
-        .await?;
 
         if let Err(error) = self
             .stale_data_cleaner
@@ -280,109 +329,5 @@ impl CodeIndexingPipeline {
         }
 
         Ok(())
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    async fn write_graph_data(
-        &self,
-        ctx: &HandlerContext,
-        project_id: i64,
-        branch: &str,
-        commit_sha: &str,
-        traversal_path: &str,
-        indexed_at: DateTime<Utc>,
-        graph_data: &GraphData,
-    ) -> Result<(), HandlerError> {
-        let converter = ArrowConverter::new(
-            traversal_path.to_string(),
-            project_id,
-            branch.to_string(),
-            commit_sha.to_string(),
-            indexed_at,
-        );
-
-        let converted = converter
-            .convert_all(graph_data)
-            .map_err(|e| HandlerError::Processing(format!("arrow conversion failed: {e}")))
-            .record_error_stage(&self.metrics, "arrow_conversion")?;
-
-        self.write_batch(ctx, &self.table_names.branch, &converted.branch)
-            .await?;
-        self.write_batch(ctx, &self.table_names.directory, &converted.directories)
-            .await?;
-        self.write_batch(ctx, &self.table_names.file, &converted.files)
-            .await?;
-        self.write_batch(ctx, &self.table_names.definition, &converted.definitions)
-            .await?;
-        self.write_batch(
-            ctx,
-            &self.table_names.imported_symbol,
-            &converted.imported_symbols,
-        )
-        .await?;
-        self.write_edge_batches(ctx, &converted.edges).await?;
-
-        Ok(())
-    }
-
-    /// Split an edges RecordBatch by `relationship_kind` and write each
-    /// group to the ontology-resolved table.
-    async fn write_edge_batches(
-        &self,
-        ctx: &HandlerContext,
-        edges: &arrow::record_batch::RecordBatch,
-    ) -> Result<(), HandlerError> {
-        use arrow::array::AsArray;
-        use std::collections::HashMap;
-
-        if edges.num_rows() == 0 {
-            return Ok(());
-        }
-
-        let rel_col = edges
-            .column_by_name("relationship_kind")
-            .expect("edges batch must have relationship_kind column");
-        let rel_array = rel_col.as_string::<i32>();
-
-        // Group row indices by destination table.
-        let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
-        for i in 0..edges.num_rows() {
-            let rel_kind = rel_array.value(i);
-            let table = self.table_names.edge_table_for(rel_kind);
-            table_rows.entry(table).or_default().push(i as u32);
-        }
-
-        for (table, indices) in &table_rows {
-            let idx_array = arrow::array::UInt32Array::from(indices.clone());
-            let batch = arrow::compute::take_record_batch(edges, &idx_array)
-                .map_err(|e| HandlerError::Processing(format!("edge batch split failed: {e}")))?;
-            self.write_batch(ctx, table, &batch).await?;
-        }
-
-        Ok(())
-    }
-
-    async fn write_batch(
-        &self,
-        ctx: &HandlerContext,
-        table: &str,
-        batch: &arrow::record_batch::RecordBatch,
-    ) -> Result<(), HandlerError> {
-        if batch.num_rows() == 0 {
-            return Ok(());
-        }
-
-        let writer = ctx
-            .destination
-            .new_batch_writer(table)
-            .await
-            .map_err(|e| HandlerError::Processing(format!("writer creation failed: {e}")))
-            .record_error_stage(&self.metrics, "write")?;
-
-        writer
-            .write_batch(std::slice::from_ref(batch))
-            .await
-            .map_err(|e| HandlerError::Processing(format!("write to {table} failed: {e}")))
-            .record_error_stage(&self.metrics, "write")
     }
 }

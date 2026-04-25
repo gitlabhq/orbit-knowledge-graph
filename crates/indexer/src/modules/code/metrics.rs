@@ -1,10 +1,10 @@
-use code_graph::legacy::linker::analysis::types::GraphData;
+use chrono::{DateTime, Utc};
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram, Meter};
 
+use gkg_observability::indexer::code;
+
 use crate::handler::HandlerError;
-use crate::metrics::DURATION_BUCKETS;
 
 #[derive(Clone)]
 pub struct CodeMetrics {
@@ -14,6 +14,8 @@ pub struct CodeMetrics {
     pub(super) repository_resolution_strategy: Counter<u64>,
     pub(super) repository_cleanup: Counter<u64>,
     pub(super) repository_empty: Counter<u64>,
+    pub(super) repository_indexing_completed: Counter<u64>,
+    pub(super) repository_source_size: Histogram<u64>,
     pub(super) indexing_duration: Histogram<f64>,
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
@@ -22,82 +24,26 @@ pub struct CodeMetrics {
 
 impl CodeMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg_indexer_code");
+        let meter = gkg_observability::meter();
         Self::with_meter(&meter)
     }
 
     pub fn with_meter(meter: &Meter) -> Self {
-        let events_processed = meter
-            .u64_counter("gkg.indexer.code.events.processed")
-            .with_description("Total push events processed by the code indexing handler")
-            .build();
-
-        let handler_duration = meter
-            .f64_histogram("gkg.indexer.code.handler.duration")
-            .with_unit("s")
-            .with_description("End-to-end duration of processing a single push event")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let repository_fetch_duration = meter
-            .f64_histogram("gkg.indexer.code.repository.fetch.duration")
-            .with_unit("s")
-            .with_description("Duration of downloading a repository archive")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let repository_resolution_strategy = meter
-            .u64_counter("gkg.indexer.code.repository.resolution")
-            .with_description(
-                "Repository resolution strategy used (full_download, empty_repository)",
-            )
-            .build();
-
-        let repository_cleanup = meter
-            .u64_counter("gkg.indexer.code.repository.cleanup")
-            .with_description("Repository disk cleanup outcomes (success, failure)")
-            .build();
-
-        let repository_empty = meter
-            .u64_counter("gkg.indexer.code.repository.empty")
-            .with_description(
-                "Projects short-circuited as terminal-empty at fetch time, labelled by reason (not_found, server_error)",
-            )
-            .build();
-
-        let indexing_duration = meter
-            .f64_histogram("gkg.indexer.code.indexing.duration")
-            .with_unit("s")
-            .with_description("Duration of code-graph parsing and analysis")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let files_processed = meter
-            .u64_counter("gkg.indexer.code.files.processed")
-            .with_description("Total files seen by the code-graph indexer")
-            .build();
-
-        let nodes_indexed = meter
-            .u64_counter("gkg.indexer.code.nodes.indexed")
-            .with_description("Total graph nodes and edges indexed by the code handler")
-            .build();
-
-        let errors = meter
-            .u64_counter("gkg.indexer.code.errors")
-            .with_description("Total code indexing errors by pipeline stage")
-            .build();
-
         Self {
-            events_processed,
-            handler_duration,
-            repository_fetch_duration,
-            repository_resolution_strategy,
-            repository_cleanup,
-            repository_empty,
-            indexing_duration,
-            files_processed,
-            nodes_indexed,
-            errors,
+            events_processed: code::EVENTS_PROCESSED.build_counter_u64(meter),
+            handler_duration: code::HANDLER_DURATION.build_histogram_f64(meter),
+            repository_fetch_duration: code::REPOSITORY_FETCH_DURATION.build_histogram_f64(meter),
+            repository_resolution_strategy: code::REPOSITORY_RESOLUTION_STRATEGY
+                .build_counter_u64(meter),
+            repository_cleanup: code::REPOSITORY_CLEANUP.build_counter_u64(meter),
+            repository_empty: code::REPOSITORY_EMPTY.build_counter_u64(meter),
+            repository_indexing_completed: code::REPOSITORY_INDEXING_COMPLETED
+                .build_counter_u64(meter),
+            repository_source_size: code::REPOSITORY_SOURCE_SIZE.build_histogram_u64(meter),
+            indexing_duration: code::INDEXING_DURATION.build_histogram_f64(meter),
+            files_processed: code::FILES_PROCESSED.build_counter_u64(meter),
+            nodes_indexed: code::NODES_INDEXED.build_counter_u64(meter),
+            errors: code::ERRORS.build_counter_u64(meter),
         }
     }
 }
@@ -105,50 +51,46 @@ impl CodeMetrics {
 impl CodeMetrics {
     pub(super) fn record_resolution_strategy(&self, strategy: &'static str) {
         self.repository_resolution_strategy
-            .add(1, &[KeyValue::new("strategy", strategy)]);
+            .add(1, &[KeyValue::new(code::labels::STRATEGY, strategy)]);
     }
 
     pub(super) fn record_cleanup(&self, outcome: &'static str) {
         self.repository_cleanup
-            .add(1, &[KeyValue::new("outcome", outcome)]);
+            .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
     pub(super) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed
-            .add(1, &[KeyValue::new("outcome", outcome)]);
+            .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
+    }
+
+    pub(super) fn record_handler_duration(&self, started_at: DateTime<Utc>) {
+        let elapsed = (Utc::now() - started_at).to_std().unwrap_or_default();
+        self.handler_duration.record(elapsed.as_secs_f64(), &[]);
     }
 
     pub(super) fn record_empty_repository(&self, reason: &'static str) {
         self.repository_empty
-            .add(1, &[KeyValue::new("reason", reason)]);
+            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    }
+
+    pub(super) fn record_repository_indexed(&self, outcome: &'static str) {
+        self.repository_indexing_completed
+            .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
+    }
+
+    pub(super) fn record_repository_source_size(&self, bytes: u64) {
+        self.repository_source_size.record(bytes, &[]);
     }
 
     pub(super) fn record_files_processed(&self, count: u64, outcome: &'static str) {
         self.files_processed
-            .add(count, &[KeyValue::new("outcome", outcome)]);
+            .add(count, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
     }
 
-    pub(super) fn record_node_counts(&self, graph_data: &GraphData) {
-        self.nodes_indexed.add(
-            graph_data.directory_nodes.len() as u64,
-            &[KeyValue::new("kind", "directory")],
-        );
-        self.nodes_indexed.add(
-            graph_data.file_nodes.len() as u64,
-            &[KeyValue::new("kind", "file")],
-        );
-        self.nodes_indexed.add(
-            graph_data.definition_nodes.len() as u64,
-            &[KeyValue::new("kind", "definition")],
-        );
-        self.nodes_indexed.add(
-            graph_data.imported_symbol_nodes.len() as u64,
-            &[KeyValue::new("kind", "imported_symbol")],
-        );
-        self.nodes_indexed.add(
-            graph_data.relationships.len() as u64,
-            &[KeyValue::new("kind", "edge")],
-        );
+    pub(super) fn record_nodes_indexed(&self, count: u64, kind: &'static str) {
+        self.nodes_indexed
+            .add(count, &[KeyValue::new(code::labels::KIND, kind)]);
     }
 }
 
@@ -173,7 +115,9 @@ impl<T> RecordStageError<T> for Result<T, HandlerError> {
         stage: &'static str,
     ) -> Result<T, HandlerError> {
         if self.is_err() {
-            metrics.errors.add(1, &[KeyValue::new("stage", stage)]);
+            metrics
+                .errors
+                .add(1, &[KeyValue::new(code::labels::STAGE, stage)]);
         }
         self
     }

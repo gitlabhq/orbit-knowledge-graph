@@ -1,3 +1,60 @@
+## [0.31.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.31.0...v0.31.1) (2026-04-24)
+
+### Fixes
+
+* **indexer:** avoid Arrow 2 GiB column overflow in SDLC transform ([e31758b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e31758b67dbe26b45a06600ae372c92f66b7b72a)) by Jean-Gabriel Doyon
+
+## [0.31.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.30.0...v0.31.0) (2026-04-24)
+
+### Features
+
+* **billing:** emit Snowplow billing events on successful ExecuteQuery ([92d3371](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/92d3371a6e3193f9060a1127fb2b002766645db7)) by Sharmad Nachnolkar
+* **code-graph:** streaming pipeline with per-language writer threads ([37b5cb8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/37b5cb83f8a51db9458f651dddc18b4f658d121b)) by Michael Usachenko
+* **graph-status:** wire NATS KV indexing progress into GetGraphStatus response ([edfbc64](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/edfbc644927084f02f16e56f1481f1e27975bf38)) by Jean-Gabriel Doyon
+* **indexer:** configure code indexing v2 pipeline ([ad32db3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ad32db3351edfca7dc74df6a92893b5c6b6fee25)) by Michael Angelo Rivera
+* **indexer:** enable v2 code indexing pipeline in production ([ed64d2d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ed64d2db491b071e7731b51e688fc70b8770a55f)) by Michael Usachenko
+* **indexer:** improve code indexing metrics ([2d561f3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d561f3e0446f79a3f944247dad6f8a56d7feff3)) by michaelangeloio
+* **indexing-status:** write per-run indexing progress to NATS KV ([a50bba4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a50bba4bdf45f65c3fccbb20f3a68fec5a145470)) by Jean-Gabriel Doyon
+* **observability:** [secure] metrics catalog and orbit-dashboards library ([5ca8dfc](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5ca8dfce1112154d80228550f00628e990e228b2)) by Michael Angelo Rivera
+* **skills:** add orbit skill for Knowledge Graph queries via glab api ([9ae1052](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9ae1052086450770980bb32539d169c9624b0534)) by Dmitry Gruzd
+
+### Fixes
+
+* **code-graph:** harden custom v2 indexers ([e1d6f83](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e1d6f83305b942cc28911b522c3f7436aab0e94e)) by michaelangeloio
+* **code-graph:** v2 pipeline hardening — error propagation, stack guards, tracing ([1ca434a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1ca434a894282b79f5baa4c630f5a4ac2a6e9bfb)) by Michael Usachenko
+* **compiler:** prevent cascade InSubquery filters from being folded into aggregates ([560725d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/560725de14cb8bf428258569d315c7e424c6bead)) by Michael Usachenko
+* **dev:** replace Python+PyYAML with yq in parse_gdk_value ([a867987](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a8679877f0aec12458bb28134b5309260e30e5a1)) by Dmitry Gruzd
+* **grpc:** pair max_connection_age with grace to avoid tonic 0.14.5 panic ([c527af9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c527af965a4dd804e3f9fce6610016a3ed94d2c3)) by Michael Angelo Rivera
+* **indexer:** fail code indexing when v2 writes fail ([9407db2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9407db281d66a1eac71da1646bdc3a1435f01272)) by michaelangeloio
+* **indexer:** tolerate dangling symlinks in archive extraction ([ffb5d1d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ffb5d1dc633eea7ec774796f4f1be9fb18cce7dd)) by Jean-Gabriel Doyon
+
+### Other
+
+* add ai-review-bot CI component for automated MR reviews ([922dd77](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/922dd7726d3278f8380fdebbb584e6d87056efd1)) by Dmitry Gruzd
+* **ai-review:** switch component to Opus 4.7 with xhigh variant ([bcc7e1e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bcc7e1ea9ac80b13e01b1ca360a1f774aa17cc68)) by Dmitry Gruzd
+* **nats:** extract nats-client crate from indexer ([3e0d7f0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3e0d7f0d00732f7fad1ec4da36808f9ec7a080e7)) by Jean-Gabriel Doyon
+
+## [0.30.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.29.1...v0.30.0) (2026-04-23)
+
+### Features
+
+* **graph-stats:** add source_type, project coverage and replace count() with uniq(id) for graph stats ([afc2885](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/afc2885169db68983c66b26eecf0b7036120a034)) by Jean-Gabriel Doyon
+* **ontology:** activate gl_code_edge table for code-domain edges ([db8f638](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/db8f638a6275093445a4d64cdf6ad83e7eabdf18)) by Michael Usachenko
+* **ontology:** add Deployment and Environment nodes ([6260ba1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6260ba133b2c46989dff6b6dee9c61b83382d1af)) by Jean-Gabriel Doyon
+* **ontology:** add disabled diff and patch virtual fields for MR resolvers ([491eae8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/491eae80c4eeb30fee513dffd61222f3ca890160)) by Jean-Gabriel Doyon
+* **ontology:** expand merge request entities coverage + note st_diff ([9262ccb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9262ccb8e9420daa5aa29e056f0d641069da68e4)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **ci:** stop triggering code-indexing benchmarks on ontology YAML changes ([13c8df0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13c8df0c34fcae68c884f1b60d80c2f0b0508f47)) by Jean-Gabriel Doyon
+* **compiler:** reject aggregation on globally-scoped entities ([13abdd2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/13abdd2d96ce8582cda2eac5cbec50a0b00bbaa2)) by Michael Angelo Rivera
+* **ontology:** expose query dsl schema via cli for use by agents ([ea01604](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ea0160497876e022e38fb83281419db4826e4c5a)) by Michael Usachenko
+
+### Other
+
+* add ADR 009 for evolving GetGraphStats into GetGraphStatus ([b2c6fdb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2c6fdb65cee3cc375fa45bc3e84d14ed8a33a60)) by Jean-Gabriel Doyon
+* **graph-status:** rename GetGraphStats to GetGraphStatus ([345099b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/345099b74344a061cf8631dd421f738c4d114bda)) by Jean-Gabriel Doyon
+
 ## [0.29.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.29.0...v0.29.1) (2026-04-22)
 
 ### Fixes

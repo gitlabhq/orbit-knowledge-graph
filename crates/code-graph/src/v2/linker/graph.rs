@@ -8,7 +8,7 @@ use crate::v2::types::{
     CanonicalDefinition, CanonicalDirectory, CanonicalFile, CanonicalImport, EdgeKind, NodeKind,
     Range, Relationship, containment_relationship,
 };
-use gkg_utils::arrow::{AsRecordBatch, BatchBuilder};
+use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType};
 
 fn common_prefix_len(a: &str, b: &str) -> usize {
     a.bytes().zip(b.bytes()).take_while(|(x, y)| x == y).count()
@@ -622,18 +622,32 @@ impl CodeGraph {
         );
     }
 
-    pub fn def(&self, idx: NodeIndex) -> &GraphDef {
+    pub fn try_def(&self, idx: NodeIndex) -> Option<&GraphDef> {
         match &self.graph[idx] {
-            GraphNode::Definition { id, .. } => &self.defs[id.0 as usize],
-            other => panic!("Expected Definition, got {other:?}"),
+            GraphNode::Definition { id, .. } => Some(&self.defs[id.0 as usize]),
+            _ => None,
+        }
+    }
+
+    pub fn def(&self, idx: NodeIndex) -> &GraphDef {
+        self.try_def(idx).unwrap_or_else(|| {
+            panic!(
+                "Expected Definition at {:?}, got {:?}",
+                idx, self.graph[idx]
+            )
+        })
+    }
+
+    pub fn try_import(&self, idx: NodeIndex) -> Option<&GraphImport> {
+        match &self.graph[idx] {
+            GraphNode::Import { id, .. } => Some(&self.imports[id.0 as usize]),
+            _ => None,
         }
     }
 
     pub fn import(&self, idx: NodeIndex) -> &GraphImport {
-        match &self.graph[idx] {
-            GraphNode::Import { id, .. } => &self.imports[id.0 as usize],
-            other => panic!("Expected Import, got {other:?}"),
-        }
+        self.try_import(idx)
+            .unwrap_or_else(|| panic!("Expected Import at {:?}, got {:?}", idx, self.graph[idx]))
     }
 
     /// Returns the definition name as `&str`.
@@ -917,16 +931,39 @@ impl<'a> RowContext<'a> {
     }
 }
 
-fn write_node_header(
-    b: &mut BatchBuilder,
-    id: i64,
-    ctx: &RowContext<'_>,
-) -> Result<(), arrow::error::ArrowError> {
-    b.col("id")?.push_int(id)?;
-    b.col("project_id")?.push_int(ctx.project_id)?;
-    b.col("branch")?.push_str(ctx.branch)?;
-    b.col("commit_sha")?.push_str(ctx.commit_sha)?;
-    Ok(())
+impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
+    fn write_header(&self, b: &mut BatchBuilder, id: i64) -> Result<(), arrow::error::ArrowError> {
+        b.col("id")?.push_int(id)?;
+        b.col("project_id")?.push_int(self.project_id)?;
+        b.col("branch")?.push_str(self.branch)?;
+        b.col("commit_sha")?.push_str(self.commit_sha)?;
+        Ok(())
+    }
+
+    fn header_specs(&self) -> Vec<ColumnSpec> {
+        vec![
+            ColumnSpec {
+                name: "id".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "project_id".into(),
+                col_type: ColumnType::Int,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "branch".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "commit_sha".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+        ]
+    }
 }
 
 fn write_range(b: &mut BatchBuilder, range: &Range) -> Result<(), arrow::error::ArrowError> {
@@ -941,13 +978,9 @@ pub struct DirectoryRow<'a> {
     pub dir: &'a CanonicalDirectory,
     pub id: i64,
 }
-impl AsRecordBatch<RowContext<'_>> for DirectoryRow<'_> {
-    fn write_row(
-        &self,
-        b: &mut BatchBuilder,
-        ctx: &RowContext<'_>,
-    ) -> Result<(), arrow::error::ArrowError> {
-        write_node_header(b, self.id, ctx)?;
+impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DirectoryRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.dir.path)?;
         b.col("name")?.push_str(&self.dir.name)?;
         Ok(())
@@ -958,13 +991,9 @@ pub struct FileRow<'a> {
     pub file: &'a CanonicalFile,
     pub id: i64,
 }
-impl AsRecordBatch<RowContext<'_>> for FileRow<'_> {
-    fn write_row(
-        &self,
-        b: &mut BatchBuilder,
-        ctx: &RowContext<'_>,
-    ) -> Result<(), arrow::error::ArrowError> {
-        write_node_header(b, self.id, ctx)?;
+impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        ctx.write_header(b, self.id)?;
         b.col("path")?.push_str(&self.file.path)?;
         b.col("name")?.push_str(&self.file.name)?;
         b.col("extension")?.push_str(&self.file.extension)?;
@@ -981,13 +1010,9 @@ pub struct DefinitionRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl AsRecordBatch<RowContext<'_>> for DefinitionRow<'_> {
-    fn write_row(
-        &self,
-        b: &mut BatchBuilder,
-        ctx: &RowContext<'_>,
-    ) -> Result<(), arrow::error::ArrowError> {
-        write_node_header(b, self.id, ctx)?;
+impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for DefinitionRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("fqn")?.push_str(self.pool.get(self.def.fqn))?;
         b.col("name")?.push_str(self.pool.get(self.def.name))?;
@@ -1005,13 +1030,9 @@ pub struct ImportRow<'a> {
     pub pool: &'a StringPool,
     pub id: i64,
 }
-impl AsRecordBatch<RowContext<'_>> for ImportRow<'_> {
-    fn write_row(
-        &self,
-        b: &mut BatchBuilder,
-        ctx: &RowContext<'_>,
-    ) -> Result<(), arrow::error::ArrowError> {
-        write_node_header(b, self.id, ctx)?;
+impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for ImportRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, ctx: &C) -> Result<(), arrow::error::ArrowError> {
+        ctx.write_header(b, self.id)?;
         b.col("file_path")?.push_str(self.file_path)?;
         b.col("import_type")?.push_str(self.import.import_type)?;
         b.col("import_path")?

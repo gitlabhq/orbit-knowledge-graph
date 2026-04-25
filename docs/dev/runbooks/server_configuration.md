@@ -164,6 +164,12 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
+      pipeline:
+        max_file_size_bytes: 5000000
+        max_files: 1000000
+        respect_gitignore: true
+        worker_threads: 0
+        max_concurrent_languages: 0
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1
@@ -182,6 +188,16 @@ engine:
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `engine.handlers.namespace-handler.datalake_batch_size` | `1,000,000` | Rows per datalake extraction query |
+
+#### Code indexing task handler
+
+| Config path | Default | Description |
+|-------------|---------|-------------|
+| `engine.handlers.code-indexing-task.pipeline.max_file_size_bytes` | `5,000,000` | Largest source file the v2 pipeline will parse |
+| `engine.handlers.code-indexing-task.pipeline.max_files` | `1,000,000` | Maximum language-supported source files accepted for one pipeline run |
+| `engine.handlers.code-indexing-task.pipeline.respect_gitignore` | `true` | Whether repository `.gitignore` rules apply during discovery |
+| `engine.handlers.code-indexing-task.pipeline.worker_threads` | `0` | Rayon workers per language; `0` uses Rayon default |
+| `engine.handlers.code-indexing-task.pipeline.max_concurrent_languages` | `0` | Concurrent language pipelines; `0` uses the pipeline default |
 
 ### Retry strategy by handler type
 
@@ -288,6 +304,7 @@ These settings are used by the Webserver mode.
 | `grpc.stream_window_size` | `1048576` (1 MB) | HTTP/2 stream flow control window |
 | `grpc.concurrency_limit` | `256` | Max concurrent requests |
 | `grpc.max_connection_age_secs` | `300` (5 min) | Max connection age (for L4 ILB rebalancing) |
+| `grpc.max_connection_age_grace_secs` | `30` | Graceful drain window after `max_connection_age_secs` fires. Must be non-zero to avoid a tonic 0.14.5 panic ([hyperium/tonic#2522](https://github.com/hyperium/tonic/issues/2522)). |
 | `grpc.stream_timeout_secs` | `60` | Stream timeout |
 
 ### Query settings
@@ -520,6 +537,12 @@ engine:
       concurrency_group: code
       max_attempts: 5
       retry_interval_secs: 60
+      pipeline:
+        max_file_size_bytes: 5000000
+        max_files: 1000000
+        respect_gitignore: true
+        worker_threads: 0
+        max_concurrent_languages: 0
     namespace-deletion:
       concurrency_group: code
       max_attempts: 1

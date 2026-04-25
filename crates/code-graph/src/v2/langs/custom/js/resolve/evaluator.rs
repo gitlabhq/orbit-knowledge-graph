@@ -276,6 +276,16 @@ fn bind_pattern_value(
     value: EvaluatedValue,
     state: &mut AliasEvalState,
 ) {
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        bind_pattern_value_inner(pattern, value, state)
+    });
+}
+
+fn bind_pattern_value_inner(
+    pattern: &oxc::ast::ast::BindingPattern<'_>,
+    value: EvaluatedValue,
+    state: &mut AliasEvalState,
+) {
     match pattern {
         oxc::ast::ast::BindingPattern::BindingIdentifier(binding) => {
             state.vars.insert(binding.name.to_string(), value);
@@ -383,17 +393,19 @@ fn assignment_target_path_from_argument(
 }
 
 fn member_path(expression: &Expression<'_>, final_property: Option<&str>) -> Option<Vec<String>> {
-    let mut path = match expression.get_inner_expression() {
-        Expression::Identifier(identifier) => vec![identifier.name.to_string()],
-        Expression::StaticMemberExpression(member) => {
-            member_path(&member.object, Some(member.property.name.as_str()))?
+    stacker::maybe_grow(32 * 1024, 1024 * 1024, || {
+        let mut path = match expression.get_inner_expression() {
+            Expression::Identifier(identifier) => vec![identifier.name.to_string()],
+            Expression::StaticMemberExpression(member) => {
+                member_path(&member.object, Some(member.property.name.as_str()))?
+            }
+            _ => return None,
+        };
+        if let Some(property) = final_property {
+            path.push(property.to_string());
         }
-        _ => return None,
-    };
-    if let Some(property) = final_property {
-        path.push(property.to_string());
-    }
-    Some(path)
+        Some(path)
+    })
 }
 
 fn set_member_path_value(path: Vec<String>, value: EvaluatedValue, state: &mut AliasEvalState) {

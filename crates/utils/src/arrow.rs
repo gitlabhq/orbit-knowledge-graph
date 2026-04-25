@@ -4,11 +4,11 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use arrow::array::{
-    Array, ArrayBuilder, ArrayRef, BooleanArray, Float64Array, Int8Array, Int16Array, Int32Array,
-    Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray, StringArray,
-    StringBuilder, StructArray, TimestampMicrosecondArray, TimestampMillisecondArray,
-    TimestampNanosecondArray, TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array,
-    UInt64Array,
+    Array, ArrayBuilder, ArrayRef, BooleanArray, BooleanBuilder, Float64Array, Int8Array,
+    Int16Array, Int32Array, Int64Array, Int64Builder, LargeStringArray, ListArray, PrimitiveArray,
+    StringArray, StringBuilder, StructArray, TimestampMicrosecondArray,
+    TimestampMicrosecondBuilder, TimestampMillisecondArray, TimestampNanosecondArray,
+    TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
@@ -284,7 +284,14 @@ impl ArrowUtils {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ColumnType {
     Str,
+    /// Dictionary-encoded string. Uses integer indices internally,
+    /// stores each unique value once. Ideal for low-cardinality columns
+    /// like edge_kind, definition_type, language.
+    DictStr,
     Int,
+    Bool,
+    /// Microsecond-precision UTC timestamp.
+    TimestampMicros,
 }
 
 /// Column definition for [`NodeBatch`] builder.
@@ -295,31 +302,59 @@ pub struct ColumnSpec {
     pub nullable: bool,
 }
 
-#[derive(Debug)]
 enum Col {
     Str(StringBuilder, bool),
+    DictStr(
+        arrow::array::StringDictionaryBuilder<arrow::datatypes::Int32Type>,
+        bool,
+    ),
     Int(Int64Builder, bool),
+    Bool(BooleanBuilder, bool),
+    Timestamp(TimestampMicrosecondBuilder, bool),
+}
+
+impl std::fmt::Debug for Col {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "Col::{}", self.kind())
+    }
 }
 
 impl Col {
     fn len(&self) -> usize {
         match self {
             Self::Str(b, _) => b.len(),
+            Self::DictStr(b, _) => b.len(),
             Self::Int(b, _) => b.len(),
+            Self::Bool(b, _) => b.len(),
+            Self::Timestamp(b, _) => b.len(),
         }
     }
 
     fn kind(&self) -> &'static str {
         match self {
             Self::Str(..) => "Str",
+            Self::DictStr(..) => "DictStr",
             Self::Int(..) => "Int",
+            Self::Bool(..) => "Bool",
+            Self::Timestamp(..) => "Timestamp",
         }
     }
 
     fn finish(self) -> (DataType, bool, ArrayRef) {
         match self {
             Self::Str(mut b, nullable) => (DataType::Utf8, nullable, Arc::new(b.finish())),
+            Self::DictStr(mut b, nullable) => (
+                DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8)),
+                nullable,
+                Arc::new(b.finish()),
+            ),
             Self::Int(mut b, nullable) => (DataType::Int64, nullable, Arc::new(b.finish())),
+            Self::Bool(mut b, nullable) => (DataType::Boolean, nullable, Arc::new(b.finish())),
+            Self::Timestamp(mut b, nullable) => (
+                DataType::Timestamp(arrow::datatypes::TimeUnit::Microsecond, Some("UTC".into())),
+                nullable,
+                Arc::new(b.finish().with_timezone("UTC")),
+            ),
         }
     }
 }
@@ -350,6 +385,10 @@ impl ColRef<'_> {
                 b.append_value(v);
                 Ok(())
             }
+            Col::DictStr(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
             other => Err(batch_err(format!(
                 "push_str on {} column '{}'",
                 other.kind(),
@@ -372,9 +411,44 @@ impl ColRef<'_> {
         }
     }
 
+    pub fn push_bool(&mut self, v: bool) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::Bool(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_bool on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
+    pub fn push_timestamp_micros(&mut self, v: i64) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::Timestamp(b, _) => {
+                b.append_value(v);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_timestamp_micros on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
+                match v {
+                    Some(s) => b.append_value(s),
+                    None => b.append_null(),
+                }
+                Ok(())
+            }
+            Col::DictStr(b, _) => {
                 match v {
                     Some(s) => b.append_value(s),
                     None => b.append_null(),
@@ -435,6 +509,15 @@ impl BatchBuilder {
                 ColumnType::Str => {
                     Col::Str(StringBuilder::with_capacity(cap, cap * 8), spec.nullable)
                 }
+                ColumnType::DictStr => Col::DictStr(
+                    arrow::array::StringDictionaryBuilder::<arrow::datatypes::Int32Type>::new(),
+                    spec.nullable,
+                ),
+                ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
+                ColumnType::TimestampMicros => Col::Timestamp(
+                    TimestampMicrosecondBuilder::with_capacity(cap),
+                    spec.nullable,
+                ),
             };
             index.insert(spec.name.clone(), names.len());
             names.push(spec.name.clone());
@@ -514,6 +597,20 @@ impl BatchBuilder {
 /// let specs = ontology.local_entity_specs("File");
 /// let batch = FileNode::to_record_batch(&nodes, &specs, &ctx)?;
 /// ```
+/// Trait for row envelope columns that surround entity-specific data.
+/// Each consumer (DuckDB, ClickHouse) implements this with their own
+/// header columns (id, project_id, branch, traversal_path, _version, etc).
+///
+/// Row types call `ctx.write_header(b, id)` to emit the envelope,
+/// then write their own entity columns.
+pub trait RowEnvelope {
+    /// Write envelope columns for a node row.
+    fn write_header(&self, b: &mut BatchBuilder, id: i64) -> BatchResult<()>;
+
+    /// Column specs for the envelope (prepended to entity specs).
+    fn header_specs(&self) -> Vec<ColumnSpec>;
+}
+
 pub trait AsRecordBatch<Ctx = ()>: Sized {
     /// Whether this item should be included in the batch.
     /// Default: always include.

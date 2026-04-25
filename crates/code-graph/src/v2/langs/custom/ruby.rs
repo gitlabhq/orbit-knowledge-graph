@@ -11,9 +11,7 @@ use arrow::datatypes::{DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 use ruby_prism::Visit;
 
-use crate::v2::pipeline::{
-    FileInput, LanguagePipeline, PipelineContext, PipelineError, PipelineOutput,
-};
+use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 
 pub struct RubyPipeline;
 
@@ -21,7 +19,8 @@ impl LanguagePipeline for RubyPipeline {
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
-    ) -> Result<PipelineOutput, Vec<PipelineError>> {
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let root_path = ctx.root_path.as_str();
         let mut defs: Vec<DefEntry> = Vec::new();
         let mut file_entries: Vec<FileEntry> = Vec::new();
@@ -39,10 +38,7 @@ impl LanguagePipeline for RubyPipeline {
             let source = match std::fs::read_to_string(&abs_path) {
                 Ok(s) => s,
                 Err(e) => {
-                    errors.push(PipelineError {
-                        file_path: file_path.clone(),
-                        error: e.to_string(),
-                    });
+                    errors.push(PipelineError::parse(file_path.clone(), e.to_string()));
                     continue;
                 }
             };
@@ -84,7 +80,7 @@ impl LanguagePipeline for RubyPipeline {
         }
         if !errors.is_empty() {
             for e in &errors {
-                eprintln!("[ruby_prism] skipped {}: {}", e.file_path, e.error);
+                tracing::warn!(path = %e.file_path, error = %e.error, "ruby_prism: skipped file");
             }
         }
 
@@ -92,11 +88,11 @@ impl LanguagePipeline for RubyPipeline {
         let def_batch = build_def_batch(&defs)?;
         let edge_batch = build_edge_batch(&edges)?;
 
-        Ok(PipelineOutput::Batches(vec![
-            ("File".to_string(), file_batch),
-            ("Definition".to_string(), def_batch),
-            ("DefinitionToDefinition".to_string(), edge_batch),
-        ]))
+        btx.send_raw("File".to_string(), file_batch);
+        btx.send_raw("Definition".to_string(), def_batch);
+        btx.send_raw("DefinitionToDefinition".to_string(), edge_batch);
+
+        Ok(())
     }
 }
 
@@ -176,7 +172,7 @@ impl PrismVisitor<'_> {
         self.edges.push(EdgeEntry {
             source_id: parent_id,
             target_id: def_id,
-            edge_kind: "Defines",
+            edge_kind: "DEFINES",
             source_kind: parent_kind,
             target_kind: "Definition",
         });
@@ -246,10 +242,11 @@ fn build_file_batch(files: &[FileEntry]) -> Result<RecordBatch, Vec<PipelineErro
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-file-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }
 
@@ -296,10 +293,11 @@ fn build_def_batch(defs: &[DefEntry]) -> Result<RecordBatch, Vec<PipelineError>>
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-definition-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }
 
@@ -338,9 +336,10 @@ fn build_edge_batch(edges: &[EdgeEntry]) -> Result<RecordBatch, Vec<PipelineErro
         ],
     )
     .map_err(|e| {
-        vec![PipelineError {
-            file_path: String::new(),
-            error: e.to_string(),
-        }]
+        vec![PipelineError::fatal(
+            "<ruby-edge-batch>",
+            e.to_string(),
+            "arrow_conversion",
+        )]
     })
 }

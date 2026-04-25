@@ -214,8 +214,8 @@ async fn pipeline_observer_records_ch_resource_metrics() {
         "gkg.query.pipeline.ch.read_rows should be recorded"
     );
     assert!(
-        find_metric(&metrics, "gkg.query.pipeline.ch.read_bytes").is_some(),
-        "gkg.query.pipeline.ch.read_bytes should be recorded"
+        find_metric(&metrics, "gkg.query.pipeline.ch.read").is_some(),
+        "gkg.query.pipeline.ch.read should be recorded"
     );
     assert!(
         find_metric(&metrics, "gkg.query.pipeline.ch.memory_usage").is_some(),

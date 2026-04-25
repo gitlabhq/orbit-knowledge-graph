@@ -1,8 +1,7 @@
 use opentelemetry::KeyValue;
-use opentelemetry::global;
 use opentelemetry::metrics::{Counter, Histogram};
 
-use crate::metrics::DURATION_BUCKETS;
+use gkg_observability::indexer::deletion;
 
 #[derive(Clone)]
 pub struct DeletionMetrics {
@@ -12,34 +11,25 @@ pub struct DeletionMetrics {
 
 impl DeletionMetrics {
     pub fn new() -> Self {
-        let meter = global::meter("gkg_indexer_namespace_deletion");
-
-        let table_deletion_duration = meter
-            .f64_histogram("gkg.indexer.namespace_deletion.table.duration")
-            .with_unit("s")
-            .with_description("Duration of a single table's soft-delete INSERT-SELECT")
-            .with_boundaries(DURATION_BUCKETS.to_vec())
-            .build();
-
-        let table_deletion_errors = meter
-            .u64_counter("gkg.indexer.namespace_deletion.table.errors")
-            .with_description("Total per-table deletion failures")
-            .build();
-
+        let meter = gkg_observability::meter();
         Self {
-            table_deletion_duration,
-            table_deletion_errors,
+            table_deletion_duration: deletion::TABLE_DELETION_DURATION.build_histogram_f64(&meter),
+            table_deletion_errors: deletion::TABLE_DELETION_ERRORS.build_counter_u64(&meter),
         }
     }
 
     pub(super) fn record_table_deleted(&self, table: &str, duration: f64) {
-        self.table_deletion_duration
-            .record(duration, &[KeyValue::new("table", table.to_owned())]);
+        self.table_deletion_duration.record(
+            duration,
+            &[KeyValue::new(deletion::labels::TABLE, table.to_owned())],
+        );
     }
 
     pub(super) fn record_table_error(&self, table: &str) {
-        self.table_deletion_errors
-            .add(1, &[KeyValue::new("table", table.to_owned())]);
+        self.table_deletion_errors.add(
+            1,
+            &[KeyValue::new(deletion::labels::TABLE, table.to_owned())],
+        );
     }
 }
 

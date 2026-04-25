@@ -6,7 +6,7 @@ license = "LicenseRef-EE"
 
 [features]
 default = []
-testkit = []
+testkit = ["nats-client/testkit"]
 
 [dependencies]
 async-nats = { workspace = true }
@@ -19,6 +19,7 @@ clickhouse = { workspace = true }
 clickhouse-client = { workspace = true }
 code-graph = { path = "../code-graph" }
 croner = { workspace = true }
+gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 datafusion = { workspace = true }
@@ -27,6 +28,7 @@ futures = { workspace = true }
 gitaly-protos = { path = "../gitaly-protos" }
 gitlab-client = { workspace = true }
 moka = { workspace = true }
+nats-client = { workspace = true }
 ontology = { path = "../ontology" }
 query-engine = { path = "../query-engine" }
 opentelemetry = { workspace = true }
@@ -49,6 +51,7 @@ axum = { workspace = true }
 zstd = "0.13.3"
 
 [dev-dependencies]
+nats-client = { workspace = true, features = ["testkit"] }
 internment = { workspace = true }
 serde_yaml = { workspace = true }
 smallvec = { workspace = true }

@@ -191,6 +191,7 @@ yaml_test!(java_v1_imported_symbols, "java/v1_imported_symbols.yaml");
 yaml_test!(java_v1_same_class_name, "java/v1_same_class_name.yaml");
 yaml_test!(java_v1_deep_nested, "java/v1_deep_nested.yaml");
 yaml_test!(java_v1_stack_safety, "java/v1_stack_safety.yaml");
+yaml_test!(java_e2e_weather_app, "java/e2e_weather_app.yaml");
 
 // Kotlin v1 parity
 yaml_test!(kotlin_v1_main_resolution, "kotlin/v1_main_resolution.yaml");
@@ -205,8 +206,17 @@ yaml_test!(
 yaml_test!(kotlin_v1_enum_methods, "kotlin/v1_enum_methods.yaml");
 yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 
-// Ruby v1 parity (v2 pipeline — all skipped until Ruby resolution is implemented)
+// C#
+yaml_test!(csharp_resolution, "csharp/resolution.yaml");
+yaml_test!(
+    csharp_advanced_resolution,
+    "csharp/advanced_resolution.yaml"
+);
+yaml_test!(csharp_edge_cases, "csharp/edge_cases.yaml");
+
+// Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
+yaml_test!(ruby_e2e_weather_app, "ruby/e2e_weather_app.yaml");
 
 // Rust
 yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");
