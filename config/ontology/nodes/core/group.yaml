@@ -82,15 +82,7 @@ etl:
     namespace.created_at AS created_at, namespace.updated_at AS updated_at,
     traversal_paths.traversal_path AS traversal_path
   from: >-
-    (
-      SELECT id, name, visibility_level, path, parent_id, owner_id,
-             created_at, updated_at, _siphon_replicated_at, _siphon_deleted
-      FROM siphon_namespaces
-      WHERE id IN (
-        SELECT id FROM namespace_traversal_paths
-        WHERE startsWith(traversal_path, {traversal_path:String})
-      )
-    ) namespace
+    siphon_namespaces namespace
     INNER JOIN (
       SELECT id, traversal_path
       FROM namespace_traversal_paths
