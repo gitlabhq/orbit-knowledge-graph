@@ -132,12 +132,13 @@ mod tests {
     #[tokio::test]
     async fn handle_processes_pipelines() {
         let ontology = Ontology::load_embedded().expect("should load ontology");
-        let plans = build_plans(&ontology, 1000, 1000);
+        let plans = build_plans(&ontology, 1000, 1000, &Default::default());
 
         let pipeline = Arc::new(Pipeline::new(
             Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore),
             test_metrics(),
+            Default::default(),
         ));
 
         let handler = NamespaceHandler::new(

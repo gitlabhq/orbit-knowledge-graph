@@ -12,7 +12,7 @@
 //! | Neighbors    | LIMIT 1 BY subquery (CTEs)    | Edge-only lowering, node dedup via _nf CTE |
 //! | PathFinding  | LIMIT 1 BY subquery           | Recursive CTEs, multi-hop joins            |
 //! | Hydration    | argMaxIfOrNull + GROUP BY     | Search-like UNION ALL of table scans       |
-//! | _nf_* CTEs   | argMaxIfOrNull + GROUP BY     | ID-only select, avoids sort overhead       |
+//! | _nf_* CTEs   | LIMIT 1 BY subquery           | Streaming reads, same as other node scans  |
 //!
 //! Edge tables are always excluded -- their full-tuple ORDER BY makes RMT
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
@@ -51,7 +51,7 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
         Node::Query(q) => {
             for cte in &mut q.ctes {
                 if cte.name.starts_with("_nf_") {
-                    dedup_nf_cte(&mut cte.query, input);
+                    dedup_nf_cte(&mut cte.query, input, ontology);
                 } else {
                     dedup_query(&mut cte.query, input, ontology);
                 }
@@ -61,14 +61,20 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     }
 }
 
-/// Deduplicate a `_nf_*` CTE using argMax. These CTEs only select `id`,
-/// so argMax is cheaper than LIMIT BY (hash aggregate vs full sort).
-fn dedup_nf_cte(q: &mut Query, input: &Input) {
+/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs select `id`
+/// for edge semi-joins. Using LIMIT 1 BY with the sort key prefix lets
+/// ClickHouse stream in primary key order instead of hash-aggregating
+/// the entire table.
+fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
     if let TableRef::Scan { table, alias, .. } = &q.from
         && is_node_table(table, &input.compiler.edge_tables)
     {
+        let table = table.clone();
         let alias = alias.clone();
-        apply_argmax_dedup(q, &alias);
+        apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
+        // The CTE only needs `id`, but the LIMIT 1 BY subquery selects *.
+        // Narrow the outer select back to just `id`.
+        q.select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
     }
 }
 
@@ -659,7 +665,7 @@ mod tests {
     }
 
     #[test]
-    fn nf_cte_uses_argmax() {
+    fn nf_cte_uses_limit_by() {
         let ont = ontology();
         let mut node = Node::Query(Box::new(Query {
             ctes: vec![Cte::new(
@@ -681,24 +687,16 @@ mod tests {
             unreachable!()
         };
         let cte_q = &q.ctes[0].query;
-        // _nf_* CTEs should use argMax, not LIMIT BY
-        assert!(
-            matches!(&cte_q.from, TableRef::Scan { table, .. } if table == "gl_merge_request"),
-            "CTE scan should NOT be wrapped in subquery"
-        );
-        assert!(!cte_q.group_by.is_empty(), "should add GROUP BY");
-        assert!(cte_q.having.is_some(), "should add HAVING clause");
-        let having_str = format!("{:?}", cte_q.having);
-        assert!(
-            having_str.contains("argMaxIfOrNull"),
-            "HAVING should use argMaxIfOrNull"
-        );
-        assert!(
-            having_str.contains("merged"),
-            "HAVING should re-check value filters via argMaxIfOrNull"
-        );
-        // WHERE still has the original filter (for index pruning)
+        // _nf_* CTEs should use LIMIT 1 BY, wrapped in a subquery
+        let inner = find_subquery(&cte_q.from, "mr").expect("CTE scan should be wrapped");
+        assert!(has_limit_by(inner), "inner should have LIMIT 1 BY");
+        // state is mutable -- stays outside the dedup subquery
+        assert!(!where_contains(&inner.where_clause, "state"));
         assert!(where_contains(&cte_q.where_clause, "state"));
+        assert!(where_contains(&cte_q.where_clause, "_deleted"));
+        // CTE outer select should be narrowed to just `id`
+        assert_eq!(cte_q.select.len(), 1);
+        assert_eq!(cte_q.select[0].alias, Some("id".to_string()));
         assert!(matches!(&q.from, TableRef::Scan { table, .. } if table == "_nf_mr"));
     }
 

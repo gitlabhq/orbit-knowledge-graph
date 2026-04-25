@@ -58,6 +58,8 @@ engine:
       concurrency_group: sdlc
       max_attempts: 1  # re-dispatched every minute, no need to retry
       retry_interval_secs: 60
+      batch_size_overrides:
+        WorkItem: 50000
     code-indexing-task:
       concurrency_group: code
       max_attempts: 5  # event-driven, must retry to avoid data loss

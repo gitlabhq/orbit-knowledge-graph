@@ -13,15 +13,20 @@ pub(in crate::modules::sdlc) fn lower(
     inputs: PlanInput,
     global_batch_size: u64,
     namespaced_batch_size: u64,
+    batch_size_overrides: &std::collections::HashMap<String, u64>,
 ) -> Plans {
     let mut global = Vec::new();
     let mut namespaced = Vec::new();
 
     for node in inputs.node_plans {
-        let batch_size = match node.scope {
+        let scope_default = match node.scope {
             EtlScope::Global => global_batch_size,
             EtlScope::Namespaced => namespaced_batch_size,
         };
+        let batch_size = batch_size_overrides
+            .get(&node.name)
+            .copied()
+            .unwrap_or(scope_default);
         let scope = node.scope;
         let plan = lower_node_plan(node, batch_size);
         match scope {
@@ -31,10 +36,14 @@ pub(in crate::modules::sdlc) fn lower(
     }
 
     for edge in inputs.standalone_edge_plans {
-        let batch_size = match edge.scope {
+        let scope_default = match edge.scope {
             EtlScope::Global => global_batch_size,
             EtlScope::Namespaced => namespaced_batch_size,
         };
+        let batch_size = batch_size_overrides
+            .get(&edge.relationship_kind)
+            .copied()
+            .unwrap_or(scope_default);
         let scope = edge.scope;
         let plan = lower_standalone_edge_plan(edge, batch_size);
         match scope {
@@ -343,7 +352,12 @@ mod tests {
     }
 
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {
-        lower(input::from_ontology(ontology), batch_size, batch_size)
+        lower(
+            input::from_ontology(ontology),
+            batch_size,
+            batch_size,
+            &std::collections::HashMap::new(),
+        )
     }
 
     #[test]
@@ -363,6 +377,32 @@ mod tests {
             namespaced_names.contains(&"Project"),
             "Project should be namespaced"
         );
+    }
+
+    #[test]
+    fn batch_size_override_applies_to_named_pipeline() {
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let overrides = std::collections::HashMap::from([("WorkItem".to_string(), 50_000u64)]);
+        let plans = lower(
+            input::from_ontology(&ontology),
+            1_000_000,
+            1_000_000,
+            &overrides,
+        );
+
+        let work_item = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "WorkItem")
+            .expect("WorkItem plan should exist");
+        assert_eq!(work_item.extract_query.batch_size(), 50_000);
+
+        let group = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "Group")
+            .expect("Group plan should exist");
+        assert_eq!(group.extract_query.batch_size(), 1_000_000);
     }
 
     #[test]
