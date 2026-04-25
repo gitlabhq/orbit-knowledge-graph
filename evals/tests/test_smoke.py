@@ -21,9 +21,12 @@ EVALS_DIR = Path(__file__).parent.parent
 
 @pytest.fixture(autouse=True)
 def _chdir():
-    """Run all tests from the evals/ directory."""
+    """Run all tests from the evals/ directory with dummy env vars."""
     orig = os.getcwd()
     os.chdir(EVALS_DIR)
+    os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
+    os.environ.setdefault("GITLAB_TOKEN", "test-token")
+    os.environ.setdefault("GITLAB_HOST", "staging.gitlab.com")
     yield
     os.chdir(orig)
 
@@ -316,8 +319,8 @@ class TestStore:
             assert loaded["config_name"] == "orbit-vs-glab-baseline"
             assert loaded["config_version"] == "0.1.0"
             assert loaded["config"]["run"]["name"] == "orbit-vs-glab-baseline"
-            assert "agents/orbit.md" in loaded["files"]
-            assert "agents/glab.md" in loaded["files"]
+            assert "container/agents/orbit.md" in loaded["files"]
+            assert "container/agents/glab.md" in loaded["files"]
 
             # Same config -> same hash
             store2 = ResultStore(db=_make_test_db(db_path), run_id="run-2")

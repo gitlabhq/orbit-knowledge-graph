@@ -19,9 +19,9 @@ run:
 
 arms:
   - name: orbit
-    agent: agents/orbit.md
+    agent: container/agents/orbit.md
     skills:
-      - .opencode/skills/orbit-query
+      - container/.opencode/skills/orbit-query
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}
@@ -32,9 +32,9 @@ arms:
     port: 4096
 
   - name: glab
-    agent: agents/glab.md
+    agent: container/agents/glab.md
     skills:
-      - .opencode/skills/glab-data
+      - container/.opencode/skills/glab-data
     env:
       GITLAB_TOKEN: ${GITLAB_TOKEN}
       GITLAB_HOST: ${GITLAB_HOST}

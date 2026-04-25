@@ -96,7 +96,7 @@ class ServerManager:
 
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
         name = f"eval-{arm.name}"
-        workspace = str(Path(work_dir).resolve())
+        workspace = str((Path(work_dir) / "container").resolve())
         # Network allowlist: gitlab host + model provider
         allowed_hosts = {
             arm.env.get("GITLAB_HOST", "staging.gitlab.com"),
