@@ -133,6 +133,17 @@ pub fn convert_code_graph(
 /// Ontology-driven specs for a node entity, plus ClickHouse
 /// infrastructure columns (_version, _deleted) that aren't in
 /// the ontology but are required by the ReplacingMergeTree schema.
+/// Fields with a small set of distinct values — stored as dictionary-encoded
+/// Arrow arrays (integer indices + unique value table) instead of plain strings.
+const DICT_ENCODED_FIELDS: &[&str] = &[
+    "definition_type",
+    "language",
+    "relationship_kind",
+    "source_node_kind",
+    "target_node_kind",
+    "import_type",
+];
+
 fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
@@ -147,6 +158,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ if DICT_ENCODED_FIELDS.contains(&f.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: f.nullable,
@@ -176,6 +188,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
+                _ if DICT_ENCODED_FIELDS.contains(&c.name.as_str()) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: false,
@@ -359,6 +372,16 @@ fn convert_edges(
         });
     }
 
+    // Sort edges by low-cardinality columns so run-length encoding
+    // (and dictionary encoding) on relationship_kind, source_kind,
+    // target_kind produce long runs of identical values.
+    edge_rows.sort_by(|a, b| {
+        a.edge_kind
+            .cmp(b.edge_kind)
+            .then_with(|| a.source_node_kind.cmp(b.source_node_kind))
+            .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
+    });
+
     IndexerEdgeRow::to_record_batch(&edge_rows, &specs, &())
 }
 
@@ -405,7 +428,13 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 .ok_or_else(|| {
                     code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
                 })?;
-            let rel_array = rel_col.as_string::<i32>();
+            // The column may be dictionary-encoded (DictStr) or plain Utf8.
+            // Cast to StringArray for uniform access.
+            let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
+                .map_err(|e| {
+                    code_graph::v2::SinkError(format!("cast relationship_kind to string: {e}"))
+                })?;
+            let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
             for i in 0..data.edges.num_rows() {
