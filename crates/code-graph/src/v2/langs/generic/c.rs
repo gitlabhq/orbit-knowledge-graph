@@ -160,7 +160,11 @@ impl HasRules for CRules {
                 ResolveStage::ImportStrategies,
                 ResolveStage::ImplicitMember,
             ],
-            vec![ImportStrategy::ScopeFqnWalk, ImportStrategy::SameFile],
+            vec![
+                ImportStrategy::ScopeFqnWalk,
+                ImportStrategy::SameFile,
+                ImportStrategy::IncludeGraph,
+            ],
             ReceiverMode::None,
             "::",
             &[],

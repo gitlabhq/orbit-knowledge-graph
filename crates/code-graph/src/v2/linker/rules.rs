@@ -65,6 +65,10 @@ pub enum ImportStrategy {
     /// Used by languages where require/include makes all symbols globally
     /// available (Ruby) or where the source root prefix is unknown (Python).
     GlobalName,
+    /// Resolve bare names via `#include` graph traversal. Finds
+    /// definitions in files reachable through this file's include
+    /// chain (direct + transitive). For C, C++, Objective-C.
+    IncludeGraph,
 }
 
 // ── Chain / receiver ────────────────────────────────────────────

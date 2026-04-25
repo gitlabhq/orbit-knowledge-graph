@@ -76,6 +76,7 @@ impl<'a> ImportResolver<'a> {
                 ImportStrategy::SameFile => self.same_file(name),
                 ImportStrategy::FilePath => vec![],
                 ImportStrategy::GlobalName => self.global_name(name),
+                ImportStrategy::IncludeGraph => self.include_graph(name),
             };
             if !candidates.is_empty() {
                 return candidates;
@@ -267,6 +268,62 @@ impl<'a> ImportResolver<'a> {
             .to_vec();
         if results.len() > max_results {
             return vec![];
+        }
+        results
+    }
+
+    /// Resolve a bare name via `#include` graph traversal.
+    ///
+    /// Collects all files reachable through this file's include imports,
+    /// then searches for top-level definitions matching `name` in those
+    /// files. Used for C/C++/Objective-C where `#include` makes
+    /// declarations visible across translation units.
+    fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
+        // Collect include paths by scanning all imports in the graph
+        // that belong to the current file (matched by file_path).
+        let file_path = self.graph.graph[self.file_node].path();
+        let mut included_paths: Vec<String> = Vec::new();
+        for (idx, fp, imp) in self.graph.imports_iter() {
+            let _ = idx;
+            if fp.as_ref() != file_path {
+                continue;
+            }
+            let raw = self.graph.str(imp.path);
+            let cleaned = raw
+                .trim_matches('"')
+                .trim_matches('<')
+                .trim_matches('>')
+                .to_string();
+            included_paths.push(cleaned);
+        }
+
+        if included_paths.is_empty() {
+            return Vec::new();
+        }
+
+        // Find file nodes matching include paths, then search for
+        // the bare name in those files' definitions
+        let mut results = Vec::new();
+        for (file_idx, file) in self.graph.files() {
+            if file_idx == self.file_node {
+                continue;
+            }
+            if !included_paths
+                .iter()
+                .any(|p| file.path.ends_with(p.as_str()))
+            {
+                continue;
+            }
+            for &idx in self
+                .graph
+                .indexes
+                .by_name
+                .lookup(name, |idx| self.graph.def_name(idx) == name)
+                .iter()
+                .filter(|&&idx| self.graph.def_in_file(idx, &file.path))
+            {
+                results.push(idx);
+            }
         }
         results
     }
