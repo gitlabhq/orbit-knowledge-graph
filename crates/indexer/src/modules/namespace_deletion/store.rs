@@ -20,16 +20,18 @@ FROM siphon_knowledge_graph_enabled_namespaces
 WHERE root_namespace_id = {namespace_id:Int64}
 "#;
 
+// Reads `traversal_path` directly from the enabled-namespaces table
+// (gitlab-org/gitlab!232941) instead of joining `siphon_namespaces` and
+// reconstructing the path with CONCAT.
 const DELETED_NAMESPACES_QUERY: &str = r#"
 SELECT
-    enabled.root_namespace_id AS namespace_id,
-    CONCAT(toString(namespaces.organization_id), '/', toString(enabled.root_namespace_id), '/') AS traversal_path
-FROM siphon_knowledge_graph_enabled_namespaces AS enabled
-INNER JOIN siphon_namespaces AS namespaces
-    ON enabled.root_namespace_id = namespaces.id
-WHERE enabled._siphon_deleted = true
-  AND enabled._siphon_replicated_at > {last_watermark:String}
-  AND enabled._siphon_replicated_at <= {watermark:String}
+    root_namespace_id AS namespace_id,
+    traversal_path
+FROM siphon_knowledge_graph_enabled_namespaces
+WHERE _siphon_deleted = true
+  AND traversal_path != ''
+  AND _siphon_replicated_at > {last_watermark:String}
+  AND _siphon_replicated_at <= {watermark:String}
 "#;
 
 fn mark_deletion_complete_sql() -> String {

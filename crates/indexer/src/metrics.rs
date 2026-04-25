@@ -11,7 +11,7 @@
 //! `opentelemetry::global::set_meter_provider()`.
 
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Histogram, Meter, UpDownCounter};
+use opentelemetry::metrics::{Counter, Gauge, Histogram, Meter, UpDownCounter};
 
 use gkg_observability::indexer::etl;
 use gkg_observability::indexer::migration;
@@ -158,6 +158,9 @@ impl Default for MigrationMetrics {
 pub struct CompletionMetrics {
     pub(crate) migration_completed: Counter<u64>,
     pub(crate) cleanup: Counter<u64>,
+    pub(crate) indexed_units: Gauge<f64>,
+    pub(crate) eligible_units: Gauge<f64>,
+    pub(crate) migrating_age: Gauge<f64>,
 }
 
 impl CompletionMetrics {
@@ -166,6 +169,9 @@ impl CompletionMetrics {
         Self {
             migration_completed: migration::COMPLETED.build_counter_u64(&meter),
             cleanup: migration::CLEANUP.build_counter_u64(&meter),
+            indexed_units: migration::INDEXED_UNITS.build_gauge_f64(&meter),
+            eligible_units: migration::ELIGIBLE_UNITS.build_gauge_f64(&meter),
+            migrating_age: migration::MIGRATING_AGE.build_gauge_f64(&meter),
         }
     }
 
@@ -182,6 +188,30 @@ impl CompletionMetrics {
                 KeyValue::new(migration::labels::RESULT, result),
             ],
         );
+    }
+
+    /// Records both gauges for a single (scope, version) at once. `version`
+    /// is the migrating version we just measured against, used to derive the
+    /// `version_band` label so dashboards don't have to know version numbers.
+    pub(crate) fn record_units(
+        &self,
+        scope: &'static str,
+        version: u32,
+        current: u32,
+        indexed: u64,
+        eligible: u64,
+    ) {
+        let band = version_band(version, current);
+        let attrs = [
+            KeyValue::new(migration::labels::SCOPE, scope),
+            KeyValue::new(migration::labels::VERSION_BAND, band),
+        ];
+        self.indexed_units.record(indexed as f64, &attrs);
+        self.eligible_units.record(eligible as f64, &attrs);
+    }
+
+    pub(crate) fn record_migrating_age(&self, age_seconds: u64) {
+        self.migrating_age.record(age_seconds as f64, &[]);
     }
 }
 

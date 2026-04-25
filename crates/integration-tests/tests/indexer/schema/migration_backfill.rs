@@ -14,7 +14,8 @@ use gkg_server_config::{
 use indexer::modules::code::NamespaceCodeBackfillDispatcher;
 use indexer::scheduler::{ScheduledTask, ScheduledTaskMetrics};
 use indexer::schema::version::{
-    ensure_version_table, write_migrating_version, write_schema_version,
+    SCHEMA_VERSION, ensure_version_table, prefixed_table_name, write_migrating_version,
+    write_schema_version,
 };
 use indexer::topic::{CODE_INDEXING_TASK_SUBJECT_PATTERN, INDEXER_STREAM};
 use serde::Deserialize;
@@ -63,8 +64,8 @@ impl TestContext {
             self.clickhouse
                 .execute(&format!(
                     "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
-                     (id, root_namespace_id, created_at, updated_at) \
-                     VALUES ({}, {ns_id}, now(), now())",
+                     (id, root_namespace_id, traversal_path, created_at, updated_at) \
+                     VALUES ({}, {ns_id}, '1/{ns_id}/', now(), now())",
                     i + 1
                 ))
                 .await;
@@ -202,18 +203,40 @@ async fn migration_triggers_backfill_for_all_enabled_namespaces() {
     );
 }
 
+/// Coverage-driven backfill: projects that already have a checkpoint row for
+/// the indexer's current schema version should be filtered out. Without this,
+/// each tick re-dispatches the entire project list and relies on NATS
+/// per-subject dedup, which wedges as soon as any message hits max_deliver.
 #[tokio::test]
-async fn no_backfill_without_migrating_version() {
+async fn backfill_skips_projects_with_existing_checkpoints() {
     let context = TestContext::new().await;
 
-    // Seed namespace with project, but no migrating version.
+    // Seed: one namespace with three projects (10, 11, 12).
     common::create_namespace(&context.clickhouse, 100, None, 20, "1/100/").await;
     common::create_project(&context.clickhouse, 10, 100, 1, 20, "1/100/10/").await;
+    common::create_project(&context.clickhouse, 11, 100, 1, 20, "1/100/11/").await;
+    common::create_project(&context.clickhouse, 12, 100, 1, 20, "1/100/12/").await;
     context.given_enabled_namespaces([100]).await;
 
     let graph = context.clickhouse.create_client();
     ensure_version_table(&graph).await.unwrap();
     write_schema_version(&graph, 0).await.unwrap();
+    write_migrating_version(&graph, *SCHEMA_VERSION)
+        .await
+        .unwrap();
+
+    // Insert a checkpoint row for project 11 in the current-version table:
+    // simulates a prior successful indexing run that the dispatcher must not
+    // re-dispatch.
+    let table = prefixed_table_name("code_indexing_checkpoint", *SCHEMA_VERSION);
+    context
+        .clickhouse
+        .execute(&format!(
+            "INSERT INTO {table} \
+             (traversal_path, project_id, branch, last_task_id, last_commit, indexed_at) \
+             VALUES ('1/100/11/', 11, 'main', 0, 'sha', now())"
+        ))
+        .await;
 
     let services = indexer::scheduler::connect(&context.nats_config())
         .await
@@ -234,10 +257,13 @@ async fn no_backfill_without_migrating_version() {
         .await
         .unwrap();
 
-    // No code indexing requests should be dispatched.
+    // Project 11 was already checkpointed, so only 10 and 12 should be
+    // dispatched.
     let requests = context.consume_code_indexing_requests().await;
-    assert!(
-        requests.is_empty(),
-        "no backfill expected when no migration in progress"
+    let project_ids: HashSet<i64> = requests.iter().map(|r| r.project_id).collect();
+    assert_eq!(
+        project_ids,
+        HashSet::from([10, 12]),
+        "checkpointed project 11 must not be re-dispatched"
     );
 }
