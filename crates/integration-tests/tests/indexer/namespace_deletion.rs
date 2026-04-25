@@ -108,8 +108,8 @@ async fn seed_namespace_as_deleted(context: &TestContext) {
     context
         .execute(&format!(
             "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
-             (id, root_namespace_id, _siphon_deleted) VALUES \
-             ({DELETED_NAMESPACE_ID}, {DELETED_NAMESPACE_ID}, true)"
+             (id, root_namespace_id, traversal_path, _siphon_deleted) VALUES \
+             ({DELETED_NAMESPACE_ID}, {DELETED_NAMESPACE_ID}, '{DELETED_NAMESPACE_PATH}', true)"
         ))
         .await;
 }

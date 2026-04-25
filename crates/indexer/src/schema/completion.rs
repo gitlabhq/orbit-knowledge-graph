@@ -60,40 +60,68 @@ WHERE _siphon_deleted = false";
 /// datalake. A namespace with zero projects never publishes code indexing
 /// tasks, so it can never produce a checkpoint row. Without this filter the
 /// code-completion predicate would be unsatisfiable whenever an enabled
-/// namespace is empty — blocking schema migration promotion indefinitely.
+/// namespace is empty, blocking schema migration promotion indefinitely.
 ///
-/// The `[2]` index on `splitByChar('/', traversal_path)` extracts the root
-/// namespace ID from a project path of the form `org_id/root_ns_id/...`,
-/// matching the convention used by `COUNT_CODE_CHECKPOINT_NAMESPACES`.
+/// Uses `enabled.traversal_path` (gitlab-org/gitlab!232941) instead of
+/// reconstructing the root namespace ID from the project path: a project
+/// belongs to an enabled namespace iff its `traversal_path` starts with
+/// `enabled.traversal_path`.
 const COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES: &str = "\
-SELECT count(DISTINCT root_namespace_id) AS ns_count \
-FROM siphon_knowledge_graph_enabled_namespaces \
-WHERE _siphon_deleted = false \
-  AND root_namespace_id IN ( \
-    SELECT DISTINCT toInt64OrZero(splitByChar('/', traversal_path)[2]) \
-    FROM project_namespace_traversal_paths \
-    WHERE deleted = false \
+SELECT count(DISTINCT enabled.root_namespace_id) AS ns_count \
+FROM siphon_knowledge_graph_enabled_namespaces AS enabled \
+WHERE enabled._siphon_deleted = false \
+  AND EXISTS ( \
+    SELECT 1 FROM project_namespace_traversal_paths AS p \
+    WHERE p.deleted = false \
+      AND startsWith(p.traversal_path, enabled.traversal_path) \
   )";
 
 /// SQL to count code-eligible projects in the datalake: projects belonging to
-/// any enabled namespace. This is the denominator of the code-coverage check
-/// that gates migration promotion (see `code_coverage_threshold`).
+/// any enabled namespace. The denominator of the code-coverage check that
+/// gates migration promotion (see `code_coverage_threshold`).
 const COUNT_CODE_ELIGIBLE_PROJECTS: &str = "\
-SELECT count(DISTINCT id) AS ns_count \
-FROM project_namespace_traversal_paths \
-WHERE deleted = false \
-  AND toInt64OrZero(splitByChar('/', traversal_path)[2]) IN ( \
-    SELECT root_namespace_id \
-    FROM siphon_knowledge_graph_enabled_namespaces \
-    WHERE _siphon_deleted = false \
-  )";
+SELECT count(DISTINCT p.id) AS ns_count \
+FROM project_namespace_traversal_paths AS p \
+INNER JOIN siphon_knowledge_graph_enabled_namespaces AS enabled \
+  ON startsWith(p.traversal_path, enabled.traversal_path) \
+WHERE p.deleted = false \
+  AND enabled._siphon_deleted = false";
 
-/// SQL to count distinct projects that have a checkpoint row in the new-prefix
-/// code indexing checkpoint table. The numerator of the code-coverage check.
-const COUNT_CODE_CHECKPOINT_PROJECTS: &str = "\
+/// SQL to fetch enabled namespaces' traversal paths from the datalake. Used
+/// to bridge the cluster boundary: the checkpoint table lives in the graph
+/// DB and cannot join to the datalake, so we pull the small enabled-path set
+/// first and pass it as an Array(String) parameter to the graph-side count.
+const FETCH_ENABLED_TRAVERSAL_PATHS: &str = "\
+SELECT DISTINCT traversal_path \
+FROM siphon_knowledge_graph_enabled_namespaces \
+WHERE _siphon_deleted = false";
+
+/// SQL to count distinct projects in the new-prefix code indexing checkpoint
+/// table that fall under at least one currently-enabled namespace traversal
+/// path. The numerator of the code-coverage check.
+///
+/// Scoping by the enabled-path set prevents leftover checkpoint rows from
+/// previously-enabled-now-disabled namespaces inflating the numerator and
+/// declaring a migration "complete" while currently-enabled namespaces are
+/// still under-indexed.
+const COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED: &str = "\
 SELECT count(DISTINCT project_id) AS ns_count \
 FROM {table:Identifier} FINAL \
-WHERE _deleted = false";
+WHERE _deleted = false \
+  AND arrayExists(p -> startsWith(traversal_path, p), {paths:Array(String)})";
+
+/// Clamps `code_coverage_threshold` to `[0.0, 1.0]`, defaulting NaN to the
+/// safe value 0.95. Operators occasionally hand-roll values that would
+/// otherwise wedge migration: NaN or > 1.0 makes the predicate
+/// unsatisfiable; < 0.0 fires immediately and re-creates the original
+/// premature-promotion bug.
+pub(crate) fn sanitize_coverage_threshold(value: f64) -> f64 {
+    if value.is_nan() {
+        0.95
+    } else {
+        value.clamp(0.0, 1.0)
+    }
+}
 
 /// Scheduled task that detects migration completion and cleans up old tables.
 pub struct MigrationCompletionChecker {
@@ -315,17 +343,34 @@ impl MigrationCompletionChecker {
             .await
             .map_err(|e| format!("count code-eligible projects: {e}"))?;
 
+        // Bridge the cluster boundary: pull enabled traversal paths from the
+        // datalake and pass them as an Array(String) param to a graph-side
+        // count that scopes the checkpoint table to currently-enabled
+        // namespaces only.
+        let enabled_paths = self
+            .fetch_enabled_traversal_paths()
+            .await
+            .map_err(|e| format!("fetch enabled traversal paths: {e}"))?;
+
         let indexed_projects = self
-            .count_table_namespaces(COUNT_CODE_CHECKPOINT_PROJECTS, &code_table)
+            .count_scoped_checkpoint_projects(&code_table, &enabled_paths)
             .await
             .map_err(|e| format!("count code-indexed projects: {e}"))?;
 
+        // `eligible == 0` short-circuits to "complete" so a brand-new
+        // install (no enabled namespaces yet) doesn't sit in `migrating`
+        // forever. Combined with the existing `code_count >= code_eligible_count`
+        // guard above (which is also `0 >= 0` in that case), the SDLC namespace
+        // gate is what actually decides promotion in the empty-eligible case.
         let coverage = if eligible_projects == 0 {
             1.0
         } else {
             indexed_projects as f64 / eligible_projects as f64
         };
-        let threshold = self.config.code_coverage_threshold;
+        // Clamp NaN / out-of-range thresholds to a safe value so a misconfigured
+        // operator override doesn't either lock migration in `migrating`
+        // forever (NaN, > 1.0) or prematurely fire (< 0.0).
+        let threshold = sanitize_coverage_threshold(self.config.code_coverage_threshold);
 
         info!(
             version,
@@ -367,6 +412,47 @@ impl MigrationCompletionChecker {
         let batches = self
             .datalake
             .query_arrow(query)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        batches
+            .first()
+            .and_then(|b| ArrowUtils::get_column::<UInt64Type>(b, "ns_count", 0))
+            .ok_or_else(|| "no ns_count in result".to_string())
+    }
+
+    /// Pulls the (small) set of enabled-namespace traversal paths from the
+    /// datalake. The cluster boundary forces this to be a separate query
+    /// from the checkpoint count.
+    async fn fetch_enabled_traversal_paths(&self) -> Result<Vec<String>, String> {
+        let batches = self
+            .datalake
+            .query(FETCH_ENABLED_TRAVERSAL_PATHS)
+            .fetch_arrow()
+            .await
+            .map_err(|e| e.to_string())?;
+
+        clickhouse_client::FromArrowColumn::extract_column(&batches, 0).map_err(|e| e.to_string())
+    }
+
+    /// Counts distinct projects in `code_table` whose `traversal_path` falls
+    /// under at least one of `enabled_paths`. Empty `enabled_paths` short-
+    /// circuits to 0 so the coverage ratio behaves correctly when no
+    /// namespaces are enabled.
+    async fn count_scoped_checkpoint_projects(
+        &self,
+        code_table: &str,
+        enabled_paths: &[String],
+    ) -> Result<u64, String> {
+        if enabled_paths.is_empty() {
+            return Ok(0);
+        }
+        let batches = self
+            .graph
+            .query(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED)
+            .param("table", code_table)
+            .param("paths", enabled_paths)
+            .fetch_arrow()
             .await
             .map_err(|e| e.to_string())?;
 
@@ -535,10 +621,6 @@ mod tests {
             COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("project_namespace_traversal_paths"),
             "code-eligible count must restrict to namespaces with at least one project"
         );
-        assert!(
-            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("splitByChar"),
-            "code-eligible count must extract root namespace ID from project traversal_path"
-        );
     }
 
     #[test]
@@ -548,20 +630,69 @@ mod tests {
 
     #[test]
     fn count_code_eligible_projects_query_filters_deleted() {
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("deleted = false"));
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("_siphon_deleted = false"));
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("p.deleted = false"));
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("enabled._siphon_deleted = false"));
     }
 
     #[test]
     fn count_code_eligible_projects_query_counts_distinct_project_ids() {
-        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("count(DISTINCT id)"));
+        assert!(COUNT_CODE_ELIGIBLE_PROJECTS.contains("count(DISTINCT p.id)"));
     }
 
     #[test]
-    fn count_code_checkpoint_projects_query_uses_identifier_param() {
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("{table:Identifier}"));
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("count(DISTINCT project_id)"));
-        assert!(COUNT_CODE_CHECKPOINT_PROJECTS.contains("_deleted = false"));
+    fn count_code_eligible_projects_uses_traversal_path_join() {
+        assert!(
+            COUNT_CODE_ELIGIBLE_PROJECTS
+                .contains("startsWith(p.traversal_path, enabled.traversal_path)"),
+            "eligible-projects must join via traversal_path, not splitByChar"
+        );
+        assert!(!COUNT_CODE_ELIGIBLE_PROJECTS.contains("splitByChar"));
+    }
+
+    #[test]
+    fn count_code_checkpoint_projects_scoped_query_shape() {
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{table:Identifier}"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("count(DISTINCT project_id)"));
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("_deleted = false"));
+    }
+
+    #[test]
+    fn count_code_checkpoint_projects_scoped_filters_by_enabled_paths() {
+        assert!(
+            COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("{paths:Array(String)}"),
+            "scoped checkpoint count must take an Array(String) param to filter by enabled namespaces — \
+             without it, leftover checkpoint rows from disabled namespaces inflate coverage"
+        );
+        assert!(COUNT_CODE_CHECKPOINT_PROJECTS_SCOPED.contains("arrayExists"));
+    }
+
+    #[test]
+    fn fetch_enabled_traversal_paths_query_filters_deleted() {
+        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("_siphon_deleted = false"));
+        assert!(FETCH_ENABLED_TRAVERSAL_PATHS.contains("DISTINCT traversal_path"));
+    }
+
+    #[test]
+    fn count_code_eligible_enabled_namespaces_uses_traversal_path() {
+        assert!(
+            COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES
+                .contains("startsWith(p.traversal_path, enabled.traversal_path)")
+        );
+        assert!(!COUNT_CODE_ELIGIBLE_ENABLED_NAMESPACES.contains("splitByChar"));
+    }
+
+    #[test]
+    fn sanitize_threshold_handles_bad_input() {
+        // Sane values pass through.
+        assert_eq!(sanitize_coverage_threshold(0.95), 0.95);
+        assert_eq!(sanitize_coverage_threshold(0.0), 0.0);
+        assert_eq!(sanitize_coverage_threshold(1.0), 1.0);
+        // Out-of-range clamps so completion still terminates.
+        assert_eq!(sanitize_coverage_threshold(2.0), 1.0);
+        assert_eq!(sanitize_coverage_threshold(-0.5), 0.0);
+        // NaN is the dangerous case: every comparison is false, migration
+        // would never promote. Falls back to the documented default.
+        assert_eq!(sanitize_coverage_threshold(f64::NAN), 0.95);
     }
 
     #[test]

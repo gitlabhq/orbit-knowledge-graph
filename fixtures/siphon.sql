@@ -490,13 +490,18 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
 
--- Knowledge graph enabled namespaces
+-- Knowledge graph enabled namespaces.
+-- `traversal_path` mirrors the production column added in
+-- gitlab-org/gitlab!232941. In production it has a dictionary-backed
+-- DEFAULT; tests use a literal '0/' default and rely on seeders to
+-- write the real value.
 CREATE TABLE IF NOT EXISTS test.siphon_knowledge_graph_enabled_namespaces
 (
     `id` Int64,
     `root_namespace_id` Int64,
     `created_at` DateTime64(6, 'UTC'),
     `updated_at` DateTime64(6, 'UTC'),
+    `traversal_path` String DEFAULT '0/',
     `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
     `_siphon_deleted` Bool DEFAULT false
 )

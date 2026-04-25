@@ -29,14 +29,6 @@ WHERE _deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-const NAMESPACE_TRAVERSAL_PATH_QUERY: &str = r#"
-SELECT traversal_path
-FROM namespace_traversal_paths
-WHERE id = {namespace_id:Int64}
-  AND deleted = false
-LIMIT 1
-"#;
-
 const NAMESPACE_PROJECTS_QUERY: &str = r#"
 SELECT id AS project_id, traversal_path
 FROM project_namespace_traversal_paths
@@ -44,12 +36,15 @@ WHERE deleted = false
   AND startsWith(traversal_path, {traversal_path:String})
 "#;
 
-/// All enabled namespace IDs from the datalake. Used to trigger a full
-/// backfill when a schema migration is in progress.
-const ENABLED_NAMESPACE_IDS_QUERY: &str = r#"
-SELECT DISTINCT root_namespace_id
+/// Enabled namespace ID + traversal path pairs from the datalake. Reads
+/// `traversal_path` directly from the enabled namespaces table
+/// (gitlab-org/gitlab!232941) instead of joining `namespace_traversal_paths`
+/// per namespace.
+const ENABLED_NAMESPACES_QUERY: &str = r#"
+SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = false
+  AND traversal_path != ''
 "#;
 
 pub struct NamespaceCodeBackfillDispatcher {
@@ -152,10 +147,12 @@ impl NamespaceCodeBackfillDispatcher {
                 break;
             }
 
-            let namespace_ids = self.extract_namespace_ids(&messages)?;
+            let enabled = self.extract_enabled_namespaces(&messages)?;
 
-            for namespace_id in &namespace_ids {
-                let outcome = self.dispatch_projects_code_indexing(*namespace_id).await?;
+            for (namespace_id, traversal_path) in &enabled {
+                let outcome = self
+                    .dispatch_projects_code_indexing(*namespace_id, traversal_path)
+                    .await?;
                 total.dispatched += outcome.dispatched;
                 total.skipped += outcome.skipped;
             }
@@ -201,15 +198,16 @@ impl NamespaceCodeBackfillDispatcher {
         // Datalake unreachable is a transient issue, not a task error. Mirror
         // the tolerance the old `read_migrating_version` gate had: log and
         // try again next tick.
-        let namespace_ids = match self.fetch_enabled_namespace_ids().await {
-            Ok(ids) => ids,
+        let enabled = match self.fetch_enabled_namespaces().await {
+            Ok(rows) => rows,
             Err(e) => {
-                warn!(error = %e, "failed to fetch enabled namespaces, skipping backfill");
+                self.metrics.record_error(self.name(), "datalake_query");
+                warn!(error = %e, "failed to fetch enabled namespace IDs, skipping backfill");
                 return Ok(());
             }
         };
 
-        if namespace_ids.is_empty() {
+        if enabled.is_empty() {
             return Ok(());
         }
 
@@ -218,8 +216,10 @@ impl NamespaceCodeBackfillDispatcher {
             skipped: 0,
         };
 
-        for namespace_id in &namespace_ids {
-            let outcome = self.dispatch_projects_code_indexing(*namespace_id).await?;
+        for (namespace_id, traversal_path) in &enabled {
+            let outcome = self
+                .dispatch_projects_code_indexing(*namespace_id, traversal_path)
+                .await?;
             total.dispatched += outcome.dispatched;
             total.skipped += outcome.skipped;
         }
@@ -264,10 +264,14 @@ impl NamespaceCodeBackfillDispatcher {
         Ok(ids.into_iter().collect())
     }
 
-    async fn fetch_enabled_namespace_ids(&self) -> Result<Vec<i64>, TaskError> {
+    /// Returns (root_namespace_id, traversal_path) for every currently-enabled
+    /// namespace. Reads `traversal_path` from the enabled namespaces table
+    /// directly (gitlab-org/gitlab!232941); the prior implementation joined
+    /// `namespace_traversal_paths` per namespace.
+    async fn fetch_enabled_namespaces(&self) -> Result<Vec<(i64, String)>, TaskError> {
         let batches = self
             .datalake
-            .query(ENABLED_NAMESPACE_IDS_QUERY)
+            .query(ENABLED_NAMESPACES_QUERY)
             .fetch_arrow()
             .await
             .map_err(|error| {
@@ -275,14 +279,19 @@ impl NamespaceCodeBackfillDispatcher {
                 TaskError::new(error)
             })?;
 
-        i64::extract_column(&batches, 0).map_err(TaskError::new)
+        let ids = i64::extract_column(&batches, 0).map_err(TaskError::new)?;
+        let paths = String::extract_column(&batches, 1).map_err(TaskError::new)?;
+        Ok(ids.into_iter().zip(paths).collect())
     }
 
-    fn extract_namespace_ids(
+    /// Pulls (namespace_id, traversal_path) from inserted CDC events on the
+    /// enabled-namespaces table. The replicated row carries `traversal_path`
+    /// directly, so no follow-up lookup is needed.
+    fn extract_enabled_namespaces(
         &self,
         messages: &[crate::nats::NatsMessage],
-    ) -> Result<Vec<i64>, TaskError> {
-        let mut namespace_ids = Vec::new();
+    ) -> Result<Vec<(i64, String)>, TaskError> {
+        let mut rows: Vec<(i64, String)> = Vec::new();
 
         for message in messages {
             let replication_events = decode_logical_replication_events(&message.envelope.payload)
@@ -310,50 +319,43 @@ impl NamespaceCodeBackfillDispatcher {
                     continue;
                 };
 
-                namespace_ids.push(root_namespace_id);
+                let Some(traversal_path) = extractor.get_string(event, "traversal_path") else {
+                    warn!(
+                        root_namespace_id,
+                        "CDC event missing traversal_path; skipping (re-tries next tick via active backfill)"
+                    );
+                    continue;
+                };
+
+                if traversal_path.is_empty() {
+                    warn!(
+                        root_namespace_id,
+                        "CDC event has empty traversal_path; skipping to avoid prefix-matching every project"
+                    );
+                    continue;
+                }
+
+                rows.push((root_namespace_id, traversal_path.to_string()));
             }
         }
 
-        namespace_ids.sort_unstable();
-        namespace_ids.dedup();
-        Ok(namespace_ids)
-    }
-
-    async fn resolve_namespace_traversal_path(
-        &self,
-        namespace_id: i64,
-    ) -> Result<Option<String>, TaskError> {
-        let batches = self
-            .datalake
-            .query(NAMESPACE_TRAVERSAL_PATH_QUERY)
-            .param("namespace_id", namespace_id)
-            .fetch_arrow()
-            .await
-            .map_err(|error| {
-                self.metrics.record_error(self.name(), "query");
-                TaskError::new(error)
-            })?;
-
-        let paths = String::extract_column(&batches, 0).map_err(TaskError::new)?;
-        Ok(paths.into_iter().next())
+        // De-dupe within a single batch.
+        rows.sort();
+        rows.dedup();
+        Ok(rows)
     }
 
     async fn dispatch_projects_code_indexing(
         &self,
         namespace_id: i64,
+        traversal_path: &str,
     ) -> Result<DispatchOutcome, TaskError> {
         let no_work = DispatchOutcome {
             dispatched: 0,
             skipped: 0,
         };
 
-        let Some(traversal_path) = self.resolve_namespace_traversal_path(namespace_id).await?
-        else {
-            warn!(namespace_id, "namespace traversal path not found, skipping");
-            return Ok(no_work);
-        };
-
-        let projects = self.fetch_namespace_projects(&traversal_path).await?;
+        let projects = self.fetch_namespace_projects(traversal_path).await?;
 
         if projects.is_empty() {
             debug!(namespace_id, "no pending projects in namespace");
@@ -365,7 +367,7 @@ impl NamespaceCodeBackfillDispatcher {
         // the un-indexed remainder rather than the full project set, which
         // matters at scale: a namespace with thousands of projects produces
         // O(remaining) NATS publishes per tick, not O(total).
-        let checkpointed = self.fetch_checkpointed_project_ids(&traversal_path).await?;
+        let checkpointed = self.fetch_checkpointed_project_ids(traversal_path).await?;
         let pending_count_before_filter = projects.len();
         let projects: Vec<PendingProject> = projects
             .into_iter()
@@ -490,7 +492,10 @@ mod tests {
     }
 
     fn namespace_enabled_columns(root_namespace_id: i64) -> EventBuilder {
-        EventBuilder::new().with_i64("root_namespace_id", root_namespace_id)
+        let traversal_path = format!("1/{root_namespace_id}/");
+        EventBuilder::new()
+            .with_i64("root_namespace_id", root_namespace_id)
+            .with_string("traversal_path", &traversal_path)
     }
 
     fn build_namespace_events(
@@ -541,14 +546,23 @@ mod tests {
             .consume_pending(&dispatcher.siphon_subscription(), 100)
             .await
             .unwrap();
-        let ids = dispatcher.extract_namespace_ids(&messages).unwrap();
+        let rows = dispatcher.extract_enabled_namespaces(&messages).unwrap();
 
-        assert_eq!(ids, vec![100, 200]);
+        assert_eq!(
+            rows,
+            vec![(100, "1/100/".to_string()), (200, "1/200/".to_string())]
+        );
     }
 
     #[test]
-    fn enabled_namespace_query_filters_deleted() {
-        assert!(ENABLED_NAMESPACE_IDS_QUERY.contains("_siphon_deleted = false"));
+    fn enabled_namespaces_query_filters_deleted_and_pulls_path() {
+        assert!(ENABLED_NAMESPACES_QUERY.contains("_siphon_deleted = false"));
+        assert!(ENABLED_NAMESPACES_QUERY.contains("traversal_path"));
+        assert!(
+            ENABLED_NAMESPACES_QUERY.contains("traversal_path != ''"),
+            "must skip rows where the dictionary-backed default hasn't \
+             populated yet — empty path would prefix-match every project"
+        );
     }
 
     #[tokio::test]
@@ -566,8 +580,8 @@ mod tests {
             .consume_pending(&dispatcher.siphon_subscription(), 100)
             .await
             .unwrap();
-        let ids = dispatcher.extract_namespace_ids(&messages).unwrap();
+        let rows = dispatcher.extract_enabled_namespaces(&messages).unwrap();
 
-        assert_eq!(ids, vec![300]);
+        assert_eq!(rows, vec![(300, "1/300/".to_string())]);
     }
 }

@@ -64,8 +64,8 @@ impl TestContext {
             self.clickhouse
                 .execute(&format!(
                     "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
-                     (id, root_namespace_id, created_at, updated_at) \
-                     VALUES ({}, {ns_id}, now(), now())",
+                     (id, root_namespace_id, traversal_path, created_at, updated_at) \
+                     VALUES ({}, {ns_id}, '1/{ns_id}/', now(), now())",
                     i + 1
                 ))
                 .await;
