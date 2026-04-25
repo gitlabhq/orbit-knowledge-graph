@@ -1,3 +1,20 @@
+## [0.33.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.32.0...v0.33.0) (2026-04-25)
+
+### Features
+
+* **observability:** jsonnet-based orbit dashboard generator ([baa9f52](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/baa9f52055a3199b985d29e05ac90390ea020023)) by Michael Angelo Rivera
+* **ontology:** introduce admin-gated User columns ([800f307](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/800f3070b37731c2dab744d3a353eeeff8562924)) by Michael Angelo Rivera
+
+### Fixes
+
+* **indexer:** clamp out-of-range Date32 values to NULL in SDLC extract ([044e288](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/044e288e3a443dc3261df3f722fe326e2b38c614)) by Michael Angelo Rivera
+* **indexer:** classify empty 200-OK archives as indexed-empty ([b64af3d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b64af3d129a65ae9005690619acc14209f1bf81f)) by Michael Angelo Rivera
+* **indexer:** dlq subjects for wildcard deliveries ([10e52f4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/10e52f45d56929c42e0ccedde5ba14af8b48bdea)) by Michael Angelo Rivera
+
+### Other
+
+* **schema:** bump schema version to 8 ([a929503](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a92950374ddd212b6ea31657fe10c246710e9aee)) by Michael Angelo Rivera
+
 ## [0.32.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.31.1...v0.32.0) (2026-04-25)
 
 ### Features
