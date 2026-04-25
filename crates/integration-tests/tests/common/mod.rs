@@ -11,6 +11,10 @@ pub fn test_security_context() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
 }
 
+pub fn admin_security_context() -> SecurityContext {
+    test_security_context().with_role(true, None)
+}
+
 pub async fn compile_and_execute(
     ctx: &TestContext,
     json: &str,
