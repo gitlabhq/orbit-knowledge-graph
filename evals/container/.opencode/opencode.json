@@ -13,8 +13,8 @@
     },
     "skill": {
       "*": "deny",
-      "orbit-query": "allow"
+      "glab-data": "allow"
     }
   },
-  "default_agent": "orbit"
+  "default_agent": "glab"
 }

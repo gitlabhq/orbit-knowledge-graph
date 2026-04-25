@@ -29,6 +29,7 @@ class TimeoutConfig(BaseModel, frozen=True):
 
 
 class TaskFilter(BaseModel, frozen=True):
+    ids: list[str] = Field(default_factory=list)
     categories: list[str] = Field(default_factory=list)
     min_difficulty: Difficulty = Difficulty.EASY
 

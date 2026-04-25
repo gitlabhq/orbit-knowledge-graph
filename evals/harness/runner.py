@@ -51,6 +51,8 @@ def load_tasks(config: EvalConfig) -> list[EvalTask]:
                     tags=t.get("tags"), timeout_override=t.get("timeout_override"),
                 ))
     filt = config.run.tasks.filter
+    if filt.ids:
+        tasks = [t for t in tasks if t.id in filt.ids]
     if filt.categories:
         tasks = [t for t in tasks if t.category in filt.categories]
     diff_order = ["easy", "medium", "hard", "very-hard"]
