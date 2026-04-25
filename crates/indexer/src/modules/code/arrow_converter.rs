@@ -428,7 +428,13 @@ impl code_graph::v2::GraphConverter for IndexerConverter {
                 .ok_or_else(|| {
                     code_graph::v2::SinkError("edges batch missing relationship_kind column".into())
                 })?;
-            let rel_array = rel_col.as_string::<i32>();
+            // The column may be dictionary-encoded (DictStr) or plain Utf8.
+            // Cast to StringArray for uniform access.
+            let rel_col_str = arrow::compute::cast(rel_col, &arrow::datatypes::DataType::Utf8)
+                .map_err(|e| {
+                    code_graph::v2::SinkError(format!("cast relationship_kind to string: {e}"))
+                })?;
+            let rel_array = rel_col_str.as_string::<i32>();
 
             let mut table_rows: HashMap<&str, Vec<u32>> = HashMap::new();
             for i in 0..data.edges.num_rows() {
