@@ -22,41 +22,36 @@ def _setup_logging(verbose: bool) -> None:
         logging.getLogger("httpcore").setLevel(logging.WARNING)
 
 
-def _get_db():
-    from harness.db import DbClient
-    db = DbClient()
-    if db.is_alive():
-        return db
-    from harness.db import default_db_path, ensure_schema, direct_connect
-    db_path = default_db_path()
-    ensure_schema(db_path)
+class Ctx:
+    """Shared CLI context. Lazily creates db client and store."""
 
-    class _Direct:
-        def write(self, sql, params=None):
-            with direct_connect(db_path) as c: c.execute(sql, params or [])
-        def write_batch(self, stmts):
-            with direct_connect(db_path) as c:
-                for s in stmts: c.execute(s["sql"], s.get("params", []))
-        def query(self, sql, params=None):
-            with direct_connect(db_path, read_only=True) as c:
-                return [list(r) for r in c.execute(sql, params or []).fetchall()]
-        def query_one(self, sql, params=None):
-            rows = self.query(sql, params)
-            return rows[0] if rows else None
-        def is_alive(self): return True
+    def __init__(self, config_path: str) -> None:
+        self.config_path = config_path
+        self._config = None
+        self._db = None
 
-    return _Direct()
+    @property
+    def config(self):
+        if not self._config:
+            self._config = load_config(self.config_path)
+        return self._config
 
+    @property
+    def db(self):
+        if not self._db:
+            from harness.db import get_client
+            self._db = get_client()
+        return self._db
 
-def _resolve_run_id(db, run_id: str | None) -> str:
-    if run_id:
-        return run_id
-    from harness.store import list_run_ids
-    ids = list_run_ids(db)
-    if not ids:
-        click.echo("error: no runs found", err=True)
-        sys.exit(1)
-    return ids[0]
+    def store(self, run_id: str | None = None):
+        from harness.store import ResultStore, list_run_ids
+        if not run_id:
+            ids = list_run_ids(self.db)
+            if not ids:
+                click.echo("error: no runs found", err=True)
+                sys.exit(1)
+            run_id = ids[0]
+        return ResultStore(db=self.db, run_id=run_id)
 
 
 @click.group()
@@ -67,7 +62,7 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
     """GKG Agent Evaluation Harness."""
     _setup_logging(verbose)
     ctx.ensure_object(dict)
-    ctx.obj["config_path"] = config_path
+    ctx.obj["ctx"] = Ctx(config_path)
     ctx.obj["verbose"] = verbose
 
 
@@ -78,7 +73,8 @@ def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
 @click.pass_context
 def run(ctx: click.Context, arm_name: str | None, run_id: str | None, bg: bool) -> None:
     """Run the evaluation."""
-    config = load_config(ctx.obj["config_path"])
+    c: Ctx = ctx.obj["ctx"]
+    config = c.config
     if arm_name:
         arms = [a for a in config.arms if a.name == arm_name]
         if not arms:
@@ -88,7 +84,7 @@ def run(ctx: click.Context, arm_name: str | None, run_id: str | None, bg: bool) 
 
     if bg:
         import subprocess as _sp
-        cmd = [sys.executable, "-m", "harness.cli", "--config", ctx.obj["config_path"], "run"]
+        cmd = [sys.executable, "-m", "harness.cli", "--config", c.config_path, "run"]
         if arm_name: cmd.extend(["--arm", arm_name])
         if run_id: cmd.extend(["--resume", run_id])
         if ctx.obj.get("verbose"): cmd.insert(3, "-v")
@@ -111,28 +107,24 @@ def run(ctx: click.Context, arm_name: str | None, run_id: str | None, bg: bool) 
 @click.pass_context
 def score(ctx: click.Context, run_id: str | None) -> None:
     """Score evaluation results."""
-    config = load_config(ctx.obj["config_path"])
+    c: Ctx = ctx.obj["ctx"]
     from harness.evaluators import load_evaluators
-    from harness.store import ResultStore
+    store = c.store(run_id)
+    click.echo(f"scoring run {store.run_id}")
 
-    db = _get_db()
-    run_id = _resolve_run_id(db, run_id)
-    store = ResultStore(db=db, run_id=run_id)
-    click.echo(f"scoring run {run_id}")
-
-    evaluators = load_evaluators(config.evaluators)
-    for arm_cfg in config.arms:
+    for arm_cfg in c.config.arms:
         arm_scores = []
+        evaluators = load_evaluators(c.config.evaluators)
         for r in store.read_results(arm_cfg.name):
             if r.status.value != "success":
                 continue
             snapshot = store.read_snapshot(arm_cfg.name, r.task_id)
-            fixture_path = Path(config.run.scoring.fixtures_path) / r.task_id / "expected.json"
+            fixture_path = Path(c.config.run.scoring.fixtures_path) / r.task_id / "expected.json"
             fixture = json.loads(fixture_path.read_text()) if fixture_path.exists() else None
             arm_scores.append({"task_id": r.task_id,
                                "scores": {ev.name: ev.evaluate(r, snapshot, fixture) for ev in evaluators}})
         store.write_scores(arm_cfg.name, arm_scores)
-    click.echo(f"scores written (run_id={run_id})")
+    click.echo(f"scores written (run_id={store.run_id})")
 
 
 @cli.command()
@@ -140,13 +132,11 @@ def score(ctx: click.Context, run_id: str | None) -> None:
 @click.pass_context
 def report(ctx: click.Context, run_id: str | None) -> None:
     """Generate report from scored run."""
-    config = load_config(ctx.obj["config_path"])
+    c: Ctx = ctx.obj["ctx"]
     from harness.report import generate_report
-    from harness.store import ResultStore
-    db = _get_db()
-    run_id = _resolve_run_id(db, run_id)
-    generate_report(config, run_id, ResultStore(db=db, run_id=run_id))
-    click.echo(f"report generated for run {run_id}")
+    store = c.store(run_id)
+    generate_report(c.config, store.run_id, store)
+    click.echo(f"report generated for run {store.run_id}")
 
 
 @cli.command("dry-run")
@@ -154,12 +144,10 @@ def report(ctx: click.Context, run_id: str | None) -> None:
 @click.pass_context
 def dry_run(ctx: click.Context, check_infra: bool) -> None:
     """Validate config and tasks without running."""
-    errors, warnings = [], []
-    try:
-        config = load_config(ctx.obj["config_path"])
-        click.echo(f"[ok] config: {ctx.obj['config_path']}")
-    except Exception as e:
-        click.echo(f"[FAIL] {e}", err=True); sys.exit(1)
+    c: Ctx = ctx.obj["ctx"]
+    errors = []
+    config = c.config
+    click.echo(f"[ok] config: {c.config_path}")
 
     for arm in config.arms:
         if not Path(arm.agent).exists(): errors.append(f"agent not found: {arm.agent}")
@@ -193,17 +181,15 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
 @click.option("--runs", "show_runs", is_flag=True)
 def servers(log_arm, tail, kill_arm, show_runs) -> None:
     """Manage eval containers."""
+    from harness.db import get_client
     from harness.server import ServerManager
-    db = _get_db()
-    mgr = ServerManager(db=db)
+    mgr = ServerManager(db=get_client())
 
     if kill_arm:
         asyncio.run(mgr.stop_all() if kill_arm == "__all__" else mgr.stop(kill_arm))
-        click.echo("stopped")
-        return
+        click.echo("stopped"); return
     if log_arm:
-        click.echo(mgr.logs(log_arm, tail=tail))
-        return
+        click.echo(mgr.logs(log_arm, tail=tail)); return
     if show_runs:
         for r in mgr.get_runs():
             click.echo(f"  {r['run_id']}  {r['status']:<10}  {r['started_at']}")

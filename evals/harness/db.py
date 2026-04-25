@@ -58,6 +58,42 @@ class DbClient:
         self._http.close()
 
 
+class DirectClient:
+    """DuckDB client that connects directly to the file. For tests and offline CLI."""
+
+    def __init__(self, db_path: Path) -> None:
+        self._path = db_path
+        ensure_schema(db_path)
+
+    def write(self, sql: str, params: list | None = None) -> None:
+        with direct_connect(self._path) as c:
+            c.execute(sql, params or [])
+
+    def write_batch(self, statements: list) -> None:
+        with direct_connect(self._path) as c:
+            for s in statements:
+                c.execute(s["sql"], s.get("params", []))
+
+    def query(self, sql: str, params: list | None = None) -> list[list]:
+        with direct_connect(self._path, read_only=True) as c:
+            return [list(r) for r in c.execute(sql, params or []).fetchall()]
+
+    def query_one(self, sql: str, params: list | None = None) -> list | None:
+        rows = self.query(sql, params)
+        return rows[0] if rows else None
+
+    def is_alive(self) -> bool:
+        return True
+
+
+def get_client() -> DbClient | DirectClient:
+    """Return DbClient if server is running, DirectClient otherwise."""
+    db = DbClient()
+    if db.is_alive():
+        return db
+    return DirectClient(default_db_path())
+
+
 def ensure_schema(db_path: Path) -> None:
     import duckdb
     conn = duckdb.connect(str(db_path))

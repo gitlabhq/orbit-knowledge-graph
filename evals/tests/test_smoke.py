@@ -29,34 +29,9 @@ def _chdir():
 
 
 def _make_test_db(db_path: Path):
-    """Create a direct-mode DbClient adapter for tests (no server needed)."""
-    from harness.db import ensure_schema, direct_connect
-
-    ensure_schema(db_path)
-
-    class _TestDb:
-        def write(self, sql, params=None):
-            with direct_connect(db_path) as conn:
-                conn.execute(sql, params or [])
-
-        def write_batch(self, statements):
-            with direct_connect(db_path) as conn:
-                for stmt in statements:
-                    conn.execute(stmt["sql"], stmt.get("params", []))
-
-        def query(self, sql, params=None):
-            with direct_connect(db_path, read_only=True) as conn:
-                rows = conn.execute(sql, params or []).fetchall()
-                return [list(r) for r in rows]
-
-        def query_one(self, sql, params=None):
-            rows = self.query(sql, params)
-            return rows[0] if rows else None
-
-        def is_alive(self):
-            return True
-
-    return _TestDb()
+    """Create a DirectClient for tests (no server needed)."""
+    from harness.db import DirectClient
+    return DirectClient(db_path)
 
 
 @pytest.fixture(autouse=True)
