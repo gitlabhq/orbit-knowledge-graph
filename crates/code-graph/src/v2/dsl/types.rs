@@ -294,6 +294,9 @@ pub struct ImportRule {
     pub(crate) wildcard_child_kind: Option<&'static str>,
     /// Symbol name used for wildcard imports (e.g. "*").
     pub(crate) wildcard_symbol: &'static str,
+    /// If true, ALL imports from this rule are treated as wildcard
+    /// (e.g. C# `using MyApp.Models;` imports all types in the namespace).
+    pub(crate) always_wildcard: bool,
     /// If set, split a scoped name at this separator into (path, name).
     /// e.g. `"."` splits `java.util.List` → path=`java.util`, name=`List`.
     pub(crate) split_last: Option<&'static str>,
@@ -369,6 +372,14 @@ impl ImportRule {
         self
     }
 
+    /// Treat all imports from this rule as wildcard imports.
+    /// Use for languages where `using Foo.Bar;` imports all types
+    /// under the namespace (C#, etc.).
+    pub fn always_wildcard(mut self) -> Self {
+        self.always_wildcard = true;
+        self
+    }
+
     pub(crate) fn resolve_label(&self, node: &N<'_>) -> &'static str {
         self.classify.map_or(self.label, |f| f(node))
     }
@@ -408,6 +419,7 @@ pub fn import(kind: &'static str) -> ImportRule {
         alias_child_kind: None,
         wildcard_child_kind: None,
         wildcard_symbol: "*",
+        always_wildcard: false,
         split_last: None,
     }
 }

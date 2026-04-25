@@ -445,10 +445,13 @@ impl LanguageSpec {
             } else {
                 raw_path
             };
-            // Check for wildcard child (e.g. `asterisk` in `import com.example.*`).
-            let has_wildcard_child = rule
-                .wildcard_child_kind
-                .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
+            // Check for wildcard: either a wildcard child node (e.g. `asterisk`
+            // in `import com.example.*`) or the always_wildcard flag (e.g. C#
+            // `using MyApp.Models;` imports all types in the namespace).
+            let has_wildcard_child = rule.always_wildcard
+                || rule
+                    .wildcard_child_kind
+                    .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
 
             if has_wildcard_child {
                 // Wildcard import: path is the full extracted name, no split needed.
