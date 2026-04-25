@@ -9,8 +9,9 @@ ENV PATH="/root/.local/bin:/root/.local/share/mise/shims:${PATH}"
 COPY mise.toml /root/.config/mise/config.toml
 RUN mise trust /root/.config/mise/config.toml && mise install
 
-# opencode (standalone installer — aqua registry ships wrong binary)
-RUN curl -fsSL https://opencode.ai/install | bash
+# opencode (pinned version — aqua registry ships wrong binary)
+ARG OPENCODE_VERSION=1.4.11
+RUN curl -fsSL https://opencode.ai/install | bash -s -- --version ${OPENCODE_VERSION}
 ENV PATH="/root/.opencode/bin:${PATH}"
 
 COPY entrypoint.sh /opt/entrypoint.sh
