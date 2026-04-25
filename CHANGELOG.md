@@ -1,3 +1,21 @@
+## [0.32.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.31.1...v0.32.0) (2026-04-25)
+
+### Features
+
+* **code-graph:** initial C# resolution support with comprehensive test coverage ([b32cf72](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b32cf72b20789afc60f07e09368b9465b5918c59)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** adaptive halving on SDLC datalake retry ([1c88346](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1c8834608268a604c23eff818e996af2730d9404)) by Michael Angelo Rivera
+* **indexer:** add per-pipeline batch_size_overrides to prevent Arrow 2 GiB cap ([85ff1df](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85ff1dfca0ba723660a7e62a3ac33b1a33c39800)) by Jean-Gabriel Doyon
+* **indexer:** drive code backfill from coverage, not migrating-version gate ([0d0a33c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0d0a33c9a7839bf7d164bf34a8d1c445b5d2c720)) by Michael Angelo Rivera
+
+### Performance
+
+* arrow IPC compression, dictionary encoding, edge sorting ([2d0f7a5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2d0f7a521fa24e8b0fc131e4e76046896c9594bd)) by Michael Usachenko
+* **query:** replace argMax with LIMIT 1 BY for search dedup ([0dc6b41](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0dc6b411f4b718e8e433a33d9fb8c0b4566b78a9)) by Michael Usachenko
+* **query:** replace argMax with LIMIT 1 BY in _nf_* CTEs ([97a5434](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97a5434b16e4c5c9a81b82267c1acf8388984af9)) by Michael Usachenko
+
 ## [0.31.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.31.0...v0.31.1) (2026-04-24)
 
 ### Fixes
