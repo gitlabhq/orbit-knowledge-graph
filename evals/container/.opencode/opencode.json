@@ -3,10 +3,18 @@
   "permission": {
     "*": "allow",
     "question": "deny",
+    "bash": {
+      "*": "deny",
+      "python tools/*": "allow",
+      "python3 tools/*": "allow",
+      "glab *": "allow",
+      "cat *": "allow",
+      "echo *": "allow"
+    },
     "skill": {
       "*": "deny",
-      "glab-data": "allow"
+      "orbit-query": "allow"
     }
   },
-  "default_agent": "glab"
+  "default_agent": "orbit"
 }

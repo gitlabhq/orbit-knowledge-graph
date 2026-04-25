@@ -40,6 +40,7 @@ class MessageInfo(BaseModel, extra="allow"):
     agent: str | None = None
     variant: str | None = None
     modelID: str | None = None
+    finish: str | None = None
     cost: float = 0.0
     tokens: dict[str, Any] = {}
     path: dict[str, str] = {}
@@ -188,18 +189,20 @@ class OpenCodeClient:
         # API returned async — poll until the last assistant message is done
         return await self._poll_completion(session_id)
 
+    _TERMINAL_FINISH = {"stop", "end_turn", "max_tokens", "error"}
+
     async def _poll_completion(
         self, session_id: str, poll_interval: float = 1.0
     ) -> MessageWithParts:
-        """Poll messages until the last assistant message has a finish reason."""
+        """Poll messages until the last assistant message has a terminal finish reason."""
         while True:
             msgs = await self.list_messages(session_id)
             for msg in reversed(msgs):
                 if msg.info.role != "assistant":
                     continue
-                if msg.info.finish and msg.info.finish != "":
+                if msg.info.finish in self._TERMINAL_FINISH:
                     return msg
-                break
+                break  # last assistant msg not done yet
             await asyncio.sleep(poll_interval)
 
     # -- session artifacts ----------------------------------------------------
