@@ -1,3 +1,9 @@
+## [0.33.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.33.0...v0.33.1) (2026-04-25)
+
+### Fixes
+
+* **ontology:** bound unbounded joins in Group and MergeRequestDiffFile ETL ([b25aa44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b25aa44f52ac47191f33f788498cdc396f220a0c)) by Jean-Gabriel Doyon
+
 ## [0.33.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.32.0...v0.33.0) (2026-04-25)
 
 ### Features
