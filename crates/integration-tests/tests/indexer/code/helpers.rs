@@ -109,6 +109,10 @@ struct ProjectData {
     /// in the handler using the ref from the request query, so the Gitaly
     /// `<slug>-<ref>/` prefix matches whatever commit SHA the indexer asks for.
     archive_files: Vec<(String, Vec<u8>)>,
+    /// When true, the archive endpoint returns 200 OK with a zero-byte body,
+    /// matching the production case where Gitaly streams an empty archive for
+    /// projects that lack repository content.
+    empty_archive_body: bool,
 }
 
 pub struct MockGitlabServer {
@@ -166,6 +170,21 @@ impl MockGitlabServer {
             ProjectData {
                 default_branch: default_branch.to_string(),
                 archive_files,
+                empty_archive_body: false,
+            },
+        );
+    }
+
+    /// Register a project whose archive endpoint returns HTTP 200 with a
+    /// zero-byte body, exercising the "empty 200" path the indexer must
+    /// classify as an empty repository instead of a retryable failure.
+    pub fn add_project_with_empty_archive(&self, project_id: i64, default_branch: &str) {
+        self.state.projects.lock().insert(
+            project_id,
+            ProjectData {
+                default_branch: default_branch.to_string(),
+                archive_files: Vec::new(),
+                empty_archive_body: true,
             },
         );
     }
@@ -177,6 +196,7 @@ impl MockGitlabServer {
                 .iter()
                 .map(|(p, c)| (p.to_string(), c.as_bytes().to_vec()))
                 .collect();
+            project.empty_archive_body = false;
         }
     }
 }
@@ -211,6 +231,7 @@ async fn handle_download_archive(
 ) -> impl IntoResponse {
     let projects = state.projects.lock();
     match projects.get(&project_id) {
+        Some(p) if p.empty_archive_body => (StatusCode::OK, Vec::<u8>::new()).into_response(),
         Some(p) => {
             let files: Vec<(&str, &str)> = p
                 .archive_files
