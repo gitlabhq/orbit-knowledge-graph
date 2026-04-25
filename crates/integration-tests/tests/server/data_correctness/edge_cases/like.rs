@@ -167,7 +167,10 @@ pub(crate) async fn like_underscore_matched_literally(ctx: &TestContext) {
 // ── equality on like_allowed:false fields ───────────────────────────
 
 pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext) {
-    let resp = run_query(
+    // User.email is admin_only, so both the test and the production callers
+    // need an admin context to reach this code path. The point of this test
+    // is that `like_allowed: false` does not block exact equality.
+    let resp = run_query_with_security(
         ctx,
         r#"{
             "query_type": "search",
@@ -176,6 +179,7 @@ pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext
             "limit": 10
         }"#,
         &allow_all(),
+        admin_security_context(),
     )
     .await;
 
@@ -186,7 +190,9 @@ pub(crate) async fn like_equality_on_email_returns_correct_row(ctx: &TestContext
 }
 
 pub(crate) async fn like_in_filter_on_email_works(ctx: &TestContext) {
-    let resp = run_query(
+    // Same reasoning as above: admin context exercises the equality/in path
+    // without being blocked by admin_only.
+    let resp = run_query_with_security(
         ctx,
         r#"{
             "query_type": "search",
@@ -195,6 +201,7 @@ pub(crate) async fn like_in_filter_on_email_works(ctx: &TestContext) {
             "limit": 10
         }"#,
         &allow_all(),
+        admin_security_context(),
     )
     .await;
 

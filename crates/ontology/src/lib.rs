@@ -1997,6 +1997,47 @@ properties:
     }
 
     #[test]
+    fn user_node_marks_sensitive_columns_admin_only() {
+        // Pin the real ontology so any future edit that drops admin_only on a
+        // sensitive User column fails CI. Each column listed here is one that
+        // GitLab does not expose to non-admins on its public REST/GraphQL
+        // surfaces; see config/ontology/nodes/core/user.yaml for the rationale.
+        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
+        for field in [
+            "email",
+            "first_name",
+            "last_name",
+            "preferred_language",
+            "private_profile",
+            "is_external",
+            "is_admin",
+            "is_auditor",
+            "updated_at",
+        ] {
+            assert!(
+                ontology.is_admin_only("User", field),
+                "User.{field} must be admin_only"
+            );
+        }
+        for field in [
+            "id",
+            "username",
+            "name",
+            "state",
+            "avatar_url",
+            "public_email",
+            "user_type",
+            "last_activity_on",
+            "created_at",
+        ] {
+            assert!(
+                !ontology.is_admin_only("User", field),
+                "User.{field} must not be admin_only"
+            );
+        }
+    }
+
+    #[test]
     fn modify_field_errors_for_unknown_field() {
         let result = Ontology::new()
             .with_nodes(["User"])
