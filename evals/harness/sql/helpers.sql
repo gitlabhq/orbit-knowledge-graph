@@ -213,6 +213,17 @@ CREATE OR REPLACE MACRO run_ids_by_config(h) AS TABLE (
     ORDER BY run_id DESC
 );
 
+-- Scalar: find the latest resumable run for a config hash
+-- Returns run_id if there's an incomplete run (running/failed), NULL otherwise
+CREATE OR REPLACE MACRO resumable_run(h) AS (
+    SELECT r.run_id
+    FROM runs r
+    JOIN run_configs rc ON r.run_id = rc.run_id
+    WHERE rc.config_hash = h AND r.status IN ('running', 'failed')
+    ORDER BY r.started_at DESC
+    LIMIT 1
+);
+
 -- Table: task results with their scores for a run+arm
 CREATE OR REPLACE MACRO task_detail(rid, a) AS TABLE (
     SELECT

@@ -257,7 +257,6 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
     from harness.server import ServerManager
 
     work_dir = work_dir or os.getcwd()
-    run_id = ResultStore.make_run_id()
 
     with _db_server(DB_SERVER_PORT):
         db = DbClient()
@@ -268,22 +267,39 @@ async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str,
         else:
             raise RuntimeError("db server failed to start")
 
-        mgr = ServerManager(db=db)
-        store = ResultStore(db=db, run_id=run_id)
         tasks = load_tasks(config)
-
-        log.setup(run_id)
         if not tasks:
             log.event("run", "no tasks matched filters", level="warn")
             return {}
 
-        config_hash = store.snapshot_config(config)
-        log.event("run", "starting", data={
-            "run_id": run_id, "tasks": len(tasks),
-            "arms": [a.name for a in config.arms],
-            "config_hash": config_hash,
-        })
-        mgr.begin_run(run_id, config.arms, len(tasks))
+        # Compute config hash to check for resumable runs
+        tmp_store = ResultStore(db=db, run_id="probe")
+        config_hash = tmp_store.snapshot_config(config)
+
+        # Check for an incomplete run with the same config
+        row = db.query_one("SELECT resumable_run(?)", [config_hash])
+        resumed_id = row[0] if row and row[0] else None
+
+        if resumed_id:
+            run_id = resumed_id
+            log.setup(run_id)
+            log.event("run", "resuming", data={"run_id": run_id, "config_hash": config_hash})
+        else:
+            run_id = ResultStore.make_run_id()
+            log.setup(run_id)
+            log.event("run", "starting", data={
+                "run_id": run_id, "tasks": len(tasks),
+                "arms": [a.name for a in config.arms],
+                "config_hash": config_hash,
+            })
+
+        mgr = ServerManager(db=db)
+        store = ResultStore(db=db, run_id=run_id)
+
+        # Re-snapshot config under the real run_id (idempotent via INSERT OR REPLACE)
+        store.snapshot_config(config)
+        if not resumed_id:
+            mgr.begin_run(run_id, config.arms, len(tasks))
 
         all_results: dict[str, list[TaskResult]] = {}
         try:
