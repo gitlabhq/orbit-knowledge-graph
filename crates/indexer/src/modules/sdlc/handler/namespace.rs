@@ -138,6 +138,7 @@ mod tests {
             Arc::new(EmptyDatalake),
             Arc::new(MockCheckpointStore),
             test_metrics(),
+            Default::default(),
         ));
 
         let handler = NamespaceHandler::new(

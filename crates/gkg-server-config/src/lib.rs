@@ -27,9 +27,9 @@ pub use app::{AppConfig, ConfigError, SECRET_FILE_DIR, SharedAppConfig};
 pub use billing::BillingConfig;
 pub use clickhouse::{ClickHouseConfiguration, ConfigurationError, ProfilingConfig};
 pub use engine::{
-    CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, EngineConfiguration,
-    GlobalDispatcherConfig, GlobalHandlerConfig, HandlerConfiguration, HandlersConfiguration,
-    MigrationCompletionConfig, NamespaceCodeBackfillDispatcherConfig,
+    CodeIndexingPipelineConfig, CodeIndexingTaskHandlerConfig, DatalakeRetryConfig,
+    EngineConfiguration, GlobalDispatcherConfig, GlobalHandlerConfig, HandlerConfiguration,
+    HandlersConfiguration, MigrationCompletionConfig, NamespaceCodeBackfillDispatcherConfig,
     NamespaceDeletionHandlerConfig, NamespaceDeletionSchedulerConfig, NamespaceDispatcherConfig,
     NamespaceHandlerConfig, ScheduleConfig, ScheduleConfiguration, ScheduledTasksConfiguration,
     SiphonCodeIndexingTaskDispatcherConfig, TableCleanupConfig,

@@ -31,12 +31,14 @@ pub(crate) trait DatalakeQuery: Send + Sync {
         &self,
         sql: &str,
         params: Value,
+        max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError>;
 
     async fn query_batches(
         &self,
         sql: &str,
         params: Value,
+        max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError>;
 }
 
@@ -44,14 +46,14 @@ pub(crate) type DatalakeClient = Arc<ArrowClickHouseClient>;
 
 pub(crate) struct Datalake {
     client: DatalakeClient,
-    max_block_size: u64,
+    default_max_block_size: u64,
 }
 
 impl Datalake {
-    pub fn new(client: DatalakeClient, max_block_size: u64) -> Self {
+    pub fn new(client: DatalakeClient, default_max_block_size: u64) -> Self {
         Self {
             client,
-            max_block_size,
+            default_max_block_size,
         }
     }
 }
@@ -62,6 +64,7 @@ impl DatalakeQuery for Datalake {
         &self,
         sql: &str,
         params: Value,
+        max_block_size: Option<u64>,
     ) -> Result<RecordBatchStream<'_>, DatalakeError> {
         let mut query = self.client.query(sql);
 
@@ -71,8 +74,9 @@ impl DatalakeQuery for Datalake {
             }
         }
 
+        let block_size = max_block_size.unwrap_or(self.default_max_block_size);
         let stream = query
-            .fetch_arrow_streamed(self.max_block_size)
+            .fetch_arrow_streamed(block_size)
             .await
             .map_err(|e| DatalakeError::Query(e.to_string()))?;
 
@@ -85,8 +89,9 @@ impl DatalakeQuery for Datalake {
         &self,
         sql: &str,
         params: Value,
+        max_block_size: Option<u64>,
     ) -> Result<Vec<RecordBatch>, DatalakeError> {
-        let mut stream = self.query_arrow(sql, params).await?;
+        let mut stream = self.query_arrow(sql, params, max_block_size).await?;
         let mut batches = Vec::new();
 
         while let Some(result) = stream.next().await {
