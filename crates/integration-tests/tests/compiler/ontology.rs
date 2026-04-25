@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use super::setup::{embedded_ontology, test_ctx};
+use super::setup::{admin_ctx, embedded_ontology, test_ctx};
 use super::utils::ParsedSql;
 use compiler::{
     ColumnSelection, HydrationPlan, Input, InputNode, QueryType, compile, compile_input,
@@ -1039,7 +1039,10 @@ fn like_rejects_starts_with_on_email() {
 }
 
 #[test]
-fn like_equality_on_email_compiles() {
+fn like_equality_on_email_compiles_for_admin() {
+    // `like_allowed: false` blocks LIKE operators but not equality. Admin context
+    // is used because User.email is also gated by `admin_only`, which the
+    // RestrictPass enforces ahead of like_allowed.
     assert!(
         compile(
             r#"{
@@ -1049,9 +1052,29 @@ fn like_equality_on_email_compiles() {
             "limit": 10
         }"#,
             &embedded_ontology(),
-            &test_ctx(),
+            &admin_ctx(),
         )
         .is_ok()
+    );
+}
+
+#[test]
+fn equality_on_email_rejected_for_non_admin() {
+    let err = compile(
+        r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User",
+                     "filters": {"email": "alice@example.com"}},
+            "limit": 10
+        }"#,
+        &embedded_ontology(),
+        &test_ctx(),
+    )
+    .unwrap_err();
+    let msg = err.to_string();
+    assert!(
+        msg.contains("email") && msg.contains("administrator"),
+        "expected admin-only rejection on User.email, got: {msg}"
     );
 }
 
