@@ -89,7 +89,15 @@ impl ArrowClickHouseClient {
         let mut buffer = Vec::new();
 
         {
-            let mut writer = StreamWriter::try_new(&mut buffer, &schema)
+            let options = arrow_ipc::writer::IpcWriteOptions::try_new(
+                8,
+                false,
+                arrow_ipc::MetadataVersion::V5,
+            )
+            .map_err(ClickHouseError::ArrowEncode)?
+            .try_with_compression(Some(arrow_ipc::CompressionType::LZ4_FRAME))
+            .map_err(ClickHouseError::ArrowEncode)?;
+            let mut writer = StreamWriter::try_new_with_options(&mut buffer, &schema, options)
                 .map_err(ClickHouseError::ArrowEncode)?;
 
             for (batch_index, batch) in batches.iter().enumerate() {
