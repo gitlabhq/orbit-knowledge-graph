@@ -1,0 +1,265 @@
+name: "C# edge cases — null-conditional, async, overloads, nested namespaces, partial"
+
+fixtures:
+  - path: Models/Point.cs
+    content: |
+      namespace Geo.Models
+      {
+          public class Point
+          {
+              public double X { get; set; }
+              public double Y { get; set; }
+
+              public Point(double x, double y) { X = x; Y = y; }
+              public Point() { X = 0; Y = 0; }
+
+              public double DistanceTo(Point other)
+              {
+                  return 0;
+              }
+
+              public Point Normalize()
+              {
+                  return new Point(X, Y);
+              }
+          }
+      }
+
+  - path: Models/Line.cs
+    content: |
+      namespace Geo.Models
+      {
+          public class Line
+          {
+              public Point Start { get; set; }
+              public Point End { get; set; }
+
+              public Line(Point start, Point end)
+              {
+                  Start = start;
+                  End = end;
+              }
+
+              public double Length()
+              {
+                  return Start.DistanceTo(End);
+              }
+          }
+      }
+
+  - path: Services/PointService.cs
+    content: |
+      using Geo.Models;
+
+      namespace Geo.Services
+      {
+          public partial class PointService
+          {
+              public Point Create(double x, double y)
+              {
+                  return new Point(x, y);
+              }
+
+              public async Task<Point> CreateAsync(double x, double y)
+              {
+                  return new Point(x, y);
+              }
+          }
+      }
+
+  - path: Services/PointService.Validation.cs
+    content: |
+      using Geo.Models;
+
+      namespace Geo.Services
+      {
+          public partial class PointService
+          {
+              public bool IsValid(Point p)
+              {
+                  return p != null;
+              }
+
+              public Point Clamp(Point p)
+              {
+                  p.Normalize();
+                  return p;
+              }
+          }
+      }
+
+  - path: App/Runner.cs
+    content: |
+      using Geo.Models;
+      using Geo.Services;
+
+      namespace Geo.App
+      {
+          public class Runner
+          {
+              private PointService _service;
+              private Point _cached;
+
+              public Runner()
+              {
+                  _service = new PointService();
+              }
+
+              public void Run()
+              {
+                  var p1 = _service.Create(1.0, 2.0);
+                  var p2 = new Point(3.0, 4.0);
+                  var line = new Line(p1, p2);
+                  line.Length();
+
+                  // Null-conditional
+                  _cached?.Normalize();
+
+                  // Chained after constructor
+                  new Point(5.0, 6.0).Normalize();
+
+                  // Method from partial class (other file)
+                  _service.IsValid(p1);
+                  _service.Clamp(p2);
+              }
+
+              public async void RunAsync()
+              {
+                  var p = await _service.CreateAsync(1.0, 2.0);
+                  p.Normalize();
+              }
+          }
+      }
+
+tests:
+  # ── Multiple constructors (overloads) ─────────────────────────
+  - name: "Point has two constructors"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geo.Models.Point.Point'
+        AND d.definition_type = 'Constructor'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+
+  # ── Nested namespaces ─────────────────────────────────────────
+  - name: "Nested namespace FQN correct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geo.Models.Line'
+        AND d.definition_type = 'Class'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Geo.Models.Line, type: Class } }
+
+  # ── Cross-file member chain ──────────────────────────────────
+  - name: "Line.Length calls Point.DistanceTo via typed field"
+    skip: true  # property type annotation not followed during chain resolution (cross-language gap)
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.Models.Line.Length'
+        AND callee.fqn = 'Geo.Models.Point.DistanceTo'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.Models.Line.Length, callee: Geo.Models.Point.DistanceTo, kind: Calls } }
+
+  # ── var inference + chained call ──────────────────────────────
+  - name: "var p1 = service.Create() → line = new Line(p1, p2) → line.Length()"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.App.Runner.Run'
+        AND callee.fqn = 'Geo.Models.Line.Length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Line.Length, kind: Calls } }
+
+  # ── Null-conditional ?.  ──────────────────────────────────────
+  - name: "_cached?.Normalize() resolves despite ?."
+    skip: true  # ?. is conditional_access_expression, not member_access_expression
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.App.Runner.Run'
+        AND callee.fqn = 'Geo.Models.Point.Normalize'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.App.Runner.Run, callee: Geo.Models.Point.Normalize, kind: Calls } }
+
+  # ── Partial class — methods from both files ───────────────────
+  - name: "Partial class Create from first file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geo.Services.PointService.Create'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Geo.Services.PointService.Create, type: Method } }
+
+  - name: "Partial class IsValid from second file"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geo.Services.PointService.IsValid'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Geo.Services.PointService.IsValid, type: Method } }
+
+  - name: "Partial class Clamp calls Point.Normalize"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.Services.PointService.Clamp'
+        AND callee.fqn = 'Geo.Models.Point.Normalize'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.Services.PointService.Clamp, callee: Geo.Models.Point.Normalize, kind: Calls } }
+
+  - name: "Runner calls partial class methods from both files"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.App.Runner.Run'
+        AND callee.fqn IN ['Geo.Services.PointService.IsValid',
+                            'Geo.Services.PointService.Clamp']
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: Geo.Services.PointService.IsValid } }
+      - { row: { callee: Geo.Services.PointService.Clamp } }
+
+  # ── Async method ──────────────────────────────────────────────
+  - name: "Async method defined with correct type"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'Geo.Services.PointService.CreateAsync'
+        AND d.definition_type = 'Method'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: Geo.Services.PointService.CreateAsync, type: Method } }
+
+  - name: "Runner.RunAsync calls CreateAsync"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.App.Runner.RunAsync'
+        AND callee.fqn = 'Geo.Services.PointService.CreateAsync'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.App.Runner.RunAsync, callee: Geo.Services.PointService.CreateAsync, kind: Calls } }
+
+  # ── Runner calls PointService.Create via typed field ──────────
+  - name: "Runner.Run calls PointService.Create"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'Geo.App.Runner.Run'
+        AND callee.fqn = 'Geo.Services.PointService.Create'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: Geo.App.Runner.Run, callee: Geo.Services.PointService.Create, kind: Calls } }
