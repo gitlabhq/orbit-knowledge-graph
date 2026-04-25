@@ -19,6 +19,17 @@ logger = logging.getLogger(__name__)
 EVAL_IMAGE = "gkg-eval"
 
 
+PROVIDER_HOSTS = {
+    "anthropic": "api.anthropic.com",
+    "openai": "api.openai.com",
+    "google": "generativelanguage.googleapis.com",
+}
+
+
+def _provider_host(provider: str) -> str | None:
+    return PROVIDER_HOSTS.get(provider)
+
+
 def _resolve_host(hostname: str) -> str:
     """Resolve hostname to IP for --add-host. Falls back to hostname if resolution fails."""
     import socket
@@ -86,14 +97,18 @@ class ServerManager:
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
         name = f"eval-{arm.name}"
         workspace = str(Path(work_dir).resolve())
-        gitlab_host = arm.env.get("GITLAB_HOST", "staging.gitlab.com")
+        # Network allowlist: gitlab host + model provider
+        allowed_hosts = {
+            arm.env.get("GITLAB_HOST", "staging.gitlab.com"),
+            _provider_host(arm.model.provider),
+        }
+        host_args = [x for h in allowed_hosts if h
+                     for x in ("--add-host", f"{h}:{_resolve_host(h)}")]
         r = subprocess.run(
             ["docker", "run", "--rm", "-d", "--name", name,
              "-p", f"{arm.port}:4096",
              "-v", f"{workspace}:/mnt/workspace:ro",
-             # network: pin gitlab host IP, null out DNS to block everything else
-             "--add-host", f"{gitlab_host}:{_resolve_host(gitlab_host)}",
-             "--dns", "0.0.0.0",
+             *host_args, "--dns", "0.0.0.0",
              *env_args, EVAL_IMAGE],
             capture_output=True, text=True,
         )
