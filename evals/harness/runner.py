@@ -89,9 +89,9 @@ class EvalRunner:
     def _render_prompt(self, task: EvalTask) -> str:
         return render_prompt(task, self.config.run.scoring.fixtures_path)
 
-    async def _capture_and_save(self, client, arm_name, task_id, event_queue, started_at):
+    async def _capture_and_save(self, client, arm_name, session_id, task_id, event_queue, started_at):
         try:
-            snapshot = await capture_snapshot(client, task_id, event_queue, started_at)
+            snapshot = await capture_snapshot(client, session_id, event_queue, started_at)
             self.store.write_snapshot(arm_name, task_id, snapshot)
             return snapshot, summarize_snapshot(snapshot)
         except Exception:
@@ -153,13 +153,13 @@ class EvalRunner:
                     timeout=timeout)
             except asyncio.TimeoutError:
                 await handle.client.abort_session(session_id)
-                _, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
+                _, summary = await self._capture_and_save(handle.client, arm.name, session_id, task.id, event_queue, started_at)
                 return TaskResult(task_id=task.id, arm=arm.name, status=TaskStatus.TIMEOUT,
                                   timestamp=started_at.isoformat(),
                                   error=f"timed out after {timeout}s", error_type="TimeoutError",
                                   session_summary=summary)
 
-            snapshot, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
+            snapshot, summary = await self._capture_and_save(handle.client, arm.name, session_id, task.id, event_queue, started_at)
             log.event("task", "success", arm=arm.name, task_id=task.id,
                       duration_ms=summary.duration_ms if summary else 0,
                       data={"steps": summary.steps if summary else 0,
@@ -174,7 +174,7 @@ class EvalRunner:
             log.event("task", f"failed: {etype}: {e}", arm=arm.name, task_id=task.id, level="error")
             summary = None
             if session_id and event_queue:
-                _, summary = await self._capture_and_save(handle.client, arm.name, task.id, event_queue, started_at)
+                _, summary = await self._capture_and_save(handle.client, arm.name, session_id, task.id, event_queue, started_at)
             status = (TaskStatus.AGENT_ERROR
                       if "structured" in etype.lower() or "step" in str(e).lower()
                       else TaskStatus.INFRA_ERROR)
