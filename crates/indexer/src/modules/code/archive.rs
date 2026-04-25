@@ -10,12 +10,28 @@ pub enum ArchiveError {
     Io(String),
     #[error("archive error: {0}")]
     Archive(String),
+    /// The stream ended before any tar entry could be read. This happens when
+    /// the GitLab archive endpoint returns 200 OK with an empty or truncated
+    /// body for a project whose repository has no content. Callers classify
+    /// this as an empty-repository outcome rather than a retryable failure.
+    #[error("archive contained no entries (empty or truncated stream)")]
+    EmptyArchive,
 }
 
 impl From<std::io::Error> for ArchiveError {
     fn from(e: std::io::Error) -> Self {
         ArchiveError::Io(e.to_string())
     }
+}
+
+fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
+    if err.kind() == std::io::ErrorKind::UnexpectedEof {
+        return true;
+    }
+    // The tar crate wraps its internal errors as io::Error with Other kind and
+    // a message like "unexpected end of file" or "failed to fill whole buffer".
+    let msg = err.to_string();
+    msg.contains("unexpected end of file") || msg.contains("failed to fill whole buffer")
 }
 
 #[cfg(test)]
@@ -51,11 +67,30 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
     // a symlink that resolves outside the target directory.
     let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
 
-    for entry in archive
-        .entries()
-        .map_err(|e| ArchiveError::Archive(e.to_string()))?
-    {
-        let mut entry = entry.map_err(|e| ArchiveError::Archive(e.to_string()))?;
+    // Tracks whether `entries.next()` has yielded an Ok item (including
+    // skipped PAX headers). False + a truncation-shaped error means the body
+    // ended before any tar header could be read.
+    let mut any_entry_seen = false;
+
+    let entries = archive.entries().map_err(|e| {
+        if looks_like_truncated_stream(&e) {
+            ArchiveError::EmptyArchive
+        } else {
+            ArchiveError::Archive(e.to_string())
+        }
+    })?;
+
+    for entry in entries {
+        let mut entry = match entry {
+            Ok(e) => {
+                any_entry_seen = true;
+                e
+            }
+            Err(e) if !any_entry_seen && looks_like_truncated_stream(&e) => {
+                return Err(ArchiveError::EmptyArchive);
+            }
+            Err(e) => return Err(ArchiveError::Archive(e.to_string())),
+        };
 
         // Skip PAX metadata entries that aren't real files. XGlobalHeader
         // appears in Gitaly archives and would otherwise be treated as the

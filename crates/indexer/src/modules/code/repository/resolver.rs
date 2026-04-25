@@ -3,7 +3,7 @@ use std::sync::Arc;
 
 use tracing::info;
 
-use super::cache::RepositoryCache;
+use super::cache::{RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
 use crate::modules::code::metrics::CodeMetrics;
@@ -133,11 +133,22 @@ impl RepositoryResolver {
             }
         };
 
-        self.cache
+        match self
+            .cache
             .extract_archive(project_id, branch, archive_stream)
             .await
-            .map_err(|e| HandlerError::Processing(format!("failed to extract archive: {e}")))
-            .map_err(Into::into)
+        {
+            Ok(path) => Ok(path),
+            Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
+                reason: EmptyRepositoryReason::NotFound,
+                detail: format!(
+                    "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                ),
+            }),
+            Err(e) => {
+                Err(HandlerError::Processing(format!("failed to extract archive: {e}")).into())
+            }
+        }
     }
 }
 
@@ -164,6 +175,15 @@ mod tests {
         fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
             Arc::new(Self {
                 archive: Mutex::new(build_test_tar_gz(files, ref_name)),
+                fail_downloads: Mutex::new(false),
+                download_error: Mutex::new(None),
+                download_count: AtomicUsize::new(0),
+            })
+        }
+
+        fn with_raw_archive(bytes: Vec<u8>) -> Arc<Self> {
+            Arc::new(Self {
+                archive: Mutex::new(bytes),
                 fail_downloads: Mutex::new(false),
                 download_error: Mutex::new(None),
                 download_count: AtomicUsize::new(0),
@@ -402,6 +422,25 @@ mod tests {
             ResolveError::EmptyRepository { reason, detail } => {
                 assert_eq!(reason, EmptyRepositoryReason::ServerError);
                 assert!(detail.contains("500"), "detail was {detail}");
+            }
+            other => panic!("expected EmptyRepository, got {other:?}"),
+        }
+    }
+
+    #[tokio::test]
+    async fn resolve_maps_empty_archive_body_to_empty_repository() {
+        let service = ScriptedRepositoryService::with_raw_archive(Vec::new());
+        let (_dir, resolver) = create_resolver(service);
+
+        let err = resolver.resolve(42, "main", None).await.unwrap_err();
+
+        match err {
+            ResolveError::EmptyRepository { reason, detail } => {
+                assert_eq!(reason, EmptyRepositoryReason::NotFound);
+                assert!(
+                    detail.contains("no entries") || detail.contains("empty body"),
+                    "detail was {detail}"
+                );
             }
             other => panic!("expected EmptyRepository, got {other:?}"),
         }
