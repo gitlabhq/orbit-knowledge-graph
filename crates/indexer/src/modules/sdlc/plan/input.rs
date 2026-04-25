@@ -96,12 +96,18 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
 pub(in crate::modules::sdlc) enum ExtractColumn {
     Bare(String),
     ToString(String),
+    /// Postgres `date` is wider than ClickHouse `Date32` (1900-01-01..2299-12-31).
+    /// A single out-of-range row would poison the whole Arrow batch, so we clamp
+    /// at the SQL projection layer and let NULL propagate.
+    DateClamp(String),
 }
 
 impl ExtractColumn {
     fn name(&self) -> &str {
         match self {
-            ExtractColumn::Bare(name) | ExtractColumn::ToString(name) => name,
+            ExtractColumn::Bare(name)
+            | ExtractColumn::ToString(name)
+            | ExtractColumn::DateClamp(name) => name,
         }
     }
 }
@@ -143,6 +149,7 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
             let col = field.column_name()?;
             Some(match &field.data_type {
                 DataType::Uuid => ExtractColumn::ToString(col.to_string()),
+                DataType::Date => ExtractColumn::DateClamp(col.to_string()),
                 _ => ExtractColumn::Bare(col.to_string()),
             })
         })
@@ -502,5 +509,52 @@ fn append_missing(columns: &mut Vec<ExtractColumn>, names: &[String]) {
         if !already_present {
             columns.push(ExtractColumn::Bare(name.clone()));
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn find_column<'a>(plan: &'a NodePlan, name: &str) -> Option<&'a ExtractColumn> {
+        plan.extract.columns.iter().find(|c| c.name() == name)
+    }
+
+    #[test]
+    fn from_ontology_emits_date_clamp_for_milestone_and_workitem() {
+        let ontology = Ontology::load_embedded().expect("should load ontology");
+        let plans = from_ontology(&ontology);
+
+        let work_item = plans
+            .node_plans
+            .iter()
+            .find(|p| p.name == "WorkItem")
+            .expect("WorkItem plan should exist");
+        let due = find_column(work_item, "due_date").expect("WorkItem due_date column");
+        assert!(
+            matches!(due, ExtractColumn::DateClamp(_)),
+            "WorkItem.due_date must be DateClamp, got different variant"
+        );
+        let start = find_column(work_item, "start_date").expect("WorkItem start_date column");
+        assert!(
+            matches!(start, ExtractColumn::DateClamp(_)),
+            "WorkItem.start_date must be DateClamp"
+        );
+
+        let milestone = plans
+            .node_plans
+            .iter()
+            .find(|p| p.name == "Milestone")
+            .expect("Milestone plan should exist");
+        let due = find_column(milestone, "due_date").expect("Milestone due_date column");
+        assert!(
+            matches!(due, ExtractColumn::DateClamp(_)),
+            "Milestone.due_date must be DateClamp"
+        );
+        let start = find_column(milestone, "start_date").expect("Milestone start_date column");
+        assert!(
+            matches!(start, ExtractColumn::DateClamp(_)),
+            "Milestone.start_date must be DateClamp"
+        );
     }
 }
