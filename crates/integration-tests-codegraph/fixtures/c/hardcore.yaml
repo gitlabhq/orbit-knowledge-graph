@@ -242,7 +242,6 @@ tests:
       - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
 
   - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
-    skip: true  # transitive include resolution not yet implemented
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'app::main'
