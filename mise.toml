@@ -363,3 +363,36 @@ description = "Run all documentation linters"
 [tasks."skill:sync:orbit"]
 run = "cp docs/source/queries/query_language.md skills/orbit/references/query_language.md"
 description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"
+
+[tasks."eval:build"]
+run = "docker build -t gkg-eval evals/container"
+description = "Build the eval harness Docker image"
+
+[tasks."eval:run"]
+run = "uv run python -m harness.cli run"
+dir = "evals"
+description = "Run full evaluation"
+
+[tasks."eval:run:bg"]
+run = "uv run python -m harness.cli run --bg"
+dir = "evals"
+description = "Run evaluation detached in background"
+
+[tasks."eval:score"]
+run = "uv run python -m harness.cli score"
+dir = "evals"
+description = "Score latest eval run"
+
+[tasks."eval:report"]
+run = "uv run python -m harness.cli report"
+dir = "evals"
+description = "Generate report from latest scored run"
+
+[tasks."eval:dry-run"]
+run = "uv run python -m harness.cli dry-run"
+dir = "evals"
+description = "Validate eval config and tasks"
+
+[tasks."eval:full"]
+depends = ["eval:build", "eval:run", "eval:score", "eval:report"]
+description = "Build image, run eval, score, report"
