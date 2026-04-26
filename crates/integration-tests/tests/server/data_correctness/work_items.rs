@@ -5,7 +5,7 @@ pub(super) async fn search_returns_correct_work_item_properties(ctx: &TestContex
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "w", "entity": "WorkItem",
+            "node": {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "work_item_type", "confidential", "weight"]},
             "order_by": {"node": "w", "property": "id", "direction": "ASC"},
             "limit": 10
@@ -44,7 +44,7 @@ pub(super) async fn search_filter_work_item_type_returns_matching_rows(ctx: &Tes
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "w", "entity": "WorkItem",
+            "node": {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "work_item_type"],
                      "filters": {"work_item_type": {"op": "in", "value": ["issue", "task"]}}},
             "limit": 10
@@ -67,7 +67,7 @@ pub(super) async fn traversal_user_authored_work_item_returns_correct_edges(ctx:
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "w"}],
@@ -99,7 +99,7 @@ pub(super) async fn traversal_work_item_in_group_returns_correct_edges(ctx: &Tes
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "w", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "IN_GROUP", "from": "w", "to": "g"}],
@@ -126,7 +126,7 @@ pub(super) async fn traversal_work_item_in_milestone_returns_correct_edges(ctx: 
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "w", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
                 {"id": "m", "entity": "Milestone", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "IN_MILESTONE", "from": "w", "to": "m"}],
@@ -153,7 +153,7 @@ pub(super) async fn traversal_user_assigned_work_item_returns_correct_edges(ctx:
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "w", "entity": "WorkItem", "columns": ["title"]}
             ],
             "relationships": [{"type": "ASSIGNED", "from": "u", "to": "w"}],
@@ -182,7 +182,7 @@ pub(super) async fn traversal_work_item_in_project_returns_correct_edges(ctx: &T
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "w", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
                 {"id": "p", "entity": "Project", "columns": ["name"]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "w", "to": "p"}],
@@ -209,7 +209,7 @@ pub(super) async fn traversal_user_closed_work_item_returns_correct_edges(ctx: &
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "w", "entity": "WorkItem", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "CLOSED", "from": "u", "to": "w"}],
@@ -236,7 +236,7 @@ pub(super) async fn traversal_work_item_has_label_returns_correct_edges(ctx: &Te
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "w", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
                 {"id": "l", "entity": "Label", "columns": ["title", "color"]}
             ],
             "relationships": [{"type": "HAS_LABEL", "from": "w", "to": "l"}],

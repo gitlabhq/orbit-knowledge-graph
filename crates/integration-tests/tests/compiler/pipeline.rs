@@ -68,7 +68,7 @@ impl TestObserver {
 fn search_json() -> &'static str {
     r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 10
     }"#
 }
@@ -293,7 +293,7 @@ fn error_stops_pipeline_early() {
     // but NormalizePass should fail on unknown entity.
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "x", "entity": "NonExistent", "columns": []},
+        "node": {"id": "x", "entity": "NonExistent", "node_ids": [1], "columns": []},
         "limit": 10
     }"#;
     let state = QueryState::from_json(json);
@@ -349,7 +349,7 @@ fn clickhouse_preset_compiles_traversal_query() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
@@ -376,7 +376,7 @@ fn from_input_preset_compiles_pre_built_input() {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);
@@ -407,7 +407,7 @@ fn hydration_preset_skips_security_and_check() {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);

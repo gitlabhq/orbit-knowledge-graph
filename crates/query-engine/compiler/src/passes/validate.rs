@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
+use crate::input::{AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType};
 use ontology::{DataType, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
@@ -105,6 +105,22 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Maximum span for id_range before it stops counting as selective.
+/// Ranges wider than this are effectively unfiltered full-table scans.
+const MAX_ID_RANGE_SPAN: i64 = 100_000;
+
+/// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
+/// Queries where no node is selective tend to produce full-table scans.
+fn node_has_selectivity(node: &InputNode) -> bool {
+    if !node.node_ids.is_empty() || !node.filters.is_empty() {
+        return true;
+    }
+    if let Some(ref range) = node.id_range {
+        return range.end.saturating_sub(range.start) <= MAX_ID_RANGE_SPAN;
+    }
+    false
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Validator
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +167,7 @@ impl<'a> Validator<'a> {
         self.check_path(input)?;
         self.check_neighbors(input)?;
         self.check_depth(input)?;
+        self.check_selectivity(input)?;
         self.check_filter_types(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
@@ -404,6 +421,62 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Reject queries that would produce unbounded scans or Cartesian explosions.
+    ///
+    /// The checks are intentionally conservative: they reject shapes that are
+    /// structurally guaranteed to be expensive regardless of data volume.
+    fn check_selectivity(&self, input: &Input) -> Result<()> {
+        match input.query_type {
+            // Path-finding without pinned endpoints causes O(E^depth) frontier joins.
+            QueryType::PathFinding => {
+                if let Some(ref path) = input.path {
+                    for endpoint in [&path.from, &path.to] {
+                        let node = input.nodes.iter().find(|n| n.id == *endpoint);
+                        if node.is_none_or(|n| !node_has_selectivity(n)) {
+                            return Err(QueryError::Validation(format!(
+                                "path_finding requires node_ids or filters on endpoint \"{endpoint}\" \
+                                 to avoid unbounded frontier expansion"
+                            )));
+                        }
+                    }
+                }
+            }
+            // Neighbors without selectivity on the center node scans all edges.
+            QueryType::Neighbors => {
+                if let Some(ref nb) = input.neighbors {
+                    let node = input.nodes.iter().find(|n| n.id == nb.node);
+                    if node.is_none_or(|n| !node_has_selectivity(n)) {
+                        return Err(QueryError::Validation(
+                            "neighbors requires node_ids or filters on the center node \
+                             to avoid scanning all edges"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            // Search without selectivity scans the entire entity table.
+            QueryType::Search if !input.nodes.iter().any(node_has_selectivity) => {
+                return Err(QueryError::Validation(
+                    "search requires node_ids, filters, or id_range on the node \
+                     to avoid full table scans"
+                        .into(),
+                ));
+            }
+            // Traversal/aggregation without selectivity scans entire edge tables.
+            QueryType::Traversal | QueryType::Aggregation
+                if !input.nodes.iter().any(node_has_selectivity) =>
+            {
+                return Err(QueryError::Validation(
+                    "traversal and aggregation queries require node_ids or filters on \
+                     at least one node to avoid full edge table scans"
+                        .into(),
+                ));
+            }
+            _ => {}
+        }
+        Ok(())
+    }
+
     fn check_pagination(&self, input: &Input) -> Result<()> {
         if let Some(ref cursor) = input.cursor
             && cursor.offset.saturating_add(cursor.page_size) > input.limit
@@ -457,6 +530,20 @@ impl<'a> Validator<'a> {
             if agg.function == AggFunction::Collect {
                 return Err(QueryError::Validation(format!(
                     "aggregation[{i}] function \"collect\" is not supported"
+                )));
+            }
+
+            // sum/avg/min/max without a property silently aggregate the edge
+            // ID column after edge-only optimization (e.g. SUM(e0.source_id)),
+            // which is meaningless. Require an explicit property.
+            if matches!(
+                agg.function,
+                AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
+            ) && agg.property.is_none()
+            {
+                return Err(QueryError::Validation(format!(
+                    "aggregation[{i}] function \"{}\" requires a 'property' field",
+                    agg.function.as_sql()
                 )));
             }
 
@@ -721,7 +808,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}]
@@ -733,7 +820,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
-                    {"id": "u", "entity": "User", "columns": ["username"]},
+                    {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -750,7 +837,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "search",
-                "node": {"id": "u", "entity": "User", "columns": ["username"]},
+                "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 "order_by": {"node": "u", "property": "username", "direction": "ASC"}
             }"#,
         );
@@ -781,7 +868,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "relationships": [{"type": "AUTHORED", "from": "ghost", "to": "u"}]
             }"#,
             "undefined node \"ghost\"",
@@ -790,7 +877,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "traversal",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "ghost"}]
             }"#,
             "undefined node \"ghost\"",
@@ -801,7 +888,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "count",
                     "target": "missing",
@@ -814,7 +901,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "count",
                     "target": "u",
@@ -829,7 +916,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "sum",
                     "target": "u",
@@ -845,7 +932,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "search",
-                "node": {"id": "u", "entity": "User"},
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
                 "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
             }"#,
             "undefined node \"missing\"",
@@ -854,7 +941,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "search",
-                "node": {"id": "u", "entity": "User"},
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
                 "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
             }"#,
             "does not exist",
@@ -904,7 +991,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "u", "entity": "Project"}
                 ]
             }"#,
@@ -918,7 +1005,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
@@ -933,7 +1020,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"},
                     {"id": "orphan", "entity": "Note"}
                 ],
@@ -948,7 +1035,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "p", "entity": "Project"}],
+                "nodes": [{"id": "p", "entity": "Project", "node_ids": [1]}],
                 "aggregations": [{"function": "count", "target": "p", "alias": "total"}]
             }"#,
         );
@@ -959,7 +1046,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "collect",
                     "target": "u",
@@ -972,11 +1059,37 @@ mod tests {
     }
 
     #[test]
+    fn rejects_property_less_sum_avg_min_max() {
+        for func in ["sum", "avg", "min", "max"] {
+            let json = format!(
+                r#"{{
+                    "query_type": "aggregation",
+                    "nodes": [{{"id": "u", "entity": "User", "node_ids": [1]}}],
+                    "aggregations": [{{
+                        "function": "{func}",
+                        "target": "u",
+                        "alias": "result"
+                    }}]
+                }}"#
+            );
+            assert_rejects(&json, "requires a 'property' field");
+        }
+        // count without property is fine
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "total"}]
+            }"#,
+        );
+    }
+
+    #[test]
     fn rejects_sum_on_string_property() {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "sum",
                     "target": "u",
@@ -993,7 +1106,7 @@ mod tests {
         assert_rejects(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "avg",
                     "target": "u",
@@ -1010,7 +1123,7 @@ mod tests {
         assert_ok(
             r#"{
                 "query_type": "aggregation",
-                "nodes": [{"id": "u", "entity": "User"}],
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
                 "aggregations": [{
                     "function": "min",
                     "target": "u",
@@ -1027,7 +1140,7 @@ mod tests {
             r#"{
                 "query_type": "aggregation",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "g", "entity": "Group"}
                 ],
                 "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1272,7 +1385,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1289,7 +1402,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1306,7 +1419,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1323,7 +1436,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1340,7 +1453,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1358,7 +1471,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1376,7 +1489,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1394,7 +1507,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "n", "entity": "Note"}
                 ],
                 "relationships": [{
@@ -1438,7 +1551,7 @@ mod tests {
 
         let input = parse_input(r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}, {"id": "n", "entity": "Note"}],
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
         }"#)
         .unwrap();
@@ -1473,7 +1586,7 @@ mod tests {
 
         let input = parse_input(r#"{
             "query_type": "traversal",
-            "nodes": [{"id": "u", "entity": "User"}, {"id": "n", "entity": "Note"}],
+            "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}, {"id": "n", "entity": "Note"}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "filters": {"source_id": 42}}]
         }"#)
         .unwrap();
@@ -1508,6 +1621,213 @@ mod tests {
         assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
         assert!(!re.is_match("üser")); // Latin u with diaeresis
         assert!(!re.is_match("用户")); // CJK
+    }
+
+    // ── Selectivity guards ────────────────────────────────────────────
+
+    #[test]
+    fn selectivity_guards() {
+        // ── Path finding ────────────────────────────────────────────
+        // Both endpoints pinned: OK
+        assert_ok(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3}
+            }"#,
+        );
+        // Filter on endpoint counts as selectivity
+        assert_ok(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+        );
+        // Missing selectivity on start endpoint
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User"},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"a\"",
+        );
+        // Missing selectivity on end endpoint
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "User"}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"b\"",
+        );
+
+        // ── Neighbors ───────────────────────────────────────────────
+        // Center node pinned: OK
+        assert_ok(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+        );
+        // Center node with filter: OK
+        assert_ok(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "filters": {"username": "root"}},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+        );
+        // Center node without selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User"},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+            "center node",
+        );
+
+        // ── Search ──────────────────────────────────────────────────
+        // Search with filter: OK
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "filters": {"username": "root"}}
+            }"#,
+        );
+        // Search with node_ids: OK
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]}
+            }"#,
+        );
+        // Search without selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User"}
+            }"#,
+            "full table scans",
+        );
+
+        // ── Traversal ───────────────────────────────────────────────
+        // Single-hop with pinned node: OK
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+        );
+        // Single-hop with filter on second node: OK
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project", "filters": {"name": "gitlab"}}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+        );
+        // Single-hop without any selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+            "full edge table scans",
+        );
+        // Multi-hop with pinned node: OK
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+            }"#,
+        );
+        // Multi-hop without any selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+            }"#,
+            "full edge table scans",
+        );
+
+        // ── Aggregation ─────────────────────────────────────────────
+        // Aggregation with filter: OK
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "filters": {"username": "root"}},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
+                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+            }"#,
+        );
+        // Aggregation without any selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
+                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+            }"#,
+            "full edge table scans",
+        );
+
+        // ── id_range selectivity ────────────────────────────────────
+        // Narrow id_range counts as selective
+        assert_ok(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}
+            }"#,
+        );
+        // Wide id_range does NOT count as selective
+        assert_rejects(
+            r#"{
+                "query_type": "search",
+                "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}
+            }"#,
+            "full table scans",
+        );
     }
 
     // ── LIKE security controls ──────────────────────────────────────
