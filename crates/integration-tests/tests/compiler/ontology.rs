@@ -204,7 +204,7 @@ fn complex_search_query() {
 fn search_with_specific_columns() {
     let json = r#"{
         "query_type": "search",
-        "node": { "id": "u", "entity": "User", "columns": ["username", "state"] },
+        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"] },
         "limit": 10
     }"#;
 
@@ -221,7 +221,7 @@ fn search_with_specific_columns() {
 fn search_with_wildcard_columns() {
     let json = r#"{
         "query_type": "search",
-        "node": { "id": "u", "entity": "User", "columns": "*" },
+        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": "*" },
         "limit": 10
     }"#;
 
