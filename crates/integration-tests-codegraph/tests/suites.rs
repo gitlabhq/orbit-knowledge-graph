@@ -279,6 +279,7 @@ yaml_test!(
     rust_extends_relationships,
     "rust/extends_relationships.yaml"
 );
+yaml_test!(rust_extends_cross_file, "rust/extends_cross_file.yaml");
 yaml_test!(
     rust_field_sensitive_local_flow,
     "rust/field_sensitive_local_flow.yaml"

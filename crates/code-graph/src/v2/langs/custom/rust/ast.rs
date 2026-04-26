@@ -451,22 +451,29 @@ impl RustStructureExtractor {
         };
 
         // Capture supertrait declarations (`trait Foo: Bar + Baz`) as pending
-        // EXTENDS edges from the local trait FQN to each supertrait FQN.
-        // Resolution lives in the linker — external supertraits (std, deps)
-        // simply do not match an in-graph definition and produce no edge.
+        // EXTENDS edges from the local trait FQN to each supertrait FQN. We
+        // route through rust-analyzer HIR (`Trait::all_supertraits`) so the
+        // emitted FQNs are the canonical module paths the trait actually
+        // resolves to — this picks up cross-module references and re-exports
+        // that AST-level path normalisation would have to re-implement by
+        // hand. External supertraits (std, deps) silently drop in the linker
+        // because no in-graph definition matches their FQN.
         if let (Some(sema), Some(workspace)) = (sema, workspace)
             && !trait_parts.is_empty()
             && let Some(trait_def) = sema.to_trait_def(&trait_item)
         {
             let target_fqn = canonical_fqn_parts(&trait_parts).as_str().to_string();
-            for super_trait in trait_def.all_supertraits(sema.db) {
+            // Direct supertraits only — transitive ancestry is reconstructed
+            // by the linker when consumers walk the EXTENDS edge. Mirrors how
+            // other languages populate `super_types` (one entry per declared
+            // parent, not the closure).
+            for super_trait in trait_def.direct_supertraits(sema.db) {
                 if super_trait == trait_def {
                     continue;
                 }
-                if let Some(super_fqn) = hir_trait_fqn(super_trait, sema, workspace) {
-                    self.pending_supertypes
-                        .push((target_fqn.clone(), super_fqn));
-                }
+                let super_fqn = hir_trait_fqn(super_trait, sema, workspace);
+                self.pending_supertypes
+                    .push((target_fqn.clone(), super_fqn));
             }
         }
 
@@ -505,14 +512,15 @@ impl RustStructureExtractor {
             .map(|name_ref| name_ref.text().to_string());
 
         // Capture `impl Trait for Type` as a pending EXTENDS edge from the
-        // self-type definition to the implemented trait. The HIR lookup
-        // resolves the trait through rust-analyzer so re-exports and aliased
-        // imports settle on the canonical trait module path.
+        // self-type definition to the implemented trait. We route through
+        // HIR (`Impl::trait_`) so the emitted FQN is the canonical module
+        // path of the resolved trait, regardless of how the trait was
+        // referenced at the impl site (bare name, re-export, alias, prelude).
         if let (Some(sema), Some(workspace)) = (sema, workspace)
             && let Some(impl_def) = sema.to_impl_def(&impl_item)
             && let Some(impl_trait) = impl_def.trait_(sema.db)
-            && let Some(super_fqn) = hir_trait_fqn(impl_trait, sema, workspace)
         {
+            let super_fqn = hir_trait_fqn(impl_trait, sema, workspace);
             let target_fqn = canonical_fqn_parts(&container_parts).as_str().to_string();
             self.pending_supertypes.push((target_fqn, super_fqn));
         }
@@ -1057,13 +1065,14 @@ fn canonical_fqn_parts(parts: &[String]) -> Fqn {
 }
 
 /// Build the canonical FQN string for a HIR `Trait` using the same module
-/// path scheme the local-definition path uses. Returns `None` when the trait
-/// has no resolvable name (e.g. anonymous parents we cannot canonicalise).
+/// path scheme local trait definitions use, so a supertrait reference
+/// resolved by HIR matches the FQN of the in-graph trait definition the
+/// linker is searching for.
 fn hir_trait_fqn(
     trait_def: ra_ap_hir::Trait,
     sema: &Semantics<'_, RootDatabase>,
     workspace: &WorkspaceIndex,
-) -> Option<String> {
+) -> String {
     let module = trait_def.module(sema.db);
     let mut parts = workspace.module_path_parts(module);
     parts.push(
@@ -1072,7 +1081,7 @@ fn hir_trait_fqn(
             .display(sema.db, Edition::CURRENT)
             .to_string(),
     );
-    Some(canonical_fqn_parts(&parts).as_str().to_string())
+    canonical_fqn_parts(&parts).as_str().to_string()
 }
 
 fn scope_fqn(parts: &[String]) -> Option<Fqn> {
