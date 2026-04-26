@@ -1,0 +1,299 @@
+name: "Rust: EXTENDS edges from supertrait declarations and trait impls"
+fixtures:
+  - path: Cargo.toml
+    content: |
+      [package]
+      name = "extends_test"
+      version = "0.1.0"
+      edition = "2021"
+  - path: src/lib.rs
+    content: |
+      // Case 1: simple supertrait declaration `trait Foo: Bar`.
+      pub trait Animal {}
+      pub trait Pet: Animal {}
+
+      // Case 2: multiple supertraits on a trait.
+      pub trait Sleepable {}
+      pub trait Trainable {}
+      pub trait Companion: Pet + Sleepable + Trainable {}
+
+      // Case 3: supertrait chain `trait A: B; trait B: C` for transitive
+      // resolution. Companion -> Pet -> Animal already exercises a 2-hop
+      // chain; add a deeper chain via Domesticated.
+      pub trait Mammal {}
+      pub trait Carnivore: Mammal {}
+      pub trait Domesticated: Carnivore {}
+
+      // Case 4: simple impl `impl Trait for Type` on a struct.
+      pub struct Dog;
+      impl Animal for Dog {}
+
+      // Case 5: multiple trait impls on the same type produce one EXTENDS
+      // edge per implemented trait.
+      pub struct Cat;
+      impl Animal for Cat {}
+      impl Pet for Cat {}
+
+      // Case 6: inherent impl block (no trait) must NOT emit EXTENDS.
+      pub struct Box1;
+      impl Box1 {
+          pub fn open(&self) {}
+      }
+
+      // Case 7: trait impl on a generic type (the self-type, not the type
+      // parameter, anchors the EXTENDS edge).
+      pub struct Wrapper<T>(pub T);
+      impl<T> Animal for Wrapper<T> {}
+
+      // Case 8: trait impl on an enum.
+      pub enum Mood {
+          Happy,
+          Grumpy,
+      }
+      impl Animal for Mood {}
+
+      // Case 9: cross-module supertrait reference. The supertrait lives in
+      // a sibling module; the EXTENDS edge must resolve through the module
+      // path, not just the name.
+      pub mod traits {
+          pub trait Audible {}
+      }
+      pub trait Bark: traits::Audible {}
+
+      // Case 10: cross-module trait impl. The trait is declared in the
+      // sibling module, the implementing type is at crate root.
+      pub mod io {
+          pub trait Reader {}
+      }
+      pub struct File;
+      impl io::Reader for File {}
+
+      // Case 11: blanket impl `impl<T> Foo for T`. The self-type is a bare
+      // type parameter, so impl_container_parts returns None and no edge
+      // is emitted. We assert that no Wrapper-like spurious row appears.
+      pub trait Markable {}
+      impl<T> Markable for T {}
+
+      // Case 12: trait impl whose trait is unknown to the workspace (no
+      // matching in-graph definition). We do not have an external crate
+      // here, so we simulate this by referencing a name that does not
+      // exist in the local graph.
+      pub struct Probe;
+      // Note: we deliberately do NOT define `Untracked` anywhere — the
+      // EXTENDS edge will be queued by the indexer but the linker will
+      // silently drop it because no definition matches the FQN. We only
+      // assert that querying for Probe's parents returns no rows.
+
+      // Case 13: diamond supertrait pattern. Two distinct supertrait
+      // chains converge on a common ancestor.
+      pub trait Shape {}
+      pub trait HasArea: Shape {}
+      pub trait HasPerimeter: Shape {}
+      pub trait Polygon: HasArea + HasPerimeter {}
+
+      // Case 14: trait impl + inherent impl on the same type. Only the
+      // trait impl should produce an EXTENDS edge; the inherent impl
+      // should not.
+      pub struct Counter;
+      impl Counter {
+          pub fn increment(&self) {}
+      }
+      impl Animal for Counter {}
+
+tests:
+  # ─────────────────────────────────────────────────────────────────
+  # Direct supertrait declarations
+  # ─────────────────────────────────────────────────────────────────
+  - name: "1. Simple supertrait Pet -> Animal"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Pet'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Animal" } }
+
+  - name: "2. Multiple direct supertraits Companion -> {Pet, Sleepable, Trainable}"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Companion'
+          RETURN parent.fqn AS parent
+          ORDER BY parent
+        assert:
+          - { row: { parent: "Pet" } }
+          - { row: { parent: "Sleepable" } }
+          - { row: { parent: "Trainable" } }
+
+  - name: "3. Direct supertrait chain Domesticated -> Carnivore -> Mammal (each hop)"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Domesticated'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Carnivore" } }
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Carnivore'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Mammal" } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Trait impls on concrete types
+  # ─────────────────────────────────────────────────────────────────
+  - name: "4. Simple struct impl Dog -> Animal"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Dog'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Animal" } }
+
+  - name: "5. Multiple impls on Cat produce one EXTENDS edge per trait"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Cat'
+          RETURN parent.fqn AS parent
+          ORDER BY parent
+        assert:
+          - { row: { parent: "Animal" } }
+          - { row: { parent: "Pet" } }
+
+  - name: "6. Inherent impl on Box1 produces no EXTENDS edge"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Box1'
+          RETURN count(parent) AS n
+        assert:
+          - { row: { n: 0 } }
+
+  - name: "7. Generic Wrapper<T> impl anchors EXTENDS on the self-type"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Wrapper'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Animal" } }
+
+  - name: "8. Enum Mood implements Animal"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Mood'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Animal" } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Cross-module resolution
+  # ─────────────────────────────────────────────────────────────────
+  - name: "9. Cross-module supertrait Bark -> traits::Audible resolves through module path"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Bark'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "traits::Audible" } }
+
+  - name: "10. Cross-module impl File implements io::Reader"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'File'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "io::Reader" } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Edge cases that must NOT emit edges
+  # ─────────────────────────────────────────────────────────────────
+  - name: "11. Blanket impl<T> Markable for T does not anchor EXTENDS on a type parameter"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND parent.fqn = 'Markable'
+          RETURN child.fqn AS child
+        assert:
+          - { row_count: 0 }
+
+  - name: "12. Probe has no EXTENDS edges (no trait impl declared)"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Probe'
+          RETURN count(parent) AS n
+        assert:
+          - { row: { n: 0 } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Diamond pattern
+  # ─────────────────────────────────────────────────────────────────
+  - name: "13. Diamond supertrait Polygon -> {HasArea, HasPerimeter}, each -> Shape"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Polygon'
+          RETURN parent.fqn AS parent
+          ORDER BY parent
+        assert:
+          - { row: { parent: "HasArea" } }
+          - { row: { parent: "HasPerimeter" } }
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'HasArea'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Shape" } }
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'HasPerimeter'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Shape" } }
+
+  # ─────────────────────────────────────────────────────────────────
+  # Coexistence with inherent impl
+  # ─────────────────────────────────────────────────────────────────
+  - name: "14. Counter has trait impl EXTENDS even when an inherent impl also exists"
+    queries:
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Counter'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Animal" } }

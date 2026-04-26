@@ -203,7 +203,7 @@ The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` a
 - **Python, Kotlin, Java, and C#** use tree-sitter grammars.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits `CALLS` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 
@@ -245,7 +245,7 @@ The graph captures fine-grained relationships across several categories:
 - **Imports** connect files and symbols to the definitions or files they import.
 - **References** represent call sites, property accesses, and ambiguous calls where the target cannot be resolved to a single definition.
 
-Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into four high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, and **CALLS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
+Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into five high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, **CALLS**, and **EXTENDS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
 
 #### Load
 

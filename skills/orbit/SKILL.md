@@ -102,6 +102,7 @@ External links (require internet):
 - [MCP tool definitions](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/queries/mcp_tools.md)
 - [Orbit product overview](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/_index.md)
 - [Real query examples (`sdlc_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/sdlc_queries.yaml)
+- [Code-graph traversal examples (`code_graph_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/code_graph_queries.yaml) — `CALLS` and `EXTENDS` traversal patterns
 
 ## Agent guidelines
 

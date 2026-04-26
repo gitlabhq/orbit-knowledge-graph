@@ -216,7 +216,7 @@ cargo build --bin orbit --release --features duckdb-client/bundled
 for repo in output/repos/*/; do
   name=$(basename "$repo")
   echo "=== Indexing $name with v2 ==="
-  ./target/release/orbit index "$repo" --v2 --stats 2>&1 || echo "FAILED: $name"
+  ./target/release/orbit index "$repo" --stats 2>&1 || echo "FAILED: $name"
 done
 """
 description = "Run v2 pipeline against all downloaded benchmark repos"
