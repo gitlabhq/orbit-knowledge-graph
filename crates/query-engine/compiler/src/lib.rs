@@ -412,4 +412,147 @@ mod tests {
             "e1 must constrain target_kind=MergeRequest (R2 cliff), got:\n{sql}"
         );
     }
+
+    /// Aggregation `count(MR) GROUP BY Project` with a User node + AUTHORED
+    /// rel that the DSL forces for structural connectivity but never
+    /// references in the aggregation must drop the `gl_user` table join,
+    /// the `_cascade_u` CTE, and any User-aliased WHERE conjuncts. The
+    /// `gl_edge` join for AUTHORED stays — it preserves the "MR has an
+    /// author" semi-join semantics. See findings G1 in the dual-cliff MR.
+    #[test]
+    fn aggregation_prunes_unreferenced_node_table_join() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "merged_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // gl_user and any u-alias CTE should be gone.
+        assert!(
+            !sql.contains("gl_user AS u") && !sql.contains("FROM gl_user"),
+            "gl_user join must be pruned for aggregation that never \
+             references the User alias, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("_cascade_u") && !sql.contains("_nf_u"),
+            "User-aliased CTEs must be dropped, got:\n{sql}"
+        );
+        // The AUTHORED edge JOIN is retained as an existence semi-join.
+        assert!(
+            sql.contains("'AUTHORED'"),
+            "AUTHORED edge constraint must survive (semi-join existence), \
+             got:\n{sql}"
+        );
+        // Project + MR work products survive.
+        assert!(
+            sql.contains("gl_project AS p") || sql.contains("FROM gl_project"),
+            "gl_project must remain in FROM, got:\n{sql}"
+        );
+    }
+
+    /// `apply_target_sip_prefilter` must skip emitting `_target_<alias>_ids`
+    /// when the only conjunct it would have folded is a structural
+    /// `InSubquery` filter the cascade pass already injected. Otherwise the
+    /// query carries a redundant CTE that re-derives the same id set.
+    #[test]
+    fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // No `_target_mr_ids` CTE: the equivalent narrowing already lives in
+        // `_cascade_mr` from the multi-rel cascade pass.
+        assert!(
+            !sql.contains("_target_mr_ids"),
+            "_target_mr_ids must not be emitted when _cascade_mr already \
+             carries the same id set, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_cascade_mr"),
+            "_cascade_mr must remain (provides the actual narrowing), \
+             got:\n{sql}"
+        );
+    }
+
+    /// Intermediate nodes (referenced by 2+ relationships) must NOT be pruned
+    /// even when they're absent from the aggregation target/group_by. Pruning
+    /// them leaves adjacent edge JOINs dangling on the now-undefined alias
+    /// (`mr.id = e1.source_id` becomes a `Unknown identifier mr.id` runtime
+    /// error). Only leaf nodes (degree ≤ 1) are safe to prune.
+    #[test]
+    fn aggregation_keeps_intermediate_node_table_join() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "n",
+                "group_by": "u",
+                "alias": "note_count"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // mr is intermediate (touches AUTHORED and HAS_NOTE). It must remain
+        // in the FROM tree so e1's JOIN ON `mr.id = e1.source_id` resolves.
+        assert!(
+            sql.contains("gl_merge_request AS mr") || sql.contains("FROM gl_merge_request"),
+            "intermediate MR table must remain in FROM, got:\n{sql}"
+        );
+    }
 }
