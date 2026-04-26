@@ -255,419 +255,6 @@
          },
          "id": 6,
          "panels": [ ],
-         "title": "Volume in window — code indexing",
-         "type": "row"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Successful repository indexing runs in the dashboard window. Click the arrow to open the per-outcome rate in Explore; hover the strip below for the rate at a point in time.",
-         "fieldConfig": {
-            "defaults": {
-               "noValue": "—",
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 3,
-            "w": 6,
-            "x": 0,
-            "y": 6
-         },
-         "id": 7,
-         "links": [
-            {
-               "targetBlank": false,
-               "title": "Open in Explore",
-               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22indexed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-            }
-         ],
-         "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "reduceOptions": {
-               "calcs": [
-                  "lastNotNull"
-               ],
-               "fields": "",
-               "values": false
-            },
-            "textMode": "value"
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "(sum(increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
-               "legendFormat": "Projects indexed",
-               "refId": "A"
-            }
-         ],
-         "title": "Projects indexed",
-         "type": "stat"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Push events processed by the code indexing handler in the dashboard window.",
-         "fieldConfig": {
-            "defaults": {
-               "noValue": "—",
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 3,
-            "w": 6,
-            "x": 6,
-            "y": 6
-         },
-         "id": 8,
-         "links": [
-            {
-               "targetBlank": false,
-               "title": "Open in Explore",
-               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_events_processed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22indexed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-            }
-         ],
-         "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "reduceOptions": {
-               "calcs": [
-                  "lastNotNull"
-               ],
-               "fields": "",
-               "values": false
-            },
-            "textMode": "value"
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "(sum(increase(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
-               "legendFormat": "Push events",
-               "refId": "A"
-            }
-         ],
-         "title": "Push events",
-         "type": "stat"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Source files seen by the code-graph indexer in the dashboard window.",
-         "fieldConfig": {
-            "defaults": {
-               "noValue": "—",
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 3,
-            "w": 6,
-            "x": 12,
-            "y": 6
-         },
-         "id": 9,
-         "links": [
-            {
-               "targetBlank": false,
-               "title": "Open in Explore",
-               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_files_processed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22parsed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-            }
-         ],
-         "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "reduceOptions": {
-               "calcs": [
-                  "lastNotNull"
-               ],
-               "fields": "",
-               "values": false
-            },
-            "textMode": "value"
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "(sum(increase(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__range]))) or vector(0)",
-               "legendFormat": "Files parsed",
-               "refId": "A"
-            }
-         ],
-         "title": "Files parsed",
-         "type": "stat"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Graph nodes and edges indexed by the code handler in the dashboard window.",
-         "fieldConfig": {
-            "defaults": {
-               "noValue": "—",
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 3,
-            "w": 6,
-            "x": 18,
-            "y": 6
-         },
-         "id": 10,
-         "links": [
-            {
-               "targetBlank": false,
-               "title": "Open in Explore",
-               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_nodes_indexed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
-            }
-         ],
-         "options": {
-            "colorMode": "value",
-            "graphMode": "none",
-            "justifyMode": "center",
-            "reduceOptions": {
-               "calcs": [
-                  "lastNotNull"
-               ],
-               "fields": "",
-               "values": false
-            },
-            "textMode": "value"
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "(sum(increase(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
-               "legendFormat": "Nodes and edges",
-               "refId": "A"
-            }
-         ],
-         "title": "Nodes and edges",
-         "type": "stat"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 25,
-                  "lineInterpolation": "smooth",
-                  "lineWidth": 2,
-                  "showPoints": "never"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 2,
-            "w": 6,
-            "x": 0,
-            "y": 9
-         },
-         "id": 11,
-         "options": {
-            "legend": {
-               "showLegend": false
-            },
-            "tooltip": {
-               "mode": "single"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
-               "legendFormat": "rate",
-               "refId": "A"
-            }
-         ],
-         "title": "",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 25,
-                  "lineInterpolation": "smooth",
-                  "lineWidth": 2,
-                  "showPoints": "never"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 2,
-            "w": 6,
-            "x": 6,
-            "y": 9
-         },
-         "id": 12,
-         "options": {
-            "legend": {
-               "showLegend": false
-            },
-            "tooltip": {
-               "mode": "single"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum(rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
-               "legendFormat": "rate",
-               "refId": "A"
-            }
-         ],
-         "title": "",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 25,
-                  "lineInterpolation": "smooth",
-                  "lineWidth": 2,
-                  "showPoints": "never"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 2,
-            "w": 6,
-            "x": 12,
-            "y": 9
-         },
-         "id": 13,
-         "options": {
-            "legend": {
-               "showLegend": false
-            },
-            "tooltip": {
-               "mode": "single"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum(rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__rate_interval]))",
-               "legendFormat": "rate",
-               "refId": "A"
-            }
-         ],
-         "title": "",
-         "type": "timeseries"
-      },
-      {
-         "datasource": {
-            "type": "prometheus",
-            "uid": "$ORBIT_DS"
-         },
-         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
-         "fieldConfig": {
-            "defaults": {
-               "custom": {
-                  "drawStyle": "line",
-                  "fillOpacity": 25,
-                  "lineInterpolation": "smooth",
-                  "lineWidth": 2,
-                  "showPoints": "never"
-               },
-               "unit": "short"
-            }
-         },
-         "gridPos": {
-            "h": 2,
-            "w": 6,
-            "x": 18,
-            "y": 9
-         },
-         "id": 14,
-         "options": {
-            "legend": {
-               "showLegend": false
-            },
-            "tooltip": {
-               "mode": "single"
-            }
-         },
-         "targets": [
-            {
-               "datasource": {
-                  "type": "prometheus",
-                  "uid": "$ORBIT_DS"
-               },
-               "expr": "sum(rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
-               "legendFormat": "rate",
-               "refId": "A"
-            }
-         ],
-         "title": "",
-         "type": "timeseries"
-      },
-      {
-         "collapsed": false,
-         "gridPos": {
-            "h": 1,
-            "w": 24,
-            "x": 0,
-            "y": 11
-         },
-         "id": 15,
-         "panels": [ ],
          "title": "Volume in window — SDLC indexing",
          "type": "row"
       },
@@ -687,9 +274,9 @@
             "h": 3,
             "w": 6,
             "x": 0,
-            "y": 12
+            "y": 6
          },
-         "id": 16,
+         "id": 7,
          "links": [
             {
                "targetBlank": false,
@@ -740,9 +327,9 @@
             "h": 3,
             "w": 6,
             "x": 6,
-            "y": 12
+            "y": 6
          },
-         "id": 17,
+         "id": 8,
          "links": [
             {
                "targetBlank": false,
@@ -793,9 +380,9 @@
             "h": 3,
             "w": 6,
             "x": 12,
-            "y": 12
+            "y": 6
          },
-         "id": 18,
+         "id": 9,
          "links": [
             {
                "targetBlank": false,
@@ -846,9 +433,9 @@
             "h": 3,
             "w": 6,
             "x": 18,
-            "y": 12
+            "y": 6
          },
-         "id": 19,
+         "id": 10,
          "links": [
             {
                "targetBlank": false,
@@ -905,9 +492,9 @@
             "h": 2,
             "w": 6,
             "x": 0,
-            "y": 15
+            "y": 9
          },
-         "id": 20,
+         "id": 11,
          "options": {
             "legend": {
                "showLegend": false
@@ -952,9 +539,9 @@
             "h": 2,
             "w": 6,
             "x": 6,
-            "y": 15
+            "y": 9
          },
-         "id": 21,
+         "id": 12,
          "options": {
             "legend": {
                "showLegend": false
@@ -999,9 +586,9 @@
             "h": 2,
             "w": 6,
             "x": 12,
-            "y": 15
+            "y": 9
          },
-         "id": 22,
+         "id": 13,
          "options": {
             "legend": {
                "showLegend": false
@@ -1046,9 +633,9 @@
             "h": 2,
             "w": 6,
             "x": 18,
-            "y": 15
+            "y": 9
          },
-         "id": 23,
+         "id": 14,
          "options": {
             "legend": {
                "showLegend": false
@@ -1072,14 +659,485 @@
          "type": "timeseries"
       },
       {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rows ingested per entity over the dashboard window. Use the legend table to see per-entity totals; click a series to isolate it.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "barAlignment": 0,
+                  "drawStyle": "bars",
+                  "fillOpacity": 70,
+                  "lineInterpolation": "linear",
+                  "lineWidth": 1,
+                  "showPoints": "never",
+                  "stacking": {
+                     "group": "A",
+                     "mode": "normal"
+                  }
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 24,
+            "x": 0,
+            "y": 11
+         },
+         "id": 15,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max",
+                  "sum"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (entity) (increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "legendFormat": "{{entity}}",
+               "refId": "A"
+            }
+         ],
+         "title": "SDLC: rows by entity (in window)",
+         "type": "timeseries"
+      },
+      {
          "collapsed": false,
          "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 17
+            "y": 19
+         },
+         "id": 16,
+         "panels": [ ],
+         "title": "Volume in window — code indexing",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Successful repository indexing runs in the dashboard window. Click the arrow to open the per-outcome rate in Explore; hover the strip below for the rate at a point in time.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 6,
+            "x": 0,
+            "y": 20
+         },
+         "id": 17,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22indexed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
+               "legendFormat": "Projects indexed",
+               "refId": "A"
+            }
+         ],
+         "title": "Projects indexed",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Push events processed by the code indexing handler in the dashboard window.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 6,
+            "x": 6,
+            "y": 20
+         },
+         "id": 18,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_events_processed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22indexed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
+               "legendFormat": "Push events",
+               "refId": "A"
+            }
+         ],
+         "title": "Push events",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Source files seen by the code-graph indexer in the dashboard window.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 6,
+            "x": 12,
+            "y": 20
+         },
+         "id": 19,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_files_processed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20outcome%3D\\%22parsed\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__range]))) or vector(0)",
+               "legendFormat": "Files parsed",
+               "refId": "A"
+            }
+         ],
+         "title": "Files parsed",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Graph nodes and edges indexed by the code handler in the dashboard window.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 3,
+            "w": 6,
+            "x": 18,
+            "y": 20
+         },
+         "id": 20,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28rate%28gkg_indexer_code_nodes_indexed_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B5m%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "none",
+            "justifyMode": "center",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
+               "legendFormat": "Nodes and edges",
+               "refId": "A"
+            }
+         ],
+         "title": "Nodes and edges",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 0,
+            "y": 23
+         },
+         "id": 21,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 6,
+            "y": 23
+         },
+         "id": 22,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 12,
+            "y": 23
+         },
+         "id": 23,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 18,
+            "y": 23
          },
          "id": 24,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 25
+         },
+         "id": 25,
          "panels": [ ],
          "title": "Throughput over time",
          "type": "row"
@@ -1097,6 +1155,7 @@
                   "drawStyle": "bars",
                   "fillOpacity": 70,
                   "lineInterpolation": "linear",
+                  "lineWidth": 1,
                   "showPoints": "never",
                   "stacking": {
                      "group": "A",
@@ -1110,9 +1169,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 18
+            "y": 26
          },
-         "id": 25,
+         "id": 26,
          "options": {
             "legend": {
                "calcs": [
@@ -1146,18 +1205,18 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "SDLC pipeline rows processed, stacked by entity.",
+         "description": "SDLC pipeline rows processed per Grafana auto-window, drawn as a smoothed trend line per entity. Same windowing as the bar variants in this row, just easier to read for long, dense series.",
          "fieldConfig": {
             "defaults": {
                "custom": {
                   "barAlignment": 0,
-                  "drawStyle": "bars",
-                  "fillOpacity": 70,
-                  "lineInterpolation": "linear",
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
                   "showPoints": "never",
                   "stacking": {
-                     "group": "A",
-                     "mode": "normal"
+                     "mode": "none"
                   }
                },
                "unit": "short"
@@ -1167,9 +1226,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 18
+            "y": 26
          },
-         "id": 26,
+         "id": 27,
          "options": {
             "legend": {
                "calcs": [
@@ -1204,9 +1263,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 26
+            "y": 34
          },
-         "id": 27,
+         "id": 28,
          "panels": [ ],
          "title": "Latency",
          "type": "row"
@@ -1232,9 +1291,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 27
+            "y": 35
          },
-         "id": 28,
+         "id": 29,
          "options": {
             "legend": {
                "calcs": [
@@ -1285,7 +1344,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "SDLC pipeline duration percentiles aggregated across entities. Drop into the top-N table below to find the entity driving p95.",
+         "description": "SDLC pipeline duration percentiles, broken down by entity. The histogram does not carry a GitLab-namespace label today, so entity is the closest available dimension. Use the legend filter to isolate one entity if the panel gets busy.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -1301,9 +1360,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 27
+            "y": 35
          },
-         "id": 29,
+         "id": 30,
          "options": {
             "legend": {
                "calcs": [
@@ -1323,8 +1382,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 overall",
+               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 {{entity}}",
                "refId": "A"
             },
             {
@@ -1332,8 +1391,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 overall",
+               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 {{entity}}",
                "refId": "B"
             },
             {
@@ -1341,12 +1400,12 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 overall",
+               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_pipeline_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 {{entity}}",
                "refId": "C"
             }
          ],
-         "title": "SDLC: pipeline duration (p50/p95/p99)",
+         "title": "SDLC: pipeline duration by entity (p50/p95/p99)",
          "type": "timeseries"
       },
       {
@@ -1370,9 +1429,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 35
+            "y": 43
          },
-         "id": 30,
+         "id": 31,
          "options": {
             "legend": {
                "calcs": [
@@ -1440,9 +1499,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 35
+            "y": 43
          },
-         "id": 31,
+         "id": 32,
          "options": {
             "cellHeight": "sm",
             "footer": {
@@ -1500,9 +1559,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 43
+            "y": 51
          },
-         "id": 32,
+         "id": 33,
          "panels": [ ],
          "title": "Reliability",
          "type": "row"
@@ -1520,6 +1579,7 @@
                   "drawStyle": "bars",
                   "fillOpacity": 70,
                   "lineInterpolation": "linear",
+                  "lineWidth": 1,
                   "showPoints": "never",
                   "stacking": {
                      "group": "A",
@@ -1533,9 +1593,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 44
+            "y": 52
          },
-         "id": 33,
+         "id": 34,
          "options": {
             "legend": {
                "calcs": [
@@ -1585,9 +1645,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 44
+            "y": 52
          },
-         "id": 34,
+         "id": 35,
          "options": {
             "legend": {
                "calcs": [
@@ -1628,6 +1688,7 @@
                   "drawStyle": "bars",
                   "fillOpacity": 70,
                   "lineInterpolation": "linear",
+                  "lineWidth": 1,
                   "showPoints": "never",
                   "stacking": {
                      "group": "A",
@@ -1641,9 +1702,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 52
+            "y": 60
          },
-         "id": 35,
+         "id": 36,
          "options": {
             "legend": {
                "calcs": [
@@ -1685,6 +1746,7 @@
                   "drawStyle": "bars",
                   "fillOpacity": 70,
                   "lineInterpolation": "linear",
+                  "lineWidth": 1,
                   "showPoints": "never",
                   "stacking": {
                      "group": "A",
@@ -1698,9 +1760,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 52
+            "y": 60
          },
-         "id": 36,
+         "id": 37,
          "options": {
             "legend": {
                "calcs": [
@@ -1735,9 +1797,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 60
+            "y": 68
          },
-         "id": 37,
+         "id": 38,
          "panels": [ ],
          "title": "Freshness and saturation",
          "type": "row"
@@ -1763,9 +1825,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 61
+            "y": 69
          },
-         "id": 38,
+         "id": 39,
          "options": {
             "legend": {
                "calcs": [
@@ -1814,9 +1876,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 61
+            "y": 69
          },
-         "id": 39,
+         "id": 40,
          "options": {
             "legend": {
                "calcs": [
@@ -1850,9 +1912,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 69
+            "y": 77
          },
-         "id": 40,
+         "id": 41,
          "panels": [ ],
          "title": "Schema migration",
          "type": "row"
@@ -1878,9 +1940,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 70
+            "y": 78
          },
-         "id": 41,
+         "id": 42,
          "options": {
             "legend": {
                "calcs": [
@@ -1929,9 +1991,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 70
+            "y": 78
          },
-         "id": 42,
+         "id": 43,
          "options": {
             "legend": {
                "calcs": [
@@ -1980,9 +2042,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 78
+            "y": 86
          },
-         "id": 43,
+         "id": 44,
          "options": {
             "legend": {
                "calcs": [
@@ -2016,9 +2078,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 86
+            "y": 94
          },
-         "id": 44,
+         "id": 45,
          "panels": [
             {
                "datasource": {
@@ -2041,9 +2103,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 87
+                  "y": 95
                },
-               "id": 45,
+               "id": 46,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2092,9 +2154,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 87
+                  "y": 95
                },
-               "id": 46,
+               "id": 47,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2161,9 +2223,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 87
+                  "y": 95
                },
-               "id": 47,
+               "id": 48,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2212,9 +2274,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 95
+                  "y": 103
                },
-               "id": 48,
+               "id": 49,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2263,9 +2325,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 95
+                  "y": 103
                },
-               "id": 49,
+               "id": 50,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2314,9 +2376,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 95
+                  "y": 103
                },
-               "id": 50,
+               "id": 51,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2383,9 +2445,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 103
+                  "y": 111
                },
-               "id": 51,
+               "id": 52,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2434,9 +2496,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 103
+                  "y": 111
                },
-               "id": 52,
+               "id": 53,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2485,9 +2547,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 103
+                  "y": 111
                },
-               "id": 53,
+               "id": 54,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2554,9 +2616,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 111
+                  "y": 119
                },
-               "id": 54,
+               "id": 55,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2605,9 +2667,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 111
+                  "y": 119
                },
-               "id": 55,
+               "id": 56,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2656,9 +2718,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 111
+                  "y": 119
                },
-               "id": 56,
+               "id": 57,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2725,9 +2787,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 119
+                  "y": 127
                },
-               "id": 57,
+               "id": 58,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2776,9 +2838,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 119
+                  "y": 127
                },
-               "id": 58,
+               "id": 59,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2845,9 +2907,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 119
+                  "y": 127
                },
-               "id": 59,
+               "id": 60,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2896,9 +2958,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 127
+                  "y": 135
                },
-               "id": 60,
+               "id": 61,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2936,9 +2998,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 135
+            "y": 143
          },
-         "id": 61,
+         "id": 62,
          "panels": [
             {
                "datasource": {
@@ -2961,9 +3023,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 136
+                  "y": 144
                },
-               "id": 62,
+               "id": 63,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3012,9 +3074,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 136
+                  "y": 144
                },
-               "id": 63,
+               "id": 64,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3063,9 +3125,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 136
+                  "y": 144
                },
-               "id": 64,
+               "id": 65,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3114,9 +3176,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 144
+                  "y": 152
                },
-               "id": 65,
+               "id": 66,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3183,9 +3245,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 144
+                  "y": 152
                },
-               "id": 66,
+               "id": 67,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3234,9 +3296,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 144
+                  "y": 152
                },
-               "id": 67,
+               "id": 68,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3303,9 +3365,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 152
+                  "y": 160
                },
-               "id": 68,
+               "id": 69,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3354,9 +3416,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 152
+                  "y": 160
                },
-               "id": 69,
+               "id": 70,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3405,9 +3467,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 152
+                  "y": 160
                },
-               "id": 70,
+               "id": 71,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3456,9 +3518,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 160
+                  "y": 168
                },
-               "id": 71,
+               "id": 72,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3507,9 +3569,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 160
+                  "y": 168
                },
-               "id": 72,
+               "id": 73,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3576,9 +3638,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 160
+                  "y": 168
                },
-               "id": 73,
+               "id": 74,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3627,9 +3689,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 168
+                  "y": 176
                },
-               "id": 74,
+               "id": 75,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3678,9 +3740,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 168
+                  "y": 176
                },
-               "id": 75,
+               "id": 76,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3729,9 +3791,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 168
+                  "y": 176
                },
-               "id": 76,
+               "id": 77,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3798,9 +3860,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 176
+                  "y": 184
                },
-               "id": 77,
+               "id": 78,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3838,9 +3900,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 184
+            "y": 192
          },
-         "id": 78,
+         "id": 79,
          "panels": [
             {
                "datasource": {
@@ -3863,9 +3925,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 185
+                  "y": 193
                },
-               "id": 79,
+               "id": 80,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3914,9 +3976,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 185
+                  "y": 193
                },
-               "id": 80,
+               "id": 81,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3983,9 +4045,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 185
+                  "y": 193
                },
-               "id": 81,
+               "id": 82,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4034,9 +4096,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 193
+                  "y": 201
                },
-               "id": 82,
+               "id": 83,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4103,9 +4165,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 193
+                  "y": 201
                },
-               "id": 83,
+               "id": 84,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4154,9 +4216,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 193
+                  "y": 201
                },
-               "id": 84,
+               "id": 85,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4223,9 +4285,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 201
+                  "y": 209
                },
-               "id": 85,
+               "id": 86,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4274,9 +4336,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 201
+                  "y": 209
                },
-               "id": 86,
+               "id": 87,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4325,9 +4387,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 201
+                  "y": 209
                },
-               "id": 87,
+               "id": 88,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4376,9 +4438,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 209
+                  "y": 217
                },
-               "id": 88,
+               "id": 89,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4445,9 +4507,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 209
+                  "y": 217
                },
-               "id": 89,
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4496,9 +4558,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 209
+                  "y": 217
                },
-               "id": 90,
+               "id": 91,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4536,9 +4598,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 217
+            "y": 225
          },
-         "id": 91,
+         "id": 92,
          "panels": [
             {
                "datasource": {
@@ -4561,9 +4623,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 218
+                  "y": 226
                },
-               "id": 92,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4630,9 +4692,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 218
+                  "y": 226
                },
-               "id": 93,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4681,9 +4743,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 218
+                  "y": 226
                },
-               "id": 94,
+               "id": 95,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4721,9 +4783,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 226
+            "y": 234
          },
-         "id": 95,
+         "id": 96,
          "panels": [
             {
                "datasource": {
@@ -4746,9 +4808,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 227
+                  "y": 235
                },
-               "id": 96,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4815,9 +4877,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 227
+                  "y": 235
                },
-               "id": 97,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4866,9 +4928,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 227
+                  "y": 235
                },
-               "id": 98,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4917,9 +4979,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 235
+                  "y": 243
                },
-               "id": 99,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4986,9 +5048,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 235
+                  "y": 243
                },
-               "id": 100,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5037,9 +5099,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 235
+                  "y": 243
                },
-               "id": 101,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5088,9 +5150,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 243
+                  "y": 251
                },
-               "id": 102,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5139,9 +5201,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 243
+                  "y": 251
                },
-               "id": 103,
+               "id": 104,
                "options": {
                   "legend": {
                      "calcs": [

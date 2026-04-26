@@ -2,8 +2,9 @@
 //
 // Layout is story-shaped, not catalog-shaped:
 //   1. Health — four headline ratios for at-a-glance status.
-//   2. Volume — "how many X in the dashboard window?" stat tiles,
-//               Code on the left, SDLC on the right.
+//   2. Volume — "how many X in the dashboard window?" stat tiles, with
+//               SDLC stacked above code (SDLC drives most prod volume),
+//               plus a per-entity breakdown for SDLC.
 //   3. Throughput — stacked bars of count-per-bucket via increase().
 //   4. Latency — heatmaps for the histograms, plus a top-N entity table.
 //   5. Reliability — error ratios and stage/kind breakdowns.
@@ -59,11 +60,44 @@ local health = [
 ];
 
 // 2. Volume in window -----------------------------------------------------
-// Each tile is a stacked pair: a stat header (h=2) showing the count
-// over $__range, plus a thin timeseries strip below (h=3) showing the
+// Each tile is a stacked pair: a stat header (h=3) showing the count
+// over $__range and a thin timeseries strip below (h=2) showing the
 // rate over time. Hover the strip for exact values, click the arrow in
-// the header to drill the metric into Grafana Explore.
+// the header to drill the metric into Grafana Explore. SDLC sits above
+// code because SDLC drives most of the volume in prod.
 local volume = [
+  o.row('Volume in window — SDLC indexing'),
+] + o.volumeTiles([
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_rows_processed_total',
+    title: 'Rows ingested',
+    desc: 'Rows extracted and written by SDLC pipelines in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_datalake_query_bytes_total',
+    title: 'Bytes from datalake',
+    desc: 'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
+    unit: 'bytes',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_duration_seconds_count',
+    title: 'Pipeline runs',
+    desc: 'Total SDLC pipeline runs across all entities in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_errors_total',
+    title: 'Pipeline errors',
+    desc: 'Total SDLC pipeline failures in the dashboard window.',
+  },
+], DS, SEL, w=6) + [
+  // Per-entity breakdown: same window as the tiles above, stacked so the
+  // legend table below the chart shows total rows per entity.
+  o.counterIncreaseBars(
+    sdlcRows,
+    'SDLC: rows by entity (in window)',
+    'Rows ingested per entity over the dashboard window. Use the legend table to see per-entity totals; click a series to isolate it.',
+    DS, SEL, by=['entity'], unit='short', w=24, h=8, range='$__range', stack=true,
+  ),
   o.row('Volume in window — code indexing'),
 ] + o.volumeTiles([
   {
@@ -89,30 +123,6 @@ local volume = [
     title: 'Nodes and edges',
     desc: 'Graph nodes and edges indexed by the code handler in the dashboard window.',
   },
-], DS, SEL, w=6) + [
-  o.row('Volume in window — SDLC indexing'),
-] + o.volumeTiles([
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_rows_processed_total',
-    title: 'Rows ingested',
-    desc: 'Rows extracted and written by SDLC pipelines in the dashboard window.',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_datalake_query_bytes_total',
-    title: 'Bytes from datalake',
-    desc: 'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
-    unit: 'bytes',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_duration_seconds_count',
-    title: 'Pipeline runs',
-    desc: 'Total SDLC pipeline runs across all entities in the dashboard window.',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_errors_total',
-    title: 'Pipeline errors',
-    desc: 'Total SDLC pipeline failures in the dashboard window.',
-  },
 ], DS, SEL, w=6);
 
 // 3. Throughput over time -------------------------------------------------
@@ -130,8 +140,8 @@ local throughput = [
   o.counterIncreaseBars(
     sdlcRows,
     'SDLC: rows ingested over time',
-    'SDLC pipeline rows processed, stacked by entity.',
-    DS, SEL, by=['entity'], unit='short', w=12,
+    'SDLC pipeline rows processed per Grafana auto-window, drawn as a smoothed trend line per entity. Same windowing as the bar variants in this row, just easier to read for long, dense series.',
+    DS, SEL, by=['entity'], unit='short', w=12, draw='line', stack=false,
   ),
 ];
 
@@ -149,9 +159,9 @@ local latency = [
   ),
   o.histogramPercentiles(
     sdlcPipelineDur,
-    'SDLC: pipeline duration (p50/p95/p99)',
-    'SDLC pipeline duration percentiles aggregated across entities. Drop into the top-N table below to find the entity driving p95.',
-    DS, SEL, w=12,
+    'SDLC: pipeline duration by entity (p50/p95/p99)',
+    'SDLC pipeline duration percentiles, broken down by entity. The histogram does not carry a GitLab-namespace label today, so entity is the closest available dimension. Use the legend filter to isolate one entity if the panel gets busy.',
+    DS, SEL, by=['entity'], w=12,
   ),
   o.histogramPercentiles(
     codeFetchDur,

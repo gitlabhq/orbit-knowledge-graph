@@ -199,9 +199,11 @@ local row(title) = { kind: 'row', title: title, collapsed: false };
 
 local rowCollapsed(title) = { kind: 'row', title: title, collapsed: true };
 
-// Bar timeseries variant. Stacks when `stack=true`, used to render
-// `increase()` per bucket so each bar reads as "count in this window".
-local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, stack=true) = {
+// Bar / line timeseries used for `increase()` per-bucket counts. Each
+// data point still represents a count over one Grafana auto-window;
+// `draw='line'` swaps the visual to a smoothed area-line for callers
+// who prefer a trend shape over discrete bars.
+local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, stack=true, draw='bars') = {
   kind: 'panel',
   type: 'timeseries',
   title: title,
@@ -211,9 +213,10 @@ local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANE
   fieldConfig: {
     defaults: {
       custom: {
-        drawStyle: 'bars',
-        lineInterpolation: 'linear',
-        fillOpacity: 70,
+        drawStyle: draw,
+        lineInterpolation: if draw == 'line' then 'smooth' else 'linear',
+        fillOpacity: if draw == 'line' then 25 else 70,
+        lineWidth: if draw == 'line' then 2 else 1,
         showPoints: 'never',
         stacking: if stack then { mode: 'normal', group: 'A' } else { mode: 'none' },
         barAlignment: 0,
@@ -368,7 +371,7 @@ local counterRangeStat(prom_name, title, description, ds_var, selector, filter='
 
 // Stacked bar timeseries showing count-per-bucket via increase(). The
 // envelope is total throughput, color is mix.
-local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true, or_zero=false) = (
+local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true, or_zero=false, draw='bars') = (
   local labels = if by == null then spec.labels else by;
   local sel = mergedSelector(selector, filter);
   local prom = spec.prom_name;
@@ -391,6 +394,7 @@ local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, f
     w,
     h,
     stack,
+    draw,
   )
 );
 
