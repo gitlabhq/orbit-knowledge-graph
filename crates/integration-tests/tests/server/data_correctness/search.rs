@@ -5,7 +5,7 @@ pub(super) async fn search_returns_correct_user_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "name", "state", "user_type"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state", "user_type"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10
         }"#,
@@ -37,7 +37,7 @@ pub(super) async fn search_returns_correct_project_properties(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]},
+            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -61,7 +61,7 @@ pub(super) async fn search_returns_correct_group_full_path(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "g", "entity": "Group", "columns": ["name", "full_path"]},
+            "node": {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]},
             "order_by": {"node": "g", "property": "id", "direction": "ASC"},
             "limit": 10
         }"#,
@@ -87,7 +87,7 @@ pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
+            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "full_path"]},
             "order_by": {"node": "p", "property": "id", "direction": "ASC"},
             "limit": 10
         }"#,
@@ -110,7 +110,7 @@ pub(super) async fn search_default_columns_include_full_path(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "g", "entity": "Group"},
+            "node": {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -130,7 +130,7 @@ pub(super) async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "blocked"}},
             "limit": 10
         }"#,
@@ -149,7 +149,7 @@ pub(super) async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"],
+            "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": {"op": "in", "value": ["public", "internal"]}}},
             "limit": 10
         }"#,
@@ -171,7 +171,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "filters": {"username": {"op": "starts_with", "value": "ali"}}},
              "limit": 10
         }"#,
@@ -216,7 +216,7 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "filters": {"username": {"op": "contains", "value": "lic"}}},
              "limit": 10
         }"#,
@@ -238,7 +238,7 @@ pub(super) async fn search_filter_is_null_matches_unset_columns(ctx: &TestContex
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "avatar_url"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "avatar_url"],
                      "filters": {"avatar_url": {"op": "is_null", "value": true}}},
             "limit": 10
         }"#,
@@ -257,7 +257,7 @@ pub(super) async fn search_with_order_by_desc(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -275,7 +275,7 @@ pub(super) async fn search_no_auth_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
         &svc,
@@ -293,7 +293,7 @@ pub(super) async fn search_redaction_returns_only_allowed_ids(ctx: &TestContext)
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
         &svc,
@@ -311,7 +311,7 @@ pub(super) async fn search_unicode_properties_survive_pipeline(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "name"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"],
                      "node_ids": [6]},
             "limit": 10
         }"#,
@@ -368,7 +368,7 @@ pub(super) async fn search_boolean_columns_have_correct_values(ctx: &TestContext
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "columns": ["note", "confidential", "internal"],
+            "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"],
                      "node_ids": [3000, 3001]},
             "limit": 10
         }"#,
@@ -392,7 +392,7 @@ pub(super) async fn search_datetime_columns_serialize_as_strings(ctx: &TestConte
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"],
+            "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "created_at"],
                      "node_ids": [3000, 3001]},
             "limit": 10
         }"#,
@@ -418,7 +418,7 @@ pub(super) async fn search_nullable_datetime_returns_null_when_unset(ctx: &TestC
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"],
+            "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "created_at"],
                      "node_ids": [3002]},
             "limit": 10
         }"#,
@@ -438,7 +438,7 @@ pub(super) async fn search_limit_truncates_results(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 3
         }"#,
@@ -455,7 +455,7 @@ pub(super) async fn search_filter_no_match_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "filters": {"username": "nonexistent_user"}},
             "limit": 10
         }"#,
@@ -474,7 +474,7 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "node_ids": [1, 2, 3, 5],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},
