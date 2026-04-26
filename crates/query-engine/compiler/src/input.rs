@@ -141,6 +141,21 @@ impl CompilerMetadata {
     }
 }
 
+impl Input {
+    /// Whether this query has the "search shape": a single node scan with no
+    /// relationships. True for `query_type: "search"` and also for
+    /// `query_type: "traversal"` with 1 node + 0 relationships.
+    ///
+    /// Use this instead of matching on `QueryType::Search` to support the
+    /// deprecated `search` query type and the equivalent traversal form.
+    pub fn is_search(&self) -> bool {
+        self.query_type == QueryType::Search
+            || (self.query_type == QueryType::Traversal
+                && self.nodes.len() == 1
+                && self.relationships.is_empty())
+    }
+}
+
 impl Default for Input {
     fn default() -> Self {
         Self {

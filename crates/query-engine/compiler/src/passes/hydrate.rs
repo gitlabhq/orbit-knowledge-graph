@@ -95,9 +95,10 @@ pub fn generate_hydration_plan(
         QueryType::Search | QueryType::Aggregation | QueryType::Traversal => {
             let mut templates = build_static_templates(input, ontology);
 
-            // Search/Aggregation only need templates with VCRs.
-            // Traversal needs all templates for DB-column hydration.
-            if matches!(input.query_type, QueryType::Search | QueryType::Aggregation) {
+            // Search/Aggregation/search-shaped traversal only need templates
+            // with VCRs. Multi-node traversal needs all templates for
+            // DB-column hydration.
+            if input.is_search() || input.query_type == QueryType::Aggregation {
                 templates.retain(|t| !t.virtual_columns.is_empty());
             }
 

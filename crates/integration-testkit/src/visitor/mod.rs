@@ -148,7 +148,7 @@ impl ResponseView {
             response.query_type, input.query_type,
         );
 
-        if matches!(input.query_type, QueryType::Search | QueryType::Aggregation) {
+        if input.is_search() || input.query_type == QueryType::Aggregation {
             assert!(
                 response.edges.is_empty(),
                 "{} response must have zero edges, got {}",

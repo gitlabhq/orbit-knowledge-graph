@@ -203,8 +203,11 @@ impl<'a> Validator<'a> {
                 input.relationships.len()
             )));
         }
+        // Traversal with 1 node + 0 rels is a search (single table scan).
+        // Multi-node traversal requires exactly n-1 relationships.
         if input.query_type == QueryType::Traversal
             && !input.nodes.is_empty()
+            && !(input.nodes.len() == 1 && input.relationships.is_empty())
             && input.relationships.len() != input.nodes.len() - 1
         {
             return Err(QueryError::Validation(format!(
@@ -693,6 +696,8 @@ impl<'a> Validator<'a> {
         let referenced: std::collections::HashSet<&str> = match input.query_type {
             // Single/multi-node query types where all declared nodes are used directly.
             QueryType::Search | QueryType::Neighbors | QueryType::Hydration => return Ok(()),
+            // Search-shaped traversal (1 node, 0 rels) also has no references to check.
+            QueryType::Traversal if input.is_search() => return Ok(()),
             QueryType::Traversal | QueryType::Aggregation => {
                 let mut set: std::collections::HashSet<&str> = input
                     .relationships

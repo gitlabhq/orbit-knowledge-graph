@@ -247,6 +247,40 @@ mod tests {
         );
     }
 
+    /// Traversal with 1 node + 0 relationships is a search shape.
+    /// It should compile to the same flat table scan as query_type: "search".
+    #[test]
+    fn traversal_single_node_compiles_as_search() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let search_query = r#"{
+            "query_type": "search",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let traversal_query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let search_sql = compile(search_query, &ontology, &security_ctx())
+            .expect("search should compile")
+            .base
+            .render();
+
+        let traversal_sql = compile(traversal_query, &ontology, &security_ctx())
+            .expect("single-node traversal should compile")
+            .base
+            .render();
+
+        assert_eq!(
+            search_sql, traversal_sql,
+            "single-node traversal SQL should match search SQL"
+        );
+    }
+
     /// Aggregation with a relationship and a property-less `count(target)`
     /// must never emit a bare `target.id` reference: ClickHouse reads that
     /// as `database.column` and fails with `Database target does not exist`.

@@ -103,10 +103,17 @@
         }
       },
       "else": {
-        "required": ["nodes"],
-        "not": {
-          "required": ["node"]
-        }
+        "oneOf": [
+          {
+            "required": ["nodes"],
+            "not": { "required": ["node"] }
+          },
+          {
+            "required": ["node"],
+            "not": { "required": ["nodes"] },
+            "description": "Single-node traversal (search shape): 1 node, 0 relationships"
+          }
+        ]
       }
     },
     {
@@ -145,17 +152,27 @@
         }
       },
       "then": {
-        "required": ["relationships"],
-        "properties": {
-          "nodes": {
-            "minItems": 2,
-            "description": "Traversal queries require at least 2 nodes"
+        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal (search shape) requires only a node.",
+        "oneOf": [
+          {
+            "required": ["relationships"],
+            "properties": {
+              "nodes": {
+                "minItems": 2,
+                "description": "Multi-node traversal requires at least 2 nodes"
+              },
+              "relationships": {
+                "minItems": 1,
+                "description": "Multi-node traversal requires at least 1 relationship"
+              }
+            }
           },
-          "relationships": {
-            "minItems": 1,
-            "description": "Traversal queries require at least 1 relationship"
+          {
+            "required": ["node"],
+            "not": { "required": ["relationships"] },
+            "description": "Single-node traversal: equivalent to search"
           }
-        }
+        ]
       }
     },
     {

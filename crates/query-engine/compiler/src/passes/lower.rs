@@ -55,6 +55,7 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
 pub fn lower(input: &mut Input) -> Result<Node> {
     let node = match input.query_type {
         QueryType::Search => lower_search(input),
+        QueryType::Traversal if input.is_search() => lower_search(input),
         QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),

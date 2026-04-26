@@ -204,10 +204,13 @@ fn enforce_return_columns(
     let select_len_before = q.select.len();
     // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
     // because the center edge column differs per direction.
+    // Search-shaped traversal (1 node, 0 rels) uses table-centric columns
+    // like search, not edge-centric. The lowerer produces a flat table scan
+    // without populating node_edge_col.
     let globally_edge_centric = matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Neighbors
-    );
+    ) && !input.is_search();
     let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
@@ -1213,13 +1216,22 @@ mod tests {
 
     #[test]
     fn traversal_node_without_edge_mapping_returns_error() {
+        // Multi-node traversal: node "x" is selectable but has no edge mapping.
         let input = traversal_input_with_edge_col(
-            vec![InputNode {
-                id: "x".to_string(),
-                entity: Some("User".to_string()),
-                table: Some("gl_user".to_string()),
-                ..Default::default()
-            }],
+            vec![
+                InputNode {
+                    id: "x".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "y".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    ..Default::default()
+                },
+            ],
             HashMap::new(),
         );
 
