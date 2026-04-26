@@ -13,8 +13,8 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
-    ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
-    InputRelationship, OrderDirection, QueryType,
+    AggFunction, ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter,
+    InputNode, InputRelationship, OrderDirection, QueryType,
 };
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
@@ -576,6 +576,31 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
 
     input.compiler.node_edge_col = node_edge_col;
 
+    // Edge-only count targets without filters or pinned ids can use bare
+    // `count()` — projection-eligible against `agg_counts`. A target is
+    // disqualified if any of its aggregations carries a property or is
+    // not `count`, or if its node has filters / `node_ids`.
+    let unfiltered_count_targets: HashSet<String> = edge_only_targets
+        .iter()
+        .filter(|alias| {
+            let aggs_for_target = || {
+                input
+                    .aggregations
+                    .iter()
+                    .filter(move |a| a.target.as_deref() == Some(alias.as_str()))
+            };
+            let all_count = aggs_for_target()
+                .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
+            let node_has_conditions = input
+                .nodes
+                .iter()
+                .find(|n| &n.id == *alias)
+                .is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
+            all_count && !node_has_conditions
+        })
+        .cloned()
+        .collect();
+
     let mut select = Vec::new();
     let mut group_by_exprs = Vec::new();
 
@@ -593,7 +618,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     }
 
     for agg in &input.aggregations {
-        let expr = agg_expr_with_edge_col(agg, &input.compiler.node_edge_col);
+        let expr = agg_expr_with_edge_col(
+            agg,
+            &input.compiler.node_edge_col,
+            &unfiltered_count_targets,
+        );
         select.push(SelectExpr::new(
             expr,
             agg.alias
@@ -623,7 +652,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         Some(s) => {
             let agg = &input.aggregations[s.agg_index];
             let mut exprs = vec![OrderExpr {
-                expr: agg_expr_with_edge_col(agg, &input.compiler.node_edge_col),
+                expr: agg_expr_with_edge_col(
+                    agg,
+                    &input.compiler.node_edge_col,
+                    &unfiltered_count_targets,
+                ),
                 desc: s.direction == OrderDirection::Desc,
             }];
             // Aggregate values frequently collide (e.g. many groups with
@@ -653,9 +686,18 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
 
 /// Build the aggregate expression. Uses edge columns for targets in
 /// `node_edge_col` (edge-only), node table columns otherwise.
+///
+/// `unfiltered_count_targets` is the set of edge-only target aliases that
+/// (a) only appear in `count` aggregations and (b) carry no node-level
+/// filters or `node_ids`. For those, we emit `count()` (no argument) so
+/// ClickHouse's projection optimizer can route the query to the
+/// pre-aggregated `agg_counts` projection on the edge table — a 100x-1000x
+/// reduction for `count(File) GROUP BY Project`-style queries on hot
+/// edge tables.
 fn agg_expr_with_edge_col(
     agg: &InputAggregation,
     node_edge_col: &HashMap<String, (String, String)>,
+    unfiltered_count_targets: &HashSet<String>,
 ) -> Expr {
     let arg = match (&agg.property, &agg.target) {
         (Some(prop), Some(target)) => {
@@ -663,7 +705,11 @@ fn agg_expr_with_edge_col(
             Expr::col(target, prop)
         }
         (None, Some(target)) => {
-            // Property-less: use edge column if target is edge-only.
+            if matches!(agg.function, AggFunction::Count)
+                && unfiltered_count_targets.contains(target.as_str())
+            {
+                return Expr::func(agg.function.as_sql(), vec![]);
+            }
             if let Some((alias, col)) = node_edge_col.get(target.as_str()) {
                 Expr::col(alias, col.as_str())
             } else {
