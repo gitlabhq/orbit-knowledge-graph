@@ -57,10 +57,116 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
+                prune_unreferenced_node_joins(q, input);
             }
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
+        }
+    }
+}
+
+/// Drop node-table joins whose alias has no role in the result: not in any
+/// `aggregations.{target, group_by}`, no filters, no `node_ids`, and not the
+/// query root. Edge joins to the pruned node stay as existence semi-joins,
+/// so row counts are unchanged.
+fn prune_unreferenced_node_joins(q: &mut Query, input: &Input) {
+    if input.query_type != QueryType::Aggregation || input.relationships.is_empty() {
+        return;
+    }
+
+    let mut referenced: HashSet<String> = HashSet::new();
+    for agg in &input.aggregations {
+        if let Some(t) = &agg.target {
+            referenced.insert(t.clone());
+        }
+        if let Some(g) = &agg.group_by {
+            referenced.insert(g.clone());
+        }
+    }
+    for n in &input.nodes {
+        if !n.node_ids.is_empty() || !n.filters.is_empty() {
+            referenced.insert(n.id.clone());
+        }
+    }
+    let root_alias = input
+        .relationships
+        .first()
+        .map(|r| r.from.clone())
+        .or_else(|| input.nodes.first().map(|n| n.id.clone()));
+    if let Some(root) = root_alias {
+        referenced.insert(root);
+    }
+
+    // Count how many relationships touch each node alias. Only leaf nodes
+    // (degree ≤ 1) are safe to prune — pruning an intermediate node would
+    // leave the adjacent edge JOINs dangling on the now-undefined alias.
+    // Example: `User -- AUTHORED --> MR -- HAS_NOTE --> Note` with MR
+    // unreferenced in the aggregation. e1's `ON mr.id = e1.source_id` would
+    // reference a missing `mr` alias after pruning.
+    let mut degree: HashMap<&str, usize> = HashMap::new();
+    for rel in &input.relationships {
+        *degree.entry(rel.from.as_str()).or_default() += 1;
+        *degree.entry(rel.to.as_str()).or_default() += 1;
+    }
+
+    let prune: HashSet<String> = input
+        .nodes
+        .iter()
+        .filter(|n| {
+            !referenced.contains(&n.id) && degree.get(n.id.as_str()).copied().unwrap_or(0) <= 1
+        })
+        .map(|n| n.id.clone())
+        .collect();
+    if prune.is_empty() {
+        return;
+    }
+
+    prune_table_joins(&mut q.from, &prune);
+
+    if let Some(w) = q.where_clause.take() {
+        let kept: Vec<Expr> = w
+            .flatten_and()
+            .into_iter()
+            .filter(|c| !c.column_aliases().iter().any(|a| prune.contains(a)))
+            .collect();
+        q.where_clause = Expr::conjoin(kept);
+    }
+
+    q.ctes.retain(|c| {
+        !prune.iter().any(|alias| {
+            c.name == node_filter_cte(alias)
+                || c.name == format!("_cascade_{alias}")
+                || c.name == format!("_target_{alias}_ids")
+        })
+    });
+}
+
+/// Walk the FROM tree and replace `Join { right: TableRef::Subquery|Scan { alias ∈ prune } }`
+/// with the left side. Recurses into left subtree first to handle nested joins.
+fn prune_table_joins(table: &mut TableRef, prune: &HashSet<String>) {
+    loop {
+        match table {
+            TableRef::Join { left, right, .. } => {
+                prune_table_joins(left, prune);
+                let right_alias = match right.as_ref() {
+                    TableRef::Scan { alias, .. } => Some(alias.clone()),
+                    TableRef::Subquery { alias, .. } => Some(alias.clone()),
+                    _ => None,
+                };
+                let should_prune = right_alias.is_some_and(|a| prune.contains(&a));
+                if !should_prune {
+                    return;
+                }
+                let mut placeholder = TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                };
+                std::mem::swap(left.as_mut(), &mut placeholder);
+                *table = placeholder;
+            }
+            _ => return,
         }
     }
 }
@@ -583,6 +689,10 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
 
         // Clone target-only conjuncts into the CTE; leave originals in WHERE
         // so fold_filters can still convert them to -If combinators.
+        // Skip `InSubquery` conjuncts: those are structural filters injected by
+        // the cascade pass (e.g. `mr.id IN _cascade_mr`). Materializing them
+        // again as `_target_<alias>_ids` produces a no-op CTE that re-derives
+        // the same id set already in `_cascade_<alias>`.
         let target_only_conds: Vec<Expr> = q
             .where_clause
             .as_ref()
@@ -591,6 +701,9 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
                 conjuncts
                     .into_iter()
                     .filter(|c| {
+                        if matches!(c, Expr::InSubquery { .. }) {
+                            return false;
+                        }
                         let aliases = c.column_aliases();
                         !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
                     })
