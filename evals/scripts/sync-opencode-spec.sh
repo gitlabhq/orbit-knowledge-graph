@@ -9,7 +9,8 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EVALS_DIR="$(dirname "$SCRIPT_DIR")"
-SPEC_PATH="${EVALS_DIR}/opencode-openapi.json"
+SPEC_PATH=$(mktemp)
+trap 'rm -f "$SPEC_PATH"' EXIT
 SDK_DIR="${EVALS_DIR}/opencode_sdk/opencode_sdk"
 
 VERSION=$(mise ls opencode --json | jq -r '.[0].version')
