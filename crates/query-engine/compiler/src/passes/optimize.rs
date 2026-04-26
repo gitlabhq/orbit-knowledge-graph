@@ -66,26 +66,72 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
 }
 
 /// Inject `source_kind`/`target_kind` filters for each node with a known
-/// entity type whose edge column mapping is recorded in `node_edge_col`.
-/// Gives ClickHouse an extra predicate for granule pruning on the
-/// `by_source`/`by_target` projections whose PK includes the kind column.
+/// entity type. Gives ClickHouse an extra predicate for granule pruning on
+/// the `by_source`/`by_target` projections whose PK includes the kind column.
+///
+/// Iterates relationships first so that a node shared between multiple
+/// relationships gets a kind filter on every edge it touches. Without this,
+/// a query like `Project ↔ MR ↔ User` only constrains MR via `e0` and the
+/// `e1` join can match `User AUTHORED <any entity with that ID>` rows,
+/// producing edges with the wrong `target_kind` in the result and missing
+/// kind-PK pruning on the second-hop edge.
 fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
     let node_edge_col = &input.compiler.node_edge_col;
-    if node_edge_col.is_empty() {
-        return;
-    }
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
+        .collect();
+
     let mut kind_filters: Vec<Expr> = Vec::new();
-    for node in &input.nodes {
-        if let Some(entity) = &node.entity
-            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
-            && let Some(kind_col) = edge_kind_column(edge_col)
-        {
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut push_filter = |alias: &str, kind_col: &'static str, entity: &str| {
+        if seen.insert(format!("{alias}.{kind_col}={entity}")) {
             kind_filters.push(Expr::eq(
                 Expr::col(alias, kind_col),
                 Expr::param(ChType::String, entity.to_string()),
             ));
         }
+    };
+
+    // Edge endpoints: for each relationship's edge alias, constrain BOTH
+    // sides if the corresponding node has a known entity type.
+    for (i, rel) in input.relationships.iter().enumerate() {
+        let edge_alias = if rel.max_hops > 1 {
+            format!("hop_e{i}")
+        } else {
+            format!("e{i}")
+        };
+        let (start_col, end_col) = if rel.max_hops > 1 {
+            rel.direction.union_columns()
+        } else {
+            rel.direction.edge_columns()
+        };
+        if let (Some(entity), Some(kind_col)) = (
+            entity_for.get(rel.from.as_str()),
+            edge_kind_column(start_col),
+        ) {
+            push_filter(&edge_alias, kind_col, entity);
+        }
+        if let (Some(entity), Some(kind_col)) =
+            (entity_for.get(rel.to.as_str()), edge_kind_column(end_col))
+        {
+            push_filter(&edge_alias, kind_col, entity);
+        }
     }
+
+    // Single-edge query types (Search/Neighbors) don't have relationships
+    // but still rely on `node_edge_col` for kind injection.
+    for node in &input.nodes {
+        if let Some(entity) = &node.entity
+            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
+            && let Some(kind_col) = edge_kind_column(edge_col)
+        {
+            push_filter(alias, kind_col, entity);
+        }
+    }
+
     if !kind_filters.is_empty() {
         let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
         parts.extend(kind_filters);
@@ -947,48 +993,58 @@ fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
         return;
     }
 
-    let pinned: HashSet<String> = input
+    // Seed the narrowed set with directly pinned nodes; extend it as we build
+    // `_nf_*` cascade CTEs so that downstream relationships can chain off them.
+    // Without the fixed-point loop, `Project[pinned] → File → Definition` only
+    // narrows File and leaves Definition unrestricted, which forces dedup to
+    // scan the whole authorized Definition table before the join.
+    let mut narrowed: HashSet<String> = input
         .nodes
         .iter()
         .filter(|n| !n.node_ids.is_empty())
         .map(|n| n.id.clone())
         .collect();
-    if pinned.is_empty() {
+    if narrowed.is_empty() {
         return;
     }
 
-    for rel in &input.relationships {
-        let (start_col, end_col) = rel.direction.edge_columns();
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rel in &input.relationships {
+            let (start_col, end_col) = rel.direction.edge_columns();
 
-        // Choose direction: pinned -> neighbor.
-        let (source_id, target_id, edge_filter_col, edge_select_col) =
-            if pinned.contains(&rel.from) && !pinned.contains(&rel.to) {
-                (&rel.from, &rel.to, start_col, end_col)
-            } else if pinned.contains(&rel.to) && !pinned.contains(&rel.from) {
-                (&rel.to, &rel.from, end_col, start_col)
-            } else {
+            let (source_id, target_id, edge_filter_col, edge_select_col) =
+                if narrowed.contains(&rel.from) && !narrowed.contains(&rel.to) {
+                    (&rel.from, &rel.to, start_col, end_col)
+                } else if narrowed.contains(&rel.to) && !narrowed.contains(&rel.from) {
+                    (&rel.to, &rel.from, end_col, start_col)
+                } else {
+                    continue;
+                };
+
+            let source_nf = node_filter_cte(source_id);
+            let target_nf = node_filter_cte(target_id);
+
+            if !q.ctes.iter().any(|c| c.name == source_nf) {
                 continue;
-            };
+            }
+            if q.ctes.iter().any(|c| c.name == target_nf) {
+                continue;
+            }
 
-        let source_nf = node_filter_cte(source_id);
-        let target_nf = node_filter_cte(target_id);
-
-        if !q.ctes.iter().any(|c| c.name == source_nf) {
-            continue;
-        }
-        if q.ctes.iter().any(|c| c.name == target_nf) {
-            continue;
-        }
-
-        if let Some(cte_query) = build_cascade_for_node(
-            input,
-            target_id,
-            edge_select_col,
-            edge_filter_col,
-            &source_nf,
-            &rel.types,
-        ) {
-            q.ctes.push(Cte::new(&target_nf, cte_query));
+            if let Some(cte_query) = build_cascade_for_node(
+                input,
+                target_id,
+                edge_select_col,
+                edge_filter_col,
+                &source_nf,
+                &rel.types,
+            ) {
+                q.ctes.push(Cte::new(&target_nf, cte_query));
+                narrowed.insert(target_id.clone());
+                changed = true;
+            }
         }
     }
 }
@@ -1636,6 +1692,87 @@ mod tests {
         assert!(
             q.ctes.iter().any(|c| c.name == "_nf_d"),
             "expected _nf_d CTE to be derived from edge filtered by _nf_f"
+        );
+    }
+
+    #[test]
+    fn pinned_traversal_cascades_across_multiple_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Project[pinned] -- IN_PROJECT --> File -- DEFINES --> Definition
+        // The pass must cascade: pinned p -> _nf_f via IN_PROJECT, then
+        // _nf_f -> _nf_d via DEFINES. Without the fixed-point loop, only
+        // _nf_f gets built and Definition's dedup scans the full table.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    node_ids: vec![278964i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["IN_PROJECT".into()],
+                    from: "f".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["DEFINES".into()],
+                    from: "f".into(),
+                    to: "d".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ctes: vec![Cte::new(
+                "_nf_p",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+                    from: TableRef::scan("gl_project", "p"),
+                    where_clause: Some(Expr::eq(Expr::col("p", "id"), Expr::lit(278964))),
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_f"),
+            "expected _nf_f CTE derived from _nf_p via IN_PROJECT"
+        );
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_d"),
+            "expected _nf_d CTE cascaded from _nf_f via DEFINES"
         );
     }
 

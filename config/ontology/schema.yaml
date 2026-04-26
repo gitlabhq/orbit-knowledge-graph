@@ -84,6 +84,21 @@ settings:
           - type: reorder
             name: by_target
             order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
+          # `count(target) GROUP BY source` — e.g. definitions per file via
+          # DEFINES. Without this, the wildcard scan over vendored JS bundles
+          # (`echarts.js` ≈ 13K defs, `pdf.worker.js` ≈ 12K defs) materializes
+          # every edge row before counting.
+          - type: aggregate
+            name: agg_counts_by_source
+            select: [relationship_kind, target_kind, source_id, traversal_path, "count()"]
+            group_by: [relationship_kind, target_kind, source_id, traversal_path]
+          # Mirrors `gl_edge.agg_counts` for the inverse direction
+          # (`count(source) GROUP BY target` — e.g. files importing a given
+          # definition via IMPORTS).
+          - type: aggregate
+            name: agg_counts_by_target
+            select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
+            group_by: [relationship_kind, source_kind, target_id, traversal_path]
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   local_db:

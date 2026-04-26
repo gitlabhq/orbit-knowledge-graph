@@ -95,6 +95,38 @@ pub struct PipelineContext {
     /// Typed errors collected during pipeline execution.
     /// Thread-safe — languages push errors from their CPU threads.
     pub graph_errors: std::sync::Mutex<Vec<crate::v2::error::CodeGraphError>>,
+    /// Benign per-file skips (oversize, line-too-long, watchdog timeout).
+    /// Tracked separately from `graph_errors` so policy outcomes do not
+    /// inflate the `gkg.indexer.code.errors` counter.
+    pub files_skipped: std::sync::Mutex<Vec<SkippedFile>>,
+}
+
+/// A benign per-file skip recorded by a language pipeline. The `reason`
+/// becomes the `reason` label on `gkg.indexer.code.files.skipped`.
+#[derive(Debug, Clone)]
+pub struct SkippedFile {
+    pub path: String,
+    pub reason: &'static str,
+}
+
+/// Classify a per-file analyzer error message into a benign-skip reason.
+/// `None` means the message is a genuine parse failure and should keep
+/// flowing through `record_error`.
+///
+/// Contract sources for the matched substrings:
+/// - `crates/code-graph/src/v2/langs/custom/js/extract.rs` produces
+///   `"refusing oversize file: ..."` when a file exceeds `MAX_FILE_BYTES`.
+/// - `crates/code-graph/src/v2/langs/custom/js/analyze/analyzer.rs` produces
+///   `"Skipping ...: line too long (...)"` when a line exceeds
+///   `MAX_LINE_LENGTH`.
+pub fn classify_skip_message(message: &str) -> Option<&'static str> {
+    if message.starts_with("refusing oversize file") {
+        Some("oversize")
+    } else if message.contains("line too long") {
+        Some("line_too_long")
+    } else {
+        None
+    }
 }
 
 impl PipelineContext {
@@ -107,6 +139,18 @@ impl PipelineContext {
     pub fn record_error(&self, error: crate::v2::error::CodeGraphError) {
         if let Ok(mut errors) = self.graph_errors.lock() {
             errors.push(error);
+        }
+    }
+
+    /// Record a benign per-file skip. Policy outcomes (oversize, line
+    /// caps, per-file watchdog) flow here instead of `record_error` so
+    /// they do not inflate the error counter.
+    pub fn record_file_skipped(&self, path: impl Into<String>, reason: &'static str) {
+        if let Ok(mut skipped) = self.files_skipped.lock() {
+            skipped.push(SkippedFile {
+                path: path.into(),
+                reason,
+            });
         }
     }
 }
@@ -271,6 +315,10 @@ pub struct PipelineResult {
     /// Typed errors from file read/parse failures, graph conversion, etc.
     /// Each carries a `.stage()` label for metrics.
     pub graph_errors: Vec<crate::v2::error::CodeGraphError>,
+    /// Benign skips emitted by language pipelines (oversize files,
+    /// line-too-long, per-file watchdog). Routed to
+    /// `gkg.indexer.code.files.skipped` instead of `errors`.
+    pub files_skipped: Vec<SkippedFile>,
     /// The pipeline context, including the tracer with accumulated events.
     pub ctx: Arc<PipelineContext>,
 }
@@ -381,6 +429,7 @@ impl Pipeline {
             tracer,
             root_path: root_str,
             graph_errors: std::sync::Mutex::new(Vec::new()),
+            files_skipped: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -541,6 +590,12 @@ impl Pipeline {
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
 
+        let skipped_files = ctx
+            .files_skipped
+            .lock()
+            .map(|mut e| std::mem::take(&mut *e))
+            .unwrap_or_default();
+
         PipelineResult {
             stats: PipelineStats {
                 files_discovered: total_files,
@@ -554,6 +609,7 @@ impl Pipeline {
             },
             errors: all_errors.into_inner().unwrap_or_default(),
             graph_errors,
+            files_skipped: skipped_files,
             ctx,
         }
     }
@@ -931,10 +987,11 @@ where
                     crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
                     _ => "unknown",
                 };
-                ctx.record_error(CodeGraphError::Internal {
-                    context: "sentinel_timeout".to_string(),
-                    message: format!("file killed by per-file timeout: {path}"),
-                });
+                // Per-file watchdog timeouts are policy outcomes, not
+                // failures of the indexer. Route them to the
+                // `files.skipped{reason="timeout_sentinel"}` counter
+                // instead of inflating `errors_total`.
+                ctx.record_file_skipped(path.to_string(), "timeout_sentinel");
             }
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
@@ -1075,6 +1132,7 @@ mod tests {
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
             graph_errors: std::sync::Mutex::new(Vec::new()),
+            files_skipped: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();
@@ -1309,5 +1367,42 @@ namespace MyApp {
             file_to_def >= 8,
             "Expected at least 8 file→def edges, got {file_to_def}"
         );
+    }
+
+    #[test]
+    fn classify_skip_message_recognises_known_reasons() {
+        assert_eq!(
+            classify_skip_message(
+                "refusing oversize file: /tmp/big.json (4808847 bytes, max 2097152)"
+            ),
+            Some("oversize"),
+        );
+        assert_eq!(
+            classify_skip_message("Skipping bundle.js: line too long (5001 bytes, max 5000)"),
+            Some("line_too_long"),
+        );
+        assert_eq!(classify_skip_message("unexpected token at 1:1"), None);
+    }
+
+    #[test]
+    fn record_file_skipped_collects_in_pipeline_result() {
+        // Direct unit test of the watchdog rerouting path: simulating
+        // the call site that replaced `ctx.record_error(Internal{
+        // sentinel_timeout })` proves that a skipped file ends up on
+        // `PipelineResult.files_skipped` rather than `graph_errors`.
+        let ctx = Arc::new(PipelineContext {
+            config: PipelineConfig::default(),
+            tracer: crate::v2::trace::Tracer::new(false),
+            root_path: "/".to_string(),
+            graph_errors: std::sync::Mutex::new(Vec::new()),
+            files_skipped: std::sync::Mutex::new(Vec::new()),
+        });
+        ctx.record_file_skipped("src/slow.rs".to_string(), "timeout_sentinel");
+
+        let skipped = ctx.files_skipped.lock().unwrap().clone();
+        assert_eq!(skipped.len(), 1);
+        assert_eq!(skipped[0].reason, "timeout_sentinel");
+        assert_eq!(skipped[0].path, "src/slow.rs");
+        assert!(ctx.graph_errors.lock().unwrap().is_empty());
     }
 }

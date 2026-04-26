@@ -55,6 +55,7 @@
          "options": {
             "colorMode": "value",
             "graphMode": "area",
+            "justifyMode": "auto",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -100,6 +101,7 @@
          "options": {
             "colorMode": "value",
             "graphMode": "area",
+            "justifyMode": "auto",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -145,6 +147,7 @@
          "options": {
             "colorMode": "value",
             "graphMode": "area",
+            "justifyMode": "auto",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -190,6 +193,7 @@
          "options": {
             "colorMode": "value",
             "graphMode": "area",
+            "justifyMode": "auto",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
