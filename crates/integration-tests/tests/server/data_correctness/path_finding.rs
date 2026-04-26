@@ -349,16 +349,17 @@ pub(super) async fn path_finding_target_entity_constrains_results(ctx: &TestCont
 }
 
 pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestContext) {
-    // Find all paths from User(1) to any seeded MergeRequest.
-    // The frontier should only include edges where the
-    // target_kind matches MergeRequest.
+    // Find all paths from User(1) to any MergeRequest in the seed range.
+    // Uses id_range instead of node_ids to exercise the filtered-endpoint
+    // path. The frontier should only include edges where the target_kind
+    // matches MergeRequest.
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]}
+                {"id": "end", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2003}}
             ],
             "path": {"type": "any", "from": "start", "to": "end", "max_depth": 1,
                      "rel_types": ["AUTHORED"]}
