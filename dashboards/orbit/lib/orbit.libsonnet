@@ -347,9 +347,10 @@ local sectionCollapsed(title, metrics, ds_var, selector) =
 
 // Single stat tile reading "X in dashboard window". The query uses
 // $__range so it always answers the user's current time picker.
-local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W, h=STAT_H) = (
+local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W, h=STAT_H, or_zero=true) = (
   local sel = mergedSelector(selector, filter);
-  local expr = 'sum(increase(%s{%s}[$__range]))' % [prom_name, sel];
+  local base = 'sum(increase(%s{%s}[$__range]))' % [prom_name, sel];
+  local expr = if or_zero then '(' + base + ') or vector(0)' else base;
   // Drill-through opens the underlying rate(metric{...}[5m]) in Explore
   // over the same time range, broken out by the same labels.
   local rate_expr = 'sum(rate(%s{%s}[5m]))' % [prom_name, sel];
@@ -441,8 +442,11 @@ local ratioPanel(title, description, num_prom, denom_prom, ds_var, selector, by=
 );
 
 // Stat tile showing the latest value of a gauge-style PromQL expression.
-local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W, h=STAT_H) =
-  stat(title, description, target(expr, title, ds_var), unit, w, h, [exploreLink(expr)]);
+// When `or_zero=true` (the default), the expression is wrapped with
+// `or vector(0)` so an empty result renders as 0 instead of "—".
+local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W, h=STAT_H, or_zero=true) =
+  local final_expr = if or_zero then '(' + expr + ') or vector(0)' else expr;
+  stat(title, description, target(final_expr, title, ds_var), unit, w, h, [exploreLink(expr)]);
 
 // Single-panel histogram percentiles (p50, p95, p99). Same shape as the
 // existing `histogramPanels` two-panel pair but without the observation

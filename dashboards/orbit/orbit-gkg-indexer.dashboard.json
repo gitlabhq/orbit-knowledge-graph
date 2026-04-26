@@ -38,7 +38,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Share of repository indexing runs that ended in outcome=success over the last hour.",
+         "description": "Share of repository indexing runs that ended in outcome=indexed over the last hour. Renders 0 when no indexing runs happened in the window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -56,7 +56,7 @@
             {
                "targetBlank": false,
                "title": "Open in Explore",
-               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D%22gkg-indexer%22%2C%20cluster%3D~%22$cluster%22%2C%20outcome%3D%22success%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D%22gkg-indexer%22%2C%20cluster%3D~%22$cluster%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22refId%22%3A%22A%22%2C%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D%22gkg-indexer%22%2C%20cluster%3D~%22$cluster%22%2C%20outcome%3D%22indexed%22%7D%5B1h%5D%29%29%29%20%2F%20%28sum%28rate%28gkg_indexer_code_repository_indexing_completed_total%7Bcontainer%3D%22gkg-indexer%22%2C%20cluster%3D~%22$cluster%22%7D%5B1h%5D%29%29%20%3E%200%29%22%2C%22range%22%3Atrue%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
             }
          ],
          "options": {
@@ -78,7 +78,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "(sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"success\"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h])) > 0)",
+               "expr": "((sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h])) > 0)) or vector(0)",
                "legendFormat": "Code: success rate (1h)",
                "refId": "A"
             }
@@ -131,7 +131,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "(sum(rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h]))) / (sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h])) > 0)",
+               "expr": "((sum(rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h]))) / (sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h])) > 0)) or vector(0)",
                "legendFormat": "SDLC: error rate (1h)",
                "refId": "A"
             }
@@ -184,7 +184,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "max(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "expr": "(max(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})) or vector(0)",
                "legendFormat": "SDLC: max watermark lag",
                "refId": "A"
             }
@@ -237,7 +237,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "expr": "(histogram_quantile(0.95, sum by (le) (rate(gkg_etl_message_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))) or vector(0)",
                "legendFormat": "Indexer: message p95 (5m)",
                "refId": "A"
             }
@@ -303,7 +303,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
                "legendFormat": "Projects indexed",
                "refId": "A"
             }
@@ -356,7 +356,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__range]))) or vector(0)",
                "legendFormat": "Push events",
                "refId": "A"
             }
@@ -409,7 +409,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__range]))) or vector(0)",
                "legendFormat": "Files parsed",
                "refId": "A"
             }
@@ -462,7 +462,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
                "legendFormat": "Nodes and edges",
                "refId": "A"
             }
@@ -528,7 +528,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
                "legendFormat": "Rows ingested",
                "refId": "A"
             }
@@ -581,7 +581,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
                "legendFormat": "Bytes from datalake",
                "refId": "A"
             }
@@ -634,7 +634,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
                "legendFormat": "Pipeline runs",
                "refId": "A"
             }
@@ -687,7 +687,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))",
+               "expr": "(sum(increase(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__range]))) or vector(0)",
                "legendFormat": "Pipeline errors",
                "refId": "A"
             }

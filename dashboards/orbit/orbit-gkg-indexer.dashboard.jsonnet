@@ -34,8 +34,8 @@ local health = [
   o.row('Health'),
   o.gaugeStat(
     'Code: success rate (1h)',
-    'Share of repository indexing runs that ended in outcome=success over the last hour.',
-    '(sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s, outcome="success"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s}[1h])) > 0)' % [SEL, SEL],
+    'Share of repository indexing runs that ended in outcome=indexed over the last hour. Renders 0 when no indexing runs happened in the window.',
+    '(sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s, outcome="indexed"}[1h]))) / (sum(rate(gkg_indexer_code_repository_indexing_completed_total{%s}[1h])) > 0)' % [SEL, SEL],
     DS, 'percentunit', 6,
   ),
   o.gaugeStat(
