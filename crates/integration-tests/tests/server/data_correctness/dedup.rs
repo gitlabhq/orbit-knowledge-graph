@@ -48,7 +48,7 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "name", "state"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "name", "state"],
                      "node_ids": [9001]},
             "limit": 10
         }"#,
@@ -79,7 +79,7 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"],
                      "node_ids": [9002]},
             "limit": 10
         }"#,
@@ -116,7 +116,7 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
+                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
@@ -153,7 +153,7 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,
@@ -189,7 +189,7 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,
@@ -238,7 +238,7 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
+                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
@@ -289,7 +289,7 @@ pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [9003]},
-                {"id": "mr", "entity": "MergeRequest"}
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 10
@@ -386,7 +386,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]},
                 {"id": "p", "entity": "Project", "node_ids": [1004]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -521,7 +521,7 @@ pub(super) async fn hydration_returns_latest_properties(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [9600], "columns": ["username", "name"]},
-                {"id": "g", "entity": "Group"}
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 10
@@ -565,7 +565,7 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]},
                 {"id": "p", "entity": "Project", "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -651,7 +651,7 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
+                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],

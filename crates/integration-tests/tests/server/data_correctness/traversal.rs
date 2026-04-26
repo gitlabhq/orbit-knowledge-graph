@@ -6,8 +6,8 @@ pub(super) async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &T
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -47,9 +47,9 @@ pub(super) async fn traversal_three_hop_returns_all_user_group_project_paths(ctx
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]},
-                {"id": "p", "entity": "Project", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]},
+                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -95,8 +95,8 @@ pub(super) async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 20
@@ -127,8 +127,8 @@ pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "APPROVED", "from": "u", "to": "mr"}],
             "limit": 20
@@ -161,8 +161,8 @@ pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestCont
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -186,8 +186,8 @@ pub(super) async fn traversal_with_order_by(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},
@@ -243,8 +243,8 @@ pub(super) async fn traversal_incoming_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100]},
-                {"id": "u", "entity": "User", "columns": ["username"]}
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"], "node_ids": [100]},
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
             "limit": 10
@@ -266,9 +266,9 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username", "state"],
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
                  "filters": {"state": "blocked"}},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -353,8 +353,8 @@ pub(super) async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -379,8 +379,8 @@ pub(super) async fn traversal_shared_target_fan_in(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
-                {"id": "n", "entity": "Note", "columns": ["note"]}
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"], "node_ids": [2000]},
+                {"id": "n", "entity": "Note", "node_ids": [3000, 3001, 3002, 3003], "columns": ["note"]}
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
             "limit": 20
@@ -401,8 +401,8 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "order_by": {"node": "mr", "property": "title", "direction": "ASC"},
@@ -425,8 +425,8 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
-                {"id": "g", "entity": "Group", "columns": ["name"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "order_by": {"node": "u", "property": "username", "direction": "ASC"},
@@ -450,8 +450,8 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
-                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "order_by": {"node": "mr", "property": "title", "direction": "DESC"},

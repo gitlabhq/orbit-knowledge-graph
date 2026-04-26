@@ -16,7 +16,7 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -34,7 +34,7 @@ pub(super) async fn cursor_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 2}
@@ -52,7 +52,7 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
@@ -71,7 +71,7 @@ pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "limit": 100,
             "cursor": {"offset": 50, "page_size": 10}
         }"#,
@@ -92,7 +92,7 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -112,7 +112,7 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -142,7 +142,7 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -165,7 +165,7 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 10}
@@ -191,7 +191,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
         let json = format!(
             r#"{{
                 "query_type": "search",
-                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
+                "node": {{"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]}},
                 "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
                 "limit": 100,
                 "cursor": {{"offset": {offset}, "page_size": 2}}
@@ -238,8 +238,8 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "g", "entity": "Group"}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100
@@ -259,8 +259,8 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "g", "entity": "Group"}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -286,8 +286,8 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "g", "entity": "Group"}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -310,8 +310,8 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
-                {"id": "g", "entity": "Group"}
+                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -338,7 +338,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
     // Run the same query twice and verify identical results.
     let query = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
         "limit": 100,
         "cursor": {"offset": 0, "page_size": 3}
     }"#;
@@ -366,7 +366,7 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
         let json = format!(
             r#"{{
                 "query_type": "search",
-                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
+                "node": {{"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]}},
                 "limit": 100,
                 "cursor": {{"offset": {offset}, "page_size": 2}}
             }}"#
@@ -401,8 +401,8 @@ pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &Tes
     let query = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "g", "entity": "Group"}
+            {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 100,
@@ -433,8 +433,8 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
     let query = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["id", "username"]},
-            {"id": "mr", "entity": "MergeRequest"}
+            {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["id", "username"]},
+            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
