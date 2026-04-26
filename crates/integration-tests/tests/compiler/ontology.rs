@@ -1162,3 +1162,97 @@ fn filterable_allows_traversal_path_in_columns() {
         .is_ok()
     );
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Aggregation filter pushdown (Bug 1 regression guard)
+//
+// Single-aggregate queries with a sort-key filter must push the filter into
+// the LIMIT 1 BY dedup subquery so ClickHouse uses the primary-key index to
+// skip granules. Without this, the dedup subquery scans the full authorized
+// table before the outer countIf filters, costing ~15s on a 5,086-row count
+// in production.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn aggregation_count_pushes_project_id_into_dedup_subquery() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "d", "entity": "Definition",
+                   "filters": {"project_id": {"op": "eq", "value": 278964}}}],
+        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+    }"#;
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    // The countIf must contain the filter (folded as today).
+    assert!(
+        rendered.contains("countIf"),
+        "should fold into countIf: {rendered}"
+    );
+    // The dedup subquery (the inner SELECT before LIMIT 1 BY) must also
+    // carry the project_id filter so the granule index narrows the read.
+    let inner = rendered
+        .split("LIMIT 1 BY")
+        .next()
+        .expect("rendered SQL should contain LIMIT 1 BY");
+    assert!(
+        inner.contains("project_id"),
+        "project_id must appear inside the LIMIT 1 BY dedup subquery: {rendered}"
+    );
+}
+
+#[test]
+fn pinned_traversal_narrows_joined_node_via_nf_cte() {
+    // Bug 2: when one node has node_ids pinned and joins to another via an
+    // edge, the joined-side node table must be narrowed to ids reachable
+    // from the pinned source. Without the fix, the joined Definition table
+    // dedups the full authorized scope (~tens of millions of rows on
+    // production data) before the JOIN.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "f", "entity": "File", "node_ids": ["12345"], "columns": ["path"]},
+            {"id": "d", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+        "limit": 50
+    }"#;
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    // Both _nf_f (existing) and _nf_d (new) CTEs must be present.
+    assert!(
+        rendered.contains("_nf_f"),
+        "_nf_f CTE must be defined: {rendered}"
+    );
+    assert!(
+        rendered.contains("_nf_d"),
+        "_nf_d CTE must be derived from edge filtered by _nf_f: {rendered}"
+    );
+    // The Definition dedup subquery must filter by _nf_d.
+    assert!(
+        rendered.contains("d.id IN (SELECT id FROM _nf_d)"),
+        "Definition subquery must be narrowed by _nf_d: {rendered}"
+    );
+}
+
+#[test]
+fn aggregation_count_in_clause_pushes_project_id() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [{"id": "d", "entity": "Definition",
+                   "filters": {"project_id": {"op": "in", "value": [69095239, 278964, 74646916]}}}],
+        "aggregations": [{"function": "count", "target": "d", "alias": "total"}]
+    }"#;
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    let inner = rendered
+        .split("LIMIT 1 BY")
+        .next()
+        .expect("rendered SQL should contain LIMIT 1 BY");
+    assert!(
+        inner.contains("project_id"),
+        "project_id IN must appear inside dedup subquery: {rendered}"
+    );
+}

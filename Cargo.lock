@@ -7876,6 +7876,8 @@ dependencies = [
  "futures",
  "gkg-server-config",
  "parking_lot",
+ "testcontainers",
+ "testcontainers-modules",
  "thiserror 2.0.18",
  "tokio",
  "tracing",

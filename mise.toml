@@ -43,6 +43,7 @@ protoc = "34.1"
 jq = "1.7"
 yq = "4.52.5"
 hyperfine = "1.20.0"
+"aqua:google/go-jsonnet" = "0.22.0"
 
 [tasks."hooks:install"]
 run = ["lefthook install", "cp scripts/hooks/post-checkout $(git rev-parse --git-common-dir)/hooks/post-checkout"]
@@ -335,6 +336,14 @@ description = "Regenerate crates/gkg-observability/orbit-dashboards/gkg-metrics.
 [tasks."metrics:catalog:check"]
 run = "cargo xtask metrics-catalog --check"
 description = "Fail if the committed metrics catalog is out of date"
+
+[tasks."dashboards"]
+run = "cargo xtask dashboards"
+description = "Regenerate dashboards/orbit/*.dashboard.json from jsonnet sources"
+
+[tasks."dashboards:check"]
+run = "cargo xtask dashboards --check"
+description = "Fail if the committed dashboards are out of date"
 
 [tasks."schema:generate:ddl"]
 run = """

@@ -562,6 +562,36 @@ mod tests {
     }
 
     #[test]
+    fn aggregation_pushes_sort_key_filter_inside() {
+        // When fold_filters_into_aggregates retains a structural conjunct in
+        // the outer WHERE for a single-aggregate target, deduplicate must
+        // hoist it into the LIMIT 1 BY subquery so ClickHouse can use the
+        // primary-key index to skip granules. Regression guard for the
+        // 411x slowdown on count(Definition where project_id=X).
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(Expr::and(
+                Expr::eq(Expr::col("mr", "id"), Expr::lit(42)),
+                Expr::eq(Expr::col("mr", "state"), Expr::lit("opened")),
+            )),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Aggregation), &ont);
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        // id is in the sort key -- pushed inside.
+        assert!(where_contains(&inner.where_clause, "\"id\""));
+        // state is mutable -- stays in outer WHERE.
+        assert!(!where_contains(&inner.where_clause, "state"));
+        assert!(where_contains(&q.where_clause, "state"));
+    }
+
+    #[test]
     fn neighbors_wraps_node_scan() {
         let ont = ontology();
         let mut node = Node::Query(Box::new(Query {

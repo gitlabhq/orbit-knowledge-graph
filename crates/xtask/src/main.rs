@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod dashboards;
 mod metrics_catalog;
 mod schema;
 mod synth;
@@ -35,6 +36,16 @@ enum Command {
         #[arg(short, long)]
         output: Option<std::path::PathBuf>,
         /// Diff the regenerated catalog against the committed file and
+        /// return a non-zero exit if they differ.
+        #[arg(long)]
+        check: bool,
+    },
+    /// Generate the Orbit Grafana dashboards from the metric catalog.
+    Dashboards {
+        /// Write dashboards under this directory instead of the default.
+        #[arg(short, long)]
+        dir: Option<std::path::PathBuf>,
+        /// Diff regenerated dashboards against the committed files and
         /// return a non-zero exit if they differ.
         #[arg(long)]
         check: bool,
@@ -130,5 +141,6 @@ async fn main() -> Result<()> {
         },
         Command::Schema { output } => schema::run(output),
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
+        Command::Dashboards { dir, check } => dashboards::run(dir, check),
     }
 }
