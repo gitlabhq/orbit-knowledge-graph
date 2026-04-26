@@ -53,6 +53,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             }
             if input.query_type == QueryType::Traversal {
                 narrow_joined_nodes_via_pinned_neighbors(q, input);
+                push_multihop_sip_into_union_arms(q, input);
             }
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
@@ -1049,6 +1050,97 @@ fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
     }
 }
 
+/// Push pinned-root SIP into the per-arm WHERE of multi-hop UNION ALL
+/// subqueries. The lowerer adds `hop_e<i>.<col> IN _nf_<root>` to the
+/// outer WHERE, but the SIP belongs INSIDE each arm so the depth-1 edge
+/// scan is bounded before the union materialises. ClickHouse's
+/// predicate pushdown handles this in many cases but not all (especially
+/// when other outer-WHERE conjuncts reference columns only emitted by
+/// the arm subquery), so an explicit per-arm injection is more robust.
+fn push_multihop_sip_into_union_arms(q: &mut Query, input: &Input) {
+    if input.relationships.is_empty() {
+        return;
+    }
+    let nec = &input.compiler.node_edge_col;
+    if nec.is_empty() {
+        return;
+    }
+
+    // For each `_nf_<alias>` CTE, find the union table the alias is mapped
+    // to and inject `e1.<col> IN _nf_<alias>` (or `e<depth>.<col>` for
+    // to-side targets) into each arm's WHERE.
+    for (node_alias, (table_alias, edge_col)) in nec {
+        let cte_name = node_filter_cte(node_alias);
+        if !q.ctes.iter().any(|c| c.name == cte_name) {
+            continue;
+        }
+        let is_start = matches!(edge_col.as_str(), START_ID_COLUMN | SOURCE_ID_COLUMN);
+        let is_end = matches!(edge_col.as_str(), END_ID_COLUMN | TARGET_ID_COLUMN);
+        if !is_start && !is_end {
+            continue;
+        }
+        push_sip_into_union(&mut q.from, table_alias, edge_col, &cte_name, is_start);
+    }
+}
+
+fn push_sip_into_union(
+    table: &mut TableRef,
+    target_alias: &str,
+    union_col: &str,
+    cte_name: &str,
+    is_start_side: bool,
+) {
+    match table {
+        TableRef::Union { alias, queries, .. } if alias == target_alias => {
+            for arm in queries {
+                let depth = arm_depth(&arm.from);
+                let (edge_alias, edge_col) = if is_start_side {
+                    ("e1".to_string(), source_col_for(union_col))
+                } else {
+                    (format!("e{depth}"), target_col_for(union_col))
+                };
+                let sip = Expr::InSubquery {
+                    expr: Box::new(Expr::col(&edge_alias, &edge_col)),
+                    cte_name: cte_name.to_string(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                };
+                arm.where_clause = Expr::and_all([arm.where_clause.take(), Some(sip)]);
+            }
+        }
+        TableRef::Join { left, right, .. } => {
+            push_sip_into_union(left, target_alias, union_col, cte_name, is_start_side);
+            push_sip_into_union(right, target_alias, union_col, cte_name, is_start_side);
+        }
+        _ => {}
+    }
+}
+
+/// Count edge scans in a hop arm's FROM tree by walking the left-deep join
+/// chain. Each `e_i` scan contributes 1 to the depth.
+fn arm_depth(from: &TableRef) -> u32 {
+    match from {
+        TableRef::Scan { .. } => 1,
+        TableRef::Join { left, .. } => 1 + arm_depth(left),
+        _ => 1,
+    }
+}
+
+fn source_col_for(union_col: &str) -> String {
+    match union_col {
+        START_ID_COLUMN => SOURCE_ID_COLUMN.to_string(),
+        END_ID_COLUMN => TARGET_ID_COLUMN.to_string(),
+        other => other.to_string(),
+    }
+}
+
+fn target_col_for(union_col: &str) -> String {
+    match union_col {
+        END_ID_COLUMN => TARGET_ID_COLUMN.to_string(),
+        START_ID_COLUMN => SOURCE_ID_COLUMN.to_string(),
+        other => other.to_string(),
+    }
+}
+
 /// Path hop frontier optimization.
 ///
 /// For path-finding queries with max_depth > 2, materializes the reachable
@@ -1073,7 +1165,24 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     let backward_depth = max_depth / 2;
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
-    let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
+    // Reuse the path_finding-specific table resolution so the frontier
+    // CTEs also drop tables that can't carry edges between the anchors.
+    let start_entity = input
+        .nodes
+        .iter()
+        .find(|n| n.id == path.from)
+        .and_then(|n| n.entity.as_deref())
+        .unwrap_or("");
+    let end_entity = input
+        .nodes
+        .iter()
+        .find(|n| n.id == path.to)
+        .and_then(|n| n.entity.as_deref())
+        .unwrap_or("");
+    let edge_tables =
+        input
+            .compiler
+            .resolve_path_edge_tables(&path.rel_types, start_entity, end_entity);
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,

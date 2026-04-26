@@ -99,6 +99,11 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// Maps edge table name → set of entity kinds that participate (as either
+    /// source or target) in any edge stored in that table. Populated by
+    /// normalize from the ontology. Used by `lower_path_finding` to prune
+    /// edge tables that cannot carry the path's anchor entities.
+    pub edge_table_entities: HashMap<String, HashSet<String>>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -110,6 +115,7 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            edge_table_entities: HashMap::new(),
         }
     }
 }
@@ -138,6 +144,29 @@ impl CompilerMetadata {
             seen.insert(table.to_string());
         }
         seen.into_iter().collect()
+    }
+
+    /// Like `resolve_edge_tables`, but for path_finding queries: when
+    /// `rel_types` is empty (would otherwise return every edge table) and
+    /// neither `start_entity` nor `end_entity` participates in a table's
+    /// edges, that table is dropped. The path can never enter or leave it.
+    pub fn resolve_path_edge_tables(
+        &self,
+        types: &[String],
+        start_entity: &str,
+        end_entity: &str,
+    ) -> Vec<String> {
+        let mut tables = self.resolve_edge_tables(types);
+        let unrestricted = types.is_empty() || (types.len() == 1 && types[0] == "*");
+        if !unrestricted || tables.len() <= 1 {
+            return tables;
+        }
+        tables.retain(|table| {
+            self.edge_table_entities
+                .get(table)
+                .is_none_or(|kinds| kinds.contains(start_entity) || kinds.contains(end_entity))
+        });
+        tables
     }
 }
 

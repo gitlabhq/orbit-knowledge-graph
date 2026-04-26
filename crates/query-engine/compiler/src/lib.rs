@@ -412,4 +412,70 @@ mod tests {
             "e1 must constrain target_kind=MergeRequest (R2 cliff), got:\n{sql}"
         );
     }
+
+    /// F1: path_finding without `rel_types` should drop edge tables that
+    /// carry no edges touching either anchor entity. `User → Vulnerability`
+    /// has no code-graph component, so `gl_code_edge` (which only stores
+    /// File/Definition/ImportedSymbol/Branch edges) must not appear in any
+    /// hop arm.
+    #[test]
+    fn path_finding_prunes_edge_tables_unreachable_from_anchors() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "v", "entity": "Vulnerability", "node_ids": [2]}
+            ],
+            "path": {"type": "any", "from": "u", "to": "v", "max_depth": 3}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_code_edge"),
+            "gl_code_edge must not appear when neither anchor entity is in \
+             its edge variants, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("gl_edge"),
+            "gl_edge must remain (carries User and Vulnerability edges), \
+             got:\n{sql}"
+        );
+    }
+
+    /// F2: pinned-root SIP should be injected into each multi-hop UNION ALL
+    /// arm, not only at the outer subquery level. Without per-arm injection
+    /// the depth-1 edge scan reads the full authorized scope before the
+    /// outer `IN _nf_<root>` filter fires.
+    #[test]
+    fn multihop_traversal_pushes_pinned_root_sip_into_each_arm() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF", "from": "u", "to": "p",
+                "min_hops": 1, "max_hops": 3
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // The arm-level injection rewrites the depth-1 edge scan to include
+        // `e1.source_id IN _nf_u`. Without F2 the only matching reference
+        // would be `hop_e0.start_id IN _nf_u` at the outer level.
+        assert!(
+            sql.contains("e1.source_id IN (SELECT id FROM _nf_u)"),
+            "depth-1 arm must reference _nf_u via e1.source_id, got:\n{sql}"
+        );
+    }
 }

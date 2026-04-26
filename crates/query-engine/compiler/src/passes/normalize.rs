@@ -78,6 +78,15 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             )
         })
         .collect();
+    input.compiler.edge_table_entities = {
+        let mut map: HashMap<String, std::collections::HashSet<String>> = HashMap::new();
+        for edge in ontology.edges() {
+            let entry = map.entry(edge.destination_table.clone()).or_default();
+            entry.insert(edge.source_kind.clone());
+            entry.insert(edge.target_kind.clone());
+        }
+        map
+    };
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {

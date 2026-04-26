@@ -759,7 +759,9 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
-    let et = input.compiler.resolve_edge_tables(&path.rel_types);
+    let et = input
+        .compiler
+        .resolve_path_edge_tables(&path.rel_types, start_entity, end_entity);
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
