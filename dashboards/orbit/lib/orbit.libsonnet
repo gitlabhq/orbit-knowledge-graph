@@ -71,14 +71,23 @@ local urlEncode(s) = (
 // Build a Grafana data link that opens the given PromQL expression in
 // Explore over the dashboard's current time range. Grafana interpolates
 // $cluster, $__from, and $__to before the redirect.
+//
+// Uses std.manifestJsonEx so quotes inside the expression are escaped
+// correctly. Hand-rolled JSON concatenation here breaks for any expr
+// containing `"`, which is most of them.
 local exploreLink(expr, ds_uid='mimir-analytics-eventsdot', title='Open in Explore') = {
+  local payload = {
+    datasource: ds_uid,
+    queries: [{
+      refId: 'A',
+      datasource: { type: 'prometheus', uid: ds_uid },
+      expr: expr,
+      range: true,
+    }],
+    range: { from: '$__from', to: '$__to' },
+  },
   title: title,
-  url: '/explore?orgId=1&left=' + urlEncode(
-    '{"datasource":"' + ds_uid +
-    '","queries":[{"refId":"A","datasource":{"type":"prometheus","uid":"' + ds_uid +
-    '"},"expr":"' + expr +
-    '","range":true}],"range":{"from":"$__from","to":"$__to"}}'
-  ),
+  url: '/explore?orgId=1&left=' + urlEncode(std.manifestJsonMinified(payload)),
   targetBlank: false,
 };
 
