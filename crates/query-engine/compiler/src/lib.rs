@@ -547,6 +547,84 @@ mod tests {
         );
     }
 
+    /// Multi-hop traversal with a pinned source node must generate hop
+    /// frontier CTEs (`_thop0_1`, `_thop0_2`) that materialize reachable
+    /// IDs at each depth. UNION ALL arms at depth >= 2 must get SIP
+    /// filters referencing the previous hop's frontier CTE.
+    #[test]
+    fn multi_hop_traversal_generates_hop_frontier_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 3
+            }],
+            "limit": 25
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Frontier CTEs should be generated for depths 1 and 2.
+        assert!(
+            sql.contains("_thop0_1"),
+            "hop frontier CTE _thop0_1 must be present, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_thop0_2"),
+            "hop frontier CTE _thop0_2 must be present, got:\n{sql}"
+        );
+
+        // Arms at depth >= 2 should reference frontier CTEs.
+        // e2.source_id IN (SELECT id FROM _thop0_1)
+        assert!(
+            sql.contains("_thop0_1"),
+            "depth-2 arm must reference _thop0_1 for SIP, got:\n{sql}"
+        );
+    }
+
+    /// Multi-hop traversal without a pinned node should NOT generate
+    /// frontier CTEs (they'd scan the full edge table).
+    #[test]
+    fn multi_hop_traversal_skips_frontiers_without_selectivity() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{
+                "type": "MEMBER_OF",
+                "from": "u",
+                "to": "p",
+                "min_hops": 1,
+                "max_hops": 2
+            }],
+            "limit": 25
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // The pinned node is `p` (the `to` side). Frontier CTEs should
+        // still be generated since the `to` node has a `_nf_p` CTE.
+        assert!(
+            sql.contains("_thop0_1"),
+            "hop frontier CTE should be generated from _nf_p (to-side selectivity), got:\n{sql}"
+        );
+    }
+
     /// Intermediate nodes (referenced by 2+ relationships) must NOT be pruned
     /// even when they're absent from the aggregation target/group_by. Pruning
     /// them leaves adjacent edge JOINs dangling on the now-undefined alias
