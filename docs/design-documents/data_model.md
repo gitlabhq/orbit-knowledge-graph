@@ -145,8 +145,8 @@ The Code Graph represents the structure and relationships within the source code
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
-| `Definition`          | Represents a code definition (e.g., class, function, method, module).                                   | `fully_qualified_name`, `display_name`, `definition_type`, `file_path`      |
-| `ImportedSymbol`      | Represents an imported symbol or module within a file.                                                  | `symbol_name`, `source_module`, `file_path`                                 |
+| `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
+| `ImportedSymbol`      | An imported symbol or module reference within a file.                                                   | `import_path`, `import_type`, `identifier_name`, `identifier_alias`, `file_path` |
 
 ### Relationship Visualization
 
@@ -155,28 +155,29 @@ graph TD
     Branch -- CONTAINS --> Directory
     Branch -- CONTAINS --> File
     Branch -- IN_PROJECT --> Project
-    Directory -- DIR_CONTAINS_DIR --> Directory
-    Directory -- DIR_CONTAINS_FILE --> File
-    File -- FILE_DEFINES --> Definition
-    File -- FILE_IMPORTS --> ImportedSymbol
-    Definition -- DEFINITION_TO_DEFINITION --> Definition
-    Definition -- DEFINES_IMPORTED_SYMBOL --> ImportedSymbol
-    ImportedSymbol -- IMPORTED_SYMBOL_TO_DEFINITION --> Definition
+    Directory -- CONTAINS --> Directory
+    Directory -- CONTAINS --> File
+    File -- DEFINES --> Definition
+    File -- IMPORTS --> ImportedSymbol
+    File -- CALLS --> Definition
+    Definition -- DEFINES --> Definition
+    Definition -- CALLS --> Definition
+    Definition -- CALLS --> ImportedSymbol
+    Definition -- EXTENDS --> Definition
+    ImportedSymbol -- IMPORTS --> Definition
 ```
 
 ### Relationship Types
 
-| Relationship                        | From Node      | To Node        | Description                                                                                             |
-| ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `CONTAINS`                          | `Branch`       | `Directory`, `File` | A branch contains root-level directories and files.                                                |
-| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project (links the Code Graph to the Namespace Graph).                            |
-| `DIR_CONTAINS_DIR`                  | `Directory`    | `Directory`    | A directory contains another directory.                                                                 |
-| `DIR_CONTAINS_FILE`                 | `Directory`    | `File`         | A directory contains a file.                                                                            |
-| `FILE_DEFINES`                      | `File`         | `Definition`   | A file contains a code definition.                                                                      |
-| `FILE_IMPORTS`                      | `File`         | `ImportedSymbol`| A file imports a symbol.                                                                                |
-| `DEFINITION_TO_DEFINITION`          | `Definition`   | `Definition`   | Represents a call graph edge (e.g., a function calls another function, a class inherits from another).    |
-| `DEFINES_IMPORTED_SYMBOL`           | `Definition`   | `ImportedSymbol`| A definition (e.g., an exported function) is the source of an imported symbol.                          |
-| `IMPORTED_SYMBOL_TO_DEFINITION`     | `ImportedSymbol`| `Definition`   | An imported symbol resolves to a specific definition.                                                   |
+| Relationship | From Node | To Node | Description |
+| --- | --- | --- | --- |
+| `CONTAINS`   | `Branch`, `Directory` | `Directory`, `File` | A branch or directory lexically contains a directory or file. |
+| `IN_PROJECT` | `Branch`              | `Project`           | A branch belongs to a project (links the Code Graph to the Namespace Graph). |
+| `ON_BRANCH`  | `Directory`, `File`, `Definition`, `ImportedSymbol` | `Branch` | Snapshots a code-graph node to a specific branch and commit. |
+| `DEFINES`    | `File`, `Definition`  | `Definition`        | File-level definition or lexical nesting between two definitions (e.g. a class containing methods). Inheritance is `EXTENDS`; call sites are `CALLS`. |
+| `IMPORTS`    | `File`, `ImportedSymbol` | `ImportedSymbol`, `Definition` | Module-system import edges. Covers `File → ImportedSymbol` for the import statement itself, and `ImportedSymbol → Definition` resolution (JS/TS today). |
+| `CALLS`      | `File`, `Definition`  | `Definition`, `ImportedSymbol` | Function or method invocation. Variants: `Definition → Definition` (resolved call), `File → Definition` (top-level call outside any definition), and `Definition → ImportedSymbol` (call whose target is still an unresolved import). |
+| `EXTENDS`    | `Definition`          | `Definition`        | Supertype declaration. Covers class extension, interface implementation, and struct embedding (Go). |
 
 ---
 

@@ -55,6 +55,104 @@ async fn indexes_repository() {
         .await;
 }
 
+/// End-to-end test for CALLS and EXTENDS edges:
+/// indexes Java code with class inheritance and a method call, then
+/// queries `gl_code_edge` to verify both relationship kinds were written.
+#[tokio::test]
+async fn indexes_calls_and_extends_edges() {
+    let project_id: i64 = 99;
+    let commit_sha = "callsdef";
+    let traversal_path = "1/99";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Zoo.java",
+            "public class Animal {
+                public void speak() {}
+            }
+            public class Dog extends Animal {
+                public void fetch() { speak(); }
+            }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        traversal_path,
+    )
+    .await;
+
+    // Both edges land in gl_code_edge per ontology routing
+    // (the schema version prefix is added at runtime).
+    let ontology = integration_testkit::load_ontology();
+    let calls_table = ontology.edge_table_for_relationship("CALLS");
+    let extends_table = ontology.edge_table_for_relationship("EXTENDS");
+    assert!(
+        calls_table.ends_with("gl_code_edge"),
+        "CALLS must route to gl_code_edge, got {calls_table}"
+    );
+    assert!(
+        extends_table.ends_with("gl_code_edge"),
+        "EXTENDS must route to gl_code_edge, got {extends_table}"
+    );
+
+    let calls = count_active_edges(&clickhouse, project_id, "CALLS").await;
+    assert!(
+        calls >= 1,
+        "expected at least one CALLS edge for fetch()->speak(), got {calls}"
+    );
+
+    let extends = count_active_edges(&clickhouse, project_id, "EXTENDS").await;
+    assert!(
+        extends >= 1,
+        "expected at least one EXTENDS edge for Dog extends Animal, got {extends}"
+    );
+
+    // Now run a real query through the compiler against the indexed data:
+    // CALLS traversal Definition -> Definition. The compiler resolves the
+    // CALLS edge through the embedded ontology (proves schema.yaml
+    // registration works) and the SQL must hit gl_code_edge.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "columns": ["name", "fqn"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 25
+    }"#;
+    let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
+        .expect("security context")
+        .with_role(true, None);
+    let compiled = compiler::compile(json, &ontology, &security_ctx).expect("CALLS query compiles");
+    let sql = compiled.base.render();
+    assert!(
+        sql.contains("gl_code_edge"),
+        "compiled CALLS query must scan gl_code_edge (table: {calls_table}): {sql}"
+    );
+    let rows = clickhouse.query(&sql).await;
+    let total: usize = rows.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total >= 1,
+        "compiled CALLS query should return at least one row, got {total}"
+    );
+}
+
 #[tokio::test]
 async fn soft_deletes_stale_code_data_after_reindexing() {
     let project_id: i64 = 2;

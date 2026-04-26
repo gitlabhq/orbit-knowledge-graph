@@ -378,26 +378,31 @@ fn parse_rust_file_standalone(
     };
     let sema = Semantics::new(&workspace.db);
     let source_file = sema.parse_guess_edition(file_id);
-    let edge_result = attach_db(&workspace.db, || {
-        collect_resolved_edge_candidates(
+    let parsed = attach_db(&workspace.db, || {
+        let edge_result = collect_resolved_edge_candidates(
             &source_file,
             &sema,
             &workspace.db,
             &workspace.paths_by_file_id,
             &relative_path,
+        );
+        // Pass sema and workspace through to the extractor so that supertype
+        // edges (EXTENDS) are emitted in standalone mode too. The standalone
+        // workspace already pays the salsa setup cost; reusing it keeps
+        // single-file fallbacks consistent with workspace-aware indexing.
+        build_parsed_rust_file(
+            relative_path.clone(),
+            source_file.syntax().text().to_string(),
+            file_module_parts,
+            Vec::new(),
+            edge_result.edge_candidates,
+            source_file.clone(),
+            Some(&sema),
+            Some(&workspace),
         )
     });
 
-    Ok(build_parsed_rust_file(
-        relative_path.clone(),
-        source_file.syntax().text().to_string(),
-        file_module_parts,
-        Vec::new(),
-        edge_result.edge_candidates,
-        source_file,
-        None,
-        None,
-    ))
+    Ok(parsed)
 }
 
 fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {

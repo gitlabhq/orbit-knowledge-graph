@@ -125,14 +125,18 @@ repos:
 
 scenarios:
   hyperfine:
+    # Legacy v1 indexer. Opt-in via --legacy after the CLI flipped to v2 by
+    # default. Kept on the benchmark grid to track regressions in the v1
+    # path until it is removed.
     - id: index
-      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats --legacy
       warmup: 1
       min_runs: 3
       max_runs: 3
 
+    # v2 indexer (production default). No flag needed.
     - id: v2
-      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats --v2
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
       warmup: 1
       min_runs: 3
       max_runs: 3
