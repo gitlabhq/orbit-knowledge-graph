@@ -263,7 +263,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Successful repository indexing runs in the dashboard window. Click to drill into the per-outcome rate in Explore.",
+         "description": "Successful repository indexing runs in the dashboard window. Click the arrow to open the per-outcome rate in Explore; hover the strip below for the rate at a point in time.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -271,7 +271,7 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 0,
             "y": 6
@@ -286,8 +286,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -295,7 +295,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -316,7 +316,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Push events processed by the code indexing handler in the dashboard window. Click to drill into Explore.",
+         "description": "Push events processed by the code indexing handler in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -324,7 +324,7 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 6,
             "y": 6
@@ -339,8 +339,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -348,7 +348,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -369,7 +369,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Source files seen by the code-graph indexer in the dashboard window. Click to drill into Explore.",
+         "description": "Source files seen by the code-graph indexer in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -377,7 +377,7 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 12,
             "y": 6
@@ -392,8 +392,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -401,7 +401,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -422,7 +422,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Graph nodes and edges indexed by the code handler in the dashboard window. Click to drill into the per-kind rate in Explore.",
+         "description": "Graph nodes and edges indexed by the code handler in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -430,7 +430,7 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 18,
             "y": 6
@@ -445,8 +445,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -454,7 +454,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -471,14 +471,202 @@
          "type": "stat"
       },
       {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 0,
+            "y": 9
+         },
+         "id": 11,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 6,
+            "y": 9
+         },
+         "id": 12,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"indexed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 12,
+            "y": 9
+         },
+         "id": 13,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\", outcome=\"parsed\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 18,
+            "y": 9
+         },
+         "id": 14,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
          "collapsed": false,
          "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 13
+            "y": 11
          },
-         "id": 11,
+         "id": 15,
          "panels": [ ],
          "title": "Volume in window — SDLC indexing",
          "type": "row"
@@ -488,7 +676,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Rows extracted and written by SDLC pipelines in the dashboard window. Click to drill into the per-entity rate in Explore.",
+         "description": "Rows extracted and written by SDLC pipelines in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -496,12 +684,12 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 0,
-            "y": 14
+            "y": 12
          },
-         "id": 12,
+         "id": 16,
          "links": [
             {
                "targetBlank": false,
@@ -511,8 +699,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -520,7 +708,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -541,7 +729,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Bytes returned by ClickHouse datalake extraction queries in the dashboard window. Click to drill into Explore.",
+         "description": "Bytes returned by ClickHouse datalake extraction queries in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -549,12 +737,12 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 6,
-            "y": 14
+            "y": 12
          },
-         "id": 13,
+         "id": 17,
          "links": [
             {
                "targetBlank": false,
@@ -564,8 +752,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -573,7 +761,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -594,7 +782,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Total SDLC pipeline runs across all entities in the dashboard window. Click to drill into Explore.",
+         "description": "Total SDLC pipeline runs across all entities in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -602,12 +790,12 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 12,
-            "y": 14
+            "y": 12
          },
-         "id": 14,
+         "id": 18,
          "links": [
             {
                "targetBlank": false,
@@ -617,8 +805,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -626,7 +814,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -647,7 +835,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Total SDLC pipeline failures in the dashboard window. Click to drill into the per-entity error rate in Explore.",
+         "description": "Total SDLC pipeline failures in the dashboard window.",
          "fieldConfig": {
             "defaults": {
                "noValue": "—",
@@ -655,12 +843,12 @@
             }
          },
          "gridPos": {
-            "h": 7,
+            "h": 3,
             "w": 6,
             "x": 18,
-            "y": 14
+            "y": 12
          },
-         "id": 15,
+         "id": 19,
          "links": [
             {
                "targetBlank": false,
@@ -670,8 +858,8 @@
          ],
          "options": {
             "colorMode": "value",
-            "graphMode": "area",
-            "justifyMode": "auto",
+            "graphMode": "none",
+            "justifyMode": "center",
             "reduceOptions": {
                "calcs": [
                   "lastNotNull"
@@ -679,7 +867,7 @@
                "fields": "",
                "values": false
             },
-            "textMode": "value_and_name"
+            "textMode": "value"
          },
          "targets": [
             {
@@ -696,14 +884,202 @@
          "type": "stat"
       },
       {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 0,
+            "y": 15
+         },
+         "id": 20,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 6,
+            "y": 15
+         },
+         "id": 21,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 12,
+            "y": 15
+         },
+         "id": 22,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_sdlc_pipeline_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 25,
+                  "lineInterpolation": "smooth",
+                  "lineWidth": 2,
+                  "showPoints": "never"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 2,
+            "w": 6,
+            "x": 18,
+            "y": 15
+         },
+         "id": 23,
+         "options": {
+            "legend": {
+               "showLegend": false
+            },
+            "tooltip": {
+               "mode": "single"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))",
+               "legendFormat": "rate",
+               "refId": "A"
+            }
+         ],
+         "title": "",
+         "type": "timeseries"
+      },
+      {
          "collapsed": false,
          "gridPos": {
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 21
+            "y": 17
          },
-         "id": 16,
+         "id": 24,
          "panels": [ ],
          "title": "Throughput over time",
          "type": "row"
@@ -734,9 +1110,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 22
+            "y": 18
          },
-         "id": 17,
+         "id": 25,
          "options": {
             "legend": {
                "calcs": [
@@ -791,9 +1167,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 22
+            "y": 18
          },
-         "id": 18,
+         "id": 26,
          "options": {
             "legend": {
                "calcs": [
@@ -828,9 +1204,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 30
+            "y": 26
          },
-         "id": 19,
+         "id": 27,
          "panels": [ ],
          "title": "Latency",
          "type": "row"
@@ -856,9 +1232,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 31
+            "y": 27
          },
-         "id": 20,
+         "id": 28,
          "options": {
             "legend": {
                "calcs": [
@@ -925,9 +1301,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 31
+            "y": 27
          },
-         "id": 21,
+         "id": 29,
          "options": {
             "legend": {
                "calcs": [
@@ -994,9 +1370,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 39
+            "y": 35
          },
-         "id": 22,
+         "id": 30,
          "options": {
             "legend": {
                "calcs": [
@@ -1064,9 +1440,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 39
+            "y": 35
          },
-         "id": 23,
+         "id": 31,
          "options": {
             "cellHeight": "sm",
             "footer": {
@@ -1124,9 +1500,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 47
+            "y": 43
          },
-         "id": 24,
+         "id": 32,
          "panels": [ ],
          "title": "Reliability",
          "type": "row"
@@ -1157,9 +1533,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 48
+            "y": 44
          },
-         "id": 25,
+         "id": 33,
          "options": {
             "legend": {
                "calcs": [
@@ -1209,9 +1585,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 48
+            "y": 44
          },
-         "id": 26,
+         "id": 34,
          "options": {
             "legend": {
                "calcs": [
@@ -1265,9 +1641,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 56
+            "y": 52
          },
-         "id": 27,
+         "id": 35,
          "options": {
             "legend": {
                "calcs": [
@@ -1322,9 +1698,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 56
+            "y": 52
          },
-         "id": 28,
+         "id": 36,
          "options": {
             "legend": {
                "calcs": [
@@ -1359,9 +1735,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 64
+            "y": 60
          },
-         "id": 29,
+         "id": 37,
          "panels": [ ],
          "title": "Freshness and saturation",
          "type": "row"
@@ -1387,9 +1763,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 65
+            "y": 61
          },
-         "id": 30,
+         "id": 38,
          "options": {
             "legend": {
                "calcs": [
@@ -1438,9 +1814,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 65
+            "y": 61
          },
-         "id": 31,
+         "id": 39,
          "options": {
             "legend": {
                "calcs": [
@@ -1474,9 +1850,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 73
+            "y": 69
          },
-         "id": 32,
+         "id": 40,
          "panels": [ ],
          "title": "Schema migration",
          "type": "row"
@@ -1502,9 +1878,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 74
+            "y": 70
          },
-         "id": 33,
+         "id": 41,
          "options": {
             "legend": {
                "calcs": [
@@ -1553,9 +1929,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 74
+            "y": 70
          },
-         "id": 34,
+         "id": 42,
          "options": {
             "legend": {
                "calcs": [
@@ -1604,9 +1980,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 82
+            "y": 78
          },
-         "id": 35,
+         "id": 43,
          "options": {
             "legend": {
                "calcs": [
@@ -1640,9 +2016,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 90
+            "y": 86
          },
-         "id": 36,
+         "id": 44,
          "panels": [
             {
                "datasource": {
@@ -1665,9 +2041,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 91
+                  "y": 87
                },
-               "id": 37,
+               "id": 45,
                "options": {
                   "legend": {
                      "calcs": [
@@ -1716,9 +2092,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 91
+                  "y": 87
                },
-               "id": 38,
+               "id": 46,
                "options": {
                   "legend": {
                      "calcs": [
@@ -1785,9 +2161,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 91
+                  "y": 87
                },
-               "id": 39,
+               "id": 47,
                "options": {
                   "legend": {
                      "calcs": [
@@ -1836,9 +2212,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 99
+                  "y": 95
                },
-               "id": 40,
+               "id": 48,
                "options": {
                   "legend": {
                      "calcs": [
@@ -1887,9 +2263,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 99
+                  "y": 95
                },
-               "id": 41,
+               "id": 49,
                "options": {
                   "legend": {
                      "calcs": [
@@ -1938,9 +2314,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 99
+                  "y": 95
                },
-               "id": 42,
+               "id": 50,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2007,9 +2383,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 107
+                  "y": 103
                },
-               "id": 43,
+               "id": 51,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2058,9 +2434,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 107
+                  "y": 103
                },
-               "id": 44,
+               "id": 52,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2109,9 +2485,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 107
+                  "y": 103
                },
-               "id": 45,
+               "id": 53,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2178,9 +2554,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 115
+                  "y": 111
                },
-               "id": 46,
+               "id": 54,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2229,9 +2605,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 115
+                  "y": 111
                },
-               "id": 47,
+               "id": 55,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2280,9 +2656,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 115
+                  "y": 111
                },
-               "id": 48,
+               "id": 56,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2349,9 +2725,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 123
+                  "y": 119
                },
-               "id": 49,
+               "id": 57,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2400,9 +2776,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 123
+                  "y": 119
                },
-               "id": 50,
+               "id": 58,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2469,9 +2845,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 123
+                  "y": 119
                },
-               "id": 51,
+               "id": 59,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2520,9 +2896,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 131
+                  "y": 127
                },
-               "id": 52,
+               "id": 60,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2560,9 +2936,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 139
+            "y": 135
          },
-         "id": 53,
+         "id": 61,
          "panels": [
             {
                "datasource": {
@@ -2585,9 +2961,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 140
+                  "y": 136
                },
-               "id": 54,
+               "id": 62,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2636,9 +3012,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 140
+                  "y": 136
                },
-               "id": 55,
+               "id": 63,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2687,9 +3063,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 140
+                  "y": 136
                },
-               "id": 56,
+               "id": 64,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2738,9 +3114,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 148
+                  "y": 144
                },
-               "id": 57,
+               "id": 65,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2807,9 +3183,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 148
+                  "y": 144
                },
-               "id": 58,
+               "id": 66,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2858,9 +3234,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 148
+                  "y": 144
                },
-               "id": 59,
+               "id": 67,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2927,9 +3303,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 156
+                  "y": 152
                },
-               "id": 60,
+               "id": 68,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2978,9 +3354,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 156
+                  "y": 152
                },
-               "id": 61,
+               "id": 69,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3029,9 +3405,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 156
+                  "y": 152
                },
-               "id": 62,
+               "id": 70,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3080,9 +3456,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 164
+                  "y": 160
                },
-               "id": 63,
+               "id": 71,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3131,9 +3507,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 164
+                  "y": 160
                },
-               "id": 64,
+               "id": 72,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3200,9 +3576,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 164
+                  "y": 160
                },
-               "id": 65,
+               "id": 73,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3251,9 +3627,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 172
+                  "y": 168
                },
-               "id": 66,
+               "id": 74,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3302,9 +3678,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 172
+                  "y": 168
                },
-               "id": 67,
+               "id": 75,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3353,9 +3729,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 172
+                  "y": 168
                },
-               "id": 68,
+               "id": 76,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3422,9 +3798,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 180
+                  "y": 176
                },
-               "id": 69,
+               "id": 77,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3462,9 +3838,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 188
+            "y": 184
          },
-         "id": 70,
+         "id": 78,
          "panels": [
             {
                "datasource": {
@@ -3487,9 +3863,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 189
+                  "y": 185
                },
-               "id": 71,
+               "id": 79,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3538,9 +3914,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 189
+                  "y": 185
                },
-               "id": 72,
+               "id": 80,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3607,9 +3983,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 189
+                  "y": 185
                },
-               "id": 73,
+               "id": 81,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3658,9 +4034,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 197
+                  "y": 193
                },
-               "id": 74,
+               "id": 82,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3727,9 +4103,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 197
+                  "y": 193
                },
-               "id": 75,
+               "id": 83,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3778,9 +4154,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 197
+                  "y": 193
                },
-               "id": 76,
+               "id": 84,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3847,9 +4223,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 205
+                  "y": 201
                },
-               "id": 77,
+               "id": 85,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3898,9 +4274,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 205
+                  "y": 201
                },
-               "id": 78,
+               "id": 86,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3949,9 +4325,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 205
+                  "y": 201
                },
-               "id": 79,
+               "id": 87,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4000,9 +4376,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 213
+                  "y": 209
                },
-               "id": 80,
+               "id": 88,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4069,9 +4445,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 213
+                  "y": 209
                },
-               "id": 81,
+               "id": 89,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4120,9 +4496,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 213
+                  "y": 209
                },
-               "id": 82,
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4160,9 +4536,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 221
+            "y": 217
          },
-         "id": 83,
+         "id": 91,
          "panels": [
             {
                "datasource": {
@@ -4185,9 +4561,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 222
+                  "y": 218
                },
-               "id": 84,
+               "id": 92,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4254,9 +4630,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 222
+                  "y": 218
                },
-               "id": 85,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4305,9 +4681,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 222
+                  "y": 218
                },
-               "id": 86,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4345,9 +4721,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 230
+            "y": 226
          },
-         "id": 87,
+         "id": 95,
          "panels": [
             {
                "datasource": {
@@ -4370,9 +4746,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 231
+                  "y": 227
                },
-               "id": 88,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4439,9 +4815,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 231
+                  "y": 227
                },
-               "id": 89,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4490,9 +4866,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 231
+                  "y": 227
                },
-               "id": 90,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4541,9 +4917,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 239
+                  "y": 235
                },
-               "id": 91,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4610,9 +4986,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 239
+                  "y": 235
                },
-               "id": 92,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4661,9 +5037,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 239
+                  "y": 235
                },
-               "id": 93,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4712,9 +5088,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 247
+                  "y": 243
                },
-               "id": 94,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4763,9 +5139,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 247
+                  "y": 243
                },
-               "id": 95,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [

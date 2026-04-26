@@ -59,63 +59,61 @@ local health = [
 ];
 
 // 2. Volume in window -----------------------------------------------------
-// Two sub-rows: Code volume on top, SDLC volume below. Four wide stat
-// tiles per row (w=6, h=5). Each tile is clickable and opens the
-// underlying rate(...) query in Grafana Explore over the same time
-// range, so a stat that catches your eye drills into a per-label trend
-// in one click.
+// Each tile is a stacked pair: a stat header (h=2) showing the count
+// over $__range, plus a thin timeseries strip below (h=3) showing the
+// rate over time. Hover the strip for exact values, click the arrow in
+// the header to drill the metric into Grafana Explore.
 local volume = [
   o.row('Volume in window — code indexing'),
-  o.counterRangeStat(
-    'gkg_indexer_code_repository_indexing_completed_total',
-    'Projects indexed',
-    'Successful repository indexing runs in the dashboard window. Click to drill into the per-outcome rate in Explore.',
-    DS, SEL, 'outcome="indexed"', 'short', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_code_events_processed_total',
-    'Push events',
-    'Push events processed by the code indexing handler in the dashboard window. Click to drill into Explore.',
-    DS, SEL, 'outcome="indexed"', 'short', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_code_files_processed_total',
-    'Files parsed',
-    'Source files seen by the code-graph indexer in the dashboard window. Click to drill into Explore.',
-    DS, SEL, 'outcome="parsed"', 'short', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_code_nodes_indexed_total',
-    'Nodes and edges',
-    'Graph nodes and edges indexed by the code handler in the dashboard window. Click to drill into the per-kind rate in Explore.',
-    DS, SEL, '', 'short', 6, 7,
-  ),
+] + o.volumeTiles([
+  {
+    prom: 'gkg_indexer_code_repository_indexing_completed_total',
+    title: 'Projects indexed',
+    desc: 'Successful repository indexing runs in the dashboard window. Click the arrow to open the per-outcome rate in Explore; hover the strip below for the rate at a point in time.',
+    filter: 'outcome="indexed"',
+  },
+  {
+    prom: 'gkg_indexer_code_events_processed_total',
+    title: 'Push events',
+    desc: 'Push events processed by the code indexing handler in the dashboard window.',
+    filter: 'outcome="indexed"',
+  },
+  {
+    prom: 'gkg_indexer_code_files_processed_total',
+    title: 'Files parsed',
+    desc: 'Source files seen by the code-graph indexer in the dashboard window.',
+    filter: 'outcome="parsed"',
+  },
+  {
+    prom: 'gkg_indexer_code_nodes_indexed_total',
+    title: 'Nodes and edges',
+    desc: 'Graph nodes and edges indexed by the code handler in the dashboard window.',
+  },
+], DS, SEL, w=6) + [
   o.row('Volume in window — SDLC indexing'),
-  o.counterRangeStat(
-    'gkg_indexer_sdlc_pipeline_rows_processed_total',
-    'Rows ingested',
-    'Rows extracted and written by SDLC pipelines in the dashboard window. Click to drill into the per-entity rate in Explore.',
-    DS, SEL, '', 'short', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_sdlc_datalake_query_bytes_total',
-    'Bytes from datalake',
-    'Bytes returned by ClickHouse datalake extraction queries in the dashboard window. Click to drill into Explore.',
-    DS, SEL, '', 'bytes', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_sdlc_pipeline_duration_seconds_count',
-    'Pipeline runs',
-    'Total SDLC pipeline runs across all entities in the dashboard window. Click to drill into Explore.',
-    DS, SEL, '', 'short', 6, 7,
-  ),
-  o.counterRangeStat(
-    'gkg_indexer_sdlc_pipeline_errors_total',
-    'Pipeline errors',
-    'Total SDLC pipeline failures in the dashboard window. Click to drill into the per-entity error rate in Explore.',
-    DS, SEL, '', 'short', 6, 7,
-  ),
-];
+] + o.volumeTiles([
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_rows_processed_total',
+    title: 'Rows ingested',
+    desc: 'Rows extracted and written by SDLC pipelines in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_datalake_query_bytes_total',
+    title: 'Bytes from datalake',
+    desc: 'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
+    unit: 'bytes',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_duration_seconds_count',
+    title: 'Pipeline runs',
+    desc: 'Total SDLC pipeline runs across all entities in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_errors_total',
+    title: 'Pipeline errors',
+    desc: 'Total SDLC pipeline failures in the dashboard window.',
+  },
+], DS, SEL, w=6);
 
 // 3. Throughput over time -------------------------------------------------
 // Each bar represents the count over one auto-sized window (Grafana's

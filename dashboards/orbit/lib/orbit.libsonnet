@@ -457,6 +457,85 @@ local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W, h=STA
   local final_expr = if or_zero then '(' + expr + ') or vector(0)' else expr;
   stat(title, description, target(final_expr, title, ds_var), unit, w, h, [exploreLink(expr)]);
 
+// Stat panel for the headline number on top of a tile pair. No
+// embedded sparkline (Grafana does not support hover tooltips on stat
+// sparklines), so the chart is rendered as a separate timeseries below
+// via `tileSpark`. Total height per tile: 3 + 2 = 5.
+local tileHeader(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W, h=3) = (
+  local sel = mergedSelector(selector, filter);
+  local expr = '(sum(increase(%s{%s}[$__range]))) or vector(0)' % [prom_name, sel];
+  local rate_expr = 'sum(rate(%s{%s}[5m]))' % [prom_name, sel];
+  {
+    kind: 'panel',
+    type: 'stat',
+    title: title,
+    description: description,
+    datasource: datasource(ds_var),
+    targets: [target(expr, title, ds_var)],
+    links: [exploreLink(rate_expr)],
+    fieldConfig: {
+      defaults: { unit: unit, noValue: '—' },
+      overrides: [],
+    },
+    options: {
+      reduceOptions: { calcs: ['lastNotNull'], fields: '', values: false },
+      colorMode: 'value',
+      graphMode: 'none',
+      textMode: 'value',
+      justifyMode: 'center',
+    },
+    gridPos: { x: 0, y: 0, w: w, h: h },
+  }
+);
+
+// Compact timeseries strip rendered below a tile header. Hover
+// tooltips are enabled so a viewer can read the exact rate at a point
+// in time.
+local tileSpark(prom_name, ds_var, selector, filter='', unit='short', w=PANEL_W, h=2) = (
+  local sel = mergedSelector(selector, filter);
+  local expr = 'sum(rate(%s{%s}[$__rate_interval]))' % [prom_name, sel];
+  {
+    kind: 'panel',
+    type: 'timeseries',
+    title: '',
+    description: 'Rate of change over time. Hover for exact values; click the link in the header for the full Explore view.',
+    datasource: datasource(ds_var),
+    targets: [target(expr, 'rate', ds_var)],
+    fieldConfig: {
+      defaults: {
+        custom: {
+          drawStyle: 'line',
+          lineInterpolation: 'smooth',
+          fillOpacity: 25,
+          showPoints: 'never',
+          lineWidth: 2,
+        },
+        unit: unit,
+      },
+      overrides: [],
+    },
+    options: {
+      legend: { showLegend: false },
+      tooltip: { mode: 'single' },
+    },
+    gridPos: { x: 0, y: 0, w: w, h: h },
+  }
+);
+
+// Helper: emit a row of tile pairs. Returns headers in order followed
+// by sparks in order so the layout packer renders them as a strip of
+// big-number cards with chart strips immediately below.
+local volumeTiles(specs, ds_var, selector, w=PANEL_W) = (
+  std.map(function(s) tileHeader(
+    s.prom, s.title, s.desc, ds_var, selector,
+    std.get(s, 'filter', ''), std.get(s, 'unit', 'short'), w,
+  ), specs)
+  + std.map(function(s) tileSpark(
+    s.prom, ds_var, selector,
+    std.get(s, 'filter', ''), std.get(s, 'unit', 'short'), w,
+  ), specs)
+);
+
 // Single-panel histogram percentiles (p50, p95, p99). Same shape as the
 // existing `histogramPanels` two-panel pair but without the observation
 // rate, so the Latency row stays compact and easy to read.
@@ -769,6 +848,9 @@ local RAILS_SEL = 'env=~"$rails_env"';
   histogramTopN: histogramTopN,
   ratioPanel: ratioPanel,
   gaugeStat: gaugeStat,
+  tileHeader: tileHeader,
+  tileSpark: tileSpark,
+  volumeTiles: volumeTiles,
   // URL helpers
   exploreLink: exploreLink,
   urlEncode: urlEncode,
