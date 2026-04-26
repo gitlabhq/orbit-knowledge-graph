@@ -1202,6 +1202,41 @@ fn aggregation_count_pushes_project_id_into_dedup_subquery() {
 }
 
 #[test]
+fn pinned_traversal_narrows_joined_node_via_nf_cte() {
+    // Bug 2: when one node has node_ids pinned and joins to another via an
+    // edge, the joined-side node table must be narrowed to ids reachable
+    // from the pinned source. Without the fix, the joined Definition table
+    // dedups the full authorized scope (~tens of millions of rows on
+    // production data) before the JOIN.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "f", "entity": "File", "node_ids": ["12345"], "columns": ["path"]},
+            {"id": "d", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
+        "limit": 50
+    }"#;
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+
+    // Both _nf_f (existing) and _nf_d (new) CTEs must be present.
+    assert!(
+        rendered.contains("_nf_f"),
+        "_nf_f CTE must be defined: {rendered}"
+    );
+    assert!(
+        rendered.contains("_nf_d"),
+        "_nf_d CTE must be derived from edge filtered by _nf_f: {rendered}"
+    );
+    // The Definition dedup subquery must filter by _nf_d.
+    assert!(
+        rendered.contains("d.id IN (SELECT id FROM _nf_d)"),
+        "Definition subquery must be narrowed by _nf_d: {rendered}"
+    );
+}
+
+#[test]
 fn aggregation_count_in_clause_pushes_project_id() {
     let json = r#"{
         "query_type": "aggregation",
