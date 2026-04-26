@@ -109,45 +109,43 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Pet'
+            AND child.fqn = 'Pet'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Animal" } }
+          - { row: { parent: "Animal" } }
 
-  - name: "2. Multiple supertraits Companion -> {Pet, Sleepable, Trainable}"
+  - name: "2. Multiple direct supertraits Companion -> {Pet, Sleepable, Trainable}"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Companion'
+            AND child.fqn = 'Companion'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
-          - { row: { parent: "extends_test::Animal" } }
-          - { row: { parent: "extends_test::Pet" } }
-          - { row: { parent: "extends_test::Sleepable" } }
-          - { row: { parent: "extends_test::Trainable" } }
+          - { row: { parent: "Pet" } }
+          - { row: { parent: "Sleepable" } }
+          - { row: { parent: "Trainable" } }
 
-  - name: "3. Transitive supertrait chain Domesticated -> Carnivore -> Mammal"
+  - name: "3. Direct supertrait chain Domesticated -> Carnivore -> Mammal (each hop)"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Domesticated'
-          RETURN parent.fqn AS parent
-          ORDER BY parent
-        assert:
-          - { row: { parent: "extends_test::Carnivore" } }
-          - { row: { parent: "extends_test::Mammal" } }
-      - query: |
-          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
-          WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Carnivore'
+            AND child.fqn = 'Domesticated'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Mammal" } }
+          - { row: { parent: "Carnivore" } }
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'Carnivore'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Mammal" } }
 
   # ─────────────────────────────────────────────────────────────────
   # Trait impls on concrete types
@@ -157,30 +155,30 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Dog'
+            AND child.fqn = 'Dog'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Animal" } }
+          - { row: { parent: "Animal" } }
 
   - name: "5. Multiple impls on Cat produce one EXTENDS edge per trait"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Cat'
+            AND child.fqn = 'Cat'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
-          - { row: { parent: "extends_test::Animal" } }
-          - { row: { parent: "extends_test::Pet" } }
+          - { row: { parent: "Animal" } }
+          - { row: { parent: "Pet" } }
 
   - name: "6. Inherent impl on Box1 produces no EXTENDS edge"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Box1'
+            AND child.fqn = 'Box1'
           RETURN count(parent) AS n
         assert:
           - { row: { n: 0 } }
@@ -190,22 +188,22 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Wrapper'
+            AND child.fqn = 'Wrapper'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Animal" } }
+          - { row: { parent: "Animal" } }
 
   - name: "8. Enum Mood implements Animal"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Mood'
+            AND child.fqn = 'Mood'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Animal" } }
+          - { row: { parent: "Animal" } }
 
   # ─────────────────────────────────────────────────────────────────
   # Cross-module resolution
@@ -215,22 +213,22 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Bark'
+            AND child.fqn = 'Bark'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::traits::Audible" } }
+          - { row: { parent: "traits::Audible" } }
 
   - name: "10. Cross-module impl File implements io::Reader"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::File'
+            AND child.fqn = 'File'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::io::Reader" } }
+          - { row: { parent: "io::Reader" } }
 
   # ─────────────────────────────────────────────────────────────────
   # Edge cases that must NOT emit edges
@@ -240,7 +238,7 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND parent.fqn = 'extends_test::Markable'
+            AND parent.fqn = 'Markable'
           RETURN child.fqn AS child
         assert:
           - { row_count: 0 }
@@ -250,7 +248,7 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Probe'
+            AND child.fqn = 'Probe'
           RETURN count(parent) AS n
         assert:
           - { row: { n: 0 } }
@@ -258,26 +256,33 @@ tests:
   # ─────────────────────────────────────────────────────────────────
   # Diamond pattern
   # ─────────────────────────────────────────────────────────────────
-  - name: "13. Diamond supertrait Polygon -> {HasArea, HasPerimeter} -> Shape"
+  - name: "13. Diamond supertrait Polygon -> {HasArea, HasPerimeter}, each -> Shape"
     queries:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Polygon'
+            AND child.fqn = 'Polygon'
           RETURN parent.fqn AS parent
           ORDER BY parent
         assert:
-          - { row: { parent: "extends_test::HasArea" } }
-          - { row: { parent: "extends_test::HasPerimeter" } }
-          - { row: { parent: "extends_test::Shape" } }
+          - { row: { parent: "HasArea" } }
+          - { row: { parent: "HasPerimeter" } }
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::HasArea'
+            AND child.fqn = 'HasArea'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Shape" } }
+          - { row: { parent: "Shape" } }
+      - query: |
+          MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
+          WHERE e.edge_kind = 'Extends'
+            AND child.fqn = 'HasPerimeter'
+          RETURN parent.fqn AS parent
+        assert:
+          - { row_count: 1 }
+          - { row: { parent: "Shape" } }
 
   # ─────────────────────────────────────────────────────────────────
   # Coexistence with inherent impl
@@ -287,8 +292,8 @@ tests:
       - query: |
           MATCH (child:Definition)-[e:DefinitionToDefinition]->(parent:Definition)
           WHERE e.edge_kind = 'Extends'
-            AND child.fqn = 'extends_test::Counter'
+            AND child.fqn = 'Counter'
           RETURN parent.fqn AS parent
         assert:
           - { row_count: 1 }
-          - { row: { parent: "extends_test::Animal" } }
+          - { row: { parent: "Animal" } }
