@@ -1,3 +1,9 @@
+## [0.33.2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.33.1...v0.33.2) (2026-04-26)
+
+### Fixes
+
+* **nats-client:** use create_or_update_key_value to migrate KV bucket config ([e2f389c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e2f389c0e982739a2507742fe04608949f664a75)) by Michael Angelo Rivera
+
 ## [0.33.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.33.0...v0.33.1) (2026-04-25)
 
 ### Fixes
