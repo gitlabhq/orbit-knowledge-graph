@@ -135,7 +135,7 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
             "query_type": "traversal",
             "nodes": [
                 {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]},
-                {"id": "b", "entity": "Branch", "node_ids": [1], "columns": ["id", "name"]}
+                {"id": "b", "entity": "Branch", "columns": ["id", "name"]}
             ],
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
             "limit": 5
@@ -173,7 +173,7 @@ fn traversal_hydration_injects_depends_on_columns() {
             "query_type": "traversal",
             "nodes": [
                 {"id": "b", "entity": "Branch", "node_ids": [1], "columns": ["id", "name"]},
-                {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "content"]}
+                {"id": "f", "entity": "File", "columns": ["id", "content"]}
             ],
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
             "limit": 5

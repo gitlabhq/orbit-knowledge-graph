@@ -71,7 +71,7 @@ fn aggregation_query() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]},
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
+            {"id": "u", "entity": "User", "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
@@ -364,7 +364,7 @@ fn multi_table_code_edge_routes_to_code_table() {
         "query_type": "traversal",
         "nodes": [
             {"id": "f", "entity": "File", "node_ids": [1]},
-            {"id": "d", "entity": "Definition", "node_ids": [1]}
+            {"id": "d", "entity": "Definition"}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 25

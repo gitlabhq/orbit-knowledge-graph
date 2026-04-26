@@ -260,7 +260,7 @@ fn aggregation_includes_mandatory_columns_for_group_by_node() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["title"]}
+            {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
@@ -377,7 +377,7 @@ fn single_hop_does_not_generate_recursive_cte() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]}
+            {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n", "min_hops": 1, "max_hops": 1}],
         "limit": 25
@@ -1212,7 +1212,7 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
         "query_type": "traversal",
         "nodes": [
             {"id": "f", "entity": "File", "node_ids": ["12345"], "columns": ["path"]},
-            {"id": "d", "entity": "Definition", "node_ids": [1], "columns": ["name"]}
+            {"id": "d", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 50

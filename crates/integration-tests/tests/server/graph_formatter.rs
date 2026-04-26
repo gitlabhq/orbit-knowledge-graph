@@ -1129,7 +1129,7 @@ async fn aggregation_sum(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1]}
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{"function": "sum", "target": "u", "group_by": "g", "property": "id", "alias": "id_sum"}],
@@ -1176,7 +1176,7 @@ async fn aggregation_avg(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1]}
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{"function": "avg", "target": "u", "group_by": "g", "property": "id", "alias": "avg_id"}],
@@ -1216,7 +1216,7 @@ async fn aggregation_min_max(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1]}
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [
@@ -1249,7 +1249,7 @@ async fn aggregation_min_string(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1]}
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [
@@ -1279,7 +1279,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1]}
+                {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [
@@ -1477,7 +1477,7 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
+                {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
             "limit": 50
@@ -1559,7 +1559,7 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]},
+                {"id": "n", "entity": "Note", "columns": ["note"]},
                 {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
             ],
             "relationships": [
@@ -2292,7 +2292,7 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["title"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
                 {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}
             ],
             "relationships": [

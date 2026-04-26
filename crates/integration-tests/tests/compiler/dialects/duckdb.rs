@@ -68,7 +68,7 @@ fn traversal() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]}
+            {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25
@@ -87,7 +87,7 @@ fn aggregation() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "n", "entity": "Note", "node_ids": [1]}
+            {"id": "n", "entity": "Note"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "aggregations": [

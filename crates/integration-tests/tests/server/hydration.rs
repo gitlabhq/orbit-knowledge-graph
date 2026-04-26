@@ -867,7 +867,7 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "f", "entity": "File", "node_ids": [1], "columns": ["name", "path", "branch"]},
-            {"id": "d", "entity": "Definition", "node_ids": [1], "columns": ["name"]}
+            {"id": "d", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 10
