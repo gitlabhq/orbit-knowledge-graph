@@ -13,7 +13,7 @@ import httpx
 
 WORKSPACE_DIR = ".eval-servers"
 DB_FILENAME = "eval.duckdb"
-DB_SERVER_PORT = 5555
+
 
 _SQL_DIR = Path(__file__).parent / "sql"
 
@@ -29,7 +29,7 @@ class DbClient:
 
     def __init__(self, base_url: str | None = None) -> None:
         self._http = httpx.Client(
-            base_url=base_url or f"http://localhost:{DB_SERVER_PORT}",
+            base_url=base_url or "http://localhost:0",
             timeout=10.0,
         )
 

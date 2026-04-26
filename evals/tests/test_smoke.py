@@ -59,13 +59,6 @@ class TestConfig:
         assert cfg.arms[0].name == "orbit"
         assert cfg.arms[1].name == "glab"
 
-    def test_arm_ports_unique(self):
-        from harness.config import load_config
-
-        cfg = load_config("eval.yaml")
-        ports = [a.port for a in cfg.arms]
-        assert len(ports) == len(set(ports))
-
     def test_env_var_resolution(self):
         from harness.config import load_config
 

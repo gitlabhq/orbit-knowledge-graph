@@ -31,7 +31,6 @@ arms:
     model:
       provider: anthropic
       model: claude-haiku-4-5
-    port: 4096
 
   - name: glab
     agent: glab
@@ -44,7 +43,6 @@ arms:
     model:
       provider: anthropic
       model: claude-haiku-4-5
-    port: 4097
 
 evaluators:
   - graph

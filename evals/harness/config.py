@@ -63,7 +63,6 @@ class ArmConfig(BaseModel, frozen=True):
     skills: list[str] = Field(default_factory=list)
     env: dict[str, str] = Field(default_factory=dict)
     model: ModelConfig
-    port: int
 
     @field_validator("name")
     @classmethod
@@ -87,13 +86,7 @@ class EvalConfig(BaseModel, frozen=True):
             raise ValueError(f"duplicate arm names: {set(dupes)}")
         return self
 
-    @model_validator(mode="after")
-    def unique_ports(self) -> EvalConfig:
-        ports = [a.port for a in self.arms]
-        dupes = [p for p in ports if ports.count(p) > 1]
-        if dupes:
-            raise ValueError(f"duplicate ports: {set(dupes)}")
-        return self
+
 
 
 _ENV_VAR_RE = re.compile(r"\$\{([^}]+)\}")

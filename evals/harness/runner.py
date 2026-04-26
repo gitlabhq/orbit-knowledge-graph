@@ -132,7 +132,7 @@ class EvalRunner:
                   data={"category": task.category, "timeout": timeout})
 
         handle = await self.mgr.start(arm, self.work_dir, timeout=self.config.run.timeouts.server_start)
-        demuxer = EventDemuxer(base_url=f"http://localhost:{arm.port}")
+        demuxer = EventDemuxer(base_url=f"http://localhost:{handle.port}")
         await demuxer.start()
 
         try:
@@ -186,7 +186,7 @@ class EvalRunner:
                 demuxer.unsubscribe(session_id)
             if demuxer:
                 await demuxer.stop()
-            await self.mgr.stop(arm.name)
+            await self.mgr.stop(handle.arm)
 
     async def _run_arm(self, arm: ArmConfig) -> list[TaskResult]:
         completed = self.store.completed_task_ids(arm.name)
@@ -197,30 +197,33 @@ class EvalRunner:
         log.event("arm", "starting", arm=arm.name,
                   data={"remaining": len(remaining), "done": len(completed)})
 
-        results, consecutive_failures = [], 0
-        for i, task in enumerate(remaining):
-            result = await self._execute_task(task, arm)
-            self.store.write_result(result)
-            results.append(result)
-            consecutive_failures = 0 if result.status in (TaskStatus.SUCCESS, TaskStatus.TIMEOUT) else consecutive_failures + 1
-            if consecutive_failures >= 10:
-                log.event("arm", "aborting: 10 consecutive failures", arm=arm.name, level="error")
-                break
-            log.event("progress", f"{i+1}/{len(remaining)}", arm=arm.name, task_id=task.id,
-                      data={"status": result.status.value,
-                            "cost": result.session_summary.cost if result.session_summary else 0})
-        return results
+        sem = asyncio.Semaphore(self.config.run.concurrency)
+        done_count = 0
+
+        async def _run_one(task: EvalTask) -> TaskResult:
+            nonlocal done_count
+            async with sem:
+                result = await self._execute_task(task, arm)
+                self.store.write_result(result)
+                done_count += 1
+                log.event("progress", f"{done_count}/{len(remaining)}", arm=arm.name, task_id=task.id,
+                          data={"status": result.status.value,
+                                "cost": result.session_summary.cost if result.session_summary else 0})
+                return result
+
+        results = await asyncio.gather(*[_run_one(t) for t in remaining])
+        return list(results)
 
     async def run(self) -> dict[str, list[TaskResult]]:
-        from harness.db import DbClient, DB_SERVER_PORT
+        from harness.db import DbClient
         from harness.server import ServerManager
 
         if not self.tasks:
             log.event("run", "no tasks matched filters", level="warn")
             return {}
 
-        with _db_server(DB_SERVER_PORT):
-            self.db = DbClient()
+        with _db_server() as db_port:
+            self.db = DbClient(base_url=f"http://localhost:{db_port}")
             for _ in range(50):
                 if self.db.is_alive():
                     break
@@ -255,8 +258,10 @@ class EvalRunner:
 
             all_results: dict[str, list[TaskResult]] = {}
             try:
-                for arm in self.config.arms:
-                    all_results[arm.name] = await self._run_arm(arm)
+                arm_results = await asyncio.gather(
+                    *[self._run_arm(arm) for arm in self.config.arms])
+                for arm, results in zip(self.config.arms, arm_results):
+                    all_results[arm.name] = results
                 self.mgr.end_run(run_id, "completed")
             except Exception:
                 self.mgr.end_run(run_id, "failed")
@@ -272,14 +277,18 @@ class EvalRunner:
 
 
 @contextmanager
-def _db_server(port: int):
+def _db_server():
+    import socket
+    with socket.socket() as s:
+        s.bind(("", 0))
+        port = s.getsockname()[1]
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "harness.db_server:app",
          "--port", str(port), "--log-level", "warning"],
         env={**os.environ, "PYTHONPATH": "."},
         stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
-        yield proc
+        yield port
     finally:
         proc.send_signal(signal.SIGTERM)
         try:

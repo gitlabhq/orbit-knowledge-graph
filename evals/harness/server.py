@@ -19,6 +19,13 @@ logger = logging.getLogger(__name__)
 EVAL_IMAGE = "gkg-eval"
 
 
+def _free_port() -> int:
+    import socket
+    with socket.socket() as s:
+        s.bind(("", 0))
+        return s.getsockname()[1]
+
+
 
 
 
@@ -73,59 +80,60 @@ class ServerManager:
         )
 
     async def start(self, arm: ArmConfig, work_dir: str, timeout: float = 30.0) -> ServerHandle:
-        log_path = self.workspace / "logs" / f"{arm.name}.log"
-        self._kill_container(arm.name)
-        self._set_server(arm.name, "starting", arm.port, work_dir=work_dir, log_path=str(log_path))
+        port = _free_port()
+        name = f"eval-{arm.name}-{port}"
+        log_path = self.workspace / "logs" / f"{name}.log"
+        self._kill_container(name)
+        self._set_server(name, "starting", port, work_dir=work_dir, log_path=str(log_path))
 
         env_args = [x for k, v in arm.env.items() for x in ("-e", f"{k}={v}")]
-        name = f"eval-{arm.name}"
         workspace = str((Path(work_dir) / "container").resolve())
         # Write agent-specific opencode.json with skill permissions
         self._write_opencode_config(Path(workspace), arm)
         r = subprocess.run(
             ["docker", "run", "--rm", "-d", "--name", name,
-             "-p", f"{arm.port}:4096",
+             "-p", f"{port}:4096",
              "-v", f"{workspace}:/mnt/workspace:ro",
              *env_args, EVAL_IMAGE],
             capture_output=True, text=True,
         )
         if r.returncode != 0:
-            self._set_server(arm.name, "error", arm.port, error=r.stderr.strip())
-            raise RuntimeError(f"docker run failed for {arm.name}: {r.stderr.strip()}")
+            self._set_server(name, "error", port, error=r.stderr.strip())
+            raise RuntimeError(f"docker run failed for {name}: {r.stderr.strip()}")
 
         container_id = r.stdout.strip()[:12]
         log_proc = subprocess.Popen(["docker", "logs", "-f", name],
                                     stdout=log_path.open("w"), stderr=subprocess.STDOUT)
 
-        client = OpenCodeClient(base_url=f"http://localhost:{arm.port}")
+        client = OpenCodeClient(base_url=f"http://localhost:{port}")
         try:
             await client.wait_ready(timeout=timeout)
         except TimeoutError:
             subprocess.run(["docker", "kill", name], capture_output=True)
-            self._set_server(arm.name, "error", arm.port, error=f"timeout after {timeout}s")
+            self._set_server(name, "error", port, error=f"timeout after {timeout}s")
             raise
 
-        self._set_server(arm.name, "ready", arm.port, pid=log_proc.pid,
+        self._set_server(name, "ready", port, pid=log_proc.pid,
                          work_dir=work_dir, log_path=str(log_path))
-        handle = ServerHandle(arm=arm.name, port=arm.port, container_id=container_id,
+        handle = ServerHandle(arm=name, port=port, container_id=container_id,
                               client=client, log_path=log_path)
-        self._handles[arm.name] = handle
-        logger.info("container %s ready (id=%s, port=%d)", arm.name, container_id, arm.port)
+        self._handles[name] = handle
+        logger.info("container %s ready (id=%s, port=%d)", name, container_id, arm.port)
         return handle
 
-    async def stop(self, arm: str) -> None:
-        handle = self._handles.pop(arm, None)
+    async def stop(self, container_name: str) -> None:
+        handle = self._handles.pop(container_name, None)
         if handle:
             await handle.client.close()
-        self._kill_container(arm)
-        self._set_server(arm, "stopped", handle.port if handle else 0)
+        self._kill_container(container_name)
+        self._set_server(container_name, "stopped", handle.port if handle else 0)
 
     async def stop_all(self) -> None:
-        for arm in list(self._handles):
-            await self.stop(arm)
+        for name in list(self._handles):
+            await self.stop(name)
 
-    def _kill_container(self, arm: str) -> None:
-        subprocess.run(["docker", "kill", f"eval-{arm}"], capture_output=True)
+    def _kill_container(self, container_name: str) -> None:
+        subprocess.run(["docker", "kill", container_name], capture_output=True)
 
     @staticmethod
     def _write_opencode_config(workspace: Path, arm: ArmConfig) -> None:

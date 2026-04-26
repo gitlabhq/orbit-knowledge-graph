@@ -172,7 +172,7 @@ def dry_run(ctx: click.Context, check_infra: bool) -> None:
     else:
         errors.append("docker not available")
 
-    click.echo(f"\n{len(config.arms)} arms, {len(tasks)} tasks, ports {','.join(str(a.port) for a in config.arms)}")
+    click.echo(f"\n{len(config.arms)} arms, {len(tasks)} tasks")
     if errors:
         click.echo(f"\n{len(errors)} errors"); sys.exit(1)
 
