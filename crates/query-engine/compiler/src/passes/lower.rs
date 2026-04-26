@@ -775,10 +775,18 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
     let et = input.compiler.resolve_edge_tables(&path.rel_types);
+
+    // Build anchor conditions and optional CTEs for filtered endpoints.
+    // When a node has concrete node_ids, use a literal IN list.
+    // When it has filters or id_range, resolve via a _nf_* CTE with a cap.
+    let mut anchor_ctes: Vec<Cte> = Vec::new();
+    let start_anchor_cond = build_path_anchor(start, SOURCE_ID_COLUMN, &mut anchor_ctes)?;
+    let end_anchor_cond = build_path_anchor(end, TARGET_ID_COLUMN, &mut anchor_ctes)?;
+
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
-            &start.node_ids,
+            start_anchor_cond,
             forward_depth,
             &rel_type_filter,
             true,
@@ -790,7 +798,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
-                &end.node_ids,
+                end_anchor_cond.clone(),
                 backward_depth,
                 &rel_type_filter,
                 false,
@@ -849,12 +857,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
                 Expr::string(end_entity),
             )),
-            Expr::col_in(
-                FORWARD_ALIAS,
-                END_ID_COLUMN,
-                ChType::Int64,
-                end.node_ids.iter().map(|id| Value::from(*id)).collect(),
-            ),
+            // Filter direct paths by end-node anchor: literal IN or subquery.
+            build_path_endpoint_filter(end, FORWARD_ALIAS, END_ID_COLUMN),
         ]),
         ..Default::default()
     };
@@ -935,7 +939,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // is needed: the edge anchors already filter by start/end node IDs.
     Ok(Node::Query(Box::new(Query {
         ctes: {
-            let mut ctes = vec![];
+            // Anchor CTEs must come before frontier CTEs that reference them.
+            let mut ctes = anchor_ctes;
             ctes.push(forward_cte);
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
@@ -976,16 +981,100 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     })))
 }
 
+/// Build an anchor condition for a path_finding endpoint.
+///
+/// - If the node has `node_ids`, returns a literal `e1.<edge_col> IN (ids)`.
+/// - If the node has `filters` or `id_range`, creates a `_nf_<id>` CTE with
+///   a LIMIT cap and returns `e1.<edge_col> IN (SELECT id FROM _nf_<id>)`.
+///
+/// `edge_col` is the edge column to filter (SOURCE_ID_COLUMN for forward
+/// start, TARGET_ID_COLUMN for backward end).
+fn build_path_anchor(
+    node: &InputNode,
+    edge_col: &str,
+    ctes: &mut Vec<Cte>,
+) -> Result<Option<Expr>> {
+    if !node.node_ids.is_empty() {
+        return Ok(Expr::col_in(
+            "e1",
+            edge_col,
+            ChType::Int64,
+            node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+        ));
+    }
+
+    // Filters or id_range: resolve via a capped CTE.
+    let node_where = build_node_where(node);
+    if node_where.is_none() {
+        return Ok(None);
+    }
+
+    let table = resolve_table(node)?;
+    let cte_name = node_filter_cte(&node.id);
+    let cte_query = Query {
+        select: vec![SelectExpr::new(
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            DEFAULT_PRIMARY_KEY,
+        )],
+        from: TableRef::scan(&table, &node.id),
+        where_clause: node_where,
+        limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
+        ..Default::default()
+    };
+    ctes.push(Cte::new(&cte_name, cte_query));
+
+    Ok(Some(Expr::InSubquery {
+        expr: Box::new(Expr::col("e1", edge_col)),
+        cte_name,
+        column: DEFAULT_PRIMARY_KEY.into(),
+    }))
+}
+
+/// Build an endpoint filter for the direct_query WHERE clause.
+///
+/// For nodes with `node_ids`, returns a literal IN on the frontier column.
+/// For nodes with `filters` or `id_range`, returns an `InSubquery` referencing
+/// the `_nf_<id>` CTE (which must already exist in `anchor_ctes`).
+fn build_path_endpoint_filter(
+    node: &InputNode,
+    frontier_alias: &str,
+    frontier_col: &str,
+) -> Option<Expr> {
+    if !node.node_ids.is_empty() {
+        return Expr::col_in(
+            frontier_alias,
+            frontier_col,
+            ChType::Int64,
+            node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+        );
+    }
+
+    // For filtered endpoints, the _nf CTE was already created by build_path_anchor.
+    if node_has_conditions(node) {
+        let cte_name = node_filter_cte(&node.id);
+        return Some(Expr::InSubquery {
+            expr: Box::new(Expr::col(frontier_alias, frontier_col)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.into(),
+        });
+    }
+
+    None
+}
+
 /// Build a frontier CTE body: UNION ALL of hop arms for depths 1..max_depth.
 ///
 /// `is_forward=true`:  anchors on source_id, traverses source→target
 /// `is_forward=false`: anchors on target_id, traverses target→source
 ///
+/// `anchor_cond`: pre-built expression filtering the anchor side of e1
+/// (e.g. `e1.source_id IN (1, 2)` or `e1.source_id IN (SELECT id FROM _nf_start)`).
+///
 /// `anchor_entity`: when set, adds `e1.source_kind = entity` (forward) or
 /// `e1.target_kind = entity` (backward) to constrain the anchor side to
 /// the expected entity type.
 fn build_frontier(
-    anchor_ids: &[i64],
+    anchor_cond: Option<Expr>,
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
@@ -995,7 +1084,7 @@ fn build_frontier(
     let arms: Vec<Query> = (1..=max_depth)
         .map(|depth| {
             build_frontier_arm(
-                anchor_ids,
+                anchor_cond.clone(),
                 depth,
                 rel_type_filter,
                 is_forward,
@@ -1025,10 +1114,12 @@ fn build_frontier(
 ///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
 ///   WHERE e1.source_id IN (start_ids) AND e1.source_kind = 'User'
 ///
+/// `anchor_cond`: pre-built expression filtering the anchor side of e1.
+///
 /// `anchor_entity`: when set, adds a kind predicate on the anchor side of
 /// the first edge so the frontier only starts from the expected entity type.
 fn build_frontier_arm(
-    anchor_ids: &[i64],
+    anchor_cond: Option<Expr>,
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
@@ -1101,14 +1192,6 @@ fn build_frontier_arm(
         (1..=depth)
             .map(|i| Expr::col(format!("e{i}"), RELATIONSHIP_KIND_COLUMN))
             .collect(),
-    );
-
-    // Anchor condition: first edge connects to the anchor node(s).
-    let anchor_cond = Expr::col_in(
-        "e1",
-        anchor_col,
-        ChType::Int64,
-        anchor_ids.iter().map(|id| Value::from(*id)).collect(),
     );
 
     // Anchor entity kind filter: constrain the anchor side of the first edge

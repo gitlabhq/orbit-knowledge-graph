@@ -395,6 +395,63 @@ mod tests {
         );
     }
 
+    /// Path-finding with a filtered endpoint (no `node_ids`) must produce
+    /// a `_nf_*` CTE that resolves the filter into IDs for frontier seeding.
+    #[test]
+    fn path_finding_filtered_endpoint_produces_anchor_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_nf_start"),
+            "filtered endpoint should generate _nf_start CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("username = 'root'") || sql.contains("username = {"),
+            "CTE should contain username filter, got:\n{sql}"
+        );
+    }
+
+    /// Path-finding with id_range on an endpoint must produce a `_nf_*` CTE
+    /// with range conditions.
+    #[test]
+    fn path_finding_id_range_endpoint_produces_anchor_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "id_range": {"start": 100, "end": 200}}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_nf_end"),
+            "id_range endpoint should generate _nf_end CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains(">= 100"),
+            "CTE should contain range lower bound, got:\n{sql}"
+        );
+    }
     /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
     /// EVERY edge it touches, not just whichever side `node_edge_col`
     /// happens to map first. Without this, `User AUTHORED MR` joined to
