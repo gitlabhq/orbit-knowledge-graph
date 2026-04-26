@@ -1311,8 +1311,9 @@ fn extends_traversal_compiles_against_embedded_ontology() {
 
 #[test]
 fn calls_to_imported_symbol_variant_compiles() {
-    // Exercises the File→ImportedSymbol and Definition→ImportedSymbol variants
-    // declared in calls.yaml.
+    // Exercises the Definition→ImportedSymbol variant declared in calls.yaml
+    // (used when a call site targets a symbol that has not been resolved to a
+    // concrete definition).
     let json = r#"{
         "query_type": "traversal",
         "nodes": [

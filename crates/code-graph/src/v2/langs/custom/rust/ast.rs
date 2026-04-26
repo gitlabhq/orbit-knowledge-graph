@@ -60,6 +60,11 @@ struct RustStructureExtractor {
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     trait_impl_scopes: Vec<TraitImplScope>,
+    /// Pending supertype edges to be applied after all definitions are
+    /// collected. Each entry is (target definition FQN, supertype FQN).
+    /// Populated from `trait Foo: Bar + Baz` (target=Foo) and
+    /// `impl Trait for Type` (target=Type, supertype=Trait).
+    pending_supertypes: Vec<(String, String)>,
 }
 
 struct TraitImplScope {
@@ -77,6 +82,7 @@ impl RustStructureExtractor {
             definitions: Vec::new(),
             imports: Vec::new(),
             trait_impl_scopes: Vec::new(),
+            pending_supertypes: Vec::new(),
         }
     }
 
@@ -89,7 +95,45 @@ impl RustStructureExtractor {
         let module_parts = self.file_module_parts.clone();
         self.collect_items(source_file.items(), &module_parts, true, sema, workspace);
         self.disambiguate_trait_impl_collisions();
+        self.apply_pending_supertypes();
         (self.definitions, self.imports)
+    }
+
+    fn apply_pending_supertypes(&mut self) {
+        if self.pending_supertypes.is_empty() {
+            return;
+        }
+        // Index local definitions by FQN. Multiple definitions can share an
+        // FQN before `disambiguate_trait_impl_collisions` runs (and after,
+        // for non-impl items); push the supertype onto each match so that
+        // every alias of the target definition is annotated. The linker
+        // resolves super_types against in-graph FQNs, so external traits
+        // (std, deps) silently produce no edge.
+        let mut by_fqn: HashMap<String, Vec<usize>> = HashMap::new();
+        for (idx, def) in self.definitions.iter().enumerate() {
+            by_fqn
+                .entry(def.fqn.as_str().to_string())
+                .or_default()
+                .push(idx);
+        }
+        for (target_fqn, super_fqn) in std::mem::take(&mut self.pending_supertypes) {
+            let Some(indices) = by_fqn.get(&target_fqn) else {
+                continue;
+            };
+            for &idx in indices {
+                let def = &mut self.definitions[idx];
+                let metadata = def.metadata.get_or_insert_with(|| {
+                    Box::new(crate::v2::types::DefinitionMetadata::default())
+                });
+                if !metadata
+                    .super_types
+                    .iter()
+                    .any(|existing| existing == &super_fqn)
+                {
+                    metadata.super_types.push(super_fqn.clone());
+                }
+            }
+        }
     }
 
     fn disambiguate_trait_impl_collisions(&mut self) {
@@ -406,6 +450,26 @@ impl RustStructureExtractor {
             }
         };
 
+        // Capture supertrait declarations (`trait Foo: Bar + Baz`) as pending
+        // EXTENDS edges from the local trait FQN to each supertrait FQN.
+        // Resolution lives in the linker — external supertraits (std, deps)
+        // simply do not match an in-graph definition and produce no edge.
+        if let (Some(sema), Some(workspace)) = (sema, workspace)
+            && !trait_parts.is_empty()
+            && let Some(trait_def) = sema.to_trait_def(&trait_item)
+        {
+            let target_fqn = canonical_fqn_parts(&trait_parts).as_str().to_string();
+            for super_trait in trait_def.all_supertraits(sema.db) {
+                if super_trait == trait_def {
+                    continue;
+                }
+                if let Some(super_fqn) = hir_trait_fqn(super_trait, sema, workspace) {
+                    self.pending_supertypes
+                        .push((target_fqn.clone(), super_fqn));
+                }
+            }
+        }
+
         if let Some(items) = trait_item.assoc_item_list() {
             self.collect_assoc_items(items.assoc_items(), &trait_parts, sema, workspace);
         }
@@ -439,6 +503,20 @@ impl RustStructureExtractor {
             .and_then(|path| path.segment())
             .and_then(|segment| segment.name_ref())
             .map(|name_ref| name_ref.text().to_string());
+
+        // Capture `impl Trait for Type` as a pending EXTENDS edge from the
+        // self-type definition to the implemented trait. The HIR lookup
+        // resolves the trait through rust-analyzer so re-exports and aliased
+        // imports settle on the canonical trait module path.
+        if let (Some(sema), Some(workspace)) = (sema, workspace)
+            && let Some(impl_def) = sema.to_impl_def(&impl_item)
+            && let Some(impl_trait) = impl_def.trait_(sema.db)
+            && let Some(super_fqn) = hir_trait_fqn(impl_trait, sema, workspace)
+        {
+            let target_fqn = canonical_fqn_parts(&container_parts).as_str().to_string();
+            self.pending_supertypes.push((target_fqn, super_fqn));
+        }
+
         let start = self.definitions.len();
         self.collect_assoc_items(items.assoc_items(), &container_parts, sema, workspace);
         if let Some(trait_name) = trait_name {
@@ -976,6 +1054,25 @@ fn child_parts(parent: &[String], child: &str) -> Vec<String> {
 fn canonical_fqn_parts(parts: &[String]) -> Fqn {
     let refs = parts.iter().map(String::as_str).collect::<Vec<_>>();
     Fqn::from_parts(&refs, "::")
+}
+
+/// Build the canonical FQN string for a HIR `Trait` using the same module
+/// path scheme the local-definition path uses. Returns `None` when the trait
+/// has no resolvable name (e.g. anonymous parents we cannot canonicalise).
+fn hir_trait_fqn(
+    trait_def: ra_ap_hir::Trait,
+    sema: &Semantics<'_, RootDatabase>,
+    workspace: &WorkspaceIndex,
+) -> Option<String> {
+    let module = trait_def.module(sema.db);
+    let mut parts = workspace.module_path_parts(module);
+    parts.push(
+        trait_def
+            .name(sema.db)
+            .display(sema.db, Edition::CURRENT)
+            .to_string(),
+    );
+    Some(canonical_fqn_parts(&parts).as_str().to_string())
 }
 
 fn scope_fqn(parts: &[String]) -> Option<Fqn> {
