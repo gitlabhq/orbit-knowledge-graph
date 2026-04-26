@@ -18,10 +18,15 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 const BUCKET: &str = "test_locks";
 
+// Pin to a NATS 2.11+ tag because per-message TTL is a 2.11 server feature.
+// testcontainers-modules' default tag is older and cannot host the bucket.
+const NATS_TAG: &str = "2.11-alpine";
+
 async fn start_nats() -> (testcontainers::ContainerAsync<Nats>, String) {
     let cmd = NatsServerCmd::default().with_jetstream();
     let container = Nats::default()
         .with_cmd(&cmd)
+        .with_tag(NATS_TAG)
         .with_mapped_port(0, ContainerPort::Tcp(4222))
         .with_ready_conditions(vec![WaitFor::seconds(3)])
         .start()
