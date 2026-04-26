@@ -455,24 +455,22 @@ impl<'a> Validator<'a> {
                 }
             }
             // Search without selectivity scans the entire entity table.
-            QueryType::Search => {
-                if !input.nodes.iter().any(node_has_selectivity) {
-                    return Err(QueryError::Validation(
-                        "search requires node_ids, filters, or id_range on the node \
-                         to avoid full table scans"
-                            .into(),
-                    ));
-                }
+            QueryType::Search if !input.nodes.iter().any(node_has_selectivity) => {
+                return Err(QueryError::Validation(
+                    "search requires node_ids, filters, or id_range on the node \
+                     to avoid full table scans"
+                        .into(),
+                ));
             }
             // Traversal/aggregation without selectivity scans entire edge tables.
-            QueryType::Traversal | QueryType::Aggregation => {
-                if !input.nodes.iter().any(node_has_selectivity) {
-                    return Err(QueryError::Validation(
-                        "traversal and aggregation queries require node_ids or filters on \
-                         at least one node to avoid full edge table scans"
-                            .into(),
-                    ));
-                }
+            QueryType::Traversal | QueryType::Aggregation
+                if !input.nodes.iter().any(node_has_selectivity) =>
+            {
+                return Err(QueryError::Validation(
+                    "traversal and aggregation queries require node_ids or filters on \
+                     at least one node to avoid full edge table scans"
+                        .into(),
+                ));
             }
             _ => {}
         }
@@ -532,6 +530,20 @@ impl<'a> Validator<'a> {
             if agg.function == AggFunction::Collect {
                 return Err(QueryError::Validation(format!(
                     "aggregation[{i}] function \"collect\" is not supported"
+                )));
+            }
+
+            // sum/avg/min/max without a property silently aggregate the edge
+            // ID column after edge-only optimization (e.g. SUM(e0.source_id)),
+            // which is meaningless. Require an explicit property.
+            if matches!(
+                agg.function,
+                AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max
+            ) && agg.property.is_none()
+            {
+                return Err(QueryError::Validation(format!(
+                    "aggregation[{i}] function \"{}\" requires a 'property' field",
+                    agg.function.as_sql()
                 )));
             }
 

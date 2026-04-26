@@ -291,7 +291,7 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project"},
+                {"id": "p", "entity": "Project", "node_ids": [1]},
                 {"id": "f", "entity": "File"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
@@ -378,7 +378,7 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "p", "entity": "Project"},
+                {"id": "p", "entity": "Project", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest"},
                 {"id": "u", "entity": "User"}
             ],
