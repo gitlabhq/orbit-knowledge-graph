@@ -1347,6 +1347,10 @@ fn calls_aggregation_compiles() {
 fn code_graph_edge_union_routes_to_code_table() {
     // CALLS, EXTENDS, DEFINES, IMPORTS all route to gl_code_edge — a UNION
     // ALL across them must touch only that table, never the SDLC gl_edge.
+    // Definition is in scope for every edge in this set (CALLS Def→Def,
+    // EXTENDS Def→Def, DEFINES Def→Def for nesting, IMPORTS reaches
+    // Definition via ImportedSymbol → Definition; we approximate by
+    // querying the Def→Def slice that all four edges support).
     let json = r#"{
         "query_type": "traversal",
         "nodes": [

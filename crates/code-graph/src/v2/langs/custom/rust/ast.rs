@@ -452,7 +452,7 @@ impl RustStructureExtractor {
 
         // Capture supertrait declarations (`trait Foo: Bar + Baz`) as pending
         // EXTENDS edges from the local trait FQN to each supertrait FQN. We
-        // route through rust-analyzer HIR (`Trait::all_supertraits`) so the
+        // route through rust-analyzer HIR (`Trait::direct_supertraits`) so the
         // emitted FQNs are the canonical module paths the trait actually
         // resolves to — this picks up cross-module references and re-exports
         // that AST-level path normalisation would have to re-implement by
