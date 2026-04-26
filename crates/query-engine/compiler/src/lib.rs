@@ -364,6 +364,37 @@ mod tests {
         );
     }
 
+    /// Traversal with `id_range` (no `node_ids` or `filters`) must produce
+    /// a `_nf_*` CTE with range conditions that actually reach the SQL.
+    /// Before the fix, `build_node_where` and `has_conditions` ignored
+    /// `id_range`, so the lowerer skipped CTE generation entirely.
+    #[test]
+    fn traversal_id_range_produces_range_conditions_in_sql() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_nf_u"),
+            "id_range should generate a _nf_u CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains(">= 1") || sql.contains(">= {u_id_start:Int64}"),
+            "CTE should contain range lower bound, got:\n{sql}"
+        );
+    }
+
     /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
     /// EVERY edge it touches, not just whichever side `node_edge_col`
     /// happens to map first. Without this, `User AUTHORED MR` joined to
