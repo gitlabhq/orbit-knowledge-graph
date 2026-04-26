@@ -276,12 +276,17 @@ class EvalRunner:
         return all_results
 
 
+_DB_PORT_FILE = Path(".eval-servers") / "db.port"
+
+
 @contextmanager
 def _db_server():
     import socket
     with socket.socket() as s:
         s.bind(("", 0))
         port = s.getsockname()[1]
+    _DB_PORT_FILE.parent.mkdir(parents=True, exist_ok=True)
+    _DB_PORT_FILE.write_text(str(port))
     proc = subprocess.Popen(
         [sys.executable, "-m", "uvicorn", "harness.db_server:app",
          "--port", str(port), "--log-level", "warning"],
@@ -295,6 +300,7 @@ def _db_server():
             proc.wait(timeout=5)
         except subprocess.TimeoutExpired:
             proc.kill()
+        _DB_PORT_FILE.unlink(missing_ok=True)
 
 
 async def run_eval(config: EvalConfig, work_dir: str | None = None) -> dict[str, list[TaskResult]]:

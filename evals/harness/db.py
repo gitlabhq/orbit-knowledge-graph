@@ -88,9 +88,12 @@ class DirectClient:
 
 def get_client() -> DbClient | DirectClient:
     """Return DbClient if server is running, DirectClient otherwise."""
-    db = DbClient()
-    if db.is_alive():
-        return db
+    port_file = Path(WORKSPACE_DIR) / "db.port"
+    if port_file.exists():
+        port = port_file.read_text().strip()
+        db = DbClient(base_url=f"http://localhost:{port}")
+        if db.is_alive():
+            return db
     return DirectClient(default_db_path())
 
 
