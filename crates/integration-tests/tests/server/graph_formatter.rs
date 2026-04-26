@@ -2120,7 +2120,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
@@ -2163,7 +2163,7 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
@@ -2203,7 +2203,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{

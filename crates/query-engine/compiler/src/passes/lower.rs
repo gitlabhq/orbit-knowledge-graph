@@ -2223,7 +2223,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -2301,7 +2301,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -2330,7 +2330,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2856,7 +2856,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -3075,7 +3075,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],

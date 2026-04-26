@@ -338,7 +338,7 @@ fn multi_hop_traversal_generates_union_subquery() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
@@ -358,7 +358,7 @@ fn multi_hop_with_min_hops_filter() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
@@ -397,7 +397,7 @@ fn multi_hop_aggregation() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],

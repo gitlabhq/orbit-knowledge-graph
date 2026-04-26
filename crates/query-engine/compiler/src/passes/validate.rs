@@ -9,7 +9,7 @@
 use std::sync::OnceLock;
 
 use crate::error::{QueryError, Result};
-use crate::input::{AggFunction, FilterOp, Input, InputFilter, QueryType};
+use crate::input::{AggFunction, FilterOp, Input, InputFilter, InputNode, QueryType};
 use ontology::{DataType, Ontology};
 
 pub(crate) const BASE_SCHEMA_JSON: &str =
@@ -105,6 +105,12 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
     }
 }
 
+/// Whether a node has explicit selectivity (node_ids, filters, or id_range).
+/// Queries where no node is selective tend to produce full-table scans.
+fn node_has_selectivity(node: &InputNode) -> bool {
+    !node.node_ids.is_empty() || !node.filters.is_empty() || node.id_range.is_some()
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Validator
 // ─────────────────────────────────────────────────────────────────────────────
@@ -151,6 +157,7 @@ impl<'a> Validator<'a> {
         self.check_path(input)?;
         self.check_neighbors(input)?;
         self.check_depth(input)?;
+        self.check_selectivity(input)?;
         self.check_filter_types(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
@@ -400,6 +407,55 @@ impl<'a> Validator<'a> {
                     )));
                 }
             }
+        }
+        Ok(())
+    }
+
+    /// Reject queries that would produce unbounded scans or Cartesian explosions.
+    ///
+    /// The checks are intentionally conservative: they reject shapes that are
+    /// structurally guaranteed to be expensive regardless of data volume.
+    fn check_selectivity(&self, input: &Input) -> Result<()> {
+        match input.query_type {
+            // Path-finding without pinned endpoints causes O(E^depth) frontier joins.
+            QueryType::PathFinding => {
+                if let Some(ref path) = input.path {
+                    for endpoint in [&path.from, &path.to] {
+                        let node = input.nodes.iter().find(|n| n.id == *endpoint);
+                        if node.is_none_or(|n| !node_has_selectivity(n)) {
+                            return Err(QueryError::Validation(format!(
+                                "path_finding requires node_ids or filters on endpoint \"{endpoint}\" \
+                                 to avoid unbounded frontier expansion"
+                            )));
+                        }
+                    }
+                }
+            }
+            // Neighbors without node_ids on the center node scans all edges for an entity type.
+            QueryType::Neighbors => {
+                if let Some(ref nb) = input.neighbors {
+                    let node = input.nodes.iter().find(|n| n.id == nb.node);
+                    if node.is_none_or(|n| !node_has_selectivity(n)) {
+                        return Err(QueryError::Validation(
+                            "neighbors requires node_ids or filters on the center node \
+                             to avoid scanning all edges"
+                                .into(),
+                        ));
+                    }
+                }
+            }
+            // Traversal/aggregation with multi-hop and no selectivity causes O(E^depth) self-joins.
+            QueryType::Traversal | QueryType::Aggregation => {
+                let has_multi_hop = input.relationships.iter().any(|r| r.max_hops > 1);
+                if has_multi_hop && !input.nodes.iter().any(node_has_selectivity) {
+                    return Err(QueryError::Validation(
+                        "multi-hop queries (max_hops > 1) require node_ids or filters on \
+                         at least one node to avoid unbounded edge self-joins"
+                            .into(),
+                    ));
+                }
+            }
+            _ => {}
         }
         Ok(())
     }
@@ -1508,6 +1564,149 @@ mod tests {
         assert!(!re.is_match("ᴜser")); // Latin small capital U (U+1D1C)
         assert!(!re.is_match("üser")); // Latin u with diaeresis
         assert!(!re.is_match("用户")); // CJK
+    }
+
+    // ── Selectivity guards ────────────────────────────────────────────
+
+    #[test]
+    fn selectivity_guards() {
+        // ── Path finding ────────────────────────────────────────────
+        // Both endpoints pinned: OK
+        assert_ok(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3}
+            }"#,
+        );
+        // Missing node_ids on start endpoint
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User"},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"a\"",
+        );
+        // Missing node_ids on end endpoint
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "User"}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"b\"",
+        );
+        // Filter on endpoint counts as selectivity
+        assert_ok(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+        );
+
+        // ── Neighbors ───────────────────────────────────────────────
+        // Center node pinned: OK
+        assert_ok(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+        );
+        // Center node with filter: OK
+        assert_ok(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User", "filters": {"username": "root"}},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+        );
+        // Center node without selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "neighbors",
+                "node": {"id": "u", "entity": "User"},
+                "neighbors": {"node": "u", "direction": "both"}
+            }"#,
+            "center node",
+        );
+
+        // ── Multi-hop traversal ─────────────────────────────────────
+        // Multi-hop with pinned node: OK
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+            }"#,
+        );
+        // Multi-hop without any selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}]
+            }"#,
+            "multi-hop",
+        );
+        // Single-hop without selectivity is allowed (bounded by LIMIT + security)
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+        );
+
+        // ── Multi-hop aggregation ───────────────────────────────────
+        // Multi-hop aggregation without selectivity
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User"},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 3}],
+                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+            }"#,
+            "multi-hop",
+        );
+        // Multi-hop aggregation with filter: OK
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "filters": {"username": "root"}},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u", "max_hops": 2}],
+                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+            }"#,
+        );
     }
 
     // ── LIKE security controls ──────────────────────────────────────
