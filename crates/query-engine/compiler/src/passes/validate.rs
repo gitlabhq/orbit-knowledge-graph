@@ -428,14 +428,17 @@ impl<'a> Validator<'a> {
     fn check_selectivity(&self, input: &Input) -> Result<()> {
         match input.query_type {
             // Path-finding without pinned endpoints causes O(E^depth) frontier joins.
+            // The lowerer (`build_frontier_arm`) seeds each frontier with
+            // concrete `node_ids` — it cannot use `filters` or `id_range` as
+            // anchor conditions — so we require `node_ids` specifically.
             QueryType::PathFinding => {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {
                         let node = input.nodes.iter().find(|n| n.id == *endpoint);
-                        if node.is_none_or(|n| !node_has_selectivity(n)) {
+                        if node.is_none_or(|n| n.node_ids.is_empty()) {
                             return Err(QueryError::Validation(format!(
-                                "path_finding requires node_ids or filters on endpoint \"{endpoint}\" \
-                                 to avoid unbounded frontier expansion"
+                                "path_finding requires node_ids on endpoint \"{endpoint}\" \
+                                 (filters and id_range are not supported for frontier seeding)"
                             )));
                         }
                     }
@@ -1639,8 +1642,8 @@ mod tests {
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3}
             }"#,
         );
-        // Filter on endpoint counts as selectivity
-        assert_ok(
+        // Filters alone are NOT enough for path_finding (lowerer needs node_ids)
+        assert_rejects(
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
@@ -1649,8 +1652,21 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
+            "endpoint \"a\"",
         );
-        // Missing selectivity on start endpoint
+        // id_range alone is NOT enough for path_finding
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"a\"",
+        );
+        // Missing node_ids on start endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -1662,7 +1678,7 @@ mod tests {
             }"#,
             "endpoint \"a\"",
         );
-        // Missing selectivity on end endpoint
+        // Missing node_ids on end endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -1827,6 +1843,41 @@ mod tests {
                 "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}
             }"#,
             "full table scans",
+        );
+        // Traversal with id_range: OK (lowerer generates CTE with range condition)
+        assert_ok(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}]
+            }"#,
+        );
+        // Aggregation with id_range: OK
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                    {"id": "p", "entity": "Project"}
+                ],
+                "relationships": [{"type": "CONTAINS", "from": "p", "to": "u"}],
+                "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
+            }"#,
+        );
+        // path_finding with id_range is NOT enough (needs node_ids)
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "endpoint \"a\"",
         );
     }
 

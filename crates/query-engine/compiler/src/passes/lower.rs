@@ -303,8 +303,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
 
     // Add IN subquery for each node that has conditions
     for node in &input.nodes {
-        let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-        if !has_conditions {
+        if !node_has_conditions(node) {
             continue;
         }
         if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
@@ -444,10 +443,27 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
     {
         parts.push(filter);
     }
+    if let Some(ref range) = node.id_range {
+        parts.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(range.start),
+        ));
+        parts.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(range.end),
+        ));
+    }
     for (col, filter) in &node.filters {
         parts.push(filter_expr(&node.id, col, filter));
     }
     Expr::and_all(parts.into_iter().map(Some))
+}
+
+/// Whether a node has conditions that should generate a filter CTE.
+fn node_has_conditions(node: &InputNode) -> bool {
+    !node.node_ids.is_empty() || !node.filters.is_empty() || node.id_range.is_some()
 }
 
 fn lower_aggregation(input: &mut Input) -> Result<Node> {
@@ -549,8 +565,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
                 node_edge_col.insert(node.id.clone(), (edge_alias.clone(), edge_col.to_string()));
             }
 
-            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-            if !has_conditions {
+            if !node_has_conditions(node) {
                 continue;
             }
             let table = resolve_table(node)?;
@@ -591,12 +606,12 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             };
             let all_count = aggs_for_target()
                 .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
-            let node_has_conditions = input
+            let has_conds = input
                 .nodes
                 .iter()
                 .find(|n| &n.id == *alias)
-                .is_some_and(|n| !n.node_ids.is_empty() || !n.filters.is_empty());
-            all_count && !node_has_conditions
+                .is_some_and(node_has_conditions);
+            all_count && !has_conds
         })
         .cloned()
         .collect();
@@ -1179,9 +1194,9 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
     };
     let limit = Some(input.limit);
 
-    // Build _nf CTE for center node filtering (IDs + filters).
+    // Build _nf CTE for center node filtering (IDs, filters, id_range).
     // Dedup pass will wrap this CTE's scan for soft-delete correctness.
-    let has_conditions = !center_node.node_ids.is_empty() || !center_node.filters.is_empty();
+    let has_conditions = node_has_conditions(center_node);
     let cte_name = node_filter_cte(&center_id);
     let ctes = if has_conditions {
         let node_where = build_node_where(center_node);
@@ -3911,6 +3926,95 @@ mod tests {
         assert!(
             !has_union(&q.from),
             "single-table ontology should not produce UNION ALL in FROM"
+        );
+    }
+
+    #[test]
+    fn traversal_id_range_generates_cte() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have a _nf_u CTE from the id_range
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_u"),
+            "id_range on node should generate a _nf CTE; got CTEs: {:?}",
+            q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+
+        // The CTE should contain range predicates
+        let cte = q.ctes.iter().find(|c| c.name == "_nf_u").unwrap();
+        let sql = format!("{:?}", cte.query.where_clause);
+        assert!(
+            sql.contains("Ge") && sql.contains("Le"),
+            "CTE should contain range conditions, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn aggregation_id_range_on_target_generates_cte() {
+        // id_range on a non-group-by target node should generate a _nf CTE
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 100}}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "c"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_n"),
+            "id_range on non-group-by node should generate a _nf CTE; got CTEs: {:?}",
+            q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn aggregation_id_range_on_group_by_uses_where() {
+        // id_range on a group-by node: no CTE, but WHERE should contain range
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "c"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Group-by nodes don't get CTEs — conditions go to WHERE via build_where
+        let sql = format!("{:?}", q.where_clause);
+        assert!(
+            sql.contains("Ge") && sql.contains("Le"),
+            "WHERE should contain range conditions for group-by node, got: {sql}"
         );
     }
 }

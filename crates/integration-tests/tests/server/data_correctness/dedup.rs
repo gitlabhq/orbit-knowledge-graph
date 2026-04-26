@@ -396,15 +396,13 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
 
-    // The traversal is edge-only: the MR node table is not joined, so
-    // MR 9500's deletion status is not visible to the query. The edge row
-    // itself is not deleted, so it still appears. This documents a known
-    // limitation: edge-only traversals cannot filter out deleted nodes.
-    resp.assert_node_count(3);
+    // The MR node's id_range generates a _nf_mr CTE that joins the node
+    // table with dedup, filtering out deleted MR 9500. Only the alive MR
+    // 9501's edge survives the IN subquery filter.
+    resp.assert_node_count(2);
     resp.assert_node_ids("Project", &[1004]);
     resp.assert_edge_exists("MergeRequest", 9501, "Project", 1004, "IN_PROJECT");
-    resp.assert_edge_exists("MergeRequest", 9500, "Project", 1004, "IN_PROJECT");
-    resp.assert_edge_count("IN_PROJECT", 2);
+    resp.assert_edge_count("IN_PROJECT", 1);
 }
 
 /// Neighbors dedup: duplicate user rows should not produce duplicate edges.
