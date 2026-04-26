@@ -66,24 +66,10 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
     }
 }
 
-/// Prune joins to node tables whose alias is structurally declared in the DSL
-/// but not referenced by any aggregation, filter, or `node_ids`.
-///
-/// The DSL's orphan check forces every node to be connected by a relationship,
-/// so users routinely declare extra nodes purely to anchor a relationship's
-/// `from`/`to`. For aggregations like
-/// `count(MR) GROUP BY Project` with a User node + AUTHORED rel attached
-/// for context, the lowerer emits an `INNER JOIN gl_user AS u` plus a
-/// `_cascade_u` CTE that contribute nothing to the result.
-///
-/// Safe pruning targets:
-/// - alias not referenced by any `aggregations.{target, group_by}`
-/// - alias has no node-level `filters` and no `node_ids`
-/// - alias is not the root of the query (preserve dedup ordering)
-///
-/// Edge JOINs that connected to the pruned node stay in the FROM tree as
-/// existence semi-joins (an MR with an AUTHORED edge is still required to
-/// match), so the row count is identical to the pre-prune query.
+/// Drop node-table joins whose alias has no role in the result: not in any
+/// `aggregations.{target, group_by}`, no filters, no `node_ids`, and not the
+/// query root. Edge joins to the pruned node stay as existence semi-joins,
+/// so row counts are unchanged.
 fn prune_unreferenced_node_joins(q: &mut Query, input: &Input) {
     if input.query_type != QueryType::Aggregation || input.relationships.is_empty() {
         return;
