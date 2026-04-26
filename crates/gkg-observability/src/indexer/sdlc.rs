@@ -8,7 +8,15 @@ pub mod labels {
     pub const ENTITY: &str = "entity";
     pub const ERROR_KIND: &str = "error_kind";
     pub const HANDLER: &str = "handler";
+    pub const NAMESPACE_ID: &str = "top_level_namespace_id";
 }
+
+/// Sentinel value emitted on counters owned by `GlobalHandler`, which
+/// processes rows that have no namespace (e.g. global lookup tables). Using
+/// a fixed string keeps the label set homogeneous across series so dashboard
+/// `sum by (top_level_namespace_id)` queries do not split global volume into
+/// an empty-string bucket.
+pub const NAMESPACE_ID_GLOBAL: &str = "_global";
 
 const DOMAIN: &str = "indexer.sdlc";
 
@@ -25,7 +33,7 @@ pub const PIPELINE_ROWS_PROCESSED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.sdlc.pipeline.rows.processed",
     "Total rows extracted and written by SDLC pipelines.",
     None,
-    &[labels::ENTITY],
+    &[labels::ENTITY, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -33,7 +41,7 @@ pub const PIPELINE_ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.indexer.sdlc.pipeline.errors",
     "Total SDLC pipeline failures.",
     None,
-    &[labels::ENTITY, labels::ERROR_KIND],
+    &[labels::ENTITY, labels::ERROR_KIND, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -61,7 +69,7 @@ pub const DATALAKE_QUERY_BYTES: MetricSpec = MetricSpec::counter(
     "gkg.indexer.sdlc.datalake.query",
     "Total bytes returned by ClickHouse datalake extraction queries.",
     Some("By"),
-    &[labels::ENTITY],
+    &[labels::ENTITY, labels::NAMESPACE_ID],
     DOMAIN,
 );
 

@@ -9,10 +9,10 @@ use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::locking::project_lock_key;
-use super::metrics::CodeMetrics;
+use super::metrics::{CodeMetrics, NAMESPACE_ID_UNKNOWN};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::topic::CodeIndexingTaskRequest;
+use crate::topic::{CodeIndexingTaskRequest, top_level_namespace_id};
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 
@@ -22,6 +22,22 @@ use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 /// `(traversal_path, project_id)` and ignores branch, so any non-empty value
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
+
+/// Derive the metric label value for `top_level_namespace_id` from a code
+/// task's `traversal_path`. Logs a warning on parse failure so an upstream
+/// format change is visible in logs even though the metric stays homogeneous.
+fn namespace_label(traversal_path: &str) -> String {
+    match top_level_namespace_id(traversal_path) {
+        Some(id) => id.to_string(),
+        None => {
+            warn!(
+                traversal_path,
+                "failed to derive top_level_namespace_id from traversal_path; emitting sentinel"
+            );
+            NAMESPACE_ID_UNKNOWN.to_string()
+        }
+    }
+}
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -112,6 +128,7 @@ impl CodeIndexingTaskHandler {
         request: &CodeIndexingTaskRequest,
     ) -> Result<(), HandlerError> {
         let started_at = Utc::now();
+        let namespace_id = namespace_label(&request.traversal_path);
 
         let Some(branch) = self.resolve_branch(request).await? else {
             warn!(
@@ -143,15 +160,19 @@ impl CodeIndexingTaskHandler {
                     "failed to write deleted-project checkpoint; dispatcher may republish"
                 );
             }
+            self.metrics.record_empty_repository(
+                EmptyRepositoryReason::NotFound.as_metric_label(),
+                &namespace_id,
+            );
             self.metrics
-                .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
-            self.metrics.record_outcome("empty_repository");
+                .record_outcome("empty_repository", &namespace_id);
             self.metrics.record_handler_duration(started_at);
             return Ok(());
         };
 
         if self.is_already_indexed(request, &branch).await {
-            self.metrics.record_outcome("skipped_checkpoint");
+            self.metrics
+                .record_outcome("skipped_checkpoint", &namespace_id);
             return Ok(());
         }
 
@@ -163,7 +184,7 @@ impl CodeIndexingTaskHandler {
         );
 
         let result = self
-            .index_with_lock(context, request, &branch, started_at)
+            .index_with_lock(context, request, &branch, started_at, &namespace_id)
             .await;
 
         let outcome = match &result {
@@ -172,12 +193,13 @@ impl CodeIndexingTaskHandler {
             Ok(None) => "skipped_lock",
             Err(_) => "error",
         };
-        self.metrics.record_outcome(outcome);
+        self.metrics.record_outcome(outcome, &namespace_id);
         if matches!(
             &result,
             Ok(Some(IndexOutcome::Indexed | IndexOutcome::EmptyRepository))
         ) {
-            self.metrics.record_repository_indexed(outcome);
+            self.metrics
+                .record_repository_indexed(outcome, &namespace_id);
         }
         self.metrics.record_handler_duration(started_at);
 
@@ -190,6 +212,7 @@ impl CodeIndexingTaskHandler {
         request: &CodeIndexingTaskRequest,
         branch: &str,
         started_at: DateTime<Utc>,
+        namespace_id: &str,
     ) -> Result<Option<IndexOutcome>, HandlerError> {
         let project_id = request.project_id;
 
@@ -218,6 +241,7 @@ impl CodeIndexingTaskHandler {
                     traversal_path: request.traversal_path.clone(),
                     task_id: request.task_id,
                     commit_sha: request.commit_sha.clone(),
+                    namespace_id: namespace_id.to_string(),
                 },
             )
             .await;

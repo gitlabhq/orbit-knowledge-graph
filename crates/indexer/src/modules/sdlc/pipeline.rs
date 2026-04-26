@@ -25,6 +25,20 @@ pub(in crate::modules::sdlc) struct PipelineContext {
     pub watermark: DateTime<Utc>,
     pub position_key: String,
     pub base_conditions: BTreeMap<String, String>,
+    /// Top-level namespace id when this run belongs to a single tenant
+    /// (`NamespaceHandler`), or `None` for global runs that touch tenant-less
+    /// tables. Reaches the metric recording boundary as either the numeric id
+    /// or the `"_global"` sentinel string so the label set stays homogeneous.
+    pub top_level_namespace_id: Option<i64>,
+}
+
+impl PipelineContext {
+    pub(in crate::modules::sdlc) fn namespace_label(&self) -> String {
+        match self.top_level_namespace_id {
+            Some(id) => id.to_string(),
+            None => super::metrics::NAMESPACE_ID_GLOBAL.to_string(),
+        }
+    }
 }
 
 pub(in crate::modules::sdlc) struct Pipeline {
@@ -57,11 +71,12 @@ impl Pipeline {
         progress: &ProgressNotifier,
     ) -> Result<(), HandlerError> {
         let mut errors = Vec::new();
+        let namespace_label = context.namespace_label();
 
         for plan in plans {
             if let Err(err) = self.run_plan(plan, context, destination, progress).await {
                 self.metrics
-                    .record_pipeline_error(&plan.name, err.error_kind());
+                    .record_pipeline_error(&plan.name, err.error_kind(), &namespace_label);
                 errors.push(format!("{}: {err}", plan.name));
             }
         }
@@ -85,6 +100,7 @@ impl Pipeline {
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
+        let namespace_label = context.namespace_label();
 
         let position_key = format!("{}.{}", context.position_key, plan.name);
         let checkpoint = self.load_checkpoint(&position_key).await;
@@ -104,7 +120,12 @@ impl Pipeline {
 
         loop {
             let batches = self
-                .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
+                .extract_batch(
+                    &plan.name,
+                    &extract_query.to_sql(),
+                    params.clone(),
+                    &namespace_label,
+                )
                 .await?;
 
             if batches.is_empty() {
@@ -159,8 +180,12 @@ impl Pipeline {
             })?;
 
         let elapsed = started_at.elapsed();
-        self.metrics
-            .record_pipeline_completion(&plan.name, elapsed.as_secs_f64(), total_rows);
+        self.metrics.record_pipeline_completion(
+            &plan.name,
+            elapsed.as_secs_f64(),
+            total_rows,
+            &namespace_label,
+        );
         self.metrics
             .record_watermark_lag(&plan.name, &context.watermark);
 
@@ -187,6 +212,7 @@ impl Pipeline {
         pipeline_name: &str,
         sql: &str,
         params: Value,
+        namespace_label: &str,
     ) -> Result<Vec<RecordBatch>, HandlerError> {
         let mut last_error = None;
         // First attempt uses the datalake's default `max_block_size`.
@@ -216,6 +242,7 @@ impl Pipeline {
                         pipeline_name,
                         query_start.elapsed().as_secs_f64(),
                         bytes,
+                        namespace_label,
                     );
                     return Ok(batches);
                 }
@@ -440,7 +467,30 @@ mod tests {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             position_key: "test".to_string(),
             base_conditions: BTreeMap::new(),
+            top_level_namespace_id: Some(9970),
         }
+    }
+
+    #[test]
+    fn namespace_label_emits_id_for_namespace_runs() {
+        let ctx = PipelineContext {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            position_key: "test".to_string(),
+            base_conditions: BTreeMap::new(),
+            top_level_namespace_id: Some(9970),
+        };
+        assert_eq!(ctx.namespace_label(), "9970");
+    }
+
+    #[test]
+    fn namespace_label_emits_global_sentinel_for_global_runs() {
+        let ctx = PipelineContext {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            position_key: "global".to_string(),
+            base_conditions: BTreeMap::new(),
+            top_level_namespace_id: None,
+        };
+        assert_eq!(ctx.namespace_label(), "_global");
     }
 
     fn test_batch(rows: usize) -> RecordBatch {

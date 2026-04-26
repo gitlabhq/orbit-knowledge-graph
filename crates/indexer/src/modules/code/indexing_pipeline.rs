@@ -14,7 +14,6 @@ use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::{RepositoryResolver, ResolveError};
 use super::stale_data_cleaner::StaleDataCleaner;
 use crate::handler::{HandlerContext, HandlerError};
-use opentelemetry::KeyValue;
 
 pub struct IndexingRequest {
     pub project_id: i64,
@@ -22,6 +21,10 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub task_id: i64,
     pub commit_sha: Option<String>,
+    /// Top-level namespace id (or `_unknown` sentinel) used as the
+    /// `top_level_namespace_id` metric label across this pipeline run.
+    /// Already resolved by the handler so per-stage callers don't reparse.
+    pub namespace_id: String,
 }
 
 /// Terminal outcome of `CodeIndexingPipeline::index_project`.
@@ -97,7 +100,7 @@ impl CodeIndexingPipeline {
                 );
                 self.metrics.record_resolution_strategy("empty_repository");
                 self.metrics
-                    .record_empty_repository(reason.as_metric_label());
+                    .record_empty_repository(reason.as_metric_label(), &request.namespace_id);
                 self.metrics
                     .repository_fetch_duration
                     .record(fetch_start.elapsed().as_secs_f64(), &[]);
@@ -108,14 +111,14 @@ impl CodeIndexingPipeline {
                     request.task_id,
                     None,
                     Utc::now(),
+                    &request.namespace_id,
                 )
                 .await?;
                 return Ok(IndexOutcome::EmptyRepository);
             }
             Err(ResolveError::Other(err)) => {
                 self.metrics
-                    .errors
-                    .add(1, &[KeyValue::new("stage", "repository_fetch")]);
+                    .record_stage_error("repository_fetch", &request.namespace_id);
                 return Err(err);
             }
         };
@@ -136,6 +139,7 @@ impl CodeIndexingPipeline {
                 &request.traversal_path,
                 indexed_at,
                 &repo_path,
+                &request.namespace_id,
             )
             .await;
 
@@ -164,12 +168,14 @@ impl CodeIndexingPipeline {
             request.task_id,
             request.commit_sha.as_deref(),
             indexed_at,
+            &request.namespace_id,
         )
         .await?;
 
         Ok(IndexOutcome::Indexed)
     }
 
+    #[allow(clippy::too_many_arguments)]
     async fn set_checkpoint(
         &self,
         traversal_path: &str,
@@ -178,6 +184,7 @@ impl CodeIndexingPipeline {
         task_id: i64,
         last_commit: Option<&str>,
         indexed_at: DateTime<Utc>,
+        namespace_id: &str,
     ) -> Result<(), HandlerError> {
         let checkpoint = CodeIndexingCheckpoint {
             traversal_path: traversal_path.to_string(),
@@ -192,7 +199,7 @@ impl CodeIndexingPipeline {
             .set_checkpoint(&checkpoint)
             .await
             .map_err(|e| HandlerError::Processing(format!("failed to set checkpoint: {e}")))
-            .record_error_stage(&self.metrics, "checkpoint")?;
+            .record_error_stage(&self.metrics, "checkpoint", namespace_id)?;
 
         info!(
             project_id,
@@ -215,6 +222,7 @@ impl CodeIndexingPipeline {
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
+        namespace_id: &str,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
         let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
@@ -269,26 +277,40 @@ impl CodeIndexingPipeline {
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
-        self.metrics
-            .record_files_processed(result.stats.files_discovered as u64, "discovered");
+        self.metrics.record_files_processed(
+            result.stats.files_discovered as u64,
+            "discovered",
+            namespace_id,
+        );
         self.metrics
             .record_repository_source_size(result.stats.bytes_discovered);
+        self.metrics.record_files_processed(
+            result.stats.files_parsed as u64,
+            "parsed",
+            namespace_id,
+        );
+        self.metrics.record_files_processed(
+            result.stats.files_skipped as u64,
+            "skipped",
+            namespace_id,
+        );
+        self.metrics.record_nodes_indexed(
+            result.stats.definitions_count as u64,
+            "definition",
+            namespace_id,
+        );
+        self.metrics.record_nodes_indexed(
+            result.stats.imports_count as u64,
+            "imported_symbol",
+            namespace_id,
+        );
         self.metrics
-            .record_files_processed(result.stats.files_parsed as u64, "parsed");
-        self.metrics
-            .record_files_processed(result.stats.files_skipped as u64, "skipped");
-        self.metrics
-            .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
-        self.metrics
-            .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
-        self.metrics
-            .record_nodes_indexed(result.stats.edges_count as u64, "edge");
+            .record_nodes_indexed(result.stats.edges_count as u64, "edge", namespace_id);
 
         // Record typed pipeline errors (file read, parse, conversion failures).
         for graph_error in &result.graph_errors {
             self.metrics
-                .errors
-                .add(1, &[KeyValue::new("stage", graph_error.stage())]);
+                .record_stage_error(graph_error.stage(), namespace_id);
         }
 
         // Record benign per-file skips separately from errors so policy
@@ -307,13 +329,11 @@ impl CodeIndexingPipeline {
                 "some files failed to parse during code indexing"
             );
             self.metrics
-                .record_files_processed(parse_error_count as u64, "errored");
+                .record_files_processed(parse_error_count as u64, "errored", namespace_id);
         }
 
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
-            self.metrics
-                .errors
-                .add(1, &[KeyValue::new("stage", error.stage)]);
+            self.metrics.record_stage_error(error.stage, namespace_id);
             return Err(HandlerError::Processing(format!(
                 "fatal code indexing pipeline error during {} for {}: {}",
                 error.stage, error.file_path, error.error

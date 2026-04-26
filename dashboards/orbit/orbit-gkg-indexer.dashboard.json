@@ -2987,8 +2987,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (stage) (rate(gkg_indexer_code_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{stage}}",
+                     "expr": "sum by (stage, top_level_namespace_id) (rate(gkg_indexer_code_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{stage}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3038,8 +3038,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (outcome) (rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{outcome}}",
+                     "expr": "sum by (outcome, top_level_namespace_id) (rate(gkg_indexer_code_events_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{outcome}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3089,8 +3089,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (outcome) (rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{outcome}}",
+                     "expr": "sum by (outcome, top_level_namespace_id) (rate(gkg_indexer_code_files_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{outcome}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3431,8 +3431,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (kind) (rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{kind}}",
+                     "expr": "sum by (kind, top_level_namespace_id) (rate(gkg_indexer_code_nodes_indexed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{kind}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3533,8 +3533,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (reason) (rate(gkg_indexer_code_repository_empty_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{reason}}",
+                     "expr": "sum by (reason, top_level_namespace_id) (rate(gkg_indexer_code_repository_empty_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{reason}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3704,8 +3704,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (outcome) (rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{outcome}}",
+                     "expr": "sum by (outcome, top_level_namespace_id) (rate(gkg_indexer_code_repository_indexing_completed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{outcome}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -3940,8 +3940,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (entity) (rate(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{entity}}",
+                     "expr": "sum by (entity, top_level_namespace_id) (rate(gkg_indexer_sdlc_datalake_query_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{entity}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -4351,8 +4351,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (entity, error_kind) (rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{entity}} / {{error_kind}}",
+                     "expr": "sum by (entity, error_kind, top_level_namespace_id) (rate(gkg_indexer_sdlc_pipeline_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{entity}} / {{error_kind}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],
@@ -4402,8 +4402,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (entity) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{entity}}",
+                     "expr": "sum by (entity, top_level_namespace_id) (rate(gkg_indexer_sdlc_pipeline_rows_processed_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{entity}} / {{top_level_namespace_id}}",
                      "refId": "A"
                   }
                ],

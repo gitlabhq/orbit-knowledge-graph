@@ -65,6 +65,7 @@ impl Handler for GlobalHandler {
             watermark: payload.watermark,
             position_key: "global".to_string(),
             base_conditions: BTreeMap::new(),
+            top_level_namespace_id: None,
         };
 
         let result = self

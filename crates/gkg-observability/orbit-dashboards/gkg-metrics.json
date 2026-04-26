@@ -302,7 +302,8 @@
       "description": "Total code indexing errors by pipeline stage.",
       "kind": "counter",
       "labels": [
-        "stage"
+        "stage",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -313,7 +314,8 @@
       "description": "Total push events processed by the code indexing handler.",
       "kind": "counter",
       "labels": [
-        "outcome"
+        "outcome",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -324,7 +326,8 @@
       "description": "Total files seen by the code-graph indexer.",
       "kind": "counter",
       "labels": [
-        "outcome"
+        "outcome",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -398,7 +401,8 @@
       "description": "Total graph nodes and edges indexed by the code handler.",
       "kind": "counter",
       "labels": [
-        "kind"
+        "kind",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -420,7 +424,8 @@
       "description": "Projects short-circuited as terminal-empty at fetch time.",
       "kind": "counter",
       "labels": [
-        "reason"
+        "reason",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -457,7 +462,8 @@
       "description": "Repository indexing runs completed by the code indexing handler.",
       "kind": "counter",
       "labels": [
-        "outcome"
+        "outcome",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -536,7 +542,8 @@
       "kind": "counter",
       "unit": "By",
       "labels": [
-        "entity"
+        "entity",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -632,7 +639,8 @@
       "kind": "counter",
       "labels": [
         "entity",
-        "error_kind"
+        "error_kind",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -643,7 +651,8 @@
       "description": "Total rows extracted and written by SDLC pipelines.",
       "kind": "counter",
       "labels": [
-        "entity"
+        "entity",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"

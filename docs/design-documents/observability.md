@@ -72,11 +72,11 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
 | `gkg.indexer.sdlc.pipeline.duration` | Histogram | s | `entity` | End-to-end duration of an entity or edge pipeline run |
-| `gkg.indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity` | Total rows extracted and written |
-| `gkg.indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind` | SDLC pipeline failures |
+| `gkg.indexer.sdlc.pipeline.rows.processed` | Counter | count | `entity`, `top_level_namespace_id` | Total rows extracted and written |
+| `gkg.indexer.sdlc.pipeline.errors` | Counter | count | `entity`, `error_kind`, `top_level_namespace_id` | SDLC pipeline failures |
 | `gkg.indexer.sdlc.handler.duration` | Histogram | s | `handler` | Duration of a full handler invocation |
 | `gkg.indexer.sdlc.datalake.query.duration` | Histogram | s | `entity` | Duration of ClickHouse datalake extraction queries |
-| `gkg.indexer.sdlc.datalake.query` | Counter | By | `entity` | Total bytes returned by ClickHouse datalake extraction queries |
+| `gkg.indexer.sdlc.datalake.query` | Counter | By | `entity`, `top_level_namespace_id` | Total bytes returned by ClickHouse datalake extraction queries |
 | `gkg.indexer.sdlc.transform.duration` | Histogram | s | `entity` | Duration of DataFusion SQL transform per batch |
 | `gkg.indexer.sdlc.watermark.lag` | Gauge | s | `entity` | Seconds between the current watermark and wall clock (data freshness) |
 
@@ -84,17 +84,20 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 
 | Metric | Type | Unit | Labels | Description |
 |---|---|---|---|---|
-| `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error) | Total code indexing tasks processed |
+| `gkg.indexer.code.events.processed` | Counter | count | `outcome` (indexed, skipped_checkpoint, skipped_lock, error), `top_level_namespace_id` | Total code indexing tasks processed |
 | `gkg.indexer.code.handler.duration` | Histogram | s | | End-to-end duration of processing a single code indexing task |
 | `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
 | `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
-| `gkg.indexer.code.repository.indexing.completed` | Counter | count | `outcome` (indexed, empty_repository) | Repository indexing runs completed by the code indexing handler |
+| `gkg.indexer.code.repository.empty` | Counter | count | `reason`, `top_level_namespace_id` | Projects short-circuited as terminal-empty at fetch time |
+| `gkg.indexer.code.repository.indexing.completed` | Counter | count | `outcome` (indexed, empty_repository), `top_level_namespace_id` | Repository indexing runs completed by the code indexing handler |
 | `gkg.indexer.code.repository.source.size` | Histogram | By | | Total bytes of language-supported source files discovered during one code indexing run |
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
-| `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
-| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage. Excludes benign skips (see `files.skipped`) so the rate reflects real failures only. |
-| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, line_too_long, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
+| `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored), `top_level_namespace_id` | Total files seen by the code-graph indexer |
+| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge), `top_level_namespace_id` | Total graph nodes and edges indexed |
+| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint), `top_level_namespace_id` | Code indexing errors by pipeline stage. Excludes benign skips (see `files.skipped`) so the rate reflects real failures only. |
+| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, line_too_long, timeout_sentinel), `top_level_namespace_id` | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
+
+The `top_level_namespace_id` label is the GitLab top-level namespace ID (e.g. `9970` for `gitlab-org`) and lets operators answer per-tenant volume and error questions from Mimir. SDLC counters use the `_global` sentinel for `GlobalHandler` runs that touch tenant-less tables. Code counters use `_unknown` if the task's `traversal_path` cannot be parsed (logged as a warning since the format is fixed by the dispatcher contract). Histograms intentionally do not carry this label: per-namespace bucket cardinality (~3K namespaces × ~14 buckets × ~30 entities on `pipeline.duration` alone) would push past Mimir's per-tenant limits. Operators get global p95 from histograms and per-namespace volume and error rates from counters; per-namespace latency is a follow-up gated on a feature flag.
 
 *Namespace deletion module metrics:*
 

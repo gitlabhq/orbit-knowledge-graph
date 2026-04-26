@@ -78,6 +78,7 @@ impl Handler for NamespaceHandler {
                 "traversal_path".to_string(),
                 traversal_path.clone(),
             )]),
+            top_level_namespace_id: Some(payload.namespace),
         };
 
         let result = self

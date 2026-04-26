@@ -10,7 +10,14 @@ pub mod labels {
     pub const REASON: &str = "reason";
     pub const KIND: &str = "kind";
     pub const STAGE: &str = "stage";
+    pub const NAMESPACE_ID: &str = "top_level_namespace_id";
 }
+
+/// Sentinel emitted when the top-level namespace id cannot be derived from
+/// the task's `traversal_path` (parse failure or unexpected format). Keeps
+/// the label set homogeneous across series; a non-zero rate of this value
+/// means the upstream contract changed.
+pub const NAMESPACE_ID_UNKNOWN: &str = "_unknown";
 
 const DOMAIN: &str = "indexer.code";
 
@@ -18,7 +25,7 @@ pub const EVENTS_PROCESSED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.events.processed",
     "Total push events processed by the code indexing handler.",
     None,
-    &[labels::OUTCOME],
+    &[labels::OUTCOME, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -60,7 +67,7 @@ pub const REPOSITORY_EMPTY: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.repository.empty",
     "Projects short-circuited as terminal-empty at fetch time.",
     None,
-    &[labels::REASON],
+    &[labels::REASON, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -68,7 +75,7 @@ pub const REPOSITORY_INDEXING_COMPLETED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.repository.indexing.completed",
     "Repository indexing runs completed by the code indexing handler.",
     None,
-    &[labels::OUTCOME],
+    &[labels::OUTCOME, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -94,7 +101,7 @@ pub const FILES_PROCESSED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.processed",
     "Total files seen by the code-graph indexer.",
     None,
-    &[labels::OUTCOME],
+    &[labels::OUTCOME, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -102,7 +109,7 @@ pub const NODES_INDEXED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.nodes.indexed",
     "Total graph nodes and edges indexed by the code handler.",
     None,
-    &[labels::KIND],
+    &[labels::KIND, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
@@ -110,7 +117,7 @@ pub const ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.errors",
     "Total code indexing errors by pipeline stage.",
     None,
-    &[labels::STAGE],
+    &[labels::STAGE, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
