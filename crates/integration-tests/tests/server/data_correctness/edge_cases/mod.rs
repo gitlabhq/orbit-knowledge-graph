@@ -108,7 +108,7 @@ pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &Test
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "user_type"],
+                {"id": "u", "entity": "User", "columns": ["username", "user_type"],
                  "filters": {"user_type": "project_bot"}},
                 {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
@@ -164,7 +164,7 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+                {"id": "u", "entity": "User", "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],

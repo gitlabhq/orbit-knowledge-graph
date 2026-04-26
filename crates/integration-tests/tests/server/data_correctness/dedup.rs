@@ -153,7 +153,7 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,
@@ -189,7 +189,7 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,

@@ -92,7 +92,7 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -112,7 +112,7 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,

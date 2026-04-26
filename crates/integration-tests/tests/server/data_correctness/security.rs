@@ -84,7 +84,7 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name", "visibility_level"],
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": "public"}},
             "limit": 10
         }"#,
@@ -225,7 +225,7 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let result = compile(
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
                      "filters": {"is_admin": true}},
             "limit": 10
         }"#,
@@ -391,7 +391,7 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "is_admin"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "is_admin"],
                      "filters": {"is_admin": false}, "node_ids": [1]},
             "limit": 10
         }"#,

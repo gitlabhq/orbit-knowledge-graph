@@ -130,7 +130,7 @@ pub(super) async fn search_filter_eq_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "filters": {"state": "blocked"}},
             "limit": 10
         }"#,
@@ -149,7 +149,7 @@ pub(super) async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name", "visibility_level"],
+            "node": {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": {"op": "in", "value": ["public", "internal"]}}},
             "limit": 10
         }"#,
@@ -171,7 +171,7 @@ pub(super) async fn search_filter_starts_with_returns_matching_rows(ctx: &TestCo
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
                      "filters": {"username": {"op": "starts_with", "value": "ali"}}},
              "limit": 10
         }"#,
@@ -216,7 +216,7 @@ pub(super) async fn search_filter_contains_returns_substring_matches(ctx: &TestC
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
                      "filters": {"username": {"op": "contains", "value": "lic"}}},
              "limit": 10
         }"#,
@@ -238,7 +238,7 @@ pub(super) async fn search_filter_is_null_matches_unset_columns(ctx: &TestContex
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "avatar_url"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "avatar_url"],
                      "filters": {"avatar_url": {"op": "is_null", "value": true}}},
             "limit": 10
         }"#,
@@ -455,7 +455,7 @@ pub(super) async fn search_filter_no_match_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"],
+            "node": {"id": "u", "entity": "User", "columns": ["username"],
                      "filters": {"username": "nonexistent_user"}},
             "limit": 10
         }"#,
@@ -474,7 +474,7 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
                      "node_ids": [1, 2, 3, 5],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},

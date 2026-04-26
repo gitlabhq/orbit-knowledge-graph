@@ -266,7 +266,7 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state"],
+                {"id": "u", "entity": "User", "columns": ["username", "state"],
                  "filters": {"state": "blocked"}},
                 {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],

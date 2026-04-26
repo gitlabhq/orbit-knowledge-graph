@@ -44,7 +44,7 @@ pub(super) async fn search_filter_work_item_type_returns_matching_rows(ctx: &Tes
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "w", "entity": "WorkItem", "node_ids": [4000, 4001, 4002, 4003],
+            "node": {"id": "w", "entity": "WorkItem",
                      "columns": ["title", "work_item_type"],
                      "filters": {"work_item_type": {"op": "in", "value": ["issue", "task"]}}},
             "limit": 10
