@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
-# Fetch the OpenCode OpenAPI spec matching the version pinned in mise.toml.
-# The spec is committed to the repo so codegen is reproducible offline.
+# Fetch the OpenCode OpenAPI spec matching the version pinned in mise.toml,
+# then regenerate the Python SDK from it.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 EVALS_DIR="$(dirname "$SCRIPT_DIR")"
 SPEC_PATH="${EVALS_DIR}/opencode-openapi.json"
+SDK_DIR="${EVALS_DIR}/opencode_sdk/opencode_sdk"
 
 VERSION=$(mise ls opencode --json | jq -r '.[0].version')
 if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
@@ -13,6 +14,7 @@ if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
   exit 1
 fi
 
+# --- fetch spec ---
 URL="https://raw.githubusercontent.com/anomalyco/opencode/v${VERSION}/packages/sdk/openapi.json"
 
 echo "fetching opencode openapi spec v${VERSION}"
@@ -28,3 +30,15 @@ if [ "$HTTP_CODE" != "200" ]; then
 fi
 
 echo "ok: $(wc -c < "$SPEC_PATH" | tr -d ' ') bytes written"
+
+# --- regenerate SDK ---
+echo ""
+echo "regenerating python client -> ${SDK_DIR}"
+rm -rf "$SDK_DIR"
+uvx openapi-python-client generate \
+  --path "$SPEC_PATH" \
+  --meta none \
+  --output-path "$SDK_DIR" \
+  --overwrite
+
+echo "ok: $(find "$SDK_DIR" -name '*.py' | wc -l | tr -d ' ') python files generated"

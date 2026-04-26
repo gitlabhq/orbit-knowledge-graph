@@ -1,11 +1,10 @@
 """
-Hand-written async httpx client for the OpenCode HTTP API.
+Async wrapper around the generated OpenCode SDK client.
 
-Covers the ~12 endpoints needed by the eval harness.
-Types are hand-written pydantic models matching the API responses we consume.
+Provides the same interface the harness expects (OpenCodeClient, typed responses)
+while delegating all HTTP calls to the openapi-python-client generated code.
 
-API reference: @opencode-ai/sdk v1.4.10
-Source: ~/.opencode/node_modules/@opencode-ai/sdk/dist/gen/types.gen.d.ts
+To regenerate the SDK: mise run eval:sync-spec
 """
 
 from __future__ import annotations
@@ -15,69 +14,127 @@ from dataclasses import dataclass, field
 from typing import Any
 
 import httpx
-from pydantic import BaseModel
+
+from opencode_sdk.client import Client
+from opencode_sdk.api.default import (
+    session_create,
+    session_delete,
+    session_abort,
+    session_list,
+    session_messages,
+    session_prompt,
+    session_status,
+    session_todo,
+    session_diff,
+)
+from opencode_sdk.api.session import session_get, session_children
+from opencode_sdk.api.default import global_health
+from opencode_sdk.models.session_create_body import SessionCreateBody
+from opencode_sdk.models.session_prompt_body import SessionPromptBody
+from opencode_sdk.models.text_part_input import TextPartInput
+from opencode_sdk.types import UNSET
+
+
+def _to_dict(obj: Any) -> Any:
+    """Convert an attrs-based SDK model to a plain dict, recursively."""
+    if hasattr(obj, "to_dict"):
+        return obj.to_dict()
+    if isinstance(obj, list):
+        return [_to_dict(item) for item in obj]
+    return obj
 
 
 # ---------------------------------------------------------------------------
-# Response models (only the shapes we actually use)
+# Thin wrappers so consumers can call .model_dump() like before.
 # ---------------------------------------------------------------------------
 
-class SessionInfo(BaseModel):
-    id: str
-    title: str
-    parentID: str | None = None
-    slug: str = ""
-    version: str = ""
-    share: str | None = None
-    time: dict[str, Any] = {}
+class _DictMixin:
+    """Wraps an attrs-based SDK model, adds model_dump() for compat."""
+
+    _raw: Any
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._raw, name)
+
+    def model_dump(self) -> dict[str, Any]:
+        return _to_dict(self._raw)
 
 
-class MessageInfo(BaseModel, extra="allow"):
-    id: str
-    role: str
-    parentID: str | None = None
-    mode: str | None = None
-    agent: str | None = None
-    variant: str | None = None
-    modelID: str | None = None
-    finish: str | None = None
-    cost: float = 0.0
-    tokens: dict[str, Any] = {}
-    path: dict[str, str] = {}
-    time: dict[str, Any] = {}
-    system: Any = None
-    tool: dict[str, Any] | None = None
+class SessionInfo(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
+
+    @property
+    def id(self) -> str:
+        return self._raw.id
+
+    @property
+    def title(self) -> str:
+        return self._raw.title
+
+    @property
+    def parentID(self) -> str | None:
+        pid = getattr(self._raw, "parent_id", UNSET)
+        return None if pid is UNSET else pid
 
 
-class PartData(BaseModel, extra="allow"):
-    type: str
-    text: str | None = None
-    tool: str | None = None
-    id: str | None = None
-    state: Any = None
-    input: Any = None
-    output: Any = None
-    metadata: dict[str, Any] | None = None
-    content: Any = None
+class MessageInfo(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
+
+    @property
+    def id(self) -> str:
+        return self._raw.id
+
+    @property
+    def role(self) -> str:
+        return self._raw.role
+
+    @property
+    def finish(self) -> str | None:
+        val = getattr(self._raw, "finish", UNSET)
+        return None if val is UNSET else val
+
+    @property
+    def cost(self) -> float:
+        return getattr(self._raw, "cost", 0.0)
+
+    @property
+    def tokens(self) -> dict[str, Any]:
+        t = getattr(self._raw, "tokens", UNSET)
+        return _to_dict(t) if t is not UNSET else {}
 
 
-class MessageWithParts(BaseModel, extra="allow"):
-    info: MessageInfo
-    parts: list[PartData] = []
+class PartData(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
+
+    @property
+    def type(self) -> str:
+        return self._raw.type
 
 
-class TodoItem(BaseModel):
-    content: str = ""
-    status: str = ""
-    priority: str = ""
+class MessageWithParts(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
+        self.info = MessageInfo(raw.info)
+        self.parts = [PartData(p) for p in raw.parts]
+
+    def model_dump(self) -> dict[str, Any]:
+        return {
+            "info": self.info.model_dump(),
+            "parts": [p.model_dump() for p in self.parts],
+        }
 
 
-class FileDiff(BaseModel):
-    path: str = ""
-    type: str = ""
-    additions: int = 0
-    deletions: int = 0
-    patch: str = ""
+class TodoItem(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
+
+
+class FileDiff(_DictMixin):
+    def __init__(self, raw: Any) -> None:
+        object.__setattr__(self, "_raw", raw)
 
 
 # ---------------------------------------------------------------------------
@@ -89,24 +146,25 @@ class OpenCodeClient:
     """Async client for a single OpenCode server instance."""
 
     base_url: str
-    _http: httpx.AsyncClient = field(init=False, repr=False)
+    _client: Client = field(init=False, repr=False)
 
     def __post_init__(self) -> None:
-        self._http = httpx.AsyncClient(
+        self._client = Client(
             base_url=self.base_url,
             timeout=httpx.Timeout(60.0, connect=10.0),
-            limits=httpx.Limits(max_connections=20),
+            httpx_args={"limits": httpx.Limits(max_connections=20)},
         )
 
     async def close(self) -> None:
-        await self._http.aclose()
+        async_client = self._client.get_async_httpx_client()
+        await async_client.aclose()
 
     # -- health ---------------------------------------------------------------
 
     async def health_check(self) -> bool:
         try:
-            r = await self._http.get("/project/current")
-            return r.status_code == 200
+            resp = await global_health.asyncio_detailed(client=self._client)
+            return resp.status_code == 200
         except httpx.HTTPError:
             return False
 
@@ -121,39 +179,41 @@ class OpenCodeClient:
     # -- session --------------------------------------------------------------
 
     async def create_session(self, title: str | None = None) -> SessionInfo:
-        body: dict[str, Any] = {}
+        body = SessionCreateBody()
         if title:
-            body["title"] = title
-        r = await self._http.post("/session", json=body)
-        r.raise_for_status()
-        return SessionInfo.model_validate(r.json())
+            body.title = title
+        result = await session_create.asyncio(client=self._client, body=body)
+        if result is None:
+            raise RuntimeError("session_create returned None")
+        return SessionInfo(result)
 
     async def get_session(self, session_id: str) -> SessionInfo:
-        r = await self._http.get(f"/session/{session_id}")
-        r.raise_for_status()
-        return SessionInfo.model_validate(r.json())
+        result = await session_get.asyncio(client=self._client, session_id=session_id)
+        if result is None:
+            raise RuntimeError(f"session_get returned None for {session_id}")
+        return SessionInfo(result)
 
     async def delete_session(self, session_id: str) -> bool:
-        r = await self._http.delete(f"/session/{session_id}")
-        r.raise_for_status()
+        await session_delete.asyncio_detailed(client=self._client, session_id=session_id)
         return True
 
     async def abort_session(self, session_id: str) -> bool:
-        r = await self._http.post(f"/session/{session_id}/abort")
-        r.raise_for_status()
+        await session_abort.asyncio_detailed(client=self._client, session_id=session_id)
         return True
 
     async def get_session_children(self, session_id: str) -> list[SessionInfo]:
-        r = await self._http.get(f"/session/{session_id}/children")
-        r.raise_for_status()
-        return [SessionInfo.model_validate(s) for s in r.json()]
+        result = await session_children.asyncio(client=self._client, session_id=session_id)
+        if result is None:
+            return []
+        return [SessionInfo(s) for s in result]
 
     # -- messages -------------------------------------------------------------
 
     async def list_messages(self, session_id: str) -> list[MessageWithParts]:
-        r = await self._http.get(f"/session/{session_id}/message")
-        r.raise_for_status()
-        return [MessageWithParts.model_validate(m) for m in r.json()]
+        result = await session_messages.asyncio(client=self._client, session_id=session_id)
+        if result is None:
+            return []
+        return [MessageWithParts(m) for m in result]
 
     async def send_message(
         self,
@@ -165,46 +225,55 @@ class OpenCodeClient:
         tools: dict[str, Any] | None = None,
         system: str | None = None,
     ) -> MessageWithParts:
-        body: dict[str, Any] = {
-            "parts": [{"type": "text", "text": text}],
-        }
-        if model:
-            body["model"] = model
-        if agent:
-            body["agent"] = agent
-        if tools:
-            body["tools"] = tools
-        if system:
-            body["system"] = system
+        # Build the prompt body. POST /session/{id}/message blocks until done.
+        part = TextPartInput(type_="text", text=text)
+        body = SessionPromptBody(parts=[part])
 
-        # POST /message blocks until the LLM finishes (may take minutes).
-        # If it returns empty, the session errored — fetch messages to get what we can.
-        r = await self._http.post(
-            f"/session/{session_id}/message",
-            json=body,
-            timeout=httpx.Timeout(600.0, connect=10.0),
+        client_with_timeout = self._client.with_timeout(
+            httpx.Timeout(600.0, connect=10.0)
         )
-        r.raise_for_status()
-        content = r.text.strip()
-        if content:
-            return MessageWithParts.model_validate(r.json())
+        result = await session_prompt.asyncio(
+            client=client_with_timeout,
+            session_id=session_id,
+            body=body,
+        )
 
+        if result is not None:
+            return MessageWithParts(result)
+
+        # Empty response — fallback to listing messages
         msgs = await self.list_messages(session_id)
         for msg in reversed(msgs):
             if msg.info.role == "assistant":
                 return msg
-        return MessageWithParts(info=MessageInfo(id="", role="assistant"))
+        # Return an empty assistant message as last resort
+        from opencode_sdk.models.assistant_message import AssistantMessage
+        from opencode_sdk.models.assistant_message_time import AssistantMessageTime
+        from opencode_sdk.models.assistant_message_path import AssistantMessagePath
+        from opencode_sdk.models.assistant_message_tokens import AssistantMessageTokens
+        empty = AssistantMessage(
+            id="", session_id=session_id, role="assistant",
+            time=AssistantMessageTime.from_dict({}),
+            parent_id="", model_id="", provider_id="",
+            mode="", agent="",
+            path=AssistantMessagePath.from_dict({}),
+            cost=0.0,
+            tokens=AssistantMessageTokens.from_dict({}),
+        )
+        return MessageWithParts(
+            type("FakeMsg", (), {"info": empty, "parts": []})()
+        )
 
     # -- session artifacts ----------------------------------------------------
 
     async def get_diff(self, session_id: str) -> list[FileDiff]:
-        r = await self._http.get(f"/session/{session_id}/diff")
-        r.raise_for_status()
-        return [FileDiff.model_validate(d) for d in r.json()]
+        result = await session_diff.asyncio(client=self._client, session_id=session_id)
+        if result is None:
+            return []
+        return [FileDiff(d) for d in result]
 
     async def get_todos(self, session_id: str) -> list[TodoItem]:
-        r = await self._http.get(f"/session/{session_id}/todo")
-        r.raise_for_status()
-        return [TodoItem.model_validate(t) for t in r.json()]
-
-
+        result = await session_todo.asyncio(client=self._client, session_id=session_id)
+        if result is None:
+            return []
+        return [TodoItem(t) for t in result]

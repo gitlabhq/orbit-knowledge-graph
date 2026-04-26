@@ -4,6 +4,7 @@ version = "0.1.0"
 description = "GKG agent evaluation harness"
 requires-python = ">=3.12"
 dependencies = [
+    "opencode-sdk",
     "pydantic>=2.11",
     "httpx>=0.28",
     "httpx-sse>=0.4",
@@ -15,6 +16,9 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.34",
 ]
+
+[tool.uv.sources]
+opencode-sdk = { path = "opencode_sdk", editable = true }
 
 [project.optional-dependencies]
 dev = [
