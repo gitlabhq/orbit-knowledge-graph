@@ -700,6 +700,19 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         .filter(|t| !input.compiler.node_edge_col.contains_key(*t))
         .collect();
 
+    // Count aggregations per target alias. When a single aggregation targets
+    // an alias, folded conjuncts can be retained in WHERE so DeduplicatePass
+    // can hoist sort-key (structural) ones into the LIMIT 1 BY subquery for
+    // granule pruning. With multiple aggregations targeting the same alias
+    // (e.g. countIf(state='opened') + countIf(state='closed')), per-If
+    // filters disagree and a retained outer WHERE would corrupt the counts.
+    let mut aggs_per_alias: HashMap<&str, usize> = HashMap::new();
+    for agg in &input.aggregations {
+        if let Some(t) = agg.target.as_deref() {
+            *aggs_per_alias.entry(t).or_default() += 1;
+        }
+    }
+
     // Build group-by alias set to avoid folding their filters.
     let group_aliases: HashSet<&str> = input
         .aggregations
@@ -741,6 +754,17 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         if should_keep {
             remaining.push(conjunct);
         } else if let Some(alias) = aliases.into_iter().next() {
+            // Retain in WHERE when this alias has exactly one aggregation
+            // target. DeduplicatePass.partition_filters will hoist sort-key
+            // columns (id, project_id, traversal_path, branch) into the
+            // dedup subquery's WHERE, enabling granule pruning. Mutable
+            // columns stay in the outer WHERE, where they correctly
+            // evaluate against the deduped row. The countIf(_, conjunct)
+            // becomes redundant in this case but the cost is negligible.
+            let single_target = aggs_per_alias.get(alias.as_str()).copied().unwrap_or(0) <= 1;
+            if single_target {
+                remaining.push(conjunct.clone());
+            }
             folded_by_alias.entry(alias).or_default().push(conjunct);
         }
     }
@@ -1253,10 +1277,12 @@ mod tests {
             other => panic!("expected FuncCall, got {other:?}"),
         }
 
-        // Group-by node filter stays in WHERE.
+        // Group-by node filter stays in WHERE; target's filter is retained
+        // alongside the countIf so DeduplicatePass can hoist sort-key
+        // columns into the LIMIT 1 BY subquery for granule pruning.
         let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
-        assert!(!where_aliases.contains("mr"));
+        assert!(where_aliases.contains("mr"));
     }
 
     #[test]
@@ -1306,7 +1332,8 @@ mod tests {
             }
             other => panic!("expected countIf, got {other:?}"),
         }
-        assert!(q.where_clause.is_none());
+        // Single-aggregate target: filter retained in WHERE for granule pruning.
+        assert!(q.where_clause.is_some());
     }
 
     #[test]
@@ -1365,6 +1392,46 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
+        // Single-aggregate target: both conjuncts retained in WHERE alongside
+        // the per-If filters, so DeduplicatePass can hoist them.
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
+        assert!(where_aliases.contains("mr"));
+    }
+
+    #[test]
+    fn multi_aggregate_does_not_retain_conjuncts() {
+        // Two aggregations target the same alias with conflicting per-If
+        // filters. Retaining either filter in outer WHERE would corrupt the
+        // other count, so fold must REMOVE conjuncts from WHERE in this case.
+        let input = agg_input(vec![
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("opened".to_string()),
+            },
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("merged".to_string()),
+            },
+        ]);
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(count_expr("mr", "id"), "opened"),
+                SelectExpr::new(count_expr("mr", "id"), "merged"),
+            ],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(eq_filter("mr", "state", "opened")),
+            ..Default::default()
+        };
+
+        fold_filters_into_aggregates(&mut q, &input);
+
+        // Filter must NOT be retained — would corrupt the other countIf.
         assert!(q.where_clause.is_none());
     }
 
