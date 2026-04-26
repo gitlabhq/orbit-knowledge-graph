@@ -59,99 +59,106 @@ local health = [
 ];
 
 // 2. Volume in window -----------------------------------------------------
-// 8 stat tiles. Code on the left (4 tiles), SDLC on the right (4 tiles).
-// Each tile uses $__range so the headline number always answers the
-// current time picker.
+// Two sub-rows: Code volume on top, SDLC volume below. Four wide stat
+// tiles per row (w=6, h=5). Each tile is clickable and opens the
+// underlying rate(...) query in Grafana Explore over the same time
+// range, so a stat that catches your eye drills into a per-label trend
+// in one click.
 local volume = [
-  o.row('Volume in window'),
-  // Code column
+  o.row('Volume in window — code indexing'),
   o.counterRangeStat(
     'gkg_indexer_code_repository_indexing_completed_total',
-    'Code: projects indexed',
-    'Successful repository indexing runs in the dashboard window.',
-    DS, SEL, 'outcome="indexed"', 'short', 3,
+    'Projects indexed',
+    'Successful repository indexing runs in the dashboard window. Click to drill into the per-outcome rate in Explore.',
+    DS, SEL, 'outcome="indexed"', 'short', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_code_events_processed_total',
-    'Code: push events',
-    'Push events processed by the code indexing handler in the dashboard window.',
-    DS, SEL, 'outcome="indexed"', 'short', 3,
+    'Push events',
+    'Push events processed by the code indexing handler in the dashboard window. Click to drill into Explore.',
+    DS, SEL, 'outcome="indexed"', 'short', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_code_files_processed_total',
-    'Code: files parsed',
-    'Source files seen by the code-graph indexer in the dashboard window.',
-    DS, SEL, 'outcome="parsed"', 'short', 3,
+    'Files parsed',
+    'Source files seen by the code-graph indexer in the dashboard window. Click to drill into Explore.',
+    DS, SEL, 'outcome="parsed"', 'short', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_code_nodes_indexed_total',
-    'Code: nodes + edges',
-    'Graph nodes and edges indexed by the code handler in the dashboard window.',
-    DS, SEL, '', 'short', 3,
+    'Nodes and edges',
+    'Graph nodes and edges indexed by the code handler in the dashboard window. Click to drill into the per-kind rate in Explore.',
+    DS, SEL, '', 'short', 6, 5,
   ),
-  // SDLC column
+  o.row('Volume in window — SDLC indexing'),
   o.counterRangeStat(
     'gkg_indexer_sdlc_pipeline_rows_processed_total',
-    'SDLC: rows ingested',
-    'Rows extracted and written by SDLC pipelines in the dashboard window.',
-    DS, SEL, '', 'short', 3,
+    'Rows ingested',
+    'Rows extracted and written by SDLC pipelines in the dashboard window. Click to drill into the per-entity rate in Explore.',
+    DS, SEL, '', 'short', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_sdlc_datalake_query_bytes_total',
-    'SDLC: bytes from datalake',
-    'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
-    DS, SEL, '', 'bytes', 3,
+    'Bytes from datalake',
+    'Bytes returned by ClickHouse datalake extraction queries in the dashboard window. Click to drill into Explore.',
+    DS, SEL, '', 'bytes', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_sdlc_pipeline_duration_seconds_count',
-    'SDLC: pipeline runs',
-    'Total SDLC pipeline runs across all entities in the dashboard window.',
-    DS, SEL, '', 'short', 3,
+    'Pipeline runs',
+    'Total SDLC pipeline runs across all entities in the dashboard window. Click to drill into Explore.',
+    DS, SEL, '', 'short', 6, 5,
   ),
   o.counterRangeStat(
     'gkg_indexer_sdlc_pipeline_errors_total',
-    'SDLC: pipeline errors',
-    'Total SDLC pipeline failures in the dashboard window.',
-    DS, SEL, '', 'short', 3,
+    'Pipeline errors',
+    'Total SDLC pipeline failures in the dashboard window. Click to drill into the per-entity error rate in Explore.',
+    DS, SEL, '', 'short', 6, 5,
   ),
 ];
 
 // 3. Throughput over time -------------------------------------------------
+// Each bar represents the count over one auto-sized window (Grafana's
+// `$__rate_interval`, ~2 to 4 minutes for a 3h time picker). The bar
+// envelope is total throughput, the colors are the per-label mix.
 local throughput = [
   o.row('Throughput over time'),
   o.counterIncreaseBars(
     codeCompleted,
-    'Code: projects indexed per bucket',
-    'Repository indexing runs per bucket, stacked by outcome.',
+    'Code: projects indexed over time',
+    'Repository indexing runs, stacked by outcome.',
     DS, SEL, by=['outcome'], unit='short', w=12,
   ),
   o.counterIncreaseBars(
     sdlcRows,
-    'SDLC: rows ingested per bucket',
-    'SDLC pipeline rows processed per bucket, stacked by entity.',
+    'SDLC: rows ingested over time',
+    'SDLC pipeline rows processed, stacked by entity.',
     DS, SEL, by=['entity'], unit='short', w=12,
   ),
 ];
 
 // 4. Latency --------------------------------------------------------------
+// Three p50/p95/p99 line panels (one per pipeline stage that matters)
+// plus a top-10 entity table for SDLC. Heatmap variants are still
+// available via o.histogramHeatmap if anyone wants to opt back in.
 local latency = [
   o.row('Latency'),
-  o.histogramHeatmap(
+  o.histogramPercentiles(
     codeIndexDur,
-    'Code: time to index a project',
-    'Bucket density of code-graph parse and analysis duration. Watch for slow tails forming.',
+    'Code: time to index a project (p50/p95/p99)',
+    'Code-graph parse and analysis duration percentiles. Watch p95 climbing without p50 moving for a long-tail bottleneck.',
     DS, SEL, w=12,
   ),
-  o.histogramHeatmap(
+  o.histogramPercentiles(
     sdlcPipelineDur,
-    'SDLC: pipeline duration (all entities)',
-    'Bucket density of SDLC entity pipeline duration. Heatmap surfaces multimodality the p95 line hides.',
+    'SDLC: pipeline duration (p50/p95/p99)',
+    'SDLC pipeline duration percentiles aggregated across entities. Drop into the top-N table below to find the entity driving p95.',
     DS, SEL, w=12,
   ),
-  o.histogramHeatmap(
+  o.histogramPercentiles(
     codeFetchDur,
-    'Code: Gitaly fetch duration',
-    'Time downloading a repository archive from Gitaly. Slow tail here often explains slow code indexing.',
+    'Code: Gitaly fetch duration (p50/p95/p99)',
+    'Time downloading a repository archive from Gitaly. A slow tail here often explains slow code indexing.',
     DS, SEL, w=12,
   ),
   o.histogramTopN(
@@ -167,16 +174,16 @@ local reliability = [
   o.row('Reliability'),
   o.counterIncreaseBars(
     codeErrors,
-    'Code: errors by pipeline stage',
-    'Code indexing error counts per bucket, stacked by stage.',
-    DS, SEL, by=['stage'], unit='short', w=12,
+    'Code: errors by pipeline stage (1h windows)',
+    'Code indexing error counts in rolling 1h windows, stacked by stage. Falls back to a flat zero line during error-free windows so the panel never goes to "No data".',
+    DS, SEL, by=['stage'], unit='short', w=12, range='1h', or_zero=true,
   ),
   o.ratioPanel(
-    'SDLC: error rate by entity',
-    'SDLC pipeline errors over rows processed, per entity.',
+    'SDLC: error rate by entity (1h window)',
+    'SDLC pipeline errors over rows processed, per entity. The 1h rate window is wide enough that sporadic errors still register; a tighter window goes to "No data" between bursts.',
     'gkg_indexer_sdlc_pipeline_errors_total',
     'gkg_indexer_sdlc_pipeline_rows_processed_total',
-    DS, SEL, by=['entity'], range='5m', w=12,
+    DS, SEL, by=['entity'], range='1h', w=12,
   ),
   o.counterIncreaseBars(
     codeEmpty,
@@ -186,9 +193,9 @@ local reliability = [
   ),
   o.counterIncreaseBars(
     sdlcErrors,
-    'SDLC: errors by kind',
-    'SDLC pipeline error counts per bucket, stacked by error_kind.',
-    DS, SEL, by=['error_kind'], unit='short', w=12,
+    'SDLC: errors by kind (1h windows)',
+    'SDLC pipeline errors counted in rolling 1h windows, stacked by error_kind. Falls back to a flat zero line during error-free windows so the panel never goes to "No data".',
+    DS, SEL, by=['error_kind'], unit='short', w=12, range='1h', or_zero=true,
   ),
 ];
 

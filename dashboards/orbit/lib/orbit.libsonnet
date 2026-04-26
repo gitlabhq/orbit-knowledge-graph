@@ -53,6 +53,35 @@ local mergedSelector(selector, filter) = (
   if filter == '' then selector else selector + ', ' + filter
 );
 
+// Minimal URL encoder for the characters that show up in PromQL inside
+// Grafana data-link URLs. PromQL queries do not contain `%`, so we skip
+// that one and dodge the double-encoding pitfall.
+local urlEncode(s) = (
+  local pairs = [
+    [' ', '%20'], ['"', '%22'], ['#', '%23'], ['&', '%26'],
+    ['+', '%2B'], [',', '%2C'], ['/', '%2F'], [':', '%3A'],
+    ['<', '%3C'], ['=', '%3D'], ['>', '%3E'], ['?', '%3F'],
+    ['@', '%40'], ['[', '%5B'], [']', '%5D'], ['{', '%7B'],
+    ['|', '%7C'], ['}', '%7D'], ['(', '%28'], [')', '%29'],
+    ['*', '%2A'], ['\n', '%0A'],
+  ];
+  std.foldl(function(acc, p) std.strReplace(acc, p[0], p[1]), pairs, s)
+);
+
+// Build a Grafana data link that opens the given PromQL expression in
+// Explore over the dashboard's current time range. Grafana interpolates
+// $cluster, $__from, and $__to before the redirect.
+local exploreLink(expr, ds_uid='mimir-analytics-eventsdot', title='Open in Explore') = {
+  title: title,
+  url: '/explore?orgId=1&left=' + urlEncode(
+    '{"datasource":"' + ds_uid +
+    '","queries":[{"refId":"A","datasource":{"type":"prometheus","uid":"' + ds_uid +
+    '"},"expr":"' + expr +
+    '","range":true}],"range":{"from":"$__from","to":"$__to"}}'
+  ),
+  targetBlank: false,
+};
+
 local histogramQuantileExpr(prom_name, q, selector, interval, by) =
   'histogram_quantile(%g, sum by (%s) (rate(%s_bucket{%s}[%s])))' % [
     q,
@@ -135,13 +164,14 @@ local timeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H
   gridPos: { x: 0, y: 0, w: w, h: h },
 };
 
-local stat(title, description, t, unit='short', w=PANEL_W) = {
+local stat(title, description, t, unit='short', w=PANEL_W, h=STAT_H, links=[]) = {
   kind: 'panel',
   type: 'stat',
   title: title,
   description: description,
   datasource: t.datasource,
   targets: [t],
+  links: links,
   fieldConfig: {
     defaults: { unit: unit, noValue: '—' },
     overrides: [],
@@ -151,8 +181,9 @@ local stat(title, description, t, unit='short', w=PANEL_W) = {
     colorMode: 'value',
     graphMode: 'area',
     textMode: 'value_and_name',
+    justifyMode: 'auto',
   },
-  gridPos: { x: 0, y: 0, w: w, h: STAT_H },
+  gridPos: { x: 0, y: 0, w: w, h: h },
 };
 
 local row(title) = { kind: 'row', title: title, collapsed: false };
@@ -316,24 +347,36 @@ local sectionCollapsed(title, metrics, ds_var, selector) =
 
 // Single stat tile reading "X in dashboard window". The query uses
 // $__range so it always answers the user's current time picker.
-local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W) = (
+local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W, h=STAT_H) = (
   local sel = mergedSelector(selector, filter);
   local expr = 'sum(increase(%s{%s}[$__range]))' % [prom_name, sel];
-  stat(title, description, target(expr, title, ds_var), unit, w)
+  // Drill-through opens the underlying rate(metric{...}[5m]) in Explore
+  // over the same time range, broken out by the same labels.
+  local rate_expr = 'sum(rate(%s{%s}[5m]))' % [prom_name, sel];
+  stat(title, description, target(expr, title, ds_var), unit, w, h, [exploreLink(rate_expr)])
 );
 
 // Stacked bar timeseries showing count-per-bucket via increase(). The
 // envelope is total throughput, color is mix.
-local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true) = (
+local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true, or_zero=false) = (
   local labels = if by == null then spec.labels else by;
   local sel = mergedSelector(selector, filter);
   local prom = spec.prom_name;
   local expr = counterIncreaseExpr(prom, sel, range, labels);
+  // Optional fallback: synthesise a zero-valued series stamped with
+  // `<label>="(none)"` for each `by` label. Keeps the panel from going
+  // to "No data" during quiet windows for sparse counters.
+  local zero_fallback = std.foldl(
+    function(inner, l) 'label_replace(%s, "%s", "(none)", "", "")' % [inner, l],
+    labels,
+    'vector(0)',
+  );
+  local final_expr = if or_zero then '(%s) or %s' % [expr, zero_fallback] else expr;
   local u = if unit != null then unit else unitFor(spec, rate=false);
   barTimeseries(
     title,
     description,
-    [target(expr, legendFor(labels), ds_var)],
+    [target(final_expr, legendFor(labels), ds_var)],
     u,
     w,
     h,
@@ -377,8 +420,10 @@ local histogramTopN(spec, title, description, ds_var, selector, byLabel, n=10, f
 );
 
 // Ratio panel: numerator counter rate divided by denominator counter
-// rate, presented as a percent-unit time series. Returns 0 when the
-// denominator is empty so the panel does not render NaN gaps.
+// rate, presented as a percent-unit time series. The numerator is OR'd
+// with `denom*0` so every label combination in the denominator gets a
+// zero-valued numerator series, which keeps the panel from flipping to
+// "No data" during quiet windows when no errors have happened.
 local ratioPanel(title, description, num_prom, denom_prom, ds_var, selector, by=[], num_filter='', denom_filter='', range='5m', w=PANEL_W, h=PANEL_H, unit='percentunit') = (
   local nsel = mergedSelector(selector, num_filter);
   local dsel = mergedSelector(selector, denom_filter);
@@ -388,13 +433,37 @@ local ratioPanel(title, description, num_prom, denom_prom, ds_var, selector, by=
   local denom =
     if std.length(by) == 0 then 'sum(rate(%s{%s}[%s]))' % [denom_prom, dsel, range]
     else 'sum by (%s) (rate(%s{%s}[%s]))' % [std.join(', ', by), denom_prom, dsel, range];
-  local expr = '(%s) / (%s)' % [num, denom];
+  // `or (denom * 0)` adds a zero-valued series for every label
+  // combination in the denominator that has no matching numerator.
+  local num_safe = '((%s) or (%s) * 0)' % [num, denom];
+  local expr = '(%s) / (%s)' % [num_safe, denom];
   timeseries(title, description, [target(expr, if std.length(by) == 0 then 'ratio' else legendFor(by), ds_var)], unit, w, h)
 );
 
 // Stat tile showing the latest value of a gauge-style PromQL expression.
-local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W) =
-  stat(title, description, target(expr, title, ds_var), unit, w);
+local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W, h=STAT_H) =
+  stat(title, description, target(expr, title, ds_var), unit, w, h, [exploreLink(expr)]);
+
+// Single-panel histogram percentiles (p50, p95, p99). Same shape as the
+// existing `histogramPanels` two-panel pair but without the observation
+// rate, so the Latency row stays compact and easy to read.
+local histogramPercentiles(spec, title, description, ds_var, selector, by=[], filter='', range='5m', w=PANEL_W, h=PANEL_H) = (
+  local sel = mergedSelector(selector, filter);
+  local prom = spec.prom_name;
+  local lg = if std.length(by) == 0 then 'overall' else legendFor(by);
+  timeseries(
+    title,
+    description,
+    [
+      target(histogramQuantileExpr(prom, 0.50, sel, range, by), 'p50 ' + lg, ds_var, 'A'),
+      target(histogramQuantileExpr(prom, 0.95, sel, range, by), 'p95 ' + lg, ds_var, 'B'),
+      target(histogramQuantileExpr(prom, 0.99, sel, range, by), 'p99 ' + lg, ds_var, 'C'),
+    ],
+    unitFor(spec),
+    w,
+    h,
+  )
+);
 
 // ---------- External (non-catalog) metrics ----------
 
@@ -683,9 +752,13 @@ local RAILS_SEL = 'env=~"$rails_env"';
   counterRangeStat: counterRangeStat,
   counterIncreaseBars: counterIncreaseBars,
   histogramHeatmap: histogramHeatmap,
+  histogramPercentiles: histogramPercentiles,
   histogramTopN: histogramTopN,
   ratioPanel: ratioPanel,
   gaugeStat: gaugeStat,
+  // URL helpers
+  exploreLink: exploreLink,
+  urlEncode: urlEncode,
   // External-metric versions
   externalSection: externalSection,
   // Dashboard shell
