@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
-# Fetch the OpenCode OpenAPI spec matching the version pinned in mise.toml,
+# Fetch the OpenAPI spec for the mise-pinned opencode version,
 # then regenerate the Python SDK from it.
+#
+# The spec is fetched from the opencode GitHub repo at the matching
+# version tag. This is the same spec used to generate the official
+# JS SDK (packages/sdk/openapi.json).
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -14,25 +18,23 @@ if [ -z "$VERSION" ] || [ "$VERSION" = "null" ]; then
   exit 1
 fi
 
-# --- fetch spec ---
+# --- fetch spec from GitHub at the pinned version tag ---
 URL="https://raw.githubusercontent.com/anomalyco/opencode/v${VERSION}/packages/sdk/openapi.json"
 
 echo "fetching opencode openapi spec v${VERSION}"
-echo "  url: ${URL}"
-echo "  out: ${SPEC_PATH}"
+echo "  from: ${URL}"
 
 HTTP_CODE=$(curl -fsSL -w '%{http_code}' -o "$SPEC_PATH" "$URL")
 if [ "$HTTP_CODE" != "200" ]; then
   echo "error: failed to fetch spec (HTTP ${HTTP_CODE})" >&2
-  echo "  the tag v${VERSION} may not have packages/sdk/openapi.json" >&2
+  echo "  tag v${VERSION} may not have packages/sdk/openapi.json" >&2
   rm -f "$SPEC_PATH"
   exit 1
 fi
 
-echo "ok: $(wc -c < "$SPEC_PATH" | tr -d ' ') bytes written"
+echo "ok: $(wc -c < "$SPEC_PATH" | tr -d ' ') bytes"
 
 # --- regenerate SDK ---
-echo ""
 echo "regenerating python client -> ${SDK_DIR}"
 rm -rf "$SDK_DIR"
 uvx openapi-python-client generate \
