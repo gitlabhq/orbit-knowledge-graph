@@ -57,10 +57,17 @@ class Ctx:
 @click.group()
 @click.option("--config", "config_path", default="eval.yaml")
 @click.option("-v", "--verbose", is_flag=True)
+@click.option("--env", "gitlab_env", type=click.Choice(["production", "staging"]), default="production",
+              help="Which GitLab environment to target (reads matching env vars)")
 @click.pass_context
-def cli(ctx: click.Context, config_path: str, verbose: bool) -> None:
+def cli(ctx: click.Context, config_path: str, verbose: bool, gitlab_env: str) -> None:
     """GKG Agent Evaluation Harness."""
     _setup_logging(verbose)
+    if gitlab_env == "staging":
+        for var in ("GITLAB_TOKEN", "GITLAB_HOST"):
+            val = os.environ.get(f"{var}_STAGING")
+            if val:
+                os.environ[var] = val
     ctx.ensure_object(dict)
     ctx.obj["ctx"] = Ctx(config_path)
     ctx.obj["verbose"] = verbose

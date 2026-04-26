@@ -26,7 +26,7 @@ def _chdir():
     os.chdir(EVALS_DIR)
     os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
     os.environ.setdefault("GITLAB_TOKEN", "test-token")
-    os.environ.setdefault("GITLAB_HOST", "staging.gitlab.com")
+    os.environ.setdefault("GITLAB_HOST", "gitlab.com")
     yield
     os.chdir(orig)
 
@@ -41,7 +41,7 @@ def _make_test_db(db_path: Path):
 def _set_env(monkeypatch):
     """Set required env vars so config loading doesn't fail."""
     monkeypatch.setenv("GITLAB_TOKEN", "glpat-fake-test-token")
-    monkeypatch.setenv("GITLAB_HOST", "staging.gitlab.com")
+    monkeypatch.setenv("GITLAB_HOST", "gitlab.com")
 
 
 # ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ class TestConfig:
 
         cfg = load_config("eval.yaml")
         assert cfg.arms[0].env["GITLAB_TOKEN"] == "glpat-fake-test-token"
-        assert cfg.arms[0].env["GITLAB_HOST"] == "staging.gitlab.com"
+        assert cfg.arms[0].env["GITLAB_HOST"] == "gitlab.com"
 
     def test_missing_env_var_raises(self, monkeypatch):
         from harness.config import load_config

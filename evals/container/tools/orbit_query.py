@@ -24,7 +24,7 @@ Usage:
 
 Environment variables:
     GITLAB_TOKEN    (required) GitLab personal access token
-    GITLAB_HOST     (default: staging.gitlab.com)
+    GITLAB_HOST     (default: gitlab.com, set to staging.gitlab.com for staging)
 
 Exit codes:
     0  success
@@ -49,7 +49,7 @@ def _resolve_token() -> str | None:
     token = os.environ.get("GITLAB_TOKEN")
     if token:
         return token
-    host = os.environ.get("GITLAB_HOST", "staging.gitlab.com")
+    host = os.environ.get("GITLAB_HOST", "gitlab.com")
     try:
         result = subprocess.run(
             ["glab", "auth", "status", "--hostname", host, "--show-token"],
@@ -68,7 +68,7 @@ def _get_config() -> tuple[str, str]:
     if not token:
         print(json.dumps({"error": "auth_error", "message": "GITLAB_TOKEN not set and glab auth not available"}))
         sys.exit(2)
-    host = os.environ.get("GITLAB_HOST", "staging.gitlab.com")
+    host = os.environ.get("GITLAB_HOST", "gitlab.com")
     return host, token
 
 
