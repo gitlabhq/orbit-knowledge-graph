@@ -317,7 +317,8 @@ impl CodeIndexingPipeline {
         // outcomes (oversize, line-too-long, watchdog timeout) do not
         // page or skew error rates.
         for skipped in &result.files_skipped {
-            self.metrics.record_file_skipped(skipped.reason);
+            self.metrics
+                .record_file_skipped(skipped.reason, namespace_id);
         }
 
         let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();

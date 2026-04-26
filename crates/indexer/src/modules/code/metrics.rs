@@ -136,9 +136,14 @@ impl CodeMetrics {
         );
     }
 
-    pub(super) fn record_file_skipped(&self, reason: &'static str) {
-        self.files_skipped
-            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    pub(super) fn record_file_skipped(&self, reason: &'static str, namespace_id: &str) {
+        self.files_skipped.add(
+            1,
+            &[
+                KeyValue::new(code::labels::REASON, reason),
+                KeyValue::new(code::labels::NAMESPACE_ID, namespace_id.to_owned()),
+            ],
+        );
     }
 }
 
@@ -318,6 +323,23 @@ mod tests {
         let dps = find_counter_u64(&collected, "gkg.indexer.code.errors");
         let dp = dps.first().expect("errors point should exist");
         assert_eq!(attr_value(dp, "stage").as_deref(), Some("checkpoint"));
+        assert_eq!(
+            attr_value(dp, "top_level_namespace_id").as_deref(),
+            Some("9970")
+        );
+    }
+
+    #[test]
+    fn record_file_skipped_writes_namespace_label() {
+        let (provider, exporter) = provider_and_exporter();
+        let metrics = CodeMetrics::with_meter(&provider.meter("test"));
+
+        metrics.record_file_skipped("oversize", "9970");
+
+        let collected = collect(&provider, &exporter);
+        let dps = find_counter_u64(&collected, "gkg.indexer.code.files.skipped");
+        let dp = dps.first().expect("files_skipped point should exist");
+        assert_eq!(attr_value(dp, "reason").as_deref(), Some("oversize"));
         assert_eq!(
             attr_value(dp, "top_level_namespace_id").as_deref(),
             Some("9970")

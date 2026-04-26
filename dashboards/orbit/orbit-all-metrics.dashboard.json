@@ -1996,8 +1996,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (reason) (rate(gkg_indexer_code_files_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{reason}}",
+               "expr": "sum by (reason, top_level_namespace_id) (rate(gkg_indexer_code_files_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{reason}} / {{top_level_namespace_id}}",
                "refId": "A"
             }
          ],

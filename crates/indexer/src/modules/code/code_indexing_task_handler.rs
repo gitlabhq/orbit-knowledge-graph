@@ -12,9 +12,10 @@ use super::locking::project_lock_key;
 use super::metrics::{CodeMetrics, NAMESPACE_ID_UNKNOWN};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
-use crate::topic::{CodeIndexingTaskRequest, top_level_namespace_id};
+use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
+use gkg_utils::traversal_path::top_level_namespace_id;
 
 /// Sentinel branch value written to the checkpoint when the project is
 /// resolved as deleted from Rails (404) and we cannot determine its default

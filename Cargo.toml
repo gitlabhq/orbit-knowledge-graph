@@ -102,6 +102,7 @@ tokio-stream = "0.1.18"
 toml = "1.0.0"
 toon-format = { version = "0.4.1", default-features = false }
 opentelemetry = { version = "0.31", default-features = false, features = ["metrics"] }
+opentelemetry_sdk = { version = "0.31", features = ["metrics", "testing"] }
 tracing = "0.1.44"
 uuid = { version = "1.19.0", features = ["v4"] }
 async-nats = { version = "0.47.0", features = ["server_2_11"] }

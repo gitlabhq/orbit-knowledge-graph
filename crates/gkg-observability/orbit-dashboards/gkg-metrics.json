@@ -338,7 +338,8 @@
       "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize` (file exceeds the per-language byte ceiling), `line_too_long` (a single line exceeds the per-language character ceiling), `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
       "kind": "counter",
       "labels": [
-        "reason"
+        "reason",
+        "top_level_namespace_id"
       ],
       "stability": "stable",
       "domain": "indexer.code"

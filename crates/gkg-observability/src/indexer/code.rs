@@ -128,7 +128,7 @@ pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
      `line_too_long` (a single line exceeds the per-language character ceiling), \
      `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
     None,
-    &[labels::REASON],
+    &[labels::REASON, labels::NAMESPACE_ID],
     DOMAIN,
 );
 
