@@ -1777,7 +1777,8 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
         "query_type": "search",
         "node": {
             "id": "g",
-            "entity": "Group"
+            "entity": "Group",
+            "id_range": {"start": 1, "end": 10000}
         },
         "limit": 100
     }"#;
@@ -1999,6 +2000,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
         "node": {
             "id": "g",
             "entity": "Group",
+            "id_range": {"start": 1, "end": 10000},
             "columns": "*"
         },
         "limit": 10
@@ -2370,6 +2372,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
         "node": {
             "id": "p",
             "entity": "Project",
+            "id_range": {"start": 1, "end": 10000},
             "columns": ["id", "name", "visibility_level"]
         },
         "limit": 10
