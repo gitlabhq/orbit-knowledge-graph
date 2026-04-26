@@ -330,6 +330,17 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.files.skipped",
+      "prom_name": "gkg_indexer_code_files_skipped_total",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize` (file exceeds the per-language byte ceiling), `line_too_long` (a single line exceeds the per-language character ceiling), `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.handler.duration",
       "prom_name": "gkg_indexer_code_handler_duration_seconds",
       "description": "End-to-end duration of processing a single push event.",

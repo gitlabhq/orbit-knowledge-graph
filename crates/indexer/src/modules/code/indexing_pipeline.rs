@@ -291,6 +291,13 @@ impl CodeIndexingPipeline {
                 .add(1, &[KeyValue::new("stage", graph_error.stage())]);
         }
 
+        // Record benign per-file skips separately from errors so policy
+        // outcomes (oversize, line-too-long, watchdog timeout) do not
+        // page or skew error rates.
+        for skipped in &result.files_skipped {
+            self.metrics.record_file_skipped(skipped.reason);
+        }
+
         let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
         if parse_error_count > 0 {
             warn!(

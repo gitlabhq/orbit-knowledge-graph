@@ -145,10 +145,13 @@ impl LanguagePipeline for RustPipeline {
         let output = parse_rust_files(files, root_path, workspaces.as_ref())?;
         for error in &output.errors {
             tracing::warn!(path = %error.file_path, error = %error.error, "rust: skipped file");
-            ctx.record_error(CodeGraphError::ParseFailed {
-                path: error.file_path.clone(),
-                message: error.error.clone(),
-            });
+            match crate::v2::pipeline::classify_skip_message(&error.error) {
+                Some(reason) => ctx.record_file_skipped(error.file_path.clone(), reason),
+                None => ctx.record_error(CodeGraphError::ParseFailed {
+                    path: error.file_path.clone(),
+                    message: error.error.clone(),
+                }),
+            }
         }
         let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
