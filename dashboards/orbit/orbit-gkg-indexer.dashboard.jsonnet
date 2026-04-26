@@ -2,10 +2,11 @@
 //
 // Layout is story-shaped, not catalog-shaped:
 //   1. Health — four headline ratios for at-a-glance status.
-//   2. Volume — "how many X in the dashboard window?" stat tiles, with
-//               SDLC stacked above code (SDLC drives most prod volume),
-//               plus a per-entity breakdown for SDLC.
-//   3. Throughput — stacked bars of count-per-bucket via increase().
+//   2. Volume — "how many X in the dashboard window?" stat tiles,
+//               code first then SDLC.
+//   3. Throughput — SDLC rows-per-window as a smoothed line on the
+//               left, code projects-per-window as stacked bars on the
+//               right.
 //   4. Latency — heatmaps for the histograms, plus a top-N entity table.
 //   5. Reliability — error ratios and stage/kind breakdowns.
 //   6. Freshness and saturation — watermark lag per entity, ETL permits.
@@ -63,41 +64,8 @@ local health = [
 // Each tile is a stacked pair: a stat header (h=3) showing the count
 // over $__range and a thin timeseries strip below (h=2) showing the
 // rate over time. Hover the strip for exact values, click the arrow in
-// the header to drill the metric into Grafana Explore. SDLC sits above
-// code because SDLC drives most of the volume in prod.
+// the header to drill the metric into Grafana Explore.
 local volume = [
-  o.row('Volume in window — SDLC indexing'),
-] + o.volumeTiles([
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_rows_processed_total',
-    title: 'Rows ingested',
-    desc: 'Rows extracted and written by SDLC pipelines in the dashboard window.',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_datalake_query_bytes_total',
-    title: 'Bytes from datalake',
-    desc: 'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
-    unit: 'bytes',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_duration_seconds_count',
-    title: 'Pipeline runs',
-    desc: 'Total SDLC pipeline runs across all entities in the dashboard window.',
-  },
-  {
-    prom: 'gkg_indexer_sdlc_pipeline_errors_total',
-    title: 'Pipeline errors',
-    desc: 'Total SDLC pipeline failures in the dashboard window.',
-  },
-], DS, SEL, w=6) + [
-  // Per-entity breakdown: same window as the tiles above, stacked so the
-  // legend table below the chart shows total rows per entity.
-  o.counterIncreaseBars(
-    sdlcRows,
-    'SDLC: rows by entity (in window)',
-    'Rows ingested per entity over the dashboard window. Use the legend table to see per-entity totals; click a series to isolate it.',
-    DS, SEL, by=['entity'], unit='short', w=24, h=8, range='$__range', stack=true,
-  ),
   o.row('Volume in window — code indexing'),
 ] + o.volumeTiles([
   {
@@ -123,25 +91,51 @@ local volume = [
     title: 'Nodes and edges',
     desc: 'Graph nodes and edges indexed by the code handler in the dashboard window.',
   },
+], DS, SEL, w=6) + [
+  o.row('Volume in window — SDLC indexing'),
+] + o.volumeTiles([
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_rows_processed_total',
+    title: 'Rows ingested',
+    desc: 'Rows extracted and written by SDLC pipelines in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_datalake_query_bytes_total',
+    title: 'Bytes from datalake',
+    desc: 'Bytes returned by ClickHouse datalake extraction queries in the dashboard window.',
+    unit: 'bytes',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_duration_seconds_count',
+    title: 'Pipeline runs',
+    desc: 'Total SDLC pipeline runs across all entities in the dashboard window.',
+  },
+  {
+    prom: 'gkg_indexer_sdlc_pipeline_errors_total',
+    title: 'Pipeline errors',
+    desc: 'Total SDLC pipeline failures in the dashboard window.',
+  },
 ], DS, SEL, w=6);
 
 // 3. Throughput over time -------------------------------------------------
-// Each bar represents the count over one auto-sized window (Grafana's
-// `$__rate_interval`, ~2 to 4 minutes for a 3h time picker). The bar
-// envelope is total throughput, the colors are the per-label mix.
+// SDLC sits on the left because it carries most of the volume in prod.
+// Each data point is a count over one Grafana auto-window
+// (`$__rate_interval`, ~2 to 4 minutes for a 3h time picker). SDLC
+// renders as a smoothed line per entity; code renders as stacked bars
+// per outcome since the volume there is sparse and bars read better.
 local throughput = [
   o.row('Throughput over time'),
+  o.counterIncreaseBars(
+    sdlcRows,
+    'SDLC: rows ingested over time',
+    'SDLC pipeline rows processed per Grafana auto-window, drawn as a smoothed trend line per entity.',
+    DS, SEL, by=['entity'], unit='short', w=12, draw='line', stack=false,
+  ),
   o.counterIncreaseBars(
     codeCompleted,
     'Code: projects indexed over time',
     'Repository indexing runs, stacked by outcome.',
     DS, SEL, by=['outcome'], unit='short', w=12,
-  ),
-  o.counterIncreaseBars(
-    sdlcRows,
-    'SDLC: rows ingested over time',
-    'SDLC pipeline rows processed per Grafana auto-window, drawn as a smoothed trend line per entity. Same windowing as the bar variants in this row, just easier to read for long, dense series.',
-    DS, SEL, by=['entity'], unit='short', w=12, draw='line', stack=false,
   ),
 ];
 
