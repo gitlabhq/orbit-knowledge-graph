@@ -203,7 +203,13 @@
     "QueryType": {
       "type": "string",
       "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors"]
+      "oneOf": [
+        { "const": "traversal", "description": "Multi-node graph traversal, or single-node table scan (1 node, 0 relationships)" },
+        { "const": "aggregation", "description": "Aggregate values (count, sum, avg, min, max) across graph relationships" },
+        { "const": "path_finding", "description": "Find paths between two pinned endpoint nodes" },
+        { "const": "search", "description": "DEPRECATED: use 'traversal' with a single node and no relationships. Kept for integration tests only, not supported for new queries." },
+        { "const": "neighbors", "description": "Find immediate neighbors of a center node" }
+      ]
     },
     "EntityType": {
       "type": "string",
