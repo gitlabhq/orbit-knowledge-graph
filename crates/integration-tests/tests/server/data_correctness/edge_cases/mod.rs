@@ -13,8 +13,8 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]},
-                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004]}
+                {"id": "g", "entity": "Group"},
+                {"id": "p", "entity": "Project"}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -84,7 +84,7 @@ pub(super) async fn sip_prefilter_with_node_ids_returns_correct_results(ctx: &Te
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 3]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -110,7 +110,7 @@ pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &Test
             "nodes": [
                 {"id": "u", "entity": "User", "columns": ["username", "user_type"],
                  "filters": {"user_type": "project_bot"}},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 20
@@ -202,7 +202,7 @@ pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &Tes
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"]}
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 20
@@ -272,7 +272,7 @@ pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]}
+                {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 50
@@ -307,7 +307,7 @@ pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestC
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"]}
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "limit": 20
@@ -341,7 +341,7 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
             "query_type": "aggregation",
             "nodes": [
                 {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
             "aggregations": [{"function": "count", "target": "p", "group_by": "g", "alias": "project_count"}],

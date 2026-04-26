@@ -239,7 +239,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100
@@ -260,7 +260,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -287,7 +287,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -311,7 +311,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 100,
@@ -402,7 +402,7 @@ pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &Tes
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
-            {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300]}
+            {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 100,
@@ -434,7 +434,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
         "query_type": "aggregation",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["id", "username"]},
-            {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]}
+            {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
@@ -473,7 +473,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+                {"id": "end", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]}
@@ -502,7 +502,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+                {"id": "end", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
@@ -524,7 +524,7 @@ pub(super) async fn cursor_path_finding_pages_cover_all_paths(ctx: &TestContext)
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+                {"id": "end", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                      "rel_types": ["MEMBER_OF", "CONTAINS"]},
@@ -566,7 +566,7 @@ pub(super) async fn cursor_path_finding_is_deterministic(ctx: &TestContext) {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
                  "rel_types": ["MEMBER_OF", "CONTAINS"]},
