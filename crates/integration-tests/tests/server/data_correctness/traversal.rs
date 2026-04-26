@@ -243,7 +243,7 @@ pub(super) async fn traversal_incoming_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"], "node_ids": [100]},
+                {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100]},
                 {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
@@ -353,7 +353,7 @@ pub(super) async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
                 {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -379,7 +379,7 @@ pub(super) async fn traversal_shared_target_fan_in(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"], "node_ids": [2000]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title"], "node_ids": [2000]},
                 {"id": "n", "entity": "Note", "node_ids": [3000, 3001, 3002, 3003], "columns": ["note"]}
             ],
             "relationships": [{"type": "HAS_NOTE", "from": "mr", "to": "n"}],
@@ -450,7 +450,7 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"], "node_ids": [1, 2]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2]},
                 {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003], "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],

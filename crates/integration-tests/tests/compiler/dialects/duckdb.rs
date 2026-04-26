@@ -14,7 +14,7 @@ fn search_uses_positional_params() {
     let result = compile_local(
         r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
+        "node": {"id": "u", "entity": "User", "columns": ["username"],
                  "filters": {"username": "alice"}},
         "limit": 10
     }"#,

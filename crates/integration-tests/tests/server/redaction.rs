@@ -2321,7 +2321,6 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
         "node": {
             "id": "u",
             "entity": "User",
-            "node_ids": [1],
             "columns": ["username", "name", "state"],
             "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
         },
@@ -2684,7 +2683,6 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
         "node": {
             "id": "u",
             "entity": "User",
-            "node_ids": [1],
             "columns": ["username"],
             "filters": {"state": "active"}
         },
@@ -3770,7 +3768,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["user_type"], "filters": {"user_type": 0}}
+        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3803,7 +3801,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // Filter by int 6 should be coerced to "project_bot"
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["user_type"], "filters": {"user_type": 6}}
+        "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3825,7 +3823,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["state"], "filters": {"state": 1}}
+        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3853,7 +3851,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // Filter by int 3 should be coerced to "merged"
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["state"], "filters": {"state": 3}}
+        "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3891,7 +3889,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["state"], "filters": {"state": "active"}}
+        "node": {"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();

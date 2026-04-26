@@ -515,7 +515,7 @@ async fn traversal_with_filter(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"], "filters": {"state": "blocked"}},
+                {"id": "u", "entity": "User", "columns": ["username", "state"], "filters": {"state": "blocked"}},
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1646,7 +1646,7 @@ async fn search_datetime_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note", "created_at"], "node_ids": [9000]},
+            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1679,7 +1679,7 @@ async fn search_nullable_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note", "created_at"], "node_ids": [3000]},
+            "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1711,7 +1711,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": "*", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1938,7 +1938,7 @@ async fn filter_in_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1963,7 +1963,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1987,7 +1987,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2008,7 +2008,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}},
+            "node": {"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2040,7 +2040,7 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [2, 4]},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2096,7 +2096,7 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [99999]},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2120,7 +2120,7 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
             ],
             "relationships": [{
@@ -2163,7 +2163,7 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
             ],
             "relationships": [{
@@ -2203,7 +2203,7 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
+                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
                 {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
             ],
             "relationships": [{

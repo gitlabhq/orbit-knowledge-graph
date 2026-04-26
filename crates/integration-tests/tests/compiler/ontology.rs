@@ -43,7 +43,7 @@ fn invalid_column_in_order_by() {
 fn valid_column_in_filter() {
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "filters": {"username": "admin"}},
+        "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": "admin"}},
         "limit": 10
     }"#;
     assert!(compile(json, &embedded_ontology(), &test_ctx()).is_ok());
@@ -54,7 +54,7 @@ fn invalid_column_in_filter() {
     let err = compile(
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "filters": {"nonexistent_column": "value"}},
+            "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"nonexistent_column": "value"}},
             "limit": 10
         }"#,
         &embedded_ontology(), &test_ctx(),
@@ -115,8 +115,8 @@ fn full_pipeline() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"], "filters": {"confidential": true}},
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
+            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
+            {"id": "u", "entity": "User", "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
@@ -338,7 +338,7 @@ fn multi_hop_traversal_generates_union_subquery() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
@@ -358,7 +358,7 @@ fn multi_hop_with_min_hops_filter() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
@@ -397,7 +397,7 @@ fn multi_hop_aggregation() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
             {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],

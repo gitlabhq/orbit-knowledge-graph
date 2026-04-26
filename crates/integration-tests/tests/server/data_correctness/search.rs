@@ -193,7 +193,7 @@ pub(super) async fn search_node_ids_returns_only_specified(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "g", "entity": "Group", "node_ids": [100, 101, 102, 200, 300], "columns": ["name"], "node_ids": [100, 102]},
+            "node": {"id": "g", "entity": "Group", "columns": ["name"], "node_ids": [100, 102]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -332,7 +332,7 @@ pub(super) async fn search_wildcard_columns_returns_all_ontology_fields(ctx: &Te
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": "*", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
         &allow_all(),

@@ -116,7 +116,7 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1000]}
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
@@ -238,7 +238,7 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1002]}
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],
@@ -651,7 +651,7 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-                {"id": "p", "entity": "Project", "node_ids": [1000, 1001, 1002, 1003, 1004], "columns": ["name"], "node_ids": [1002]}
+                {"id": "p", "entity": "Project", "columns": ["name"], "node_ids": [1002]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "mr_count"}],

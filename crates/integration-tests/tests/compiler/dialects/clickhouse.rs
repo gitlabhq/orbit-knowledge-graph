@@ -25,7 +25,7 @@ fn traversal_query() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"], "filters": {"confidential": true}},
+            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -163,7 +163,7 @@ fn path_finding_depth_control() {
 fn neighbors_query() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [100]},
+        "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
         "neighbors": {"node": "u", "direction": "both"}
     }"#;
 

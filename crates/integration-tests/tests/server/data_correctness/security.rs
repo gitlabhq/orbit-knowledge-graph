@@ -332,7 +332,7 @@ pub(super) async fn admin_only_non_admin_wildcard_columns_excludes_admin_fields(
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": "*", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -461,7 +461,7 @@ pub(super) async fn admin_only_admin_wildcard_columns_includes_admin_fields(ctx:
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": "*", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
         &allow_all(),
