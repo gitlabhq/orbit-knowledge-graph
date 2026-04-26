@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
+const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
@@ -103,7 +104,7 @@ impl NatsBroker {
 
         for (stream_name, subjects) in managed_streams {
             self.inner
-                .create_or_update_stream(stream_name, subjects)
+                .create_or_update_stream(stream_name, subjects, None)
                 .await?;
         }
 
@@ -119,7 +120,7 @@ impl NatsBroker {
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
         let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
         self.inner
-            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject])
+            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject], Some(DEAD_LETTER_MAX_AGE))
             .await?;
         Ok(())
     }
