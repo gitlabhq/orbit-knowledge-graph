@@ -108,7 +108,7 @@ fn path_finding() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [100]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#,

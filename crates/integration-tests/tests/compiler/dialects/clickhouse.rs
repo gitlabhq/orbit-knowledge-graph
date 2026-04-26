@@ -91,7 +91,7 @@ fn path_finding_query() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [100]},
-            {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [200]}
+            {"id": "end", "entity": "Project", "columns": ["name"]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -122,7 +122,7 @@ fn path_finding_depth_control() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
-            {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
+            {"id": "end", "entity": "Project", "columns": ["name"]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
     }"#;
@@ -131,7 +131,7 @@ fn path_finding_depth_control() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "Project", "columns": ["name"], "node_ids": [1]},
-            {"id": "end", "entity": "Project", "columns": ["name"], "node_ids": [2]}
+            {"id": "end", "entity": "Project", "columns": ["name"]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -341,7 +341,7 @@ fn multi_table_single_type_routes_to_default() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
@@ -387,7 +387,7 @@ fn multi_table_wildcard_scans_all_tables() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
@@ -414,7 +414,7 @@ fn multi_table_mixed_types_scans_both_tables() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
@@ -437,7 +437,7 @@ fn single_table_ontology_no_union() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
@@ -456,7 +456,7 @@ fn multi_table_path_finding_scans_all_tables() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Definition", "node_ids": [100]}
+            {"id": "end", "entity": "Definition"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;

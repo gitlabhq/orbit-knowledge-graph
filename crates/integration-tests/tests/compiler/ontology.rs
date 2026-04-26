@@ -239,7 +239,7 @@ fn traversal_with_columns() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
         "limit": 10
@@ -284,7 +284,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
-            {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
+            {"id": "end", "entity": "Project", "columns": ["name"]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -302,7 +302,7 @@ fn result_context_populated() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "CONTAINS", "from": "u", "to": "p"}],
         "limit": 10
@@ -339,7 +339,7 @@ fn multi_hop_traversal_generates_union_subquery() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
         "limit": 25
@@ -359,7 +359,7 @@ fn multi_hop_with_min_hops_filter() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
         "limit": 10
@@ -398,7 +398,7 @@ fn multi_hop_aggregation() {
         "query_type": "aggregation",
         "nodes": [
             {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
         "aggregations": [{"function": "count", "target": "p", "group_by": "u", "alias": "project_count"}],
@@ -514,7 +514,7 @@ fn cursor_pagination_validation() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p"}],
         "limit": 50,
