@@ -42,6 +42,17 @@ local counterRateExpr(prom_name, selector, interval, by) = (
     'sum by (%s) (rate(%s{%s}[%s]))' % [std.join(', ', by), prom_name, selector, interval]
 );
 
+local counterIncreaseExpr(prom_name, selector, range, by) = (
+  if std.length(by) == 0 then
+    'sum(increase(%s{%s}[%s]))' % [prom_name, selector, range]
+  else
+    'sum by (%s) (increase(%s{%s}[%s]))' % [std.join(', ', by), prom_name, selector, range]
+);
+
+local mergedSelector(selector, filter) = (
+  if filter == '' then selector else selector + ', ' + filter
+);
+
 local histogramQuantileExpr(prom_name, q, selector, interval, by) =
   'histogram_quantile(%g, sum by (%s) (rate(%s_bucket{%s}[%s])))' % [
     q,
@@ -144,7 +155,92 @@ local stat(title, description, t, unit='short', w=PANEL_W) = {
   gridPos: { x: 0, y: 0, w: w, h: STAT_H },
 };
 
-local row(title) = { kind: 'row', title: title };
+local row(title) = { kind: 'row', title: title, collapsed: false };
+
+local rowCollapsed(title) = { kind: 'row', title: title, collapsed: true };
+
+// Bar timeseries variant. Stacks when `stack=true`, used to render
+// `increase()` per bucket so each bar reads as "count in this window".
+local barTimeseries(title, description, targets, unit='short', w=PANEL_W, h=PANEL_H, stack=true) = {
+  kind: 'panel',
+  type: 'timeseries',
+  title: title,
+  description: description,
+  datasource: if std.length(targets) > 0 then targets[0].datasource else null,
+  targets: targets,
+  fieldConfig: {
+    defaults: {
+      custom: {
+        drawStyle: 'bars',
+        lineInterpolation: 'linear',
+        fillOpacity: 70,
+        showPoints: 'never',
+        stacking: if stack then { mode: 'normal', group: 'A' } else { mode: 'none' },
+        barAlignment: 0,
+      },
+      unit: unit,
+    },
+    overrides: [],
+  },
+  options: {
+    legend: { displayMode: 'table', placement: 'bottom', calcs: ['lastNotNull', 'max', 'sum'] },
+    tooltip: { mode: 'multi' },
+  },
+  gridPos: { x: 0, y: 0, w: w, h: h },
+};
+
+// Heatmap panel for a Prometheus histogram. Reads `<name>_bucket` and
+// renders bucket density over time.
+local heatmap(title, description, expr, ds_var, unit='s', w=PANEL_W, h=PANEL_H) = {
+  kind: 'panel',
+  type: 'heatmap',
+  title: title,
+  description: description,
+  datasource: datasource(ds_var),
+  targets: [{
+    datasource: datasource(ds_var),
+    expr: expr,
+    format: 'heatmap',
+    legendFormat: '{{le}}',
+    refId: 'A',
+  }],
+  options: {
+    calculate: false,
+    yAxis: { axisPlacement: 'left', reverse: false, unit: unit },
+    rowsFrame: { layout: 'auto' },
+    color: { mode: 'scheme', scheme: 'Spectral', exponent: 0.5, steps: 64, fill: 'dark-orange', reverse: false },
+    cellGap: 1,
+    cellValues: { unit: 'short' },
+    legend: { show: true },
+    tooltip: { show: true, yHistogram: true },
+    filterValues: { le: 1e-9 },
+  },
+  gridPos: { x: 0, y: 0, w: w, h: h },
+};
+
+// Table panel. Each target should set `format: 'table', instant: true`.
+local tablePanel(title, description, targets, w=PANEL_W, h=PANEL_H, sortBy=null) = {
+  kind: 'panel',
+  type: 'table',
+  title: title,
+  description: description,
+  datasource: targets[0].datasource,
+  targets: targets,
+  fieldConfig: {
+    defaults: {
+      unit: 'short',
+      custom: { align: 'auto', cellOptions: { type: 'auto' }, filterable: true },
+    },
+    overrides: [],
+  },
+  options: {
+    showHeader: true,
+    sortBy: if sortBy != null then [{ displayName: sortBy, desc: true }] else [],
+    cellHeight: 'sm',
+    footer: { show: false },
+  },
+  gridPos: { x: 0, y: 0, w: w, h: h },
+};
 
 // ---------- Catalog-driven panel constructors ----------
 
@@ -211,6 +307,94 @@ local panelsFor(spec, ds_var, selector) = (
 // Returns [row(title), ...panels for every metric in `metrics`].
 local section(title, metrics, ds_var, selector) =
   [row(title)] + std.flattenArrays([panelsFor(m, ds_var, selector) for m in metrics]);
+
+// Returns the same as `section` but the row is collapsed by default.
+local sectionCollapsed(title, metrics, ds_var, selector) =
+  [rowCollapsed(title)] + std.flattenArrays([panelsFor(m, ds_var, selector) for m in metrics]);
+
+// ---------- Story-shaped panel constructors ----------
+
+// Single stat tile reading "X in dashboard window". The query uses
+// $__range so it always answers the user's current time picker.
+local counterRangeStat(prom_name, title, description, ds_var, selector, filter='', unit='short', w=PANEL_W) = (
+  local sel = mergedSelector(selector, filter);
+  local expr = 'sum(increase(%s{%s}[$__range]))' % [prom_name, sel];
+  stat(title, description, target(expr, title, ds_var), unit, w)
+);
+
+// Stacked bar timeseries showing count-per-bucket via increase(). The
+// envelope is total throughput, color is mix.
+local counterIncreaseBars(spec, title, description, ds_var, selector, by=null, filter='', unit=null, w=PANEL_W, h=PANEL_H, range='$__rate_interval', stack=true) = (
+  local labels = if by == null then spec.labels else by;
+  local sel = mergedSelector(selector, filter);
+  local prom = spec.prom_name;
+  local expr = counterIncreaseExpr(prom, sel, range, labels);
+  local u = if unit != null then unit else unitFor(spec, rate=false);
+  barTimeseries(
+    title,
+    description,
+    [target(expr, legendFor(labels), ds_var)],
+    u,
+    w,
+    h,
+    stack,
+  )
+);
+
+// Heatmap of a histogram metric's buckets over time.
+local histogramHeatmap(spec, title, description, ds_var, selector, filter='', range='$__rate_interval', w=PANEL_W, h=PANEL_H) = (
+  local sel = mergedSelector(selector, filter);
+  local prom = spec.prom_name;
+  local expr = 'sum by (le) (rate(%s_bucket{%s}[%s]))' % [prom, sel, range];
+  heatmap(title, description, expr, ds_var, unitFor(spec), w, h)
+);
+
+// Top-N table of slowest series by p95, with p50/p95/p99 columns. Uses
+// the dashboard `$__range` so the table reflects the time picker.
+local histogramTopN(spec, title, description, ds_var, selector, byLabel, n=10, filter='', w=PANEL_W, h=PANEL_H) = (
+  local sel = mergedSelector(selector, filter);
+  local prom = spec.prom_name;
+  local mkTarget(q, ref, alias) = {
+    datasource: datasource(ds_var),
+    expr: 'topk(%d, histogram_quantile(%g, sum by (%s, le) (rate(%s_bucket{%s}[$__range]))))' % [n, q, byLabel, prom, sel],
+    format: 'table',
+    instant: true,
+    legendFormat: alias,
+    refId: ref,
+  };
+  tablePanel(
+    title,
+    description,
+    [
+      mkTarget(0.50, 'A', 'p50'),
+      mkTarget(0.95, 'B', 'p95'),
+      mkTarget(0.99, 'C', 'p99'),
+    ],
+    w,
+    h,
+    sortBy='Value #B',
+  )
+);
+
+// Ratio panel: numerator counter rate divided by denominator counter
+// rate, presented as a percent-unit time series. Returns 0 when the
+// denominator is empty so the panel does not render NaN gaps.
+local ratioPanel(title, description, num_prom, denom_prom, ds_var, selector, by=[], num_filter='', denom_filter='', range='5m', w=PANEL_W, h=PANEL_H, unit='percentunit') = (
+  local nsel = mergedSelector(selector, num_filter);
+  local dsel = mergedSelector(selector, denom_filter);
+  local num =
+    if std.length(by) == 0 then 'sum(rate(%s{%s}[%s]))' % [num_prom, nsel, range]
+    else 'sum by (%s) (rate(%s{%s}[%s]))' % [std.join(', ', by), num_prom, nsel, range];
+  local denom =
+    if std.length(by) == 0 then 'sum(rate(%s{%s}[%s]))' % [denom_prom, dsel, range]
+    else 'sum by (%s) (rate(%s{%s}[%s]))' % [std.join(', ', by), denom_prom, dsel, range];
+  local expr = '(%s) / (%s)' % [num, denom];
+  timeseries(title, description, [target(expr, if std.length(by) == 0 then 'ratio' else legendFor(by), ds_var)], unit, w, h)
+);
+
+// Stat tile showing the latest value of a gauge-style PromQL expression.
+local gaugeStat(title, description, expr, ds_var, unit='short', w=PANEL_W) =
+  stat(title, description, target(expr, title, ds_var), unit, w);
 
 // ---------- External (non-catalog) metrics ----------
 
@@ -288,25 +472,49 @@ local externalSection(title, metrics, ds_var, selector) =
 // ---------- Layout (assigns gridPos + ids) ----------
 
 local layoutItems(items) = (
+  // Panels under a `collapsed: true` row must live inside that row's
+  // `panels` array, not at the top level. We track that row in the
+  // accumulator and flush it on the next row boundary or at the end.
+  local flushCollapsed(acc) =
+    if acc.collapsed_open then
+      acc.result + [acc.collapsed_row { panels: acc.collapsed_panels }]
+    else acc.result;
   local step(acc, item) = (
     if item.kind == 'row' then
-      // Flush current row of panels, then drop the row header on its own line.
+      local result0 = flushCollapsed(acc);
       local y = if acc.row_max_h > 0 then acc.row_y + acc.row_max_h else acc.row_y;
-      acc {
-        result: acc.result + [{
-          id: acc.next_id,
-          type: 'row',
-          title: item.title,
-          collapsed: false,
-          gridPos: { h: 1, w: GRID_WIDTH, x: 0, y: y },
-          panels: [],
-        }],
-        next_id: acc.next_id + 1,
-        y: y + 1,
-        row_y: y + 1,
-        cursor_x: 0,
-        row_max_h: 0,
-      }
+      local collapsed = std.objectHas(item, 'collapsed') && item.collapsed;
+      local row_obj = {
+        id: acc.next_id,
+        type: 'row',
+        title: item.title,
+        collapsed: collapsed,
+        gridPos: { h: 1, w: GRID_WIDTH, x: 0, y: y },
+        panels: [],
+      };
+      if collapsed then
+        acc {
+          result: result0,
+          next_id: acc.next_id + 1,
+          y: y + 1,
+          row_y: y + 1,
+          cursor_x: 0,
+          row_max_h: 0,
+          collapsed_open: true,
+          collapsed_row: row_obj,
+          collapsed_panels: [],
+        }
+      else
+        acc {
+          result: result0 + [row_obj],
+          next_id: acc.next_id + 1,
+          y: y + 1,
+          row_y: y + 1,
+          cursor_x: 0,
+          row_max_h: 0,
+          collapsed_open: false,
+          collapsed_panels: [],
+        }
     else
       // Panel: wrap to a new row when the panel would overflow GRID_WIDTH.
       local w = item.gridPos.w;
@@ -319,15 +527,23 @@ local layoutItems(items) = (
         id: acc.next_id,
         gridPos: { x: cursor_x, y: row_y, w: w, h: h },
       };
-      // Strip our internal `kind` marker so the JSON is pure Grafana shape.
       local cleaned = std.prune(placed { kind: null });
-      acc {
-        result: acc.result + [cleaned],
-        next_id: acc.next_id + 1,
-        cursor_x: cursor_x + w,
-        row_y: row_y,
-        row_max_h: std.max(row_max_h, h),
-      }
+      if acc.collapsed_open then
+        acc {
+          collapsed_panels: acc.collapsed_panels + [cleaned],
+          next_id: acc.next_id + 1,
+          cursor_x: cursor_x + w,
+          row_y: row_y,
+          row_max_h: std.max(row_max_h, h),
+        }
+      else
+        acc {
+          result: acc.result + [cleaned],
+          next_id: acc.next_id + 1,
+          cursor_x: cursor_x + w,
+          row_y: row_y,
+          row_max_h: std.max(row_max_h, h),
+        }
   );
   local final = std.foldl(step, items, {
     result: [],
@@ -336,8 +552,11 @@ local layoutItems(items) = (
     row_y: 0,
     cursor_x: 0,
     row_max_h: 0,
+    collapsed_open: false,
+    collapsed_row: {},
+    collapsed_panels: [],
   });
-  final.result
+  flushCollapsed(final)
 );
 
 // ---------- Templating + dashboard shell ----------
@@ -440,20 +659,33 @@ local RAILS_SEL = 'env=~"$rails_env"';
   metricsInDomain: metricsInDomain,
   // PromQL string builders
   counterRateExpr: counterRateExpr,
+  counterIncreaseExpr: counterIncreaseExpr,
   histogramQuantileExpr: histogramQuantileExpr,
   histogramCountRateExpr: histogramCountRateExpr,
   gaugeExpr: gaugeExpr,
   // Panel primitives
   target: target,
   timeseries: timeseries,
+  barTimeseries: barTimeseries,
+  heatmap: heatmap,
+  tablePanel: tablePanel,
   stat: stat,
   row: row,
+  rowCollapsed: rowCollapsed,
   // Catalog-driven
   counterPanels: counterPanels,
   histogramPanels: histogramPanels,
   gaugePanels: gaugePanels,
   panelsFor: panelsFor,
   section: section,
+  sectionCollapsed: sectionCollapsed,
+  // Story-shaped helpers
+  counterRangeStat: counterRangeStat,
+  counterIncreaseBars: counterIncreaseBars,
+  histogramHeatmap: histogramHeatmap,
+  histogramTopN: histogramTopN,
+  ratioPanel: ratioPanel,
+  gaugeStat: gaugeStat,
   // External-metric versions
   externalSection: externalSection,
   // Dashboard shell
