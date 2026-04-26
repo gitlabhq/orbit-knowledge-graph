@@ -93,7 +93,8 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage |
+| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage. Excludes benign skips (see `files.skipped`) so the rate reflects real failures only. |
+| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, line_too_long, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
 
 *Namespace deletion module metrics:*
 

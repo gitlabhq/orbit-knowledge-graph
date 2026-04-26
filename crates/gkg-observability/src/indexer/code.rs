@@ -114,6 +114,17 @@ pub const ERRORS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.files.skipped",
+    "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
+     Not an error. Reasons: `oversize` (file exceeds the per-language byte ceiling), \
+     `line_too_long` (a single line exceeds the per-language character ceiling), \
+     `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
+    None,
+    &[labels::REASON],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
@@ -127,4 +138,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &FILES_PROCESSED,
     &NODES_INDEXED,
     &ERRORS,
+    &FILES_SKIPPED,
 ];

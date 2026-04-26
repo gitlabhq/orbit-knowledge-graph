@@ -111,6 +111,7 @@ mod tests {
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
             graph_errors: std::sync::Mutex::new(Vec::new()),
+            files_skipped: std::sync::Mutex::new(Vec::new()),
         })
     }
 
