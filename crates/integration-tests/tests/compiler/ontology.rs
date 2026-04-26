@@ -1364,8 +1364,21 @@ fn code_graph_edge_union_routes_to_code_table() {
         rendered.contains("gl_code_edge"),
         "code-graph edges should scan gl_code_edge: {rendered}"
     );
+    // Match `gl_edge` only when it is a standalone identifier so the assertion
+    // does not get fooled by `gl_code_edge` (which contains the substring
+    // `_edge`) or future suffixed table names. `gl_edge` followed by an
+    // alphanumeric or underscore is a different identifier and must not flag.
+    let mentions_sdlc_edge = rendered.match_indices("gl_edge").any(|(idx, _)| {
+        let after = rendered.as_bytes().get(idx + "gl_edge".len()).copied();
+        let before = idx
+            .checked_sub(1)
+            .and_then(|i| rendered.as_bytes().get(i).copied());
+        let next_is_ident = matches!(after, Some(b) if b.is_ascii_alphanumeric() || b == b'_');
+        let prev_is_ident = matches!(before, Some(b) if b.is_ascii_alphanumeric() || b == b'_');
+        !next_is_ident && !prev_is_ident
+    });
     assert!(
-        !rendered.contains(" gl_edge "),
+        !mentions_sdlc_edge,
         "code-graph edges should not touch SDLC gl_edge: {rendered}"
     );
 }
