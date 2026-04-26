@@ -1,0 +1,9 @@
+# config/ontology/edges/extends.yaml
+
+description: Class inheritance relationships in source code
+table: gl_code_edge
+
+variants:
+  - from_node: { type: Definition, id: id }
+    to_node: { type: Definition, id: id }
+    description: "Class or interface extends another class or interface."

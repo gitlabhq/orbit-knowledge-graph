@@ -6,7 +6,6 @@
 use crate::v2::config::Language;
 
 use crate::v2::langs::custom::js::JsPipeline;
-use crate::v2::langs::custom::ruby::RubyPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
 use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
@@ -86,7 +85,6 @@ register_v2_pipelines! {
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
     Tag("js") => [JsPipeline],
-    Tag("ruby_prism") => [RubyPipeline],
 }
 
 #[cfg(test)]

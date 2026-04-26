@@ -1236,6 +1236,34 @@ fn pinned_traversal_narrows_joined_node_via_nf_cte() {
     );
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Code-graph edges (CALLS, EXTENDS) — registered in schema.yaml
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[test]
+fn calls_traversal_compiles_against_embedded_ontology() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "columns": ["name"]},
+            {"id": "callee", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_code_edge"),
+        "CALLS should scan gl_code_edge: {rendered}"
+    );
+    assert!(
+        rendered.contains("'CALLS'"),
+        "CALLS relationship_kind should appear in SQL: {rendered}"
+    );
+}
+
 #[test]
 fn aggregation_count_in_clause_pushes_project_id() {
     let json = r#"{
@@ -1254,5 +1282,90 @@ fn aggregation_count_in_clause_pushes_project_id() {
     assert!(
         inner.contains("project_id"),
         "project_id IN must appear inside dedup subquery: {rendered}"
+    );
+}
+
+#[test]
+fn extends_traversal_compiles_against_embedded_ontology() {
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "child", "entity": "Definition", "columns": ["name"]},
+            {"id": "parent", "entity": "Definition", "columns": ["name"]}
+        ],
+        "relationships": [{"type": "EXTENDS", "from": "child", "to": "parent"}],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_code_edge"),
+        "EXTENDS should scan gl_code_edge: {rendered}"
+    );
+    assert!(
+        rendered.contains("'EXTENDS'"),
+        "EXTENDS relationship_kind should appear in SQL: {rendered}"
+    );
+}
+
+#[test]
+fn calls_to_imported_symbol_variant_compiles() {
+    // Exercises the File→ImportedSymbol and Definition→ImportedSymbol variants
+    // declared in calls.yaml.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "caller", "entity": "Definition", "columns": ["name"]},
+            {"id": "sym", "entity": "ImportedSymbol", "columns": ["identifier_name"]}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "sym"}],
+        "limit": 10
+    }"#;
+
+    assert!(compile(json, &embedded_ontology(), &admin_ctx()).is_ok());
+}
+
+#[test]
+fn calls_aggregation_compiles() {
+    let json = r#"{
+        "query_type": "aggregation",
+        "nodes": [
+            {"id": "caller", "entity": "Definition"},
+            {"id": "callee", "entity": "Definition"}
+        ],
+        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
+        "limit": 1
+    }"#;
+
+    assert!(compile(json, &embedded_ontology(), &admin_ctx()).is_ok());
+}
+
+#[test]
+fn code_graph_edge_union_routes_to_code_table() {
+    // CALLS, EXTENDS, DEFINES, IMPORTS all route to gl_code_edge — a UNION
+    // ALL across them must touch only that table, never the SDLC gl_edge.
+    let json = r#"{
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "a", "entity": "Definition"},
+            {"id": "b", "entity": "Definition"}
+        ],
+        "relationships": [
+            {"type": ["CALLS", "EXTENDS", "DEFINES"], "from": "a", "to": "b"}
+        ],
+        "limit": 25
+    }"#;
+
+    let result = compile(json, &embedded_ontology(), &admin_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
+        rendered.contains("gl_code_edge"),
+        "code-graph edges should scan gl_code_edge: {rendered}"
+    );
+    assert!(
+        !rendered.contains(" gl_edge "),
+        "code-graph edges should not touch SDLC gl_edge: {rendered}"
     );
 }
