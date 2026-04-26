@@ -1,19 +1,20 @@
 #!/bin/bash
 
-# Parse --v2 flag
-V2_FLAG=""
+# Parse --legacy flag (v2 is the production default; pass --legacy to opt
+# into the v1 indexer for back-to-back memory comparisons).
+LEGACY_FLAG=""
 POSITIONAL=()
 for arg in "$@"; do
   case $arg in
-    --v2) V2_FLAG="--v2"; shift ;;
+    --legacy) LEGACY_FLAG="--legacy"; shift ;;
     *) POSITIONAL+=("$arg"); shift ;;
   esac
 done
 set -- "${POSITIONAL[@]}"
 
 if [ -z "$1" ]; then
-  echo '{"error": "Usage: ./average_rss.sh [--v2] <path> [sampling_interval_seconds]"}'
-  echo '{"example": "./average_rss.sh --v2 ../gdk/gitlab 0.025"}'
+  echo '{"error": "Usage: ./average_rss.sh [--legacy] <path> [sampling_interval_seconds]"}'
+  echo '{"example": "./average_rss.sh ../gdk/gitlab 0.025"}'
   exit 1
 fi
 
@@ -33,7 +34,7 @@ if [ $? -ne 0 ]; then
 fi
 
 # Start the process in the background
-"$ORBIT_BIN" index $V2_FLAG "$1" > /dev/null 2>&1 &
+"$ORBIT_BIN" index $LEGACY_FLAG "$1" > /dev/null 2>&1 &
 PROCESS_PID=$!
 
 # Wait a moment for the process to start
