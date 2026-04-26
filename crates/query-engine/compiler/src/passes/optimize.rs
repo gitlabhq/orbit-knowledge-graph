@@ -98,10 +98,24 @@ fn prune_unreferenced_node_joins(q: &mut Query, input: &Input) {
         referenced.insert(root);
     }
 
+    // Count how many relationships touch each node alias. Only leaf nodes
+    // (degree ≤ 1) are safe to prune — pruning an intermediate node would
+    // leave the adjacent edge JOINs dangling on the now-undefined alias.
+    // Example: `User -- AUTHORED --> MR -- HAS_NOTE --> Note` with MR
+    // unreferenced in the aggregation. e1's `ON mr.id = e1.source_id` would
+    // reference a missing `mr` alias after pruning.
+    let mut degree: HashMap<&str, usize> = HashMap::new();
+    for rel in &input.relationships {
+        *degree.entry(rel.from.as_str()).or_default() += 1;
+        *degree.entry(rel.to.as_str()).or_default() += 1;
+    }
+
     let prune: HashSet<String> = input
         .nodes
         .iter()
-        .filter(|n| !referenced.contains(&n.id))
+        .filter(|n| {
+            !referenced.contains(&n.id) && degree.get(n.id.as_str()).copied().unwrap_or(0) <= 1
+        })
         .map(|n| n.id.clone())
         .collect();
     if prune.is_empty() {

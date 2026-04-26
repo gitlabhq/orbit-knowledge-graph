@@ -515,4 +515,44 @@ mod tests {
              got:\n{sql}"
         );
     }
+
+    /// Intermediate nodes (referenced by 2+ relationships) must NOT be pruned
+    /// even when they're absent from the aggregation target/group_by. Pruning
+    /// them leaves adjacent edge JOINs dangling on the now-undefined alias
+    /// (`mr.id = e1.source_id` becomes a `Unknown identifier mr.id` runtime
+    /// error). Only leaf nodes (degree ≤ 1) are safe to prune.
+    #[test]
+    fn aggregation_keeps_intermediate_node_table_join() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "n",
+                "group_by": "u",
+                "alias": "note_count"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // mr is intermediate (touches AUTHORED and HAS_NOTE). It must remain
+        // in the FROM tree so e1's JOIN ON `mr.id = e1.source_id` resolves.
+        assert!(
+            sql.contains("gl_merge_request AS mr") || sql.contains("FROM gl_merge_request"),
+            "intermediate MR table must remain in FROM, got:\n{sql}"
+        );
+    }
 }
