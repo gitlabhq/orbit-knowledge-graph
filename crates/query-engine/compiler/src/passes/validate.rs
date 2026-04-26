@@ -1059,6 +1059,32 @@ mod tests {
     }
 
     #[test]
+    fn rejects_property_less_sum_avg_min_max() {
+        for func in ["sum", "avg", "min", "max"] {
+            let json = format!(
+                r#"{{
+                    "query_type": "aggregation",
+                    "nodes": [{{"id": "u", "entity": "User", "node_ids": [1]}}],
+                    "aggregations": [{{
+                        "function": "{func}",
+                        "target": "u",
+                        "alias": "result"
+                    }}]
+                }}"#
+            );
+            assert_rejects(&json, "requires a 'property' field");
+        }
+        // count without property is fine
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [{"id": "u", "entity": "User", "node_ids": [1]}],
+                "aggregations": [{"function": "count", "target": "u", "alias": "total"}]
+            }"#,
+        );
+    }
+
+    #[test]
     fn rejects_sum_on_string_property() {
         assert_rejects(
             r#"{
