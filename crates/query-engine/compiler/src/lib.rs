@@ -278,4 +278,138 @@ mod tests {
             "relationship_kind filter must survive, got:\n{sql}"
         );
     }
+
+    /// Org-wide `count(target) GROUP BY group` with no filters and no pinned
+    /// IDs must emit bare `COUNT()` so ClickHouse can route to the
+    /// `agg_counts` projection. With `COUNT(e0.source_id)`, projection
+    /// routing fails and the query scans the full edge slice (1B+ rows for
+    /// File → Project on production scale).
+    #[test]
+    fn unfiltered_edge_only_count_emits_bare_count_for_projection_routing() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "f", "entity": "File"}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "f", "to": "p"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "f",
+                "group_by": "p",
+                "alias": "files"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("COUNT()") || sql.contains("count()"),
+            "unfiltered edge-only count must emit bare COUNT() for projection \
+             routing, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("COUNT(e0.source_id)") && !sql.contains("count(e0.source_id)"),
+            "must not emit COUNT(source_id) -- breaks agg_counts projection routing, \
+             got:\n{sql}"
+        );
+    }
+
+    /// When the target node has filters that fold into `countIf`, the column
+    /// reference is required so the `-If` combinator has something to count.
+    /// Bare `count()` would lose the filter semantics.
+    #[test]
+    fn filtered_edge_only_count_keeps_column_arg_for_count_if() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "opened"}
+                }}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "open_mrs"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Filter is captured via SIP CTE (`_nf_mr` filtered by state='opened',
+        // edge `source_id IN _nf_mr`). The COUNT must reference the edge column
+        // so that filtered edges are what's counted; emitting bare `count()`
+        // here would not be wrong (the IN-filter still bounds rows) but would
+        // suppress the projection-routing decision based on filter presence.
+        assert!(
+            sql.contains("COUNT(e0.source_id)")
+                || sql.contains("countIf")
+                || sql.contains("COUNTIF"),
+            "filtered count must reference edge column or use countIf, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("state = 'opened'"),
+            "state filter must reach the SQL (in _nf_* or WHERE), got:\n{sql}"
+        );
+    }
+
+    /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
+    /// EVERY edge it touches, not just whichever side `node_edge_col`
+    /// happens to map first. Without this, `User AUTHORED MR` joined to
+    /// `MR IN_PROJECT Project` can match `User AUTHORED <other entity>`
+    /// rows whose ID happens to collide with an MR ID, producing edges
+    /// with garbage `target_kind` in the result and skipping kind-PK
+    /// pruning on the second-hop edge.
+    #[test]
+    fn multi_hop_traversal_constrains_kind_on_every_edge() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "p", "entity": "Project"},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "AUTHORED", "from": "u", "to": "mr"}
+            ],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // e0 covers IN_PROJECT (mr → p): both sides must be constrained.
+        assert!(
+            sql.contains("e0.source_kind = 'MergeRequest'"),
+            "e0 must constrain source_kind=MergeRequest, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("e0.target_kind = 'Project'"),
+            "e0 must constrain target_kind=Project, got:\n{sql}"
+        );
+        // e1 covers AUTHORED (u → mr): the previously missing target_kind
+        // constraint that lets bogus edges leak through.
+        assert!(
+            sql.contains("e1.source_kind = 'User'"),
+            "e1 must constrain source_kind=User, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("e1.target_kind = 'MergeRequest'"),
+            "e1 must constrain target_kind=MergeRequest (R2 cliff), got:\n{sql}"
+        );
+    }
 }
