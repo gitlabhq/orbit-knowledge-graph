@@ -10,12 +10,4 @@ variants:
 
   - from_node: { type: ImportedSymbol, id: id }
     to_node: { type: Definition, id: id }
-    description: "Imported symbol resolves to a definition."
-
-  - from_node: { type: ImportedSymbol, id: id }
-    to_node: { type: ImportedSymbol, id: id }
-    description: "Imported symbol references another imported symbol (re-exports)."
-
-  - from_node: { type: ImportedSymbol, id: id }
-    to_node: { type: File, id: id }
-    description: "Imported symbol references a file (module import)."
+    description: "Imported symbol resolves to a concrete definition (e.g. JS/TS module-system resolution to the imported export)."

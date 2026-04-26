@@ -1,9 +1,9 @@
 # config/ontology/edges/extends.yaml
 
-description: Class inheritance relationships in source code
+description: Supertype relationships in source code (inheritance, interface implementation, struct embedding)
 table: gl_code_edge
 
 variants:
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
-    description: "Class or interface extends another class or interface."
+    description: "Definition declares a supertype relationship to another definition. Covers class extension, interface implementation, and struct embedding."

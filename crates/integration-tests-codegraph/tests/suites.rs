@@ -276,6 +276,10 @@ yaml_test!(
     "rust/trait_ambiguity_resolution.yaml"
 );
 yaml_test!(
+    rust_extends_relationships,
+    "rust/extends_relationships.yaml"
+);
+yaml_test!(
     rust_field_sensitive_local_flow,
     "rust/field_sensitive_local_flow.yaml"
 );
