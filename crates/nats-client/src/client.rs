@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use async_nats::jetstream::Context;
 use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
@@ -81,16 +82,25 @@ impl NatsClient {
         options
     }
 
+    /// Creates or updates a JetStream stream.
+    ///
+    /// `max_age_override` lets callers opt out of the configured default. Pass
+    /// `None` to use `NatsConfiguration::stream_max_age` (work-queue streams
+    /// where abandoned messages should auto-expire) and `Some(Duration::ZERO)`
+    /// to keep messages indefinitely (the dead-letter stream).
     pub async fn create_or_update_stream(
         &self,
         stream_name: &str,
         subjects: Vec<String>,
+        max_age_override: Option<Duration>,
     ) -> Result<Stream, NatsError> {
+        let max_age =
+            max_age_override.unwrap_or_else(|| self.config.stream_max_age().unwrap_or_default());
         let stream_config = async_nats::jetstream::stream::Config {
             name: stream_name.to_string(),
             subjects: subjects.clone(),
             num_replicas: self.config.stream_replicas,
-            max_age: self.config.stream_max_age().unwrap_or_default(),
+            max_age,
             max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
             max_messages: self.config.stream_max_messages.unwrap_or(-1),
             max_messages_per_subject: 1,

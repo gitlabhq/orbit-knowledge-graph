@@ -102,8 +102,10 @@ impl NatsBroker {
         }
 
         for (stream_name, subjects) in managed_streams {
+            // Work-queue streams use the configured stream_max_age so abandoned
+            // messages auto-expire instead of pinning their per-subject slot.
             self.inner
-                .create_or_update_stream(stream_name, subjects)
+                .create_or_update_stream(stream_name, subjects, None)
                 .await?;
         }
 
@@ -118,8 +120,15 @@ impl NatsBroker {
 
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
         let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
+        // The dead-letter stream is for post-mortem inspection. Pin
+        // max_age=0 so configured stream_max_age can never auto-expire DLQ
+        // messages out from under operators.
         self.inner
-            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject])
+            .create_or_update_stream(
+                DEAD_LETTER_STREAM,
+                vec![subject],
+                Some(std::time::Duration::ZERO),
+            )
             .await?;
         Ok(())
     }
