@@ -84,11 +84,10 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
         .collect();
 
     let mut kind_filters: Vec<Expr> = Vec::new();
-    let mut seen: HashSet<(String, &'static str)> = HashSet::new();
+    let mut seen: HashSet<String> = HashSet::new();
 
     let mut push_filter = |alias: &str, kind_col: &'static str, entity: &str| {
-        let key = (format!("{alias}.{kind_col}={entity}"), kind_col);
-        if seen.insert(key) {
+        if seen.insert(format!("{alias}.{kind_col}={entity}")) {
             kind_filters.push(Expr::eq(
                 Expr::col(alias, kind_col),
                 Expr::param(ChType::String, entity.to_string()),
