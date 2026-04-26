@@ -5,7 +5,7 @@ use chrono::{DateTime, Utc};
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
-use super::checkpoint_store::CodeCheckpointStore;
+use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::locking::project_lock_key;
@@ -15,6 +15,13 @@ use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
 use crate::types::{Envelope, Event, Subscription};
 use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
+
+/// Sentinel branch value written to the checkpoint when the project is
+/// resolved as deleted from Rails (404) and we cannot determine its default
+/// branch. The dispatcher's `fetch_checkpointed_project_ids` filter keys on
+/// `(traversal_path, project_id)` and ignores branch, so any non-empty value
+/// satisfies the schema and dedupes future dispatch cycles.
+const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -112,6 +119,30 @@ impl CodeIndexingTaskHandler {
                 task_id = request.task_id,
                 "project not found resolving default branch; acknowledging as deleted"
             );
+            // Mirror the empty-repository path: write a checkpoint so the
+            // dispatcher's `fetch_checkpointed_project_ids` filter excludes
+            // this project on subsequent backfill cycles instead of
+            // republishing the same task forever.
+            let sentinel_branch = request
+                .branch
+                .as_deref()
+                .unwrap_or(DELETED_PROJECT_BRANCH_SENTINEL);
+            let checkpoint = CodeIndexingCheckpoint {
+                traversal_path: request.traversal_path.clone(),
+                project_id: request.project_id,
+                branch: sentinel_branch.to_string(),
+                last_task_id: request.task_id,
+                last_commit: None,
+                indexed_at: Utc::now(),
+            };
+            if let Err(e) = self.checkpoint_store.set_checkpoint(&checkpoint).await {
+                warn!(
+                    project_id = request.project_id,
+                    task_id = request.task_id,
+                    error = %e,
+                    "failed to write deleted-project checkpoint; dispatcher may republish"
+                );
+            }
             self.metrics
                 .record_empty_repository(EmptyRepositoryReason::NotFound.as_metric_label());
             self.metrics.record_outcome("empty_repository");
@@ -436,7 +467,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn project_info_404_acks_without_checkpoint() {
+    async fn project_info_404_acks_and_writes_checkpoint() {
         use crate::modules::code::repository::RepositoryServiceError;
         use gitlab_client::GitlabClientError;
 
@@ -465,14 +496,14 @@ mod tests {
             !ctx.lock_exists(123, "main"),
             "no lock should be acquired when branch cannot be resolved"
         );
-        assert!(
-            ctx.mock_checkpoints
-                .get_checkpoint("/org/project-123", 123, "main")
-                .await
-                .unwrap()
-                .is_none(),
-            "no checkpoint expected when branch is unknown"
-        );
+        let checkpoint = ctx
+            .mock_checkpoints
+            .get_checkpoint("/org/project-123", 123, "HEAD")
+            .await
+            .unwrap()
+            .expect("checkpoint should be written for deleted project so the dispatcher dedupes");
+        assert_eq!(checkpoint.last_task_id, 99);
+        assert!(checkpoint.last_commit.is_none());
     }
 
     #[tokio::test]
