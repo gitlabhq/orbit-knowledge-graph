@@ -23,7 +23,7 @@
 //!
 //! let json = r#"{
 //!     "query_type": "search",
-//!     "node": {"id": "u", "entity": "User", "columns": ["username"]},
+//!     "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
 //!     "limit": 10
 //! }"#;
 //!
@@ -208,7 +208,7 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let prefixed = ontology.with_schema_version_prefix("v1_");
 
-        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
@@ -223,7 +223,7 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let prefixed = ontology.with_schema_version_prefix("v1_");
 
-        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
+        let query = r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1],"columns":["username"]},{"id":"mr","entity":"MergeRequest","columns":["title"]}],"relationships":[{"type":"AUTHORED","from":"u","to":"mr"}],"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
@@ -237,7 +237,7 @@ mod tests {
     fn compile_without_prefix_uses_unprefixed_tables() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
-        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 

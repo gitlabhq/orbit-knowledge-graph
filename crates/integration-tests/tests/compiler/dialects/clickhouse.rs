@@ -8,7 +8,7 @@ use compiler::{Node, QueryError, compile};
 fn compile_to_ast_works() {
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 10
     }"#;
 
@@ -25,8 +25,8 @@ fn traversal_query() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "n", "entity": "Note", "columns": ["confidential"], "filters": {"confidential": true}},
-            {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"], "filters": {"confidential": true}},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25,
@@ -70,8 +70,8 @@ fn aggregation_query() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "n", "entity": "Note", "columns": ["confidential"]},
-            {"id": "u", "entity": "User", "columns": ["username"]}
+            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
@@ -163,7 +163,7 @@ fn path_finding_depth_control() {
 fn neighbors_query() {
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [100]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"], "node_ids": [100]},
         "neighbors": {"node": "u", "direction": "both"}
     }"#;
 
@@ -297,7 +297,7 @@ fn valid_identifiers_produce_parseable_sql() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "user_node", "entity": "User", "columns": ["username"]},
+            {"id": "user_node", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "_private", "entity": "Note", "columns": ["confidential"]},
             {"id": "CamelCase", "entity": "Project", "columns": ["name"]},
             {"id": "node123", "entity": "Group", "columns": ["name"]}
@@ -340,8 +340,8 @@ fn multi_table_single_type_routes_to_default() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "p", "entity": "Project"}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25
@@ -363,8 +363,8 @@ fn multi_table_code_edge_routes_to_code_table() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "f", "entity": "File"},
-            {"id": "d", "entity": "Definition"}
+            {"id": "f", "entity": "File", "node_ids": [1]},
+            {"id": "d", "entity": "Definition", "node_ids": [1]}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
         "limit": 25
@@ -386,8 +386,8 @@ fn multi_table_wildcard_scans_all_tables() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "p", "entity": "Project"}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [{"type": "*", "from": "u", "to": "p"}],
         "limit": 25
@@ -413,8 +413,8 @@ fn multi_table_mixed_types_scans_both_tables() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "p", "entity": "Project"}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
         "limit": 25
@@ -436,8 +436,8 @@ fn single_table_ontology_no_union() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "p", "entity": "Project"}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 25

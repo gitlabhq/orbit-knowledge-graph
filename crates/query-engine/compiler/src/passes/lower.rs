@@ -1938,7 +1938,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [
                 {"id": "n", "entity": "Note"},
-                {"id": "u", "entity": "User"}
+                {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
@@ -1963,7 +1963,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "columns": ["username"]}],
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -1988,7 +1988,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "Note"},
-                {"id": "u", "entity": "User", "columns": ["username", "state"]}
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
@@ -2023,7 +2023,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "n", "entity": "Note"},
-                {"id": "u", "entity": "User", "columns": "*"}
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": "*"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
@@ -2161,7 +2161,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2365,7 +2365,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{
@@ -2432,7 +2432,8 @@ mod tests {
             "query_type": "search",
             "node": {
                 "id": "p",
-                "entity": "Project"
+                "entity": "Project",
+                "node_ids": [1]
             },
             "limit": 50
         }"#,
@@ -2459,6 +2460,7 @@ mod tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": ["username", "state"]
             },
             "limit": 10
@@ -2484,6 +2486,7 @@ mod tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": "*"
             },
             "limit": 10
@@ -2509,7 +2512,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["confidential"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2535,7 +2538,8 @@ mod tests {
             "query_type": "search",
             "node": {
                 "id": "u",
-                "entity": "User"
+                "entity": "User",
+                "node_ids": [1]
             },
             "limit": 10
         }"#,
@@ -2565,6 +2569,7 @@ mod tests {
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": ["id", "username"]
             },
             "limit": 10
@@ -2721,7 +2726,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2764,7 +2769,7 @@ mod tests {
         // Edge-centric puts the type filter in WHERE, not JOIN ON.
         // Single type — WHERE should contain relationship_kind = 'AUTHORED'
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2776,7 +2781,7 @@ mod tests {
 
         // Multiple types — should use IN
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2788,7 +2793,7 @@ mod tests {
 
         // Wildcard — no type filter
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2833,7 +2838,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2916,7 +2921,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["confidential"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2950,7 +2955,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2984,7 +2989,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3015,7 +3020,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3099,7 +3104,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3131,7 +3136,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [1]},
                 {"id": "d", "entity": "MergeRequestDiff"}
             ],
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
@@ -3153,7 +3158,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3228,7 +3233,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
         }"#,
@@ -3253,7 +3258,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10
         }"#,
         );
@@ -3270,7 +3275,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
@@ -3310,7 +3315,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
@@ -3334,7 +3339,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3420,7 +3425,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["id", "username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3467,7 +3472,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3553,7 +3558,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["id", "username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3736,7 +3741,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
@@ -3764,7 +3769,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "f", "entity": "File"},
+                    {"id": "f", "entity": "File", "node_ids": [1]},
                     {"id": "d", "entity": "Definition"}
                 ],
                 "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
@@ -3792,7 +3797,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "*", "from": "u", "to": "p"}],
@@ -3821,7 +3826,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
@@ -3846,7 +3851,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],

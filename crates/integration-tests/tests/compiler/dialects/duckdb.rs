@@ -14,7 +14,7 @@ fn search_uses_positional_params() {
     let result = compile_local(
         r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"],
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
                  "filters": {"username": "alice"}},
         "limit": 10
     }"#,
@@ -38,7 +38,7 @@ fn no_clickhouse_functions_leak() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -53,7 +53,7 @@ fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -67,8 +67,8 @@ fn traversal() {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
-            {"id": "n", "entity": "Note", "columns": ["confidential"]}
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["confidential"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "limit": 25
@@ -86,8 +86,8 @@ fn aggregation() {
         r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User"},
-            {"id": "n", "entity": "Note"}
+            {"id": "u", "entity": "User", "node_ids": [1]},
+            {"id": "n", "entity": "Note", "node_ids": [1]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
         "aggregations": [
