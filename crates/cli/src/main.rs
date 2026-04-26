@@ -148,9 +148,11 @@ enum Commands {
         #[arg(short, long)]
         verbose: bool,
 
-        /// Use v2 code-graph pipeline (Python, Java, Kotlin, C#)
-        #[arg(long)]
-        v2: bool,
+        /// Opt out of the v2 code-graph pipeline and run the legacy v1
+        /// linker. Kept for migration safety; v2 is the production default
+        /// and emits the only edge variants the current ontology declares.
+        #[arg(long, default_value_t = false)]
+        legacy: bool,
     },
     /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
@@ -259,7 +261,7 @@ async fn main() -> Result<()> {
             threads,
             stats,
             verbose,
-            v2,
+            legacy,
         } => {
             let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
@@ -278,7 +280,7 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats, v2).await
+            run_index(path, threads, stats, !legacy).await
         }
         Commands::Query {
             json,
