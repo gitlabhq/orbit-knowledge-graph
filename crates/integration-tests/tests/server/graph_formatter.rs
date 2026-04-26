@@ -240,7 +240,7 @@ async fn search_exact_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state", "name"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -288,7 +288,7 @@ async fn search_unicode_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "name"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -309,7 +309,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
         &svc,
@@ -337,7 +337,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
         &MockRedactionService::new(),
@@ -357,8 +357,8 @@ async fn traversal_single_hop_exact(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 50
@@ -446,8 +446,8 @@ async fn traversal_redaction_removes_unauthorized_paths(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 50
@@ -484,8 +484,8 @@ async fn traversal_deduplicates_shared_nodes(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "g", "entity": "Group", "node_ids": [100]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 50
@@ -516,7 +516,7 @@ async fn traversal_with_filter(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "columns": ["username", "state"], "filters": {"state": "blocked"}},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 50
@@ -555,8 +555,8 @@ async fn aggregation_count_exact(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
@@ -616,8 +616,8 @@ async fn aggregation_redaction(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
@@ -781,7 +781,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &allow_all(),
@@ -957,7 +957,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "neighbors": {"node": "u", "direction": "both"}
         }"#,
         &allow_all(),
@@ -1032,7 +1032,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &svc,
@@ -1128,7 +1128,7 @@ async fn aggregation_sum(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1175,7 +1175,7 @@ async fn aggregation_avg(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1215,7 +1215,7 @@ async fn aggregation_min_max(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1248,7 +1248,7 @@ async fn aggregation_min_string(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1278,7 +1278,7 @@ async fn aggregation_multiple_functions(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -1338,7 +1338,7 @@ async fn ungrouped_count_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
             "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
@@ -1370,7 +1370,7 @@ async fn ungrouped_multiple_functions_emits_aggregates(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
             "aggregations": [
                 {"function": "count", "target": "g", "alias": "total"},
                 {"function": "min", "target": "g", "property": "id", "alias": "min_id"},
@@ -1405,8 +1405,8 @@ async fn grouped_aggregation_uses_entity_nodes(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "group_count"}],
@@ -1445,7 +1445,7 @@ async fn ungrouped_count_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "g", "entity": "Group", "node_ids": [100]}],
+            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
             "aggregations": [{"function": "count", "target": "g", "alias": "total"}],
             "limit": 10
         }"#,
@@ -1476,7 +1476,7 @@ async fn traversal_incoming_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User", "columns": ["username"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g", "to": "u", "direction": "incoming"}],
@@ -1516,7 +1516,7 @@ async fn traversal_both_direction(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g1", "entity": "Group", "columns": ["name"]},
+                {"id": "g1", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "g2", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "g1", "to": "g2", "direction": "both"}],
@@ -1558,9 +1558,9 @@ async fn traversal_shared_target_node(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["note"]},
-                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "n"},
@@ -1606,7 +1606,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "node_ids": [3000, 3001, 3002, 3003], "columns": ["note", "confidential", "internal"]},
+            "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1711,7 +1711,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1846,7 +1846,7 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["AUTHORED"]}
         }"#,
         &allow_all(),
@@ -1891,7 +1891,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -2068,7 +2068,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -2120,8 +2120,8 @@ async fn traversal_variable_length_reaches_depth_2(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",
@@ -2163,8 +2163,8 @@ async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",
@@ -2203,8 +2203,8 @@ async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1, 2, 3, 4, 5]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{
                 "type": "MEMBER_OF",
@@ -2245,9 +2245,9 @@ async fn traversal_chain_user_group_project(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-                {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
-                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -2291,9 +2291,9 @@ async fn traversal_chain_user_mr_note(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]},
-                {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note"]}
+                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note"]}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -2337,7 +2337,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -2366,7 +2366,7 @@ async fn pagination_absent_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2384,7 +2384,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
         }"#,
@@ -2411,7 +2411,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}

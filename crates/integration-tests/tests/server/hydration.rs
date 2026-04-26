@@ -465,7 +465,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
 
@@ -484,8 +484,8 @@ async fn traversal_produces_static_hydration_plan(_ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name"]},
-            {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name", "visibility_level"]}
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
+            {"id": "g", "entity": "Group", "columns": ["name", "visibility_level"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
@@ -866,7 +866,7 @@ async fn traversal_static_hydration_indirect_auth_entities(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "f", "entity": "File", "node_ids": [1], "columns": ["name", "path", "branch"]},
+            {"id": "f", "entity": "File", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "path", "branch"]},
             {"id": "d", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
@@ -1063,8 +1063,8 @@ async fn traversal_static_hydration_default_auth_entities(ctx: &TestContext) {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 10

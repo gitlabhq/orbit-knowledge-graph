@@ -14,7 +14,7 @@ fn search_uses_positional_params() {
     let result = compile_local(
         r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"],
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
                  "filters": {"username": "alice"}},
         "limit": 10
     }"#,
@@ -38,7 +38,7 @@ fn no_clickhouse_functions_leak() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -53,7 +53,7 @@ fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -108,7 +108,7 @@ fn path_finding() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project"}
+            {"id": "end", "entity": "Project", "node_ids": [100]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#,

@@ -67,7 +67,7 @@ fn valid_column_in_aggregation() {
     assert!(compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
             "aggregations": [{"function": "count", "target": "p", "property": "name", "alias": "name_count"}],
             "limit": 10
         }"#,
@@ -80,7 +80,7 @@ fn invalid_column_in_aggregation() {
     let err = compile(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}],
+            "nodes": [{"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]}],
             "aggregations": [{"function": "sum", "target": "p", "property": "invalid_property", "alias": "total"}],
             "limit": 10
         }"#,
@@ -204,7 +204,7 @@ fn complex_search_query() {
 fn search_with_specific_columns() {
     let json = r#"{
         "query_type": "search",
-        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"] },
+        "node": { "id": "u", "entity": "User", "columns": ["username", "state"] },
         "limit": 10
     }"#;
 
@@ -221,7 +221,7 @@ fn search_with_specific_columns() {
 fn search_with_wildcard_columns() {
     let json = r#"{
         "query_type": "search",
-        "node": { "id": "u", "entity": "User", "node_ids": [1], "columns": "*" },
+        "node": { "id": "u", "entity": "User", "columns": "*" },
         "limit": 10
     }"#;
 
@@ -284,7 +284,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
-            {"id": "end", "entity": "Project", "columns": ["name"]}
+            {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -338,7 +338,7 @@ fn multi_hop_traversal_generates_union_subquery() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 3}],
@@ -358,7 +358,7 @@ fn multi_hop_with_min_hops_filter() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 2, "max_hops": 3}],
@@ -397,7 +397,7 @@ fn multi_hop_aggregation() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [1]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
@@ -441,7 +441,7 @@ fn definition_uses_project_id_for_redaction() {
 fn project_still_uses_id_for_redaction() {
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
 
@@ -636,7 +636,7 @@ fn render_traversal_inlines_all_params() {
         "query_type": "traversal",
         "nodes": [
             {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-            {"id": "u", "entity": "User", "node_ids": [1]}
+            {"id": "u", "entity": "User"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "limit": 10
@@ -712,7 +712,7 @@ fn debug_json_round_trip() {
         "query_type": "traversal",
         "nodes": [
             {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}},
-            {"id": "u", "entity": "User", "node_ids": [1]}
+            {"id": "u", "entity": "User"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
         "limit": 10

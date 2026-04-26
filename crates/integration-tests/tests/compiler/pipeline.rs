@@ -350,7 +350,7 @@ fn clickhouse_preset_compiles_traversal_query() {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
+            {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
         "limit": 10
@@ -376,7 +376,7 @@ fn from_input_preset_compiles_pre_built_input() {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);
@@ -407,7 +407,7 @@ fn hydration_preset_skips_security_and_check() {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);
