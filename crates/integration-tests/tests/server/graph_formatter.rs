@@ -240,7 +240,7 @@ async fn search_exact_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state", "name"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "state", "name"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -288,7 +288,7 @@ async fn search_unicode_properties(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "name"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username", "name"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -309,7 +309,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "limit": 10
         }"#,
         &svc,
@@ -337,7 +337,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "limit": 10
         }"#,
         &MockRedactionService::new(),
@@ -781,7 +781,7 @@ async fn neighbors_outgoing_exact(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &allow_all(),
@@ -957,7 +957,7 @@ async fn neighbors_both_direction_edges_correct(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "neighbors": {"node": "u", "direction": "both"}
         }"#,
         &allow_all(),
@@ -1032,7 +1032,7 @@ async fn neighbors_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "neighbors": {"node": "u", "direction": "outgoing"}
         }"#,
         &svc,
@@ -1606,7 +1606,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "n", "entity": "Note", "node_ids": [1], "columns": ["note", "confidential", "internal"]},
+            "node": {"id": "n", "entity": "Note", "node_ids": [3000, 3001, 3002, 3003], "columns": ["note", "confidential", "internal"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1711,7 +1711,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1, 2, 3, 4, 5, 6]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1846,7 +1846,7 @@ async fn neighbors_with_rel_types_filter(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["AUTHORED"]}
         }"#,
         &allow_all(),
@@ -1891,7 +1891,7 @@ async fn neighbors_dynamic_columns_all(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "neighbors",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "neighbors": {"node": "u", "direction": "outgoing", "rel_types": ["MEMBER_OF"]},
             "options": {"dynamic_columns": "*"}
         }"#,
@@ -2068,7 +2068,7 @@ async fn search_with_order_by(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -2337,7 +2337,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -2366,7 +2366,7 @@ async fn pagination_absent_without_cursor(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -2384,7 +2384,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
         }"#,
@@ -2411,7 +2411,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}

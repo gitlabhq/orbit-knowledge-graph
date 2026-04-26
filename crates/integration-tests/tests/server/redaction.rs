@@ -119,7 +119,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 10
     }"#;
 
@@ -148,7 +148,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 10
     }"#;
 
@@ -187,7 +187,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 10
     }"#;
 
@@ -222,7 +222,7 @@ async fn single_hop_user_group_verifies_both_nodes(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]}
+            {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
@@ -288,7 +288,7 @@ async fn two_hop_denying_intermediate_group_filters_all_paths_through_it(ctx: &T
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]}
+            {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
@@ -332,7 +332,7 @@ async fn three_hop_user_group_project_verifies_all_paths(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]},
+            {"id": "g", "entity": "Group"},
             {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [
@@ -400,7 +400,7 @@ async fn three_hop_denying_one_project_removes_only_those_paths(ctx: &TestContex
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]},
+            {"id": "g", "entity": "Group"},
             {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [
@@ -464,7 +464,7 @@ async fn group_project_two_hop_verifies_exact_pairs(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group", "node_ids": [100]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "limit": 20
@@ -559,7 +559,7 @@ async fn all_nodes_have_required_type_columns(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]},
+            {"id": "g", "entity": "Group"},
             {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [
@@ -634,7 +634,7 @@ async fn all_authorized_preserves_all_data(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group", "node_ids": [100]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "limit": 20
@@ -667,7 +667,7 @@ async fn all_columns_preserved_after_redaction(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group", "node_ids": [100]},
-            {"id": "p", "entity": "Project", "node_ids": [1000]}
+            {"id": "p", "entity": "Project"}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "limit": 20
@@ -768,7 +768,7 @@ async fn all_columns_preserved_on_three_hop_traversal(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]},
+            {"id": "g", "entity": "Group"},
             {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [
@@ -811,7 +811,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 10
     }"#;
 
@@ -937,7 +937,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -989,7 +989,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -1138,7 +1138,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -1260,7 +1260,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1, 2]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -1363,7 +1363,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
         "query_type": "path_finding",
         "nodes": [
             {"id": "start", "entity": "User", "node_ids": [1]},
-            {"id": "end", "entity": "Project", "node_ids": [1000]}
+            {"id": "end", "entity": "Project"}
         ],
         "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
@@ -2068,7 +2068,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
     // No columns specified - should still work for redaction
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 10
     }"#;
 
@@ -2130,7 +2130,7 @@ async fn column_selection_multi_hop_traversal_all_nodes_have_mandatory_columns(c
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]},
             {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name", "visibility_level"]}
         ],
         "relationships": [
@@ -2218,7 +2218,7 @@ async fn column_selection_redaction_works_with_specific_columns(ctx: &TestContex
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"]},
-            {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]}
+            {"id": "g", "entity": "Group", "columns": ["name"]}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
@@ -2274,7 +2274,7 @@ async fn column_selection_fail_closed_on_any_unauthorized_node(ctx: &TestContext
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
-            {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name"]},
+            {"id": "g", "entity": "Group", "columns": ["name"]},
             {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]}
         ],
         "relationships": [
@@ -2620,7 +2620,7 @@ async fn column_selection_traversal_join_semantics_preserved(ctx: &TestContext) 
         "query_type": "traversal",
         "nodes": [
             {"id": "g", "entity": "Group", "node_ids": [100], "columns": ["name", "visibility_level"]},
-            {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name", "visibility_level"]}
+            {"id": "p", "entity": "Project", "columns": ["name", "visibility_level"]}
         ],
         "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
         "limit": 20
@@ -2777,7 +2777,7 @@ async fn neighbors_query_comprehensive(ctx: &TestContext) {
     // --- Test 1: Verify SQL structure and query execution ---
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -2910,7 +2910,7 @@ async fn neighbors_query_center_node_denied_filters_all(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -3370,7 +3370,7 @@ async fn traversal_edge_columns_preserved_through_redaction(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]}
+            {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
         "limit": 20
@@ -3538,7 +3538,7 @@ async fn multi_hop_edge_columns_survive_redaction(ctx: &TestContext) {
         "query_type": "traversal",
         "nodes": [
             {"id": "u", "entity": "User", "node_ids": [1]},
-            {"id": "g", "entity": "Group", "node_ids": [100]},
+            {"id": "g", "entity": "Group"},
             {"id": "p", "entity": "Project", "node_ids": [1000]}
         ],
         "relationships": [
@@ -3680,7 +3680,7 @@ async fn neighbors_query_filters_by_entity_type(ctx: &TestContext) {
     // Query User 1's outgoing neighbors
     let json = r#"{
         "query_type": "neighbors",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "neighbors": {"node": "u", "direction": "outgoing"}
     }"#;
 
@@ -3958,7 +3958,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
     // 5 users total. cursor: offset=0, page_size=2 → first 2 users
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
         "cursor": {"offset": 0, "page_size": 2}
@@ -4025,7 +4025,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
     // 5 users, but redaction will deny 2 of them
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
         "cursor": {"offset": 0, "page_size": 2}
@@ -4070,7 +4070,7 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
 
     let json = r#"{
         "query_type": "search",
-        "node": {"id": "u", "entity": "User", "node_ids": [1]},
+        "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
         "limit": 1000,
         "cursor": {"offset": 100, "page_size": 10}
     }"#;
@@ -4139,7 +4139,7 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1]},
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [2000, 2001, 2002, 2003]},
             "limit": 10
         }"#,
     )
@@ -4178,7 +4178,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10
         }"#,
@@ -4212,7 +4212,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3, 4, 5, 6]},
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},
             "limit": 10
         }"#,
@@ -4251,7 +4251,7 @@ async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [99999]},
-                {"id": "end", "entity": "Project", "node_ids": [99999]}
+                {"id": "end", "entity": "Project"}
             ],
             "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#,
@@ -4299,7 +4299,7 @@ async fn cross_entity_id_collision_redaction(ctx: &TestContext) {
             "query_type": "traversal",
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1]},
-                {"id": "g", "entity": "Group", "node_ids": [100]}
+                {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
             "limit": 30
