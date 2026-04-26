@@ -160,7 +160,7 @@ impl NatsClient {
 
         let store = self
             .jetstream
-            .create_key_value(kv_config)
+            .create_or_update_key_value(kv_config)
             .await
             .map_err(|e| NatsError::KvBucket {
                 bucket: bucket.to_string(),
