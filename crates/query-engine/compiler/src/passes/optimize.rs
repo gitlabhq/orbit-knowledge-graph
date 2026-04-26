@@ -51,6 +51,9 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
                 cascade_node_filter_ctes(q, input);
             }
+            if input.query_type == QueryType::Traversal {
+                narrow_joined_nodes_via_pinned_neighbors(q, input);
+            }
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
@@ -700,6 +703,19 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         .filter(|t| !input.compiler.node_edge_col.contains_key(*t))
         .collect();
 
+    // Count aggregations per target alias. When a single aggregation targets
+    // an alias, folded conjuncts can be retained in WHERE so DeduplicatePass
+    // can hoist sort-key (structural) ones into the LIMIT 1 BY subquery for
+    // granule pruning. With multiple aggregations targeting the same alias
+    // (e.g. countIf(state='opened') + countIf(state='closed')), per-If
+    // filters disagree and a retained outer WHERE would corrupt the counts.
+    let mut aggs_per_alias: HashMap<&str, usize> = HashMap::new();
+    for agg in &input.aggregations {
+        if let Some(t) = agg.target.as_deref() {
+            *aggs_per_alias.entry(t).or_default() += 1;
+        }
+    }
+
     // Build group-by alias set to avoid folding their filters.
     let group_aliases: HashSet<&str> = input
         .aggregations
@@ -741,6 +757,17 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         if should_keep {
             remaining.push(conjunct);
         } else if let Some(alias) = aliases.into_iter().next() {
+            // Retain in WHERE when this alias has exactly one aggregation
+            // target. DeduplicatePass.partition_filters will hoist sort-key
+            // columns (id, project_id, traversal_path, branch) into the
+            // dedup subquery's WHERE, enabling granule pruning. Mutable
+            // columns stay in the outer WHERE, where they correctly
+            // evaluate against the deduped row. The countIf(_, conjunct)
+            // becomes redundant in this case but the cost is negligible.
+            let single_target = aggs_per_alias.get(alias.as_str()).copied().unwrap_or(0) <= 1;
+            if single_target {
+                remaining.push(conjunct.clone());
+            }
             folded_by_alias.entry(alias).or_default().push(conjunct);
         }
     }
@@ -898,6 +925,70 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
 
             narrowed.insert(target_id.clone());
             changed = true;
+        }
+    }
+}
+
+/// For traversal queries, derive `_nf_{neighbor}` CTEs for un-pinned nodes
+/// that are reachable via a single hop from a pinned node.
+///
+/// Without this, a query like `File[node_ids: [X]] --DEFINES--> Definition`
+/// builds `_nf_f` for the pinned File but leaves the joined-side Definition
+/// table unrestricted. DeduplicatePass.wrap_join_scans then dedups the full
+/// authorized Definition table before the JOIN, which on production data
+/// scans tens of millions of rows for a single file's ~30 definitions.
+///
+/// We materialize the neighbor's reachable ids in `_nf_{neighbor}` once.
+/// `wrap_join_scans` (deduplicate.rs) already injects the standard
+/// `neighbor.id IN (SELECT id FROM _nf_{neighbor})` filter into the
+/// neighbor's dedup subquery whenever such a CTE exists.
+fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
+    if input.relationships.is_empty() {
+        return;
+    }
+
+    let pinned: HashSet<String> = input
+        .nodes
+        .iter()
+        .filter(|n| !n.node_ids.is_empty())
+        .map(|n| n.id.clone())
+        .collect();
+    if pinned.is_empty() {
+        return;
+    }
+
+    for rel in &input.relationships {
+        let (start_col, end_col) = rel.direction.edge_columns();
+
+        // Choose direction: pinned -> neighbor.
+        let (source_id, target_id, edge_filter_col, edge_select_col) =
+            if pinned.contains(&rel.from) && !pinned.contains(&rel.to) {
+                (&rel.from, &rel.to, start_col, end_col)
+            } else if pinned.contains(&rel.to) && !pinned.contains(&rel.from) {
+                (&rel.to, &rel.from, end_col, start_col)
+            } else {
+                continue;
+            };
+
+        let source_nf = node_filter_cte(source_id);
+        let target_nf = node_filter_cte(target_id);
+
+        if !q.ctes.iter().any(|c| c.name == source_nf) {
+            continue;
+        }
+        if q.ctes.iter().any(|c| c.name == target_nf) {
+            continue;
+        }
+
+        if let Some(cte_query) = build_cascade_for_node(
+            input,
+            target_id,
+            edge_select_col,
+            edge_filter_col,
+            &source_nf,
+            &rel.types,
+        ) {
+            q.ctes.push(Cte::new(&target_nf, cte_query));
         }
     }
 }
@@ -1253,10 +1344,12 @@ mod tests {
             other => panic!("expected FuncCall, got {other:?}"),
         }
 
-        // Group-by node filter stays in WHERE.
+        // Group-by node filter stays in WHERE; target's filter is retained
+        // alongside the countIf so DeduplicatePass can hoist sort-key
+        // columns into the LIMIT 1 BY subquery for granule pruning.
         let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
-        assert!(!where_aliases.contains("mr"));
+        assert!(where_aliases.contains("mr"));
     }
 
     #[test]
@@ -1306,7 +1399,8 @@ mod tests {
             }
             other => panic!("expected countIf, got {other:?}"),
         }
-        assert!(q.where_clause.is_none());
+        // Single-aggregate target: filter retained in WHERE for granule pruning.
+        assert!(q.where_clause.is_some());
     }
 
     #[test]
@@ -1365,6 +1459,46 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
+        // Single-aggregate target: both conjuncts retained in WHERE alongside
+        // the per-If filters, so DeduplicatePass can hoist them.
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
+        assert!(where_aliases.contains("mr"));
+    }
+
+    #[test]
+    fn multi_aggregate_does_not_retain_conjuncts() {
+        // Two aggregations target the same alias with conflicting per-If
+        // filters. Retaining either filter in outer WHERE would corrupt the
+        // other count, so fold must REMOVE conjuncts from WHERE in this case.
+        let input = agg_input(vec![
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("opened".to_string()),
+            },
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("merged".to_string()),
+            },
+        ]);
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(count_expr("mr", "id"), "opened"),
+                SelectExpr::new(count_expr("mr", "id"), "merged"),
+            ],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(eq_filter("mr", "state", "opened")),
+            ..Default::default()
+        };
+
+        fold_filters_into_aggregates(&mut q, &input);
+
+        // Filter must NOT be retained — would corrupt the other countIf.
         assert!(q.where_clause.is_none());
     }
 
@@ -1441,6 +1575,117 @@ mod tests {
             other => panic!("expected COUNT, got {other:?}"),
         }
         assert!(q.where_clause.is_some());
+    }
+
+    #[test]
+    fn pinned_traversal_creates_neighbor_nf_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Source node is pinned via node_ids; target is unpinned.
+        // The pass must create _nf_<target> by deriving target ids from the
+        // edge filtered by _nf_<source>, so DeduplicatePass can narrow the
+        // target's dedup subquery.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    node_ids: vec![42i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["DEFINES".into()],
+                from: "f".into(),
+                to: "d".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        // Simulate the lowerer having created _nf_f for the pinned File.
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ctes: vec![Cte::new(
+                "_nf_f",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("f", "id"), "id")],
+                    from: TableRef::scan("gl_file", "f"),
+                    where_clause: Some(Expr::eq(Expr::col("f", "id"), Expr::lit(42))),
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        // _nf_d should now exist alongside _nf_f.
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_d"),
+            "expected _nf_d CTE to be derived from edge filtered by _nf_f"
+        );
+    }
+
+    #[test]
+    fn pinned_traversal_skips_when_both_sides_pinned() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Both pinned: nothing to derive.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    node_ids: vec![1i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    node_ids: vec![2i64],
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["DEFINES".into()],
+                from: "f".into(),
+                to: "d".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        assert!(
+            q.ctes.is_empty(),
+            "no CTEs should be created when both sides are pinned"
+        );
     }
 
     #[test]
