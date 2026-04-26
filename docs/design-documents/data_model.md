@@ -159,7 +159,11 @@ graph TD
     Directory -- DIR_CONTAINS_FILE --> File
     File -- FILE_DEFINES --> Definition
     File -- FILE_IMPORTS --> ImportedSymbol
-    Definition -- DEFINITION_TO_DEFINITION --> Definition
+    File -- CALLS --> Definition
+    File -- CALLS --> ImportedSymbol
+    Definition -- CALLS --> Definition
+    Definition -- CALLS --> ImportedSymbol
+    Definition -- EXTENDS --> Definition
     Definition -- DEFINES_IMPORTED_SYMBOL --> ImportedSymbol
     ImportedSymbol -- IMPORTED_SYMBOL_TO_DEFINITION --> Definition
 ```
@@ -174,7 +178,8 @@ graph TD
 | `DIR_CONTAINS_FILE`                 | `Directory`    | `File`         | A directory contains a file.                                                                            |
 | `FILE_DEFINES`                      | `File`         | `Definition`   | A file contains a code definition.                                                                      |
 | `FILE_IMPORTS`                      | `File`         | `ImportedSymbol`| A file imports a symbol.                                                                                |
-| `DEFINITION_TO_DEFINITION`          | `Definition`   | `Definition`   | Represents a call graph edge (e.g., a function calls another function, a class inherits from another).    |
+| `CALLS`                             | `Definition`, `File` | `Definition`, `ImportedSymbol` | A function/method invocation. Variants cover definition-to-definition calls, top-level (file-scoped) calls into definitions or imports, and definition-to-import calls. |
+| `EXTENDS`                           | `Definition`   | `Definition`   | A class or interface inheritance relationship.                                                          |
 | `DEFINES_IMPORTED_SYMBOL`           | `Definition`   | `ImportedSymbol`| A definition (e.g., an exported function) is the source of an imported symbol.                          |
 | `IMPORTED_SYMBOL_TO_DEFINITION`     | `ImportedSymbol`| `Definition`   | An imported symbol resolves to a specific definition.                                                   |
 
