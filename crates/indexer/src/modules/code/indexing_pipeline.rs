@@ -21,9 +21,6 @@ pub struct IndexingRequest {
     pub traversal_path: String,
     pub task_id: i64,
     pub commit_sha: Option<String>,
-    /// Top-level namespace id (or `_unknown` sentinel) used as the
-    /// `top_level_namespace_id` metric label across this pipeline run.
-    /// Already resolved by the handler so per-stage callers don't reparse.
     pub namespace_id: String,
 }
 

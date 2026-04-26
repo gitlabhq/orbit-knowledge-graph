@@ -57,10 +57,8 @@ impl SdlcMetrics {
         rows: u64,
         namespace_id: &str,
     ) {
-        // `pipeline_duration` is a histogram and intentionally does not carry
-        // the namespace label; per-namespace bucket cardinality blows past
-        // Mimir's per-tenant comfort. Record duration with the entity label
-        // only and rows with both.
+        // Histograms intentionally drop the namespace label: per-namespace
+        // bucket cardinality would push past Mimir's per-tenant comfort.
         self.pipeline_duration.record(
             duration,
             &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
@@ -81,7 +79,6 @@ impl SdlcMetrics {
         bytes: u64,
         namespace_id: &str,
     ) {
-        // Histogram stays entity-only; counter takes the namespace label.
         self.datalake_query_duration.record(
             duration,
             &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],

@@ -11,11 +11,9 @@ pub mod labels {
     pub const NAMESPACE_ID: &str = "top_level_namespace_id";
 }
 
-/// Sentinel value emitted on counters owned by `GlobalHandler`, which
-/// processes rows that have no namespace (e.g. global lookup tables). Using
-/// a fixed string keeps the label set homogeneous across series so dashboard
-/// `sum by (top_level_namespace_id)` queries do not split global volume into
-/// an empty-string bucket.
+/// Label value for `GlobalHandler` runs that touch tenant-less tables. Fixed
+/// string so the label set stays homogeneous and `sum by (top_level_namespace_id)`
+/// queries do not split global volume into an empty-string bucket.
 pub const NAMESPACE_ID_GLOBAL: &str = "_global";
 
 const DOMAIN: &str = "indexer.sdlc";

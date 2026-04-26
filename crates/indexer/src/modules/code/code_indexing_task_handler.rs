@@ -24,9 +24,6 @@ use gkg_utils::traversal_path::top_level_namespace_id;
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
 
-/// Derive the metric label value for `top_level_namespace_id` from a code
-/// task's `traversal_path`. Logs a warning on parse failure so an upstream
-/// format change is visible in logs even though the metric stays homogeneous.
 fn namespace_label(traversal_path: &str) -> String {
     match top_level_namespace_id(traversal_path) {
         Some(id) => id.to_string(),

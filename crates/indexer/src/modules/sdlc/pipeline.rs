@@ -25,10 +25,8 @@ pub(in crate::modules::sdlc) struct PipelineContext {
     pub watermark: DateTime<Utc>,
     pub position_key: String,
     pub base_conditions: BTreeMap<String, String>,
-    /// Top-level namespace id when this run belongs to a single tenant
-    /// (`NamespaceHandler`), or `None` for global runs that touch tenant-less
-    /// tables. Reaches the metric recording boundary as either the numeric id
-    /// or the `"_global"` sentinel string so the label set stays homogeneous.
+    /// `None` for `GlobalHandler` runs; surfaces as the `_global` sentinel
+    /// at the metric boundary so the label set stays homogeneous.
     pub top_level_namespace_id: Option<i64>,
 }
 

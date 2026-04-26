@@ -13,10 +13,8 @@ pub mod labels {
     pub const NAMESPACE_ID: &str = "top_level_namespace_id";
 }
 
-/// Sentinel emitted when the top-level namespace id cannot be derived from
-/// the task's `traversal_path` (parse failure or unexpected format). Keeps
-/// the label set homogeneous across series; a non-zero rate of this value
-/// means the upstream contract changed.
+/// A non-zero rate on this label value means the upstream `traversal_path`
+/// contract changed; alert before dashboards start splitting tenants.
 pub const NAMESPACE_ID_UNKNOWN: &str = "_unknown";
 
 const DOMAIN: &str = "indexer.code";
