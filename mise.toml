@@ -34,6 +34,7 @@ DUCKDB_DOWNLOAD_LIB = "{{env.DUCKDB_DOWNLOAD_LIB | default(value='1')}}"
 "zig" = "0.15.2"
 clickhouse = "25.12"
 duckdb = "1.5.1"
+opencode = "1.4.11"
 uv = "0.9.28"
 node = "24"
 vale = "3.13.0"
@@ -373,22 +374,38 @@ description = "Run all documentation linters"
 run = "cp docs/source/queries/query_language.md skills/orbit/references/query_language.md"
 description = "Sync upstream docs into the Orbit agent skill (skills/orbit/references/)"
 
+[tasks."eval:sync-spec"]
+run = "bash evals/scripts/sync-opencode-spec.sh"
+description = "Fetch OpenCode OpenAPI spec matching pinned version"
+
 [tasks."eval:build"]
-run = "docker build -t gkg-eval evals/container"
+run = "docker build --build-arg OPENCODE_VERSION=$(mise ls opencode --json | jq -r '.[0].version') -t gkg-eval evals/container"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
 description = "Build the eval harness Docker image"
 
-[tasks."eval:run"]
-run = "uv run python -m harness.cli run"
+[tasks."eval:run:prod"]
+run = "uv run python -m harness.cli --env production run"
 dir = "evals"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
-description = "Run full evaluation"
+description = "Run evaluation against production"
 
-[tasks."eval:run:bg"]
-run = "uv run python -m harness.cli run --bg"
+[tasks."eval:run:staging"]
+run = "uv run python -m harness.cli --env staging run"
 dir = "evals"
 env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
-description = "Run evaluation detached in background"
+description = "Run evaluation against staging"
+
+[tasks."eval:run:prod:bg"]
+run = "uv run python -m harness.cli --env production run --bg"
+dir = "evals"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run evaluation against production (background)"
+
+[tasks."eval:run:staging:bg"]
+run = "uv run python -m harness.cli --env staging run --bg"
+dir = "evals"
+env = { DOCKER_HOST = "unix://{{env.HOME}}/.colima/gkg/docker.sock" }
+description = "Run evaluation against staging (background)"
 
 [tasks."eval:score"]
 run = "uv run python -m harness.cli score"
