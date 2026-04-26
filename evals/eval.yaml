@@ -9,6 +9,10 @@ run:
     filter:
       ids:
         - mr-count-by-project
+        - search-user
+        - mr-neighbors
+        - path-between-users
+        - most-contentious-features
       categories: []
       min_difficulty: easy
 

@@ -118,7 +118,7 @@ class ServerManager:
         handle = ServerHandle(arm=name, port=port, container_id=container_id,
                               client=client, log_path=log_path)
         self._handles[name] = handle
-        logger.info("container %s ready (id=%s, port=%d)", name, container_id, arm.port)
+        logger.info("container %s ready (id=%s, port=%d)", name, container_id, port)
         return handle
 
     async def stop(self, container_name: str) -> None:
