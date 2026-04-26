@@ -229,6 +229,8 @@ edges:
   HAS_NOTE: edges/has_note.yaml
   DEFINES: edges/defines.yaml
   IMPORTS: edges/imports.yaml
+  CALLS: edges/calls.yaml
+  EXTENDS: edges/extends.yaml
   TARGETS: edges/targets.yaml
   FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml

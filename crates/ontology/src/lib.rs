@@ -1027,6 +1027,33 @@ mod tests {
     }
 
     #[test]
+    fn code_graph_edges_are_registered() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        // Code-graph emits CALLS, EXTENDS, DEFINES, IMPORTS via the linker
+        // resolver. All four must be registered for queries to compile, and
+        // they must all route to the same edge table so traversals can JOIN
+        // them with edges from other code-graph relationships.
+        for kind in ["CALLS", "EXTENDS", "DEFINES", "IMPORTS"] {
+            let entries = ontology
+                .get_edge(kind)
+                .unwrap_or_else(|| panic!("{kind} should be registered"));
+            assert!(!entries.is_empty(), "{kind} should have variants");
+            assert!(
+                entries.iter().any(|e| e.relationship_kind == kind),
+                "{kind} relationship_kind mismatch"
+            );
+            for entry in entries {
+                assert_eq!(
+                    entry.destination_table, "gl_code_edge",
+                    "{kind} variant {:?} -> {:?} should route to gl_code_edge",
+                    entry.source_kind, entry.target_kind,
+                );
+            }
+        }
+    }
+
+    #[test]
     fn test_display() {
         let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
         let display = format!("{ontology}");
