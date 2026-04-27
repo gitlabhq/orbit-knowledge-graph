@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.1.0
+version: 0.2.0
 license: MIT
 metadata:
   audience: developers
@@ -56,7 +56,7 @@ POST to `orbit/query` requires an explicit `Content-Type`. Without it you get
 cat > /tmp/q.json <<'JSON'
 {
   "query": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "p", "entity": "Project"},
     "limit": 5
   },
@@ -112,8 +112,8 @@ External links (require internet):
 3. **Set `Content-Type: application/json` on POST.** Missing → 415.
 4. **No `-R owner/repo`.** Orbit endpoints are user-scoped at the API level.
 5. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
-6. **`query_type` dictates the top-level key:** `search` / `neighbors` → `node` (singular);
-   `traversal` / `aggregation` / `path_finding` → `nodes` (array).
+6. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
+   multi-node `traversal` / `aggregation` / `path_finding` → `nodes` (array).
 7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
 8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
