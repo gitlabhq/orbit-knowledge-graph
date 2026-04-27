@@ -266,7 +266,12 @@ fn lower_edge_select(
                 let cases: Vec<String> = mapping
                     .iter()
                     .map(|(key, value)| {
-                        format!("WHEN {} = {} THEN '{}'", d.source_column, key, value)
+                        format!(
+                            "WHEN {} = {} THEN '{}'",
+                            d.source_column,
+                            key,
+                            value.replace('\'', "\\'")
+                        )
                     })
                     .collect();
                 Expr::raw(format!("CASE {} ELSE NULL END", cases.join(" ")))

@@ -803,4 +803,166 @@ mod tests {
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
         );
     }
+
+    // ── Denormalization pass tests ──────────────────────────────────────
+
+    #[test]
+    fn denorm_single_hop_removes_nf_cte_and_injects_edge_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // The original node-table _nf_pipe CTE (scanning gl_pipeline) should
+        // be eliminated. A SIP-derived CTE named _nf_pipe may still exist
+        // (scanning gl_edge), which is expected.
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("source_status"),
+            "denorm pass should inject source_status edge filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_partial_filters_keeps_nf_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        // Pipeline has 'status' denormalized but 'source' is not.
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"},
+                    "source": {"op": "eq", "value": "push"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_nf_pipe"),
+            "partial denorm must keep _nf_pipe CTE when not all filters are denormalized, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("source_status"),
+            "partial denorm must not inject edge filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_skips_rewrite_when_node_ids_present() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "node_ids": [1, 2, 3],
+                 "filters": {"status": {"op": "eq", "value": "failed"}}},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("source_status"),
+            "denorm pass must skip rewrite when node_ids are present, got:\n{sql}"
+        );
+    }
+
+    /// The GROUP BY rewrite replaces `GROUP BY node.prop` with
+    /// `GROUP BY edge.denorm_col` when all GROUP BY columns are
+    /// denormalized. The node table join may still remain if the
+    /// node is referenced for redaction IDs or other columns.
+    #[test]
+    fn denorm_aggregation_count_with_filter_uses_edge_column() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "pipe",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("source_status"),
+            "filter on denormalized property must use edge column, got:\n{sql}"
+        );
+        // The _nf_pipe node-filter CTE (with status filter + LIMIT 1 BY)
+        // should be eliminated. gl_pipeline may still appear in SIP/cascade
+        // CTEs, but those don't scan for the status property.
+        assert!(
+            !sql.contains("pipe.status"),
+            "node-table status filter should be eliminated by denorm rewrite, got:\n{sql}"
+        );
+    }
+
+    /// Role-gated entities (e.g. Vulnerability with required_role > Reporter)
+    /// must keep their node table in FROM so the security pass can apply
+    /// role-scoped traversal path filters.
+    #[test]
+    fn denorm_preserves_role_gated_node_table_for_security() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability", "filters": {
+                    "state": {"op": "eq", "value": "detected"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "v",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Vulnerability requires SecurityManager role. Even though the state
+        // filter is denormalized, the node table must remain for security.
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "role-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
+        );
+    }
 }
