@@ -399,7 +399,6 @@ pub struct InputFilter {
     pub value: Option<Value>,
     /// Populated by the validate pass; lets the lowerer bind temporal columns
     /// with their typed CH param.
-    #[doc(hidden)]
     pub data_type: Option<ontology::DataType>,
 }
 

@@ -147,7 +147,7 @@ impl ArrowClickHouseClient {
                 // was parsed"). Column already pins UTC, so dropping it
                 // preserves the value.
                 let normalized = match ch_type {
-                    ChType::DateTime64 | ChType::Date => s.strip_suffix('Z').unwrap_or(s),
+                    ChType::DateTime64 => s.strip_suffix('Z').unwrap_or(s),
                     _ => s.as_str(),
                 };
                 query.param(key, normalized)
