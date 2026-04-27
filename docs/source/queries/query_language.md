@@ -417,9 +417,10 @@ Find the shortest path between user ID 1 and project ID 100 across all relations
   `id` values even when `fqn` and `file_path` are identical. Searching by
   `name = "Foo"` typically returns one row per (project, branch) where
   `Foo` is defined. Pin all variants explicitly via `node_ids` if you need
-  full coverage. Definition IDs commonly serialize as large negative
-  strings (e.g. `"-3105496773625129529"`) — that is normal Int64 hashing,
-  not a sign error.
+  full coverage. Hashed IDs are masked to a positive Int64 range
+  (`[0, 2^63)`), so they always serialize as non-negative decimal
+  strings. Rows indexed before the masking change can still appear as
+  negative until the affected projects are reindexed.
 - **All entity IDs are emitted as strings** in the JSON response so that
   values beyond `Number.MAX_SAFE_INTEGER` (2^53) survive a JS round-trip.
   Cast back to integers in your client when comparing.
