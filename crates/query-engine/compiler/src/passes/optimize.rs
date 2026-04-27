@@ -824,6 +824,17 @@ fn rewrite_denormalized_group_by(q: &mut Query, input: &Input) {
             *where_clause = Expr::conjoin(rewritten).unwrap_or(Expr::int(1));
         }
 
+        // Don't prune node tables that require elevated access. The security
+        // pass needs the node table alias to apply role-scoped traversal path
+        // filters (e.g. Vulnerability requires SecurityManager, not Reporter).
+        let requires_elevated_role = input
+            .entity_auth
+            .get(entity.as_str())
+            .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+        if requires_elevated_role {
+            continue;
+        }
+
         nodes_to_prune.insert(group_alias.clone());
     }
 
