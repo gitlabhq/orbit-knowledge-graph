@@ -12,6 +12,4 @@ pub enum AuthError {
     TokenExpired,
     #[error("invalid configuration: {0}")]
     InvalidConfig(String),
-    #[error("security context: {0}")]
-    SecurityContext(String),
 }

@@ -1,15 +1,13 @@
 use query_engine::compiler::{SecurityContext, TraversalPath};
 
 use super::Claims;
-use super::error::AuthError;
 
 const ADMIN_ORG_ROOT_ACCESS_LEVEL: u32 = 50;
 
-pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, AuthError> {
+pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, String> {
     let org_id = claims
         .organization_id
-        .ok_or_else(|| AuthError::SecurityContext("missing organization_id in claims".into()))?
-        as i64;
+        .ok_or("missing organization_id in claims")? as i64;
 
     let traversal_paths = if claims.admin {
         vec![TraversalPath::new(
@@ -18,9 +16,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, AuthEr
         )]
     } else {
         if claims.group_traversal_ids.is_empty() {
-            return Err(AuthError::SecurityContext(
-                "no enabled namespaces for this user".into(),
-            ));
+            return Err("no enabled namespaces for this user".into());
         }
         claims
             .group_traversal_ids
@@ -31,7 +27,7 @@ pub fn build_security_context(claims: &Claims) -> Result<SecurityContext, AuthEr
 
     SecurityContext::new_with_roles(org_id, traversal_paths)
         .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
-        .map_err(|e| AuthError::SecurityContext(e.to_string()))
+        .map_err(|e| e.to_string())
 }
 
 #[cfg(test)]
@@ -85,17 +81,15 @@ mod tests {
     #[test]
     fn missing_org_id_returns_error() {
         let claims = make_claims(true, vec![], None);
-        assert!(matches!(
-            build_security_context(&claims),
-            Err(AuthError::SecurityContext(_))
-        ));
+        let err = build_security_context(&claims).unwrap_err();
+        assert!(err.contains("missing organization_id"));
     }
 
     #[test]
     fn non_admin_empty_paths_returns_error() {
         let claims = make_claims(false, vec![], Some(1));
         let err = build_security_context(&claims).unwrap_err();
-        assert!(err.to_string().contains("no enabled namespaces"));
+        assert!(err.contains("no enabled namespaces"));
     }
 
     #[test]
@@ -118,5 +112,52 @@ mod tests {
         assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "1/33/"]);
         assert_eq!(ctx.paths_at_least(30), vec!["1/33/"]);
         assert!(ctx.paths_at_least(50).is_empty());
+    }
+
+    #[test]
+    fn non_admin_preserves_access_levels() {
+        let claims = make_claims(
+            false,
+            vec![
+                TraversalPathClaim {
+                    path: "1/22/".to_string(),
+                    access_levels: vec![20],
+                },
+                TraversalPathClaim {
+                    path: "1/33/".to_string(),
+                    access_levels: vec![20],
+                },
+            ],
+            Some(1),
+        );
+        let ctx = build_security_context(&claims).unwrap();
+        let paths: Vec<&str> = ctx
+            .traversal_paths
+            .iter()
+            .map(|tp| tp.path.as_str())
+            .collect();
+        assert_eq!(paths, vec!["1/22/", "1/33/"]);
+        assert!(
+            ctx.traversal_paths
+                .iter()
+                .all(|tp| tp.access_levels == vec![20])
+        );
+    }
+
+    #[test]
+    fn exact_access_levels_propagate() {
+        let claims = make_claims(
+            false,
+            vec![TraversalPathClaim {
+                path: "1/22/".to_string(),
+                access_levels: vec![20, 25],
+            }],
+            Some(1),
+        );
+        let ctx = build_security_context(&claims).unwrap();
+        assert_eq!(ctx.traversal_paths[0].access_levels, vec![20, 25]);
+        assert_eq!(ctx.paths_at_least(20), vec!["1/22/"]);
+        assert_eq!(ctx.paths_at_least(25), vec!["1/22/"]);
+        assert!(ctx.paths_at_least(30).is_empty());
     }
 }
