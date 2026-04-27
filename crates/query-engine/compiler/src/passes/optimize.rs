@@ -27,7 +27,10 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{AggFunction, Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
+use crate::input::{
+    AggFunction, ColumnSelection, Direction, FilterOp, Input, InputFilter, InputNode,
+    InputRelationship, QueryType,
+};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -433,6 +436,12 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         *where_clause = Expr::conjoin(kept).unwrap_or(Expr::int(1));
     }
 
+    // Rewrite GROUP BY on denormalized properties: replace node-table column
+    // references with edge-column references so the node-table join can be pruned.
+    if input.query_type == QueryType::Aggregation {
+        rewrite_denormalized_group_by(q, input, rel);
+    }
+
     // Rewrite COUNT(e0.source_id) → COUNT() for edge-only targets whose
     // _nf_ CTE was the only filter.
     for cte_name in &ctes_to_remove {
@@ -509,6 +518,140 @@ fn rewrite_count_to_bare(q: &mut Query, edge_alias: &str, edge_col: &str) {
                 };
             }
         }
+    }
+}
+
+/// Rewrite GROUP BY expressions that reference a node table with a denormalized
+/// property to use the edge column instead. After rewriting, the node-table
+/// join becomes unreferenced and `prune_table_joins` removes it.
+///
+/// Before:
+///   SELECT pipe.status AS pipe_status, COUNT(e0.source_id) FROM gl_edge e0
+///   JOIN gl_pipeline pipe ON ... GROUP BY pipe.status
+///
+/// After:
+///   SELECT e0.source_status AS pipe_status, COUNT() FROM gl_edge e0
+///   WHERE ... GROUP BY e0.source_status
+fn rewrite_denormalized_group_by(q: &mut Query, input: &Input, rel: &InputRelationship) {
+    let mut nodes_to_prune: HashSet<String> = HashSet::new();
+
+    for agg in &input.aggregations {
+        let Some(group_alias) = &agg.group_by else {
+            continue;
+        };
+        let Some(node) = input.nodes.iter().find(|n| &n.id == group_alias) else {
+            continue;
+        };
+        let Some(entity) = &node.entity else {
+            continue;
+        };
+
+        let dir_prefix = if node.id == rel.from {
+            match rel.direction {
+                Direction::Outgoing | Direction::Both => "source",
+                Direction::Incoming => "target",
+            }
+        } else {
+            match rel.direction {
+                Direction::Outgoing | Direction::Both => "target",
+                Direction::Incoming => "source",
+            }
+        };
+
+        // Check which columns in SELECT/GROUP BY reference denormalized properties.
+        let cols = match &node.columns {
+            Some(ColumnSelection::List(c)) => c,
+            _ => continue,
+        };
+
+        let mut all_denormalized = true;
+        let mut rewrites: Vec<(String, String)> = Vec::new(); // (node_col, edge_col)
+
+        for col in cols {
+            let key = (entity.clone(), col.clone(), dir_prefix.to_string());
+            if let Some(edge_column) = input.compiler.denormalized_columns.get(&key) {
+                rewrites.push((col.clone(), edge_column.clone()));
+            } else {
+                all_denormalized = false;
+                break;
+            }
+        }
+
+        // Only rewrite if ALL group-by columns are denormalized. Partial
+        // rewrite would still require the node-table join.
+        if !all_denormalized || rewrites.is_empty() {
+            continue;
+        }
+
+        // Rewrite SELECT and GROUP BY expressions.
+        let edge_alias = "e0";
+        for (node_col, edge_col) in &rewrites {
+            let from_expr = Expr::col(group_alias, node_col);
+            for sel in &mut q.select {
+                if sel.expr == from_expr {
+                    sel.expr = Expr::col(edge_alias, edge_col);
+                }
+            }
+            for gb in &mut q.group_by {
+                if *gb == from_expr {
+                    *gb = Expr::col(edge_alias, edge_col);
+                }
+            }
+        }
+
+        // Also rewrite any WHERE conjuncts referencing this node's properties
+        // (filters that were placed by build_where, not in a CTE).
+        if let Some(ref mut where_clause) = q.where_clause {
+            let conjuncts = where_clause.clone().flatten_and();
+            let rewritten: Vec<Expr> = conjuncts
+                .into_iter()
+                .map(|mut c| {
+                    for (node_col, edge_col) in &rewrites {
+                        replace_column_ref(&mut c, group_alias, node_col, edge_alias, edge_col);
+                    }
+                    c
+                })
+                .collect();
+            *where_clause = Expr::conjoin(rewritten).unwrap_or(Expr::int(1));
+        }
+
+        nodes_to_prune.insert(group_alias.clone());
+    }
+
+    if !nodes_to_prune.is_empty() {
+        prune_table_joins(&mut q.from, &nodes_to_prune);
+    }
+}
+
+/// Replace column references in an expression tree.
+fn replace_column_ref(
+    expr: &mut Expr,
+    from_table: &str,
+    from_col: &str,
+    to_table: &str,
+    to_col: &str,
+) {
+    match expr {
+        Expr::Column { table, column } if table == from_table && column == from_col => {
+            *table = to_table.to_string();
+            *column = to_col.to_string();
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            replace_column_ref(left, from_table, from_col, to_table, to_col);
+            replace_column_ref(right, from_table, from_col, to_table, to_col);
+        }
+        Expr::UnaryOp { expr: inner, .. } => {
+            replace_column_ref(inner, from_table, from_col, to_table, to_col);
+        }
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                replace_column_ref(arg, from_table, from_col, to_table, to_col);
+            }
+        }
+        Expr::InSubquery { expr: inner, .. } => {
+            replace_column_ref(inner, from_table, from_col, to_table, to_col);
+        }
+        _ => {}
     }
 }
 
