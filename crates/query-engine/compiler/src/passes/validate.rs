@@ -109,6 +109,28 @@ fn json_type_name(value: &serde_json::Value) -> &'static str {
 /// Ranges wider than this are effectively unfiltered full-table scans.
 const MAX_ID_RANGE_SPAN: i64 = 100_000;
 
+/// Tighter id_range cap for path_finding endpoints. The frontier BFS is
+/// O(anchors × E^depth), so we bound anchor cardinality to match
+/// MAX_NODE_IDS (500).
+const MAX_PATH_ANCHOR_RANGE: i64 = 500;
+
+/// Maximum number of rows the lowerer will resolve from a filtered
+/// path_finding endpoint CTE. Matches the node_ids cap (500).
+pub(crate) const MAX_PATH_ANCHOR_LIMIT: i64 = 500;
+
+/// Whether a path_finding endpoint has bounded selectivity.
+/// Uses the tighter MAX_PATH_ANCHOR_RANGE cap for id_range because
+/// the BFS frontier cost is O(anchors * E^depth).
+fn path_endpoint_has_selectivity(node: &InputNode) -> bool {
+    if !node.node_ids.is_empty() || !node.filters.is_empty() {
+        return true;
+    }
+    if let Some(ref range) = node.id_range {
+        return range.end.saturating_sub(range.start) <= MAX_PATH_ANCHOR_RANGE;
+    }
+    false
+}
+
 /// Whether a node has explicit selectivity (node_ids, filters, or a narrow id_range).
 /// Queries where no node is selective tend to produce full-table scans.
 fn node_has_selectivity(node: &InputNode) -> bool {
@@ -430,18 +452,18 @@ impl<'a> Validator<'a> {
     /// structurally guaranteed to be expensive regardless of data volume.
     fn check_selectivity(&self, input: &Input) -> Result<()> {
         match input.query_type {
-            // Path-finding without pinned endpoints causes O(E^depth) frontier joins.
-            // The lowerer (`build_frontier_arm`) seeds each frontier with
-            // concrete `node_ids` — it cannot use `filters` or `id_range` as
-            // anchor conditions — so we require `node_ids` specifically.
+            // Path-finding endpoints seed BFS frontiers, so each endpoint
+            // must have bounded selectivity: node_ids (already capped at 500
+            // by check_depth), filters (lowerer caps CTE at MAX_PATH_ANCHOR_LIMIT),
+            // or id_range with span ≤ MAX_PATH_ANCHOR_RANGE.
             QueryType::PathFinding => {
                 if let Some(ref path) = input.path {
                     for endpoint in [&path.from, &path.to] {
                         let node = input.nodes.iter().find(|n| n.id == *endpoint);
-                        if node.is_none_or(|n| n.node_ids.is_empty()) {
+                        if node.is_none_or(|n| !path_endpoint_has_selectivity(n)) {
                             return Err(QueryError::Validation(format!(
-                                "path_finding requires node_ids on endpoint \"{endpoint}\" \
-                                 (filters and id_range are not supported for frontier seeding)"
+                                "path_finding requires node_ids, filters, or id_range \
+                                 (max span {MAX_PATH_ANCHOR_RANGE}) on endpoint \"{endpoint}\""
                             )));
                         }
                     }
@@ -1640,8 +1662,8 @@ mod tests {
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3}
             }"#,
         );
-        // Filters alone are NOT enough for path_finding (lowerer needs node_ids)
-        assert_rejects(
+        // Filters on endpoint: OK (lowerer resolves via capped CTE)
+        assert_ok(
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
@@ -1650,10 +1672,9 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "endpoint \"a\"",
         );
-        // id_range alone is NOT enough for path_finding
-        assert_rejects(
+        // Narrow id_range on endpoint: OK
+        assert_ok(
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
@@ -1662,9 +1683,20 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
+        );
+        // Wide id_range on endpoint exceeds MAX_PATH_ANCHOR_RANGE (500)
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 10000}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
             "endpoint \"a\"",
         );
-        // Missing node_ids on start endpoint
+        // No selectivity on start endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -1676,7 +1708,7 @@ mod tests {
             }"#,
             "endpoint \"a\"",
         );
-        // Missing node_ids on end endpoint
+        // No selectivity on end endpoint
         assert_rejects(
             r#"{
                 "query_type": "path_finding",
@@ -1865,12 +1897,23 @@ mod tests {
                 "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "c"}]
             }"#,
         );
-        // path_finding with id_range is NOT enough (needs node_ids)
-        assert_rejects(
+        // path_finding with narrow id_range: OK (within MAX_PATH_ANCHOR_RANGE)
+        assert_ok(
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
                     {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+        );
+        // path_finding with wide id_range: rejected (exceeds MAX_PATH_ANCHOR_RANGE)
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 1000}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}

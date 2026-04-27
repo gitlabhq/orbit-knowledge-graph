@@ -1245,7 +1245,7 @@ fn calls_traversal_compiles_against_embedded_ontology() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "caller", "entity": "Definition", "columns": ["name"]},
+            {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
             {"id": "callee", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -1290,7 +1290,7 @@ fn extends_traversal_compiles_against_embedded_ontology() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "child", "entity": "Definition", "columns": ["name"]},
+            {"id": "child", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
             {"id": "parent", "entity": "Definition", "columns": ["name"]}
         ],
         "relationships": [{"type": "EXTENDS", "from": "child", "to": "parent"}],
@@ -1317,7 +1317,7 @@ fn calls_to_imported_symbol_variant_compiles() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "caller", "entity": "Definition", "columns": ["name"]},
+            {"id": "caller", "entity": "Definition", "node_ids": [1], "columns": ["name"]},
             {"id": "sym", "entity": "ImportedSymbol", "columns": ["identifier_name"]}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "sym"}],
@@ -1332,7 +1332,7 @@ fn calls_aggregation_compiles() {
     let json = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "caller", "entity": "Definition"},
+            {"id": "caller", "entity": "Definition", "node_ids": [1]},
             {"id": "callee", "entity": "Definition"}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -1354,7 +1354,7 @@ fn code_graph_edge_union_routes_to_code_table() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "a", "entity": "Definition"},
+            {"id": "a", "entity": "Definition", "node_ids": [1]},
             {"id": "b", "entity": "Definition"}
         ],
         "relationships": [
