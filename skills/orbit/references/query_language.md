@@ -178,23 +178,6 @@ An array of aggregation specifications. Required when `query_type` is `aggregati
 | `property` | {{< no >}}  | `string`  | The property to aggregate. Required for `sum`, `avg`, `min`, `max`, and `collect`. |
 | `alias`    | {{< no >}}  | `string`  | A name for the aggregation result in the response.                                 |
 
-### Aggregation gotchas
-
-- **`count` and property aggregates run over different row populations.**
-  `count` counts every joined row that survives the relationship filter.
-  `sum` / `avg` / `min` / `max` skip rows where the property is `NULL`. So
-  for the same query, `sum(p) / count(*) ≠ avg(p)` whenever any row has a
-  null property value. If you need sum over the same population that `count`
-  reports, treat nulls as zero in your interpretation of the response, or
-  add a separate `count` aggregate scoped to rows where the property is set.
-- **The aggregate alias is just a label.** A field named `total_added` in
-  the response is whatever the server computed for `function: "sum",
-  property: "added_lines"`. It is not validated against the alias text.
-- **Redacted target rows still affect the count.** If a row is
-  permission-redacted, the `count` includes it but property aggregates
-  exclude it (the property comes back null). Hydrated columns will appear
-  empty for groups whose target rows were entirely redacted.
-
 Example:
 
 Count the number of merge requests authored by each user and return up to 10 results in descending order.
