@@ -408,3 +408,34 @@ Find the shortest path between user ID 1 and project ID 100 across all relations
   "options": {"dynamic_columns": "*"}
 }
 ```
+
+## Entity ID quirks
+
+- **`Definition` IDs are content-hashed Int64s, scoped per project and
+  branch.** Two definitions of the same symbol that live in different
+  projects (or different branches of the same project) have different
+  `id` values even when `fqn` and `file_path` are identical. Searching by
+  `name = "Foo"` typically returns one row per (project, branch) where
+  `Foo` is defined. Pin all variants explicitly via `node_ids` if you need
+  full coverage. Definition IDs commonly serialize as large negative
+  strings (e.g. `"-3105496773625129529"`) — that is normal Int64 hashing,
+  not a sign error.
+- **All entity IDs are emitted as strings** in the JSON response so that
+  values beyond `Number.MAX_SAFE_INTEGER` (2^53) survive a JS round-trip.
+  Cast back to integers in your client when comparing.
+
+## Result deduplication
+
+The graph DDL stores each row as a versioned tuple in
+ReplacingMergeTree. Between background merges, multiple `_version` copies
+of the same logical row can coexist on disk. The query engine collapses
+these to a single result row, but the strategy depends on query type:
+
+- `traversal`, `aggregation`: node tables are dedup'd via
+  `LIMIT 1 BY id` ordered by `_version DESC`. One row per node.
+- `path_finding`, `neighbors`: edge rows can still surface multiple
+  `_version` copies. The formatter collapses them by canonical edge tuple
+  (`from`, `from_id`, `to`, `to_id`, `type`) and by canonical path tuple,
+  so callers see one `path_id` per logical path and one entry per edge.
+  If you want to inspect the raw versioned rows, use the `goon` formatter
+  or query `system.query_log` directly.
