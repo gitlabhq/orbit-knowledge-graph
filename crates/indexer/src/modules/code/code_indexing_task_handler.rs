@@ -1,4 +1,5 @@
 use std::sync::Arc;
+use std::time::Duration;
 
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
@@ -6,7 +7,6 @@ use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
 use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
-use super::config::CODE_LOCK_TTL;
 use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::locking::project_lock_key;
 use super::metrics::CodeMetrics;
@@ -29,6 +29,7 @@ pub struct CodeIndexingTaskHandler {
     checkpoint_store: Arc<dyn CodeCheckpointStore>,
     metrics: CodeMetrics,
     config: CodeIndexingTaskHandlerConfig,
+    lock_ttl: Duration,
 }
 
 impl CodeIndexingTaskHandler {
@@ -38,6 +39,7 @@ impl CodeIndexingTaskHandler {
         checkpoint_store: Arc<dyn CodeCheckpointStore>,
         metrics: CodeMetrics,
         config: CodeIndexingTaskHandlerConfig,
+        lock_ttl: Duration,
     ) -> Self {
         Self {
             pipeline,
@@ -45,6 +47,7 @@ impl CodeIndexingTaskHandler {
             checkpoint_store,
             metrics,
             config,
+            lock_ttl,
         }
     }
 }
@@ -268,7 +271,7 @@ impl CodeIndexingTaskHandler {
     ) -> Result<bool, HandlerError> {
         let key = project_lock_key(project_id, branch);
         ctx.lock_service
-            .try_acquire(&key, CODE_LOCK_TTL)
+            .try_acquire(&key, self.lock_ttl)
             .await
             .map_err(|e| HandlerError::Processing(format!("lock acquire failed: {e}")))
     }
@@ -356,6 +359,7 @@ mod tests {
                 Arc::clone(&checkpoint_store),
                 metrics,
                 CodeIndexingTaskHandlerConfig::default(),
+                Duration::from_secs(60),
             );
 
             Self {

@@ -91,6 +91,7 @@ impl CodeIndexingDeps {
             Arc::clone(&self.checkpoint_store) as _,
             self.metrics.clone(),
             CodeIndexingTaskHandlerConfig::default(),
+            std::time::Duration::from_secs(60),
         )
     }
 }
