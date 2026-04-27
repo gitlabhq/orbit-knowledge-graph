@@ -1336,7 +1336,7 @@ fn calls_aggregation_compiles() {
             {"id": "callee", "entity": "Definition"}
         ],
         "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
-        "aggregations": [{"function": "count", "target": "caller", "alias": "callers"}],
+        "aggregations": [{"function": "count", "target": "caller", "group_by": "callee", "alias": "callers"}],
         "limit": 1
     }"#;
 
