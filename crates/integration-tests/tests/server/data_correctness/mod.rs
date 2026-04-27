@@ -186,6 +186,14 @@ async fn data_correctness() {
         security::aggregation_user_joined_runtime_returns_expected_counts,
         security::aggregation_user_disconnected_scoped_node_rejects_at_compile,
         security::aggregation_user_reachable_via_path_compiles,
+        // security: per-entity role scoping on aggregation target nodes
+        security::aggregation_vulnerability_reporter_only_sees_zero_counts,
+        security::aggregation_vulnerability_mixed_roles_only_surfaces_developer_paths,
+        security::aggregation_vulnerability_security_manager_meets_the_required_floor,
+        security::aggregation_vulnerability_developer_everywhere_sees_all_counts,
+        security::search_vulnerability_reporter_only_returns_empty,
+        security::aggregation_vulnerability_filter_oracle_is_neutralized,
+        security::aggregation_vulnerability_sql_drops_reporter_paths,
         // cursor pagination
         pagination::cursor_first_page,
         pagination::cursor_second_page,

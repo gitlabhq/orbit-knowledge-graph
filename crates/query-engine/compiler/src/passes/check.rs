@@ -66,10 +66,44 @@ fn check_derived_tables_in_from(table_ref: &TableRef, ctx: &SecurityContext) -> 
     }
 }
 
-/// Recursively checks whether `expr` contains a `startsWith(alias.traversal_path, path)`
-/// call where `path` is a prefix of (or equal to) at least one path in the security context.
+/// Checks whether `expr` scopes `alias` to the user's eligible paths.
+/// Returns true when either (a) the expression is, or AND-contains, a
+/// matching `startsWith(alias.traversal_path, path)` call, or (b) the
+/// expression is a `Bool(false)` AND-conjunct — which forces zero rows and
+/// therefore trivially scopes every alias.
+///
+/// `Bool(false)` is only accepted when reached via AND descent from the
+/// top. A `Bool(false)` that lands inside a comparison (`col = false`) or
+/// under an OR (`X OR Bool(false)`) does NOT short-circuit the clause:
+/// other rows are still reachable, so we must keep requiring an actual
+/// `startsWith` on the alias. Matching it unconditionally would let any
+/// query containing a `= false` filter bypass this defense-in-depth check.
 fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext) -> bool {
     let Some(expr) = expr else { return false };
+    match expr {
+        Expr::Literal(Value::Bool(false))
+        | Expr::Param {
+            value: Value::Bool(false),
+            ..
+        } => true,
+        Expr::BinaryOp {
+            op: crate::ast::Op::And,
+            left,
+            right,
+        } => {
+            has_valid_path_filter(Some(left), alias, ctx)
+                || has_valid_path_filter(Some(right), alias, ctx)
+        }
+        _ => has_matching_starts_with(expr, alias, ctx),
+    }
+}
+
+/// Recursive walker used once we've left an AND-chain context. It looks
+/// only for a matching `startsWith(alias.traversal_path, path)` call and
+/// never treats a bare `Bool(false)` as a satisfying filter, so a
+/// `col = false` comparison or an OR-ed `Bool(false)` does not spoof a
+/// scoping check.
+fn has_matching_starts_with(expr: &Expr, alias: &str, ctx: &SecurityContext) -> bool {
     match expr {
         Expr::FuncCall { name, args } if name == STARTS_WITH_FNAME => {
             let has_column = args.iter().any(|a| {
@@ -89,15 +123,15 @@ fn has_valid_path_filter(expr: Option<&Expr>, alias: &str, ctx: &SecurityContext
                 } => ctx
                     .traversal_paths
                     .iter()
-                    .any(|tp| tp.starts_with(path.as_str())),
+                    .any(|tp| tp.path.starts_with(path.as_str())),
                 _ => false,
             })
         }
         Expr::BinaryOp { left, right, .. } => {
-            has_valid_path_filter(Some(left), alias, ctx)
-                || has_valid_path_filter(Some(right), alias, ctx)
+            has_matching_starts_with(left, alias, ctx)
+                || has_matching_starts_with(right, alias, ctx)
         }
-        Expr::UnaryOp { expr: inner, .. } => has_valid_path_filter(Some(inner), alias, ctx),
+        Expr::UnaryOp { expr: inner, .. } => has_matching_starts_with(inner, alias, ctx),
         _ => false,
     }
 }
@@ -123,7 +157,12 @@ mod tests {
     fn passes_after_security_injection() {
         let ctx = SecurityContext::new(42, vec!["42/43/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology::Ontology::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 
@@ -158,8 +197,135 @@ mod tests {
     fn accepts_lowest_common_prefix() {
         let ctx = SecurityContext::new(42, vec!["42/10/".into(), "42/20/".into()]).unwrap();
         let mut node = project_query(None);
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology::Ontology::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    /// An AND-chain containing `Bool(false)` short-circuits to zero rows, so
+    /// the post-check must accept the query even when no per-alias
+    /// `startsWith` filter is present. The security pass emits this shape
+    /// when an alias has no eligible traversal paths (e.g. a Reporter-only
+    /// user hitting an entity that requires Security Manager).
+    #[test]
+    fn accepts_bool_false_as_dead_alias_filter() {
+        use crate::ast::Op;
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        // Simulates the output of apply_security_context when paths_at_least()
+        // returned an empty slice for the Vulnerability alias: the alias's
+        // `startsWith` turns into Bool(false), AND-ed with the rest of the
+        // clause.
+        let dead = Expr::param(crate::ast::ChType::Bool, false);
+        let node = project_query(Some(Expr::binary(Op::And, dead, Expr::lit(true))));
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    /// A `col = false` comparison (or any other non-AND operator whose
+    /// operand happens to be a boolean false literal) must NOT be treated
+    /// as a proof that the alias is scoped. Bool(false) short-circuits the
+    /// clause only when AND-chained into the top level. OR-ing or
+    /// equality-ing against it leaves other rows reachable.
+    ///
+    /// Without this guard a user filter like `Project.archived = false`
+    /// would bypass CheckPass defense-in-depth for any alias whose
+    /// `startsWith` is missing — defeating the purpose of the post-check.
+    #[test]
+    fn rejects_bool_false_nested_inside_comparison() {
+        use crate::ast::Op;
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        // `p.archived = false` — a typical boolean column filter. The false
+        // literal sits inside an Eq op, not an AND conjunct, so it does not
+        // scope the alias.
+        let eq_false = Expr::binary(
+            Op::Eq,
+            Expr::col("p", "archived"),
+            Expr::param(crate::ast::ChType::Bool, false),
+        );
+        let node = project_query(Some(eq_false));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter"),
+            "CheckPass must still require a startsWith for alias 'p'; got: {err}"
+        );
+    }
+
+    /// `Bool(false)` OR-ed with anything is not a dead clause: the OR
+    /// arms can still produce rows. Treating it as proof of scoping would
+    /// leak data if the security pass forgot to emit a `startsWith`.
+    #[test]
+    fn rejects_bool_false_ored_with_true() {
+        use crate::ast::Op;
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        let or_expr = Expr::binary(
+            Op::Or,
+            Expr::param(crate::ast::ChType::Bool, false),
+            Expr::lit(true),
+        );
+        let node = project_query(Some(or_expr));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter"),
+            "OR-ed Bool(false) must not satisfy the post-check; got: {err}"
+        );
+    }
+
+    /// A `Bool(false)` buried in a deeply nested AND chain (the shape
+    /// `Expr::and_all` typically emits for multi-alias queries) still
+    /// short-circuits the clause and counts as a valid path filter.
+    #[test]
+    fn accepts_bool_false_in_nested_and_chain() {
+        use crate::ast::Op;
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        // `startsWith(p, '1/') AND (col = 5 AND Bool(false))`
+        // — Bool(false) is buried under a right-heavy AND, not an OR.
+        let dead_conjunct = Expr::binary(
+            Op::And,
+            Expr::binary(Op::Eq, Expr::col("p", "id"), Expr::lit(5)),
+            Expr::param(crate::ast::ChType::Bool, false),
+        );
+        let where_expr = Expr::binary(
+            Op::And,
+            Expr::func(
+                STARTS_WITH_FNAME,
+                vec![Expr::col("p", TRAVERSAL_PATH_COLUMN), Expr::string("1/")],
+            ),
+            dead_conjunct,
+        );
+        let node = project_query(Some(where_expr));
+        assert!(check_ast(&node, &ctx).is_ok());
+    }
+
+    /// Inverse of the previous test: if the AND chain has no Bool(false)
+    /// and no matching startsWith for the alias, the check must fail even
+    /// when the clause contains `col = false` (which is NOT a dead
+    /// conjunct).
+    #[test]
+    fn rejects_and_chain_with_col_eq_false_and_no_starts_with() {
+        use crate::ast::Op;
+        let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
+        // `col = false AND col2 > 0` — no startsWith, no Bool(false) conjunct.
+        let where_expr = Expr::binary(
+            Op::And,
+            Expr::binary(
+                Op::Eq,
+                Expr::col("p", "archived"),
+                Expr::param(crate::ast::ChType::Bool, false),
+            ),
+            Expr::binary(Op::Gt, Expr::col("p", "id"), Expr::lit(0)),
+        );
+        let node = project_query(Some(where_expr));
+        let err = check_ast(&node, &ctx).unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("missing valid traversal_path filter"),
+            "col = false is NOT a dead conjunct — check must still require startsWith, got: {err}"
+        );
     }
 
     #[test]
@@ -219,6 +385,7 @@ mod tests {
         crate::passes::security::apply_security_context(
             &mut Node::Query(Box::new(inner.clone())),
             &ctx,
+            &ontology::Ontology::new(),
         )
         .unwrap();
         // Re-extract the filtered query from the node
@@ -359,7 +526,12 @@ mod tests {
             }],
             ..Default::default()
         }));
-        crate::passes::security::apply_security_context(&mut node, &ctx).unwrap();
+        crate::passes::security::apply_security_context(
+            &mut node,
+            &ctx,
+            &ontology::Ontology::new(),
+        )
+        .unwrap();
         assert!(check_ast(&node, &ctx).is_ok());
     }
 

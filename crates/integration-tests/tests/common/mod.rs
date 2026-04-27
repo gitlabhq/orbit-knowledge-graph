@@ -44,7 +44,10 @@ impl DummyClaims for gkg_server::auth::Claims {
             admin: true,
             organization_id: Some(1),
             min_access_level: Some(20),
-            group_traversal_ids: vec!["1/".into()],
+            group_traversal_ids: vec![gkg_server::auth::TraversalPathClaim {
+                path: "1/".into(),
+                access_levels: vec![20],
+            }],
             source_type: "rest".into(),
             ai_session_id: None,
             instance_id: None,
