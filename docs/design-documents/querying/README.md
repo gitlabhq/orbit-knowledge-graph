@@ -18,7 +18,7 @@ View the [Intermediate Query Language](./intermediary_llm_query_language.md) des
 
 ### Unified Response Schema
 
-All five query types (search, traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ query_type, nodes, edges, columns?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.
+All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ query_type, nodes, edges, columns?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.
 
 - **ADR**: [ADR 004 — Unified Response Schema](../decisions/004_unified_response_schema.md)
 

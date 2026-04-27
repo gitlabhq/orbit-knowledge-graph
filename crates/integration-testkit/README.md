@@ -153,10 +153,10 @@ let resp = ResponseView::for_query(&compiled.input, response);
 
 On construction, `for_query` validates two structural invariants:
 
-- The response's `query_type` matches the input (e.g. a search query must produce
-  a `"search"` response).
-- Search and aggregation responses have zero edges (the formatter never produces
-  edges for these query types).
+- The response's `query_type` matches the input (e.g. a traversal query must produce
+  a `"traversal"` response).
+- Single-node traversal and aggregation responses have zero edges (the formatter
+  never produces edges for these query shapes).
 
 ### Assertion enforcement
 
@@ -199,12 +199,12 @@ For edge cases where a test intentionally skips an assertion:
 resp.skip_requirement(Requirement::OrderBy);
 ```
 
-### Example: search with filter and ordering
+### Example: single-entity traversal with filter and ordering
 
 ```rust
 async fn search_filter_eq(ctx: &TestContext) {
     let resp = run_query(ctx, r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User",
                  "filters": {"state": "blocked"}},
         "order_by": {"node": "u", "property": "id"},
