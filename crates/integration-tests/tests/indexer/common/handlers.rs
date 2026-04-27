@@ -28,21 +28,10 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
 }
 
 pub async fn namespace_handler(ctx: &TestContext) -> Arc<dyn Handler> {
-    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
-    namespace_handler_with_ontology(ctx, &ontology).await
-}
-
-/// Variant of [`namespace_handler`] that registers handlers against a
-/// caller-supplied ontology. Useful for integration tests that need to
-/// exercise behavior not present in the embedded ontology (for example
-/// multi-emit FK edges, where the production yaml has no such config yet).
-pub async fn namespace_handler_with_ontology(
-    ctx: &TestContext,
-    ontology: &ontology::Ontology,
-) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
+    let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, ontology)
+    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
         .await
         .expect("failed to register SDLC handlers");
     registry

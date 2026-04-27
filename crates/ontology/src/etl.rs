@@ -29,10 +29,6 @@ pub enum EdgeTarget {
     /// A fixed node type (e.g., "User").
     Literal(String),
     /// Type read from a column at runtime (e.g., "noteable_type").
-    ///
-    /// `type_mapping` collapses raw legacy values into ontology node names
-    /// (e.g., `Issue -> WorkItem`). Values missing from the map pass through
-    /// unchanged — the `TypeIn` extract filter still rejects unrelated types.
     Column {
         column: String,
         type_mapping: BTreeMap<String, String>,
@@ -57,10 +53,8 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        /// Edges to generate from columns. Key is the source column name.
-        /// Edges to generate from columns. Key is the source column name.
-        /// Each column may emit one or more edges (e.g. one outgoing FK edge
-        /// plus an incoming inverse edge sourced from the same column).
+        /// Edges keyed by source column name. Each column may declare one or
+        /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
     Query {
@@ -72,9 +66,8 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         traversal_path_filter: Option<String>,
-        /// Edges to generate from columns. Key is the source column name.
-        /// Each column may emit one or more edges (e.g. one outgoing FK edge
-        /// plus an incoming inverse edge sourced from the same column).
+        /// Edges keyed by source column name. Each column may declare one or
+        /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
 }
@@ -115,8 +108,6 @@ impl EtlConfig {
         }
     }
 
-    /// Iterate over every (source-column, mapping) pair, flattening the
-    /// per-column Vec so that callers see one logical edge emission at a time.
     pub fn edge_mappings(&self) -> impl Iterator<Item = (&String, &EdgeMapping)> + '_ {
         self.edges()
             .iter()

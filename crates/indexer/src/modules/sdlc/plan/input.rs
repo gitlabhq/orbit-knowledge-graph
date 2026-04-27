@@ -2,7 +2,7 @@ use ontology::{
     DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EnumType,
     EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
 };
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 
@@ -172,23 +172,18 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
 
 /// Collects all extra column names that FK edge transforms need beyond the
 /// node's own fields. This ensures the extract query includes them.
-fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> {
-    let mut columns = vec!["id".to_string()];
+fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> BTreeSet<String> {
+    let mut columns = BTreeSet::from(["id".to_string()]);
 
     for (fk_column, mapping) in etl.edge_mappings() {
-        columns.push(fk_column.clone());
+        columns.insert(fk_column.clone());
         if let EdgeTarget::Column { column, .. } = &mapping.target {
-            columns.push(column.clone());
+            columns.insert(column.clone());
         }
     }
 
-    // Dedup since multi-emit on the same FK column would otherwise repeat the
-    // column name in the SELECT list.
-    columns.sort();
-    columns.dedup();
-
-    if namespaced && etl.has_edges() && !columns.iter().any(|c| c == TRAVERSAL_PATH_COLUMN) {
-        columns.push(TRAVERSAL_PATH_COLUMN.to_string());
+    if namespaced && etl.has_edges() {
+        columns.insert(TRAVERSAL_PATH_COLUMN.to_string());
     }
 
     columns
@@ -245,8 +240,6 @@ fn resolve_fk_edges(
                         node_name,
                         mapping.direction,
                     );
-                    // Raw legacy values (e.g. "Issue") must survive the extract
-                    // filter; the CASE below maps them to ontology names.
                     let mut filter_types = allowed;
                     for raw in type_mapping.keys() {
                         if !filter_types.iter().any(|t| t == raw) {
@@ -365,15 +358,18 @@ fn resolve_standalone_edge(
         ExtractColumn::Bare(config.to.id_column.clone()),
     ];
     if let EdgeEndpointType::Column { column, .. } = &config.from.node_type {
-        append_missing(&mut extract_columns, std::slice::from_ref(column));
+        append_missing(&mut extract_columns, std::iter::once(column));
     }
     if let EdgeEndpointType::Column { column, .. } = &config.to.node_type {
-        append_missing(&mut extract_columns, std::slice::from_ref(column));
+        append_missing(&mut extract_columns, std::iter::once(column));
     }
     append_missing(&mut extract_columns, &config.order_by);
 
     if namespaced {
-        append_missing(&mut extract_columns, &[TRAVERSAL_PATH_COLUMN.to_string()]);
+        append_missing(
+            &mut extract_columns,
+            std::iter::once(&TRAVERSAL_PATH_COLUMN.to_string()),
+        );
     }
 
     StandaloneEdgePlan {
@@ -502,7 +498,10 @@ fn build_extract_plan(
     }
 }
 
-fn append_missing(columns: &mut Vec<ExtractColumn>, names: &[String]) {
+fn append_missing<'a, I>(columns: &mut Vec<ExtractColumn>, names: I)
+where
+    I: IntoIterator<Item = &'a String>,
+{
     for name in names {
         let already_present = columns.iter().any(|c| {
             let col_name = c.name();
@@ -562,9 +561,6 @@ mod tests {
         );
     }
 
-    /// End-to-end check: a node whose `etl.edges.<col>` declares multiple
-    /// mappings produces N FkEdgeTransform entries on the resulting NodePlan,
-    /// all sharing the same parent extract (no extra StandaloneEdgePlan).
     #[test]
     fn multi_emit_fk_edges_share_parent_extract() {
         use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
@@ -618,9 +614,6 @@ mod tests {
         assert!(kinds.contains(&"IN_PIPELINE"));
         assert!(kinds.contains(&"HAS_JOB"));
 
-        // The Job-side commit_id stays as the FK column for both directions:
-        // outgoing IN_PIPELINE -> source=Job.id, target=Pipeline.commit_id
-        // incoming HAS_JOB     -> source=Pipeline.commit_id, target=Job.id
         let in_pipeline = fk_edges
             .iter()
             .find(|e| e.relationship_kind == "IN_PIPELINE")
@@ -648,9 +641,6 @@ mod tests {
         );
     }
 
-    /// Backward-compat regression: the embedded ontology (single-emit only,
-    /// pre-MR shape) must still produce exactly one FkEdgeTransform per
-    /// declared FK. Catches accidental fanout from the multi-emit refactor.
     #[test]
     fn embedded_ontology_single_emit_fks_still_produce_one_transform_each() {
         let ontology = Ontology::load_embedded().expect("ontology");
@@ -673,8 +663,6 @@ mod tests {
         }
     }
 
-    /// `collect_fk_extract_columns` must include each FK column exactly once
-    /// even when it has multiple emissions.
     #[test]
     fn multi_emit_fk_does_not_duplicate_extract_columns() {
         use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};

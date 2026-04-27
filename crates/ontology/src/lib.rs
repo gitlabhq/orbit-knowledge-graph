@@ -527,13 +527,6 @@ impl Ontology {
         self.nodes.get(name)
     }
 
-    /// Mutable accessor for a node, used by tests that need to inject
-    /// synthetic ETL configurations (e.g. multi-emit FK edges) without
-    /// shipping a separate fixture ontology.
-    pub fn get_node_mut(&mut self, name: &str) -> Option<&mut NodeEntity> {
-        self.nodes.get_mut(name)
-    }
-
     /// Get all variants of an edge by relationship name.
     #[must_use]
     pub fn get_edge(&self, name: &str) -> Option<&[EdgeEntity]> {

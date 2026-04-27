@@ -74,9 +74,6 @@ enum EtlYaml {
     },
 }
 
-/// A node's `etl.edges.<column>` may be either a single edge mapping
-/// (the common case) or a list of mappings (when one source column needs
-/// to emit multiple edges, e.g. an outgoing FK edge plus its inverse).
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum EdgeMappingYamlEntry {
@@ -410,8 +407,6 @@ fn convert_edge_mappings(
                         column
                     )));
                 }
-                // Reject the same (relationship_kind, direction) twice on one column;
-                // emitting two identical edges from the same row is always a bug.
                 let key = (mapping.relationship_kind.clone(), mapping.direction);
                 if !seen_kinds.insert(key) {
                     return Err(OntologyError::Validation(format!(
