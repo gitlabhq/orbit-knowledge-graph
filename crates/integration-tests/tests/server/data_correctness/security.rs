@@ -18,8 +18,8 @@ pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestConte
     )
     .await;
 
-    resp.assert_node_count(2);
-    resp.assert_node_ids("Project", &[1000, 1002]);
+    resp.assert_node_count(3);
+    resp.assert_node_ids("Project", &[1000, 1002, 1010]);
     resp.assert_node_absent("Project", 1001);
     resp.assert_node_absent("Project", 1003);
     resp.assert_node_absent("Project", 1004);
@@ -55,8 +55,8 @@ pub(super) async fn search_multi_path_returns_union_of_scopes(ctx: &TestContext)
     )
     .await;
 
-    resp.assert_node_count(3);
-    resp.assert_node_ids("Project", &[1000, 1002, 1004]);
+    resp.assert_node_count(4);
+    resp.assert_node_ids("Project", &[1000, 1002, 1004, 1010]);
     resp.assert_node_absent("Project", 1001);
     resp.assert_node_absent("Project", 1003);
 }
@@ -94,9 +94,11 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
     )
     .await;
 
-    // Only Public Project (1000) is public AND in 1/100/. Shared Project (1004) is public but in 1/102/.
-    resp.assert_node_count(1);
-    resp.assert_node_ids("Project", &[1000]);
+    // Public projects in 1/100/: Project 1000 directly and Project 1010
+    // (under Group 200, path 1/100/200/1010/). Shared Project (1004) is
+    // public but in 1/102/, excluded by scope.
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Project", &[1000, 1010]);
     resp.assert_filter("Project", "visibility_level", |n| {
         n.prop_str("visibility_level") == Some("public")
     });
@@ -682,8 +684,8 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(5);
-    resp.assert_node_ids("Project", &[1000, 1001, 1002, 1003, 1004]);
+    resp.assert_node_count(6);
+    resp.assert_node_ids("Project", &[1000, 1001, 1002, 1003, 1004, 1010]);
     resp.assert_node_absent("Project", 9000);
 }
 
@@ -1031,7 +1033,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]},
             "limit": 10
         }"#,

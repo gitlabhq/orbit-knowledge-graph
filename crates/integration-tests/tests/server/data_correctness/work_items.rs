@@ -14,8 +14,8 @@ pub(super) async fn search_returns_correct_work_item_properties(ctx: &TestContex
     )
     .await;
 
-    resp.assert_node_count(4);
-    resp.assert_node_order("WorkItem", &[4000, 4001, 4002, 4003]);
+    resp.assert_node_count(5);
+    resp.assert_node_order("WorkItem", &[4000, 4001, 4002, 4003, 4010]);
 
     let login = resp.find_node("WorkItem", 4000).unwrap();
     login.assert_str("title", "Implement login page");
@@ -53,8 +53,8 @@ pub(super) async fn search_filter_work_item_type_returns_matching_rows(ctx: &Tes
     )
     .await;
 
-    resp.assert_node_count(2);
-    resp.assert_node_ids("WorkItem", &[4000, 4002]);
+    resp.assert_node_count(3);
+    resp.assert_node_ids("WorkItem", &[4000, 4002, 4010]);
     resp.assert_filter("WorkItem", "work_item_type", |n| {
         let t = n.prop_str("work_item_type").unwrap_or("");
         t == "issue" || t == "task"
@@ -77,13 +77,14 @@ pub(super) async fn traversal_user_authored_work_item_returns_correct_edges(ctx:
     )
     .await;
 
-    resp.assert_node_count(7);
+    resp.assert_node_count(9);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("User", 1, "WorkItem", 4000, "AUTHORED");
     resp.assert_edge_exists("User", 2, "WorkItem", 4001, "AUTHORED");
     resp.assert_edge_exists("User", 1, "WorkItem", 4002, "AUTHORED");
     resp.assert_edge_exists("User", 3, "WorkItem", 4003, "AUTHORED");
+    resp.assert_edge_exists("User", 7, "WorkItem", 4010, "AUTHORED");
 
     resp.assert_node("WorkItem", 4000, |n| {
         n.prop_str("title") == Some("Implement login page") && n.prop_str("state") == Some("opened")
@@ -192,11 +193,12 @@ pub(super) async fn traversal_work_item_in_project_returns_correct_edges(ctx: &T
     )
     .await;
 
-    resp.assert_node_count(3);
+    resp.assert_node_count(5);
     resp.assert_referential_integrity();
 
     resp.assert_edge_exists("WorkItem", 4000, "Project", 1000, "IN_PROJECT");
     resp.assert_edge_exists("WorkItem", 4001, "Project", 1000, "IN_PROJECT");
+    resp.assert_edge_exists("WorkItem", 4010, "Project", 1010, "IN_PROJECT");
 
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("name") == Some("Public Project")
