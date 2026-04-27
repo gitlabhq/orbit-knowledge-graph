@@ -570,7 +570,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -663,6 +663,11 @@
           "$ref": "#/$defs/DynamicColumnMode",
           "description": "Columns fetched for dynamically-discovered entities (PathFinding, Neighbors hydration). '*' returns all columns; 'default' returns the entity's default_columns from the ontology. Defaults to 'default'.",
           "default": "default"
+        },
+        "include_debug_sql": {
+          "type": "boolean",
+          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
+          "default": false
         }
       },
       "additionalProperties": false

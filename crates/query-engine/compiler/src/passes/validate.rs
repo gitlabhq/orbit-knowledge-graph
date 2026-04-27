@@ -687,6 +687,30 @@ impl<'a> Validator<'a> {
             )));
         }
 
+        // When an endpoint uses filters or id_range (not node_ids), the
+        // anchor CTE can resolve up to MAX_PATH_ANCHOR_LIMIT (500) nodes.
+        // Without rel_types each of those seeds fans out through every edge
+        // type across all physical tables — O(500 × |E|^depth). Require
+        // rel_types so the frontier only traverses relevant relationships.
+        // Pinned endpoints (node_ids) have a known, small anchor set where
+        // the hop-frontier optimizer bounds intermediate work adequately.
+        if path.rel_types.is_empty() {
+            let both_pinned = [&path.from, &path.to].iter().all(|endpoint| {
+                input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == **endpoint)
+                    .is_some_and(|n| !n.node_ids.is_empty())
+            });
+            if !both_pinned {
+                return Err(QueryError::Validation(
+                    "path_finding requires rel_types when an endpoint uses filters \
+                     or id_range; without it the frontier scans all edge tables"
+                        .into(),
+                ));
+            }
+        }
+
         Ok(())
     }
 
@@ -882,7 +906,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "node_ids": [1]},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
         );
 
@@ -988,7 +1013,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "node_ids": [1]},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "ghost", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "ghost", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "undefined node \"ghost\"",
         );
@@ -1000,7 +1026,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "node_ids": [1]},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "ghost", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "undefined node \"ghost\"",
         );
@@ -1699,7 +1726,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "node_ids": [1]},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 3,
+                         "rel_types": ["CONTAINS"]}
             }"#,
         );
         // Filters on endpoint: OK (lowerer resolves via capped CTE)
@@ -1710,7 +1738,8 @@ mod tests {
                     {"id": "a", "entity": "User", "filters": {"username": "alice"}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
         );
         // Narrow id_range on endpoint: OK
@@ -1721,7 +1750,8 @@ mod tests {
                     {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 100}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
         );
         // Wide id_range on endpoint exceeds MAX_PATH_ANCHOR_RANGE (500)
@@ -1732,7 +1762,8 @@ mod tests {
                     {"id": "a", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "endpoint \"a\"",
         );
@@ -1744,7 +1775,8 @@ mod tests {
                     {"id": "a", "entity": "User"},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "endpoint \"a\"",
         );
@@ -1756,9 +1788,33 @@ mod tests {
                     {"id": "a", "entity": "Project", "node_ids": [1]},
                     {"id": "b", "entity": "User"}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "endpoint \"b\"",
+        );
+        // Missing rel_types with filtered endpoint: rejected
+        assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "requires rel_types",
+        );
+        // Missing rel_types with both endpoints pinned: OK
+        assert_ok(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "Project", "node_ids": [1]},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
         );
 
         // ── Neighbors ───────────────────────────────────────────────
@@ -1945,7 +2001,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 100}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
         );
         // path_finding with wide id_range: rejected (exceeds MAX_PATH_ANCHOR_RANGE)
@@ -1956,7 +2013,8 @@ mod tests {
                     {"id": "a", "entity": "Project", "id_range": {"start": 1, "end": 1000}},
                     {"id": "b", "entity": "Project", "node_ids": [2]}
                 ],
-                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2,
+                         "rel_types": ["CONTAINS"]}
             }"#,
             "endpoint \"a\"",
         );
