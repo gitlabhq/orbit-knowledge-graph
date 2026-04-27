@@ -10,8 +10,9 @@
 //   4. Latency — heatmaps for the histograms, plus a top-N entity table.
 //   5. Reliability — error ratios and stage/kind breakdowns.
 //   6. Freshness and saturation — watermark lag per entity, ETL permits.
-//   7. Schema migration — coverage and phase activity.
-//   8. Reference — every metric in every indexer domain, collapsed by
+//   7. Resources — pod-level CPU, memory, FS I/O, pressure, OOM, restarts.
+//   8. Schema migration — coverage and phase activity.
+//   9. Reference — every metric in every indexer domain, collapsed by
 //                  default. Kept as the deep-debug fallback.
 
 local o = import 'lib/orbit.libsonnet';
@@ -218,7 +219,141 @@ local freshness = [
   ),
 ];
 
-// 7. Schema migration ----------------------------------------------------
+// 7. Resources -----------------------------------------------------------
+// Pod-level resource utilization from cAdvisor and kube-state-metrics.
+// All series are scoped by container="gkg-indexer" and broken down by
+// pod so a single hot replica is visible against its peers. The four
+// headline tiles read aggregate ratios across all replicas; the
+// timeseries below split by pod.
+local KUBE_SEL = SEL + ', namespace="gkg"';
+local resources = [
+  o.row('Resources'),
+  o.gaugeStat(
+    'CPU: usage / limit (5m)',
+    'Aggregate CPU seconds used per second divided by configured CPU limit, across all indexer replicas. 1.0 means the pool is fully consuming its quota.',
+    '(sum(rate(container_cpu_usage_seconds_total{%s, cpu="total"}[5m]))) / (sum(kube_pod_container_resource_limits{%s, resource="cpu"}) > 0)' % [SEL, KUBE_SEL],
+    DS, 'percentunit', 6,
+  ),
+  o.gaugeStat(
+    'Memory: working set / limit',
+    'Working-set memory across all replicas as a fraction of the aggregate memory limit. Watch for sustained values above ~0.85 — that is OOM-kill territory.',
+    '(sum(container_memory_working_set_bytes{%s})) / (sum(kube_pod_container_resource_limits{%s, resource="memory"}) > 0)' % [SEL, KUBE_SEL],
+    DS, 'percentunit', 6,
+  ),
+  o.gaugeStat(
+    'OOM events (1h)',
+    'Total OOM-killer events across indexer replicas in the last hour. Any non-zero value warrants a look at the memory panel below.',
+    'sum(increase(container_oom_events_total{%s}[1h]))' % [SEL],
+    DS, 'short', 6,
+  ),
+  o.gaugeStat(
+    'Restarts (1h)',
+    'Container restarts across indexer replicas in the last hour. Crash-loops show up here before they show up in the app metrics.',
+    'sum(increase(kube_pod_container_status_restarts_total{%s}[1h]))' % [KUBE_SEL],
+    DS, 'short', 6,
+  ),
+  o.timeseries(
+    'CPU: cores used per pod',
+    'Per-pod CPU seconds consumed per second. The dashed reference line is the per-pod CPU limit from kube-state-metrics; pods bumping against it should be cross-checked with the throttling panel.',
+    [
+      o.target(
+        'sum by (pod) (rate(container_cpu_usage_seconds_total{%s, cpu="total"}[5m]))' % [SEL],
+        '{{pod}}', DS, 'A',
+      ),
+      o.target(
+        'avg(kube_pod_container_resource_limits{%s, resource="cpu"})' % [KUBE_SEL],
+        'limit', DS, 'B',
+      ),
+    ],
+    'short', 12, 8,
+  ),
+  o.timeseries(
+    'CPU: throttled time fraction per pod',
+    'Share of CFS periods where the cgroup was throttled. Anything sustained above ~5% means the pod is hitting its CPU quota and pipelines will queue.',
+    [o.target(
+      '(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{%s}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{%s}[5m])) > 0)' % [SEL, SEL],
+      '{{pod}}', DS,
+    )],
+    'percentunit', 12, 8,
+  ),
+  o.timeseries(
+    'Memory: working set per pod',
+    'container_memory_working_set_bytes per replica. The dashed reference line is the per-pod memory limit. Working set is what the OOM killer reads, not RSS.',
+    [
+      o.target(
+        'sum by (pod) (container_memory_working_set_bytes{%s})' % [SEL],
+        '{{pod}}', DS, 'A',
+      ),
+      o.target(
+        'avg(kube_pod_container_resource_limits{%s, resource="memory"})' % [KUBE_SEL],
+        'limit', DS, 'B',
+      ),
+    ],
+    'bytes', 12, 8,
+  ),
+  o.timeseries(
+    'Memory: RSS and cache per pod',
+    'Resident set and page cache, per pod. RSS dominating with a tiny cache often means heap growth; cache dominating typically means Gitaly archive I/O.',
+    [
+      o.target(
+        'sum by (pod) (container_memory_rss{%s})' % [SEL],
+        'rss / {{pod}}', DS, 'A',
+      ),
+      o.target(
+        'sum by (pod) (container_memory_cache{%s})' % [SEL],
+        'cache / {{pod}}', DS, 'B',
+      ),
+    ],
+    'bytes', 12, 8,
+  ),
+  o.timeseries(
+    'Filesystem I/O bytes per pod',
+    'Read and write throughput from cAdvisor. A sustained climb on writes during code indexing usually points at archive extraction; reads spike during ClickHouse query bursts.',
+    [
+      o.target(
+        'sum by (pod) (rate(container_fs_reads_bytes_total{%s}[5m]))' % [SEL],
+        'read / {{pod}}', DS, 'A',
+      ),
+      o.target(
+        'sum by (pod) (rate(container_fs_writes_bytes_total{%s}[5m]))' % [SEL],
+        'write / {{pod}}', DS, 'B',
+      ),
+    ],
+    'Bps', 12, 8,
+  ),
+  o.timeseries(
+    'Pressure stall: IO and memory',
+    'PSI seconds per second. IO pressure rising means processes are waiting on disk; memory pressure rising means the kernel is reclaiming pages, often the leading edge of an OOM.',
+    [
+      o.target(
+        'sum by (pod) (rate(container_pressure_io_waiting_seconds_total{%s}[5m]))' % [SEL],
+        'io / {{pod}}', DS, 'A',
+      ),
+      o.target(
+        'sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{%s}[5m]))' % [SEL],
+        'mem / {{pod}}', DS, 'B',
+      ),
+    ],
+    's', 12, 8,
+  ),
+  o.timeseries(
+    'Threads and sockets per pod',
+    'OS-level concurrency counters. Threads climbing without a corresponding workload increase usually points at a tokio blocking-pool growth event; sockets climbing flags a NATS or ClickHouse connection leak.',
+    [
+      o.target(
+        'sum by (pod) (container_threads{%s})' % [SEL],
+        'threads / {{pod}}', DS, 'A',
+      ),
+      o.target(
+        'sum by (pod) (container_sockets{%s})' % [SEL],
+        'sockets / {{pod}}', DS, 'B',
+      ),
+    ],
+    'short', 12, 8,
+  ),
+];
+
+// 8. Schema migration ----------------------------------------------------
 // Coverage relies on dispatcher-emitted gauges, currently dark in prod
 // (issue #524). The phase counter is emitted from indexer-mode startup
 // and populates today.
@@ -242,7 +377,7 @@ local migration = [
   ),
 ] + o.counterPanels(o.metric('gkg_schema_migration_phase_total'), DS, SEL);
 
-// 8. Reference (collapsed by default) ------------------------------------
+// 9. Reference (collapsed by default) ------------------------------------
 local reference =
   o.sectionCollapsed('ETL engine (reference)', o.metricsInDomain('indexer.etl'), DS, SEL)
   + o.sectionCollapsed('Code pipeline (reference)', o.metricsInDomain('indexer.code'), DS, SEL)
@@ -257,6 +392,7 @@ local items =
   + latency
   + reliability
   + freshness
+  + resources
   + migration
   + reference;
 
