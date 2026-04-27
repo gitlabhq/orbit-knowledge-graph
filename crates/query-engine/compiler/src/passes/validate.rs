@@ -460,14 +460,7 @@ impl<'a> Validator<'a> {
                     }
                 }
             }
-            // Search without selectivity scans the entire entity table.
-            QueryType::Search if !input.nodes.iter().any(node_has_selectivity) => {
-                return Err(QueryError::Validation(
-                    "search requires node_ids, filters, or id_range on the node \
-                     to avoid full table scans"
-                        .into(),
-                ));
-            }
+
             // Traversal/aggregation without selectivity scans entire edge tables.
             QueryType::Traversal | QueryType::Aggregation
                 if !input.nodes.iter().any(node_has_selectivity) =>
@@ -694,9 +687,9 @@ impl<'a> Validator<'a> {
     /// the FROM clause, producing broken SQL or silently dropped columns.
     fn check_unreferenced_nodes(&self, input: &Input) -> Result<()> {
         let referenced: std::collections::HashSet<&str> = match input.query_type {
-            // Single/multi-node query types where all declared nodes are used directly.
-            QueryType::Search | QueryType::Neighbors | QueryType::Hydration => return Ok(()),
-            // Search-shaped traversal (1 node, 0 rels) also has no references to check.
+            // Single-node query types where all declared nodes are used directly.
+            QueryType::Neighbors | QueryType::Hydration => return Ok(()),
+            // Search-shaped traversal (1 node, 0 rels) has no references to check.
             QueryType::Traversal if input.is_search() => return Ok(()),
             QueryType::Traversal | QueryType::Aggregation => {
                 let mut set: std::collections::HashSet<&str> = input
@@ -844,7 +837,7 @@ mod tests {
         // Valid order_by referencing declared node
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 "order_by": {"node": "u", "property": "username", "direction": "ASC"}
             }"#,
@@ -939,7 +932,7 @@ mod tests {
 
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
                 "order_by": {"node": "missing", "property": "username", "direction": "ASC"}
             }"#,
@@ -948,7 +941,7 @@ mod tests {
 
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]},
                 "order_by": {"node": "u", "property": "nonexistent", "direction": "ASC"}
             }"#,
@@ -1167,7 +1160,7 @@ mod tests {
     fn accepts_string_filter_on_string_column() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}}
             }"#,
         );
@@ -1177,7 +1170,7 @@ mod tests {
     fn accepts_int_filter_on_int_column() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 42}}
             }"#,
         );
@@ -1188,7 +1181,7 @@ mod tests {
         // u64 values beyond i64::MAX are still valid integers
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 9223372036854775808}}
             }"#,
         );
@@ -1198,7 +1191,7 @@ mod tests {
     fn accepts_bool_filter_on_bool_column() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"confidential": true}}
             }"#,
         );
@@ -1208,7 +1201,7 @@ mod tests {
     fn accepts_string_in_filter() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {
                     "id": "u", "entity": "User",
                     "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}
@@ -1221,7 +1214,7 @@ mod tests {
     fn accepts_int_in_filter() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, 2, 3]}}
@@ -1234,7 +1227,7 @@ mod tests {
     fn accepts_is_null_without_value_check() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {
                     "id": "u", "entity": "User",
                     "filters": {"username": {"op": "is_null"}}
@@ -1247,7 +1240,7 @@ mod tests {
     fn rejects_int_on_string_column() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": 42}}
             }"#,
             "expected String",
@@ -1258,7 +1251,7 @@ mod tests {
     fn rejects_string_on_int_column() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "abc"}}
             }"#,
             "expected Int",
@@ -1269,7 +1262,7 @@ mod tests {
     fn rejects_string_on_bool_column() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"confidential": "yes"}}
             }"#,
             "expected Bool",
@@ -1280,7 +1273,7 @@ mod tests {
     fn rejects_mixed_type_in_array() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, "two", 3]}}
@@ -1294,7 +1287,7 @@ mod tests {
     fn rejects_float_on_int_column() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": 3.14}}
             }"#,
             "is a float, not an integer",
@@ -1310,7 +1303,7 @@ mod tests {
 
         let input = parse_input(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "m", "entity": "Metric", "filters": {"score": 42}}
             }"#,
         )
@@ -1322,7 +1315,7 @@ mod tests {
     fn accepts_string_on_enum_column() {
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"user_type": "human"}}
             }"#,
         );
@@ -1333,7 +1326,7 @@ mod tests {
         // Int-based enums pass validation; normalization coerces to string later.
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"user_type": 0}}
             }"#,
         );
@@ -1343,7 +1336,7 @@ mod tests {
     fn rejects_bool_on_enum_column() {
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"user_type": true}}
             }"#,
             "not a string or integer",
@@ -1358,7 +1351,7 @@ mod tests {
         // Scalar op: wrong type must produce Err, not silently pass.
         let input = parse_input(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "n", "entity": "Note", "filters": {"noteable_id": "bad"}}
             }"#,
         )
@@ -1371,7 +1364,7 @@ mod tests {
         // IN op: one bad element among valid ones must produce Err.
         let input = parse_input(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {
                     "id": "n", "entity": "Note",
                     "filters": {"noteable_id": {"op": "in", "value": [1, "bad", 3]}}
@@ -1727,24 +1720,24 @@ mod tests {
         // Search with filter: OK
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "root"}}
             }"#,
         );
         // Search with node_ids: OK
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1]}
             }"#,
         );
-        // Search without selectivity
+        // Single-node traversal without selectivity
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User"}
             }"#,
-            "full table scans",
+            "full edge table scans",
         );
 
         // ── Traversal ───────────────────────────────────────────────
@@ -1837,17 +1830,17 @@ mod tests {
         // Narrow id_range counts as selective
         assert_ok(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}}
             }"#,
         );
         // Wide id_range does NOT count as selective
         assert_rejects(
             r#"{
-                "query_type": "search",
+                "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 999999999}}
             }"#,
-            "full table scans",
+            "full edge table scans",
         );
         // Traversal with id_range: OK (lowerer generates CTE with range condition)
         assert_ok(
@@ -1921,7 +1914,7 @@ mod tests {
         let validator = Validator::new(&ont);
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User",
                      "filters": {"username": {"op": "contains", "value": "ab"}}},
             "limit": 10
@@ -1943,7 +1936,7 @@ mod tests {
         let validator = Validator::new(&ont);
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User",
                      "filters": {"email": {"op": "contains", "value": "example"}}},
             "limit": 10
@@ -1964,7 +1957,7 @@ mod tests {
         let validator = Validator::new(&ont);
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User",
                      "filters": {"email": "test@example.com"}},
             "limit": 10
@@ -1984,7 +1977,7 @@ mod tests {
         let validator = Validator::new(&ont);
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "g", "entity": "Group",
                      "filters": {"traversal_path": {"op": "starts_with", "value": "1/100"}}},
             "limit": 10
@@ -2005,7 +1998,7 @@ mod tests {
         let validator = Validator::new(&ont);
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "g", "entity": "Group",
                      "filters": {"name": "Public Group"}},
             "limit": 10

@@ -47,7 +47,7 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state"],
                      "node_ids": [9001]},
             "limit": 10
@@ -78,7 +78,7 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "node_ids": [9002]},
             "limit": 10
@@ -152,7 +152,7 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
@@ -188,7 +188,7 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
@@ -601,7 +601,7 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "mr", "entity": "MergeRequest",
                      "columns": ["title", "state"],
                      "node_ids": [9800, 9801]},

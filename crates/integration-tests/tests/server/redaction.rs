@@ -118,7 +118,7 @@ async fn fail_closed_no_authorization_returns_nothing(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -147,7 +147,7 @@ async fn fail_closed_partial_authorization_denies_unknown_ids(ctx: &TestContext)
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -186,7 +186,7 @@ async fn fail_closed_explicit_deny_filters_row(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -519,7 +519,7 @@ async fn single_node_project_query_verifies_all_projects(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -606,7 +606,7 @@ async fn empty_query_result_stays_empty(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"username": "nonexistent"}},
         "limit": 10
     }"#;
@@ -810,7 +810,7 @@ async fn redacted_rows_filtered_from_authorized_iterator(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -1517,7 +1517,7 @@ async fn search_with_complex_filters_and_redaction(ctx: &TestContext) {
     // Search for active users whose names start with a letter in the first half of
     // the alphabet, using multiple filter operators simultaneously
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -1576,7 +1576,7 @@ async fn search_projects_with_visibility_and_path_filters(ctx: &TestContext) {
 
     // Search for projects that are either public or internal
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "p",
             "entity": "Project",
@@ -1623,7 +1623,7 @@ async fn search_groups_with_traversal_path_starts_with(ctx: &TestContext) {
 
     // Search for all groups by ID range (traversal_path is not user-filterable)
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "g",
             "entity": "Group",
@@ -1666,7 +1666,7 @@ async fn search_with_id_range_filter(ctx: &TestContext) {
 
     // Search for users with IDs in a specific range
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -1702,7 +1702,7 @@ async fn search_with_specific_node_ids(ctx: &TestContext) {
 
     // Search for specific projects by ID
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "p",
             "entity": "Project",
@@ -1744,7 +1744,7 @@ async fn search_no_results_with_impossible_filter(ctx: &TestContext) {
 
     // Search for a user that doesn't exist
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -1774,7 +1774,7 @@ async fn search_fail_closed_no_authorization(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "g",
             "entity": "Group",
@@ -1807,7 +1807,7 @@ async fn search_preserves_metadata_columns_after_redaction(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -1925,7 +1925,7 @@ async fn column_selection_specific_columns_includes_mandatory_columns(ctx: &Test
 
     // Request only username and state, but mandatory columns must still appear
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -1996,7 +1996,7 @@ async fn column_selection_wildcard_returns_all_columns_plus_mandatory(ctx: &Test
 
     // Use Group entity - all its ontology columns exist in gl_group
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "g",
             "entity": "Group",
@@ -2067,7 +2067,7 @@ async fn column_selection_omitted_includes_mandatory_columns(ctx: &TestContext) 
 
     // No columns specified - should still work for redaction
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;
@@ -2317,7 +2317,7 @@ async fn column_selection_data_values_preserved_through_redaction(ctx: &TestCont
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -2368,7 +2368,7 @@ async fn column_selection_id_in_list_no_duplication(ctx: &TestContext) {
 
     // Explicitly request "id" alongside other columns
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "p",
             "entity": "Project",
@@ -2680,7 +2680,7 @@ async fn column_selection_filters_work_with_columns(ctx: &TestContext) {
 
     // Filter by state, but only select username
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -2731,7 +2731,7 @@ async fn column_selection_fail_closed_no_authorization(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
@@ -3769,7 +3769,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // Filter by int 0 should be coerced to "human" and match.
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 0}}
     }"#;
 
@@ -3802,7 +3802,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     // Filter by int 6 should be coerced to "project_bot"
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "columns": ["user_type"], "filters": {"user_type": 6}}
     }"#;
 
@@ -3824,7 +3824,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // Filter by int 1 should be coerced to "opened" and match.
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 1}}
     }"#;
 
@@ -3852,7 +3852,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     // Filter by int 3 should be coerced to "merged"
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "columns": ["state"], "filters": {"state": 3}}
     }"#;
 
@@ -3868,7 +3868,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     // IN operator with int values on int-based enum
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2]}}}
     }"#;
 
@@ -3890,7 +3890,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
     // String filters pass through unchanged - no int→string coercion.
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "columns": ["state"], "filters": {"state": "active"}}
     }"#;
 
@@ -3918,7 +3918,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     // Filter blocked user (string enum value)
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "blocked"}}
     }"#;
 
@@ -3934,7 +3934,7 @@ async fn enum_filter_normalization_int_vs_string_enums(ctx: &TestContext) {
 
     // IN operator with string enum values
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": {"op": "in", "value": ["active", "blocked"]}}}
     }"#;
 
@@ -3959,7 +3959,7 @@ async fn cursor_pagination_basic(ctx: &TestContext) {
 
     // 5 users total. cursor: offset=0, page_size=2 → first 2 users
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
@@ -4026,7 +4026,7 @@ async fn cursor_pagination_with_redaction(ctx: &TestContext) {
 
     // 5 users, but redaction will deny 2 of them
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
@@ -4071,7 +4071,7 @@ async fn cursor_pagination_offset_beyond_data(ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 1000,
         "cursor": {"offset": 100, "page_size": 10}
@@ -4096,7 +4096,7 @@ async fn cursor_pagination_with_filters(ctx: &TestContext) {
 
     // 4 active users (IDs 1-4), 1 blocked (ID 5)
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
         "order_by": {"node": "u", "property": "id", "direction": "ASC"},
         "limit": 100,
@@ -4140,7 +4140,7 @@ async fn search_merge_requests_with_redaction(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
             "limit": 10
         }"#,
@@ -4179,7 +4179,7 @@ async fn redaction_preserves_row_order(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10
@@ -4213,7 +4213,7 @@ async fn redaction_preserves_row_order_desc(ctx: &TestContext) {
     let (_, mut result) = compile_and_execute(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             "order_by": {"node": "u", "property": "id", "direction": "DESC"},
             "limit": 10

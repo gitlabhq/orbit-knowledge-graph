@@ -8,7 +8,7 @@ pub(super) async fn search_scoped_path_excludes_other_namespaces(ctx: &TestConte
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
             "limit": 10
         }"#,
@@ -28,7 +28,7 @@ pub(super) async fn search_scoped_to_single_project_namespace(ctx: &TestContext)
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
             "limit": 10
         }"#,
@@ -45,7 +45,7 @@ pub(super) async fn search_multi_path_returns_union_of_scopes(ctx: &TestContext)
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
             "limit": 10
         }"#,
@@ -64,7 +64,7 @@ pub(super) async fn search_scoped_mr_excludes_other_namespaces(ctx: &TestContext
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}, "columns": ["title"]},
             "limit": 10
         }"#,
@@ -83,7 +83,7 @@ pub(super) async fn search_with_filter_respects_scope(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name", "visibility_level"],
                      "filters": {"visibility_level": "public"}},
             "limit": 10
@@ -224,7 +224,7 @@ pub(super) async fn admin_only_non_admin_filter_rejects_at_compile(ctx: &TestCon
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "filters": {"is_admin": true}},
             "limit": 10
@@ -246,7 +246,7 @@ pub(super) async fn admin_only_non_admin_order_by_rejects_at_compile(ctx: &TestC
     let ontology = Arc::new(load_ontology());
     let result = compile(
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
             "limit": 10
@@ -331,7 +331,7 @@ pub(super) async fn admin_only_non_admin_wildcard_columns_excludes_admin_fields(
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
@@ -360,7 +360,7 @@ pub(super) async fn admin_only_non_admin_explicit_columns_silently_stripped(ctx:
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User",
                      "id_range": {"start": 1, "end": 10000},
                      "columns": ["username", "is_admin", "is_auditor"],
@@ -390,7 +390,7 @@ pub(super) async fn admin_only_admin_filter_compiles(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"],
                      "filters": {"is_admin": false}, "node_ids": [1]},
             "limit": 10
@@ -419,7 +419,7 @@ pub(super) async fn admin_only_admin_order_by_compiles(ctx: &TestContext) {
     let ontology = Arc::new(load_ontology());
     compile(
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "is_admin"]},
             "order_by": {"node": "u", "property": "is_admin", "direction": "DESC"},
             "limit": 10
@@ -460,7 +460,7 @@ pub(super) async fn admin_only_admin_wildcard_columns_includes_admin_fields(ctx:
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
@@ -672,7 +672,7 @@ pub(super) async fn cross_org_search_excludes_other_org(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
             "limit": 50
         }"#,
@@ -749,7 +749,7 @@ pub(super) async fn cross_org_inverse_isolation(ctx: &TestContext) {
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
             "limit": 50
         }"#,

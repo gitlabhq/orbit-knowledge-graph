@@ -236,7 +236,7 @@ mod tests {
         assert_eq!(agg.max_execution_time, Some(120));
         assert_eq!(agg.use_query_cache, Some(false));
 
-        let search = settings.resolve("search");
+        let search = settings.resolve("traversal");
         assert_eq!(search, settings.default);
     }
 
@@ -262,7 +262,7 @@ aggregation:
 
     #[test]
     fn validate_keys_rejects_unknown_types() {
-        let valid = &["traversal", "aggregation", "search"];
+        let valid = &["traversal", "aggregation"];
         let mut overrides = HashMap::new();
         overrides.insert("aggregation".to_string(), QueryConfig::default());
         overrides.insert("bogus_type".to_string(), QueryConfig::default());

@@ -39,7 +39,7 @@ pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]},
             "limit": 10
         }"#,
@@ -59,7 +59,7 @@ pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]},
             "limit": 10
         }"#,
@@ -420,7 +420,7 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
             "limit": 10
         }"#,

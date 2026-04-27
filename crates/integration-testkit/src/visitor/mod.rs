@@ -832,7 +832,7 @@ pub(crate) mod tests {
     pub(crate) fn sample_search_response() -> GraphResponse {
         GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
                 make_node("User", 2, &[("username", json!("bob"))]),
@@ -1278,7 +1278,7 @@ pub(crate) mod tests {
     fn empty_response_returns_zero_counts_and_empty_collections() {
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![],
             edges: vec![],
             columns: None,
@@ -1371,7 +1371,7 @@ mod edge_coverage_tests {
     fn assert_all_edge_types_covered_empty_response_passes() {
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![],
             edges: vec![],
             columns: None,

@@ -192,7 +192,7 @@
   },
 
   "16_ns_search_pipelines_failed": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}, "columns": ["id", "status", "ref"]},
     "limit": 50
   },
@@ -312,7 +312,7 @@
   },
 
   "25_ns_search_all_mrs": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"]},
     "limit": 100
   }

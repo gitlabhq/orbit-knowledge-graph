@@ -176,7 +176,7 @@ mod tests {
 
         let mut obs = MultiObserver::new(vec![Box::new(a), Box::new(b)]);
 
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.compiled(Duration::from_millis(1));
         obs.executed(Duration::from_millis(10), 3);
         obs.authorized(Duration::from_millis(2));
@@ -205,7 +205,7 @@ mod tests {
 
         let mut obs = MultiObserver::new(vec![Box::new(a), Box::new(b)]);
 
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.record_error(&PipelineError::Execution("fail".into()));
 
         for handle in [&a_handle, &b_handle] {
@@ -219,7 +219,7 @@ mod tests {
     fn multi_observer_empty_is_valid_noop() {
         // Passes if forwarded methods don't panic on an empty observer list.
         let mut obs = MultiObserver::new(vec![]);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.compiled(Duration::from_millis(1));
         obs.finish(1, 0);
     }

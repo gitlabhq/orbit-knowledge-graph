@@ -92,7 +92,7 @@ pub fn generate_hydration_plan(
         QueryType::PathFinding | QueryType::Neighbors => {
             HydrationPlan::Dynamic(build_dynamic_specs(input, ontology, security_ctx))
         }
-        QueryType::Search | QueryType::Aggregation | QueryType::Traversal => {
+        QueryType::Aggregation | QueryType::Traversal => {
             let mut templates = build_static_templates(input, ontology);
 
             // Search/Aggregation/search-shaped traversal only need templates

@@ -4,7 +4,7 @@ pub(super) async fn search_returns_correct_work_item_properties(ctx: &TestContex
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "state", "work_item_type", "confidential", "weight"]},
             "order_by": {"node": "w", "property": "id", "direction": "ASC"},
@@ -43,7 +43,7 @@ pub(super) async fn search_filter_work_item_type_returns_matching_rows(ctx: &Tes
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "w", "entity": "WorkItem", "id_range": {"start": 1, "end": 10000},
                      "columns": ["title", "work_item_type"],
                      "filters": {"work_item_type": {"op": "in", "value": ["issue", "task"]}}},

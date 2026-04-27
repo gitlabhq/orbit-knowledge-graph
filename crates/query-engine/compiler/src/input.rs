@@ -142,17 +142,12 @@ impl CompilerMetadata {
 }
 
 impl Input {
-    /// Whether this query has the "search shape": a single node scan with no
-    /// relationships. True for `query_type: "search"` and also for
-    /// `query_type: "traversal"` with 1 node + 0 relationships.
-    ///
-    /// Use this instead of matching on `QueryType::Search` to support the
-    /// deprecated `search` query type and the equivalent traversal form.
+    /// Whether this query has the "search shape": a single-node table scan
+    /// with no relationships (traversal with 1 node + 0 relationships).
     pub fn is_search(&self) -> bool {
-        self.query_type == QueryType::Search
-            || (self.query_type == QueryType::Traversal
-                && self.nodes.len() == 1
-                && self.relationships.is_empty())
+        self.query_type == QueryType::Traversal
+            && self.nodes.len() == 1
+            && self.relationships.is_empty()
     }
 }
 
@@ -236,7 +231,6 @@ pub enum QueryType {
     Traversal,
     Aggregation,
     PathFinding,
-    Search,
     Neighbors,
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
@@ -727,25 +721,26 @@ mod tests {
     }
 
     #[test]
-    fn search_with_single_node() {
+    fn traversal_with_single_node() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}}
         }"#,
         )
         .unwrap();
 
-        assert_eq!(input.query_type, QueryType::Search);
+        assert_eq!(input.query_type, QueryType::Traversal);
         assert_eq!(input.nodes.len(), 1);
         assert_eq!(input.nodes[0].id, "u");
+        assert!(input.is_search());
     }
 
     #[test]
     fn columns_wildcard() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": "*"}
         }"#,
         )
@@ -758,7 +753,7 @@ mod tests {
     fn columns_list() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}
         }"#,
         )
@@ -778,7 +773,7 @@ mod tests {
     fn columns_not_specified() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User"}
         }"#,
         )
@@ -828,7 +823,7 @@ mod tests {
     #[test]
     fn options_default_when_omitted() {
         let input =
-            parse_input(r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#)
+            parse_input(r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#)
                 .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
@@ -868,7 +863,7 @@ mod tests {
     fn options_empty_object_uses_defaults() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User"},
             "options": {}
         }"#,
@@ -882,7 +877,7 @@ mod tests {
     fn node_ids_accepts_integers_and_strings() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -899,7 +894,7 @@ mod tests {
     fn id_range_accepts_integers_and_strings() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
