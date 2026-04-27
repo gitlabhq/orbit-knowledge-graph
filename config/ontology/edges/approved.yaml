@@ -4,3 +4,8 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     description: "User approved a merge request."
+
+denormalized_properties:
+  - node: MergeRequest
+    property: state
+    direction: target

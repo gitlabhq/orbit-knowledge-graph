@@ -10,3 +10,14 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
     description: "User is assigned to work item."
+
+denormalized_properties:
+  - node: MergeRequest
+    property: state
+    direction: target
+  - node: WorkItem
+    property: state
+    direction: target
+  - node: WorkItem
+    property: work_item_type
+    direction: target

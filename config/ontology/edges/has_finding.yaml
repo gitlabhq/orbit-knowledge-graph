@@ -10,3 +10,14 @@ variants:
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Finding, id: id }
     description: "Security scan has finding."
+
+denormalized_properties:
+  - node: Vulnerability
+    property: state
+    direction: source
+  - node: Vulnerability
+    property: severity
+    direction: source
+  - node: Finding
+    property: severity
+    direction: target

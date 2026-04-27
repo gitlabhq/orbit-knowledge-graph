@@ -64,6 +64,11 @@ settings:
           - {name: source_status, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
           - {name: source_state, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
           - {name: source_severity, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_status, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_state, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_severity, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: source_work_item_type, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_work_item_type, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
     gl_code_edge:
       sort_key: [traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind]
       columns:
@@ -111,6 +116,11 @@ settings:
           - {name: source_status, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
           - {name: source_state, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
           - {name: source_severity, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_status, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_state, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_severity, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: source_work_item_type, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
+          - {name: target_work_item_type, type: "Nullable(LowCardinality(String))", codec: ["LZ4"]}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User]
   local_db:

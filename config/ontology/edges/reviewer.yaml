@@ -6,3 +6,8 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     description: "User is a reviewer of merge request."
+
+denormalized_properties:
+  - node: MergeRequest
+    property: state
+    direction: target

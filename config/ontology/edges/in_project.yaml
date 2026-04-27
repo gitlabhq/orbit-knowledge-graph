@@ -83,3 +83,15 @@ denormalized_properties:
   - node: Vulnerability
     property: severity
     direction: source
+  - node: Job
+    property: status
+    direction: source
+  - node: WorkItem
+    property: work_item_type
+    direction: source
+  - node: Deployment
+    property: status
+    direction: source
+  - node: Finding
+    property: severity
+    direction: source

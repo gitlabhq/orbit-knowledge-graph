@@ -6,3 +6,11 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
     description: "Merge request has head pipeline."
+
+denormalized_properties:
+  - node: MergeRequest
+    property: state
+    direction: source
+  - node: Pipeline
+    property: status
+    direction: target
