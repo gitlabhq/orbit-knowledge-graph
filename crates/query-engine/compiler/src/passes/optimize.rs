@@ -346,11 +346,6 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     if input.compiler.denormalized_columns.is_empty() {
         return;
     }
-    // Skip aggregation queries: fold_filters_into_aggregates runs later and
-    // depends on _nf_ CTEs + node-alias WHERE conjuncts to build -If combinators.
-    if input.query_type == QueryType::Aggregation {
-        return;
-    }
     // Only single-hop, single-relationship queries for now.
     if input.relationships.len() != 1 {
         return;
