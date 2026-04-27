@@ -894,7 +894,7 @@ pub(super) async fn aggregation_vulnerability_reporter_only_sees_zero_counts(ctx
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -928,7 +928,7 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -966,7 +966,7 @@ pub(super) async fn aggregation_vulnerability_security_manager_meets_the_require
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -997,7 +997,7 @@ pub(super) async fn aggregation_vulnerability_developer_everywhere_sees_all_coun
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
@@ -1032,7 +1032,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
         ctx,
         r#"{
             "query_type": "search",
-            "node": {"id": "v", "entity": "Vulnerability", "columns": ["title", "severity"]},
+            "node": {"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]},
             "limit": 10
         }"#,
         &allow_all(),
@@ -1087,7 +1087,7 @@ pub(super) async fn aggregation_vulnerability_sql_drops_reporter_paths(ctx: &Tes
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "v", "entity": "Vulnerability"}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
