@@ -118,4 +118,6 @@ storage:
   indexes:
     - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
+    - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_build_id, order_by: [build_id]}
+    - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

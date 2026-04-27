@@ -313,7 +313,12 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_build_id (SELECT * ORDER BY build_id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_build_id (SELECT * ORDER BY build_id),
+    PROJECTION tp_count (
+      SELECT traversal_path, uniq(id)
+      GROUP BY traversal_path
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, build_id) PRIMARY KEY (traversal_path, build_id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
@@ -584,7 +589,8 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     _deleted Bool DEFAULT false,
     INDEX idx_runner_type runner_type TYPE set(8) GRANULARITY 2,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT * ORDER BY id)
+    PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_runner_type (SELECT * ORDER BY (runner_type, id))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
