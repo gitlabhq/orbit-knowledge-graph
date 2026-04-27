@@ -65,10 +65,13 @@ properties:
     description: "Whether the runner picks up jobs that have no tags."
 
   access_level:
-    type: int64
+    type: enum
     source: access_level
     nullable: false
-    description: "Access level required for the runner to run a job."
+    description: "Whether the runner is restricted to protected refs."
+    values:
+      0: not_protected
+      1: ref_protected
 
   maximum_timeout:
     type: int64
@@ -110,7 +113,7 @@ storage:
     - {name: active, type: "Bool", default: "true"}
     - {name: locked, type: "Bool", default: "false"}
     - {name: run_untagged, type: "Bool", default: "true"}
-    - {name: access_level, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: access_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: maximum_timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: organization_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

@@ -50,7 +50,9 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `project_id`, `state`, `diff_type`, `files_count`, `real_size`, `stored_externally` |
 | `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`, `generated`, `a_mode`, `b_mode` |
 | `Stage`               | Represents a CI stage.                                                                                  | `id`, `name`, `status`, `position`                                            |
-| `Job`                 | Represents a CI job.                                                                                    | `id`, `name`, `status`, `ref`, `allow_failure`                                |
+| `Job`                 | Represents a CI job (`Ci::Build` or `Ci::Bridge`).                                                      | `id`, `name`, `status`, `ref`, `allow_failure`, `type`, `runner_id`, `timeout`, `timeout_source`, `exit_code`, `scheduling_type`, `auto_canceled_by_id` |
+| `JobMetadata`         | Per-job runtime metadata sourced from `siphon_p_ci_builds_metadata`.                                    | `id`, `build_id`, `interruptible`, `timeout`, `timeout_source`, `exit_code`, `expanded_environment_name` |
+| `Runner`              | Represents a CI/CD runner (`Ci::Runner`). Global node, no `traversal_path` on the node table.            | `id`, `runner_type`, `name`, `active`, `locked`, `access_level`               |
 | `Finding`             | Represents a security finding.                                                                          | `id`, `uuid`, `name`, `severity`                                              |
 | `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence.                                                   | `id`, `uuid`, `report_type`, `severity`, `location`                           |
@@ -110,7 +112,8 @@ graph TD
 | `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
 | `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
 | `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
-| `HAS_JOB`                           | `Stage`        | `Job`          | A stage contains jobs (canonical Pipeline → Stage → Job traversal).                                     |
+| `HAS_JOB`                           | `Stage`, `Pipeline` | `Job`     | A stage contains jobs (canonical Pipeline → Stage → Job traversal); also exposed directly as Pipeline → Job for the natural CI mental model. |
+| `HAS_METADATA`                      | `Job`          | `JobMetadata`  | Job has runtime metadata (interruptible, effective timeout, expanded environment) sourced from `siphon_p_ci_builds_metadata`. |
 | `IN_PIPELINE`                       | `Job`, `SecurityScan` | `Pipeline` | A job or security scan belongs to a pipeline (one-hop replacement for `Pipeline → Stage → Job`).   |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
 | `AUTO_CANCELED_BY`                  | `Pipeline`, `Job` | `Pipeline`, `Job` | Entity was auto-canceled when a newer entity of the same kind superseded it.                       |

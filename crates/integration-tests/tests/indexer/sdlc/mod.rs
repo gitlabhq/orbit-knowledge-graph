@@ -74,6 +74,7 @@ async fn namespace_indexing() {
         ci::processes_job_in_pipeline_and_runs_on,
         ci::processes_runs_for_group_and_project,
         ci::processes_ci_sources_pipelines,
+        ci::processes_job_metadata,
         deployments::processes_deployments,
         deployments::processes_deployment_environment_link,
         deployments::processes_deployment_merge_request_links,

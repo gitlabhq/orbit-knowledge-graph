@@ -317,3 +317,31 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
     )
     .await;
 }
+
+pub async fn processes_job_metadata(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+    create_project(ctx, 1000, 100, 1, 0, "1/100/1000/").await;
+
+    ctx.execute(
+        "INSERT INTO siphon_p_ci_stages (id, partition_id, pipeline_id, project_id, name, status, position, traversal_path, _siphon_replicated_at) \
+         VALUES (6001, 1, 5001, 1000, 'build', 3, 0, '1/100/1000/', '2024-01-20 12:00:00')",
+    ).await;
+    ctx.execute(
+        "INSERT INTO siphon_p_ci_builds (id, partition_id, stage_id, project_id, type, name, status, ref, allow_failure, traversal_path, _siphon_replicated_at) \
+         VALUES (7001, 1, 6001, 1000, 'Ci::Build', 'compile', 'success', 'main', false, '1/100/1000/', '2024-01-20 12:00:00')",
+    ).await;
+    ctx.execute(
+        "INSERT INTO siphon_p_ci_builds_metadata (id, build_id, project_id, partition_id, timeout, timeout_source, interruptible, expanded_environment_name, traversal_path, _siphon_replicated_at) \
+         VALUES (9001, 7001, 1000, 1, 3600, 2, true, 'production', '1/100/1000/', '2024-01-20 12:00:00')",
+    ).await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_node_count(ctx, "gl_job_metadata", 1).await;
+    assert_edges_have_traversal_path(ctx, "HAS_METADATA", "Job", "JobMetadata", "1/100/1000/", 1)
+        .await;
+}
