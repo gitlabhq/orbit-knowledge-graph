@@ -198,6 +198,10 @@ pub async fn run(
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
         .await?;
 
+    broker
+        .ensure_managed_streams(&topic::all_managed_subscriptions())
+        .await?;
+
     // Run the migration orchestrator before the engine starts consuming messages.
     // This ensures no in-flight NATS messages exist during the drain phase.
     let migration_metrics = metrics::MigrationMetrics::new();

@@ -180,7 +180,9 @@ impl Engine {
 
         self.validate_concurrency_groups(configuration)?;
 
-        self.broker.ensure_streams(&subscriptions).await?;
+        self.broker
+            .ensure_unmanaged_streams_exist(&subscriptions)
+            .await?;
 
         let runtime = Arc::new(EngineRuntime {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
