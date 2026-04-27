@@ -2,7 +2,7 @@
 //! per-stage errors).
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, MEMORY_BYTES};
+use crate::buckets::{LATENCY_SLOW, MEMORY_BYTES};
 
 pub mod labels {
     pub const OUTCOME: &str = "outcome";
@@ -27,7 +27,7 @@ pub const HANDLER_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end duration of processing a single push event.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -36,7 +36,7 @@ pub const REPOSITORY_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of downloading a repository archive from Gitaly.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -86,7 +86,7 @@ pub const INDEXING_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of code-graph parsing and analysis.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
