@@ -345,6 +345,9 @@ pub struct GetGraphStatusRequest {
     pub traversal_path: ::prost::alloc::string::String,
     #[prost(enumeration = "SourceType", tag = "2")]
     pub source_type: i32,
+    /// RAW: structured JSON; LLM: TOON text
+    #[prost(enumeration = "ResponseFormat", tag = "3")]
+    pub format: i32,
 }
 /// Indexing progress metadata from the most recent indexing run.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -363,6 +366,24 @@ pub struct IndexingStatus {
 /// Response containing project coverage and entity counts grouped by domain.
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct GetGraphStatusResponse {
+    #[prost(oneof = "get_graph_status_response::Content", tags = "1, 2")]
+    pub content: ::core::option::Option<get_graph_status_response::Content>,
+}
+/// Nested message and enum types in `GetGraphStatusResponse`.
+pub mod get_graph_status_response {
+    #[derive(Clone, PartialEq, ::prost::Oneof)]
+    pub enum Content {
+        /// format = RAW
+        #[prost(message, tag = "1")]
+        Structured(super::StructuredGraphStatus),
+        /// format = LLM (TOON notation)
+        #[prost(string, tag = "2")]
+        FormattedText(::prost::alloc::string::String),
+    }
+}
+/// Structured graph status with project coverage, entity counts, and indexing state.
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct StructuredGraphStatus {
     #[prost(message, optional, tag = "1")]
     pub projects: ::core::option::Option<ProjectsStatus>,
     #[prost(message, repeated, tag = "2")]
