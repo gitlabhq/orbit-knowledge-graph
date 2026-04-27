@@ -548,7 +548,7 @@
     "PathConfig": {
       "type": "object",
       "description": "Configuration for path finding queries",
-      "required": ["type", "from", "to", "max_depth"],
+      "required": ["type", "from", "to", "max_depth", "rel_types"],
       "properties": {
         "type": {
           "$ref": "#/$defs/PathType",
@@ -570,10 +570,11 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse. Required to constrain the frontier and avoid scanning all edge tables.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
+          "minItems": 1,
           "maxItems": 10
         }
       },

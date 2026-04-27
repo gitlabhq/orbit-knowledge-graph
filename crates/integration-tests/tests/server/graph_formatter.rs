@@ -655,7 +655,7 @@ async fn path_finding_exact_path(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
     )
@@ -732,7 +732,7 @@ async fn path_finding_redaction_blocks_path(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &svc,
     )
@@ -754,7 +754,7 @@ async fn path_finding_max_depth(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Note", "node_ids": [3000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE", "MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
         }"#,
         &allow_all(),
     )
@@ -1073,7 +1073,7 @@ async fn giant_string_survives_pipeline(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [2]},
                 {"id": "end", "entity": "Note", "node_ids": [3001]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["AUTHORED", "HAS_NOTE"]}
         }"#,
         &allow_all(),
     )
@@ -1098,7 +1098,7 @@ async fn sql_injection_string_preserved(ctx: &TestContext) {
                 {"id": "start", "entity": "MergeRequest", "node_ids": [2000]},
                 {"id": "end", "entity": "Note", "node_ids": [3002]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["HAS_NOTE"]}
         }"#,
         &allow_all(),
     )

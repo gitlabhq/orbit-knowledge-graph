@@ -939,7 +939,7 @@ async fn path_finding_extracts_all_nodes_from_path(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -991,7 +991,7 @@ async fn path_finding_no_authorization_returns_nothing(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1019,7 +1019,7 @@ async fn path_finding_denying_intermediate_node_filters_path(ctx: &TestContext) 
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1092,7 +1092,7 @@ async fn path_finding_all_nodes_authorized_preserves_paths(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1, 2]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1140,7 +1140,7 @@ async fn path_finding_denying_start_node_filters_all_paths(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1170,7 +1170,7 @@ async fn path_finding_denying_end_node_filters_those_paths(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1214,7 +1214,7 @@ async fn path_finding_multiple_paths_independent_authorization(ctx: &TestContext
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1262,7 +1262,7 @@ async fn path_finding_shared_intermediate_node_authorization(ctx: &TestContext) 
             {"id": "start", "entity": "User", "node_ids": [1, 2]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1307,7 +1307,7 @@ async fn path_finding_deep_traversal_all_nodes_verified(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1365,7 +1365,7 @@ async fn path_finding_all_paths_denied_returns_empty(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -1410,7 +1410,7 @@ async fn path_finding_edge_kinds_preserved_through_redaction(ctx: &TestContext) 
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1002, 1004]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -3259,7 +3259,7 @@ async fn path_finding_indirect_auth_fail_closed_no_owner_in_path(ctx: &TestConte
             {"id": "start", "entity": "File", "node_ids": [3000]},
             {"id": "end", "entity": "Definition", "node_ids": [5000, 5001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
     }"#;
 
     let query = compile(json, &ontology, &security_ctx).unwrap();
@@ -4255,7 +4255,7 @@ async fn path_finding_no_path_exists_returns_empty(ctx: &TestContext) {
                 {"id": "start", "entity": "User", "node_ids": [99999]},
                 {"id": "end", "entity": "Project", "node_ids": [99999]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
     )
     .await;

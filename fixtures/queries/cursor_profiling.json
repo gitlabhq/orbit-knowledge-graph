@@ -168,7 +168,8 @@
       {"id": "start", "entity": "User", "node_ids": [1]},
       {"id": "end", "entity": "Project", "node_ids": [13083]}
     ],
-    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
+             "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
   },
 
   "16_path_finding_depth3": {
@@ -177,6 +178,7 @@
       {"id": "start", "entity": "Project", "node_ids": [13083]},
       {"id": "end", "entity": "Project", "node_ids": [13764]}
     ],
-    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+    "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+             "rel_types": ["MEMBER_OF", "CONTAINS", "IN_PROJECT"]}
   }
 }

@@ -120,7 +120,7 @@ pub(super) async fn path_finding_scoped_excludes_paths_through_other_namespaces(
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/100/".into()]).unwrap(),
@@ -155,7 +155,7 @@ pub(super) async fn path_finding_multi_path_scope_finds_both(ctx: &TestContext) 
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/100/".into(), "1/102/".into()]).unwrap(),
@@ -187,7 +187,7 @@ pub(super) async fn path_finding_narrow_scope_excludes_all_targets(ctx: &TestCon
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000, 1004]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
         }"#,
         &allow_all(),
         SecurityContext::new(1, vec!["1/101/".into()]).unwrap(),
@@ -1335,7 +1335,7 @@ pub(super) async fn aggregation_user_reachable_via_path_compiles(ctx: &TestConte
                 {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "p", "entity": "Project"}
             ],
-            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3},
+            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]},
             "aggregations": [{"function": "count", "target": "u", "group_by": "p", "alias": "hit"}],
             "limit": 10
         }"#,
