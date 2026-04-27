@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.2.0
+version: 0.3.0
 license: MIT
 metadata:
   audience: developers
@@ -108,19 +108,49 @@ External links (require internet):
 
 1. **Always discover before querying.** Call `orbit/schema` and/or `orbit/tools` first. Do not guess
    node names, edge types, or property names — validate against the live ontology.
-2. **Use `"response_format": "llm"`** for compact agent-friendly output unless piping to `jq`.
-3. **Set `Content-Type: application/json` on POST.** Missing → 415.
-4. **No `-R owner/repo`.** Orbit endpoints are user-scoped at the API level.
-5. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
-6. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
+   `query_type` enum is exactly four values: `traversal`, `aggregation`, `path_finding`, `neighbors`.
+   To "search" for a single entity type, use `traversal` with a single `node`.
+2. **`traversal` and `aggregation` require `node_ids` or `filters` on at least one node.**
+   Server rejects unscoped queries with `HTTP 400 schema violation` to prevent full edge-table scans.
+3. **Use `"response_format": "llm"`** for compact agent-friendly output unless piping to `jq`.
+4. **Set `Content-Type: application/json` on POST.** Missing → 415. The bundled `orbit-query` script
+   handles this automatically — prefer it over raw `glab api` invocations.
+5. **No `-R owner/repo`.** Orbit endpoints are user-scoped at the API level.
+6. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
+7. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
    multi-node `traversal` / `aggregation` / `path_finding` → `nodes` (array).
-7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
+8. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
-8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
-9. **Read-only.** All endpoints are idempotent queries — no data is modified.
-10. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
+9. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
+10. **Read-only.** All endpoints are idempotent queries — no data is modified.
+11. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
     (see `HTTP 429` in troubleshooting). Prefer aggregation/traversal in one
     query over N separate queries.
+
+## Footguns (will 400 / 504 / silently return 0)
+
+- **`path_finding` and `neighbors` on dense centers without `rel_types` will 504.** Always set
+  `rel_types` when the source/target node type is `Definition`, `File`, `User`, or `MergeRequest`.
+- **Aggregations across a high-cardinality unscoped name filter timeout.** When grouping over
+  `Definition.name = "compile"` (or similar names with many matches across branches), look up the
+  IDs first via a single-node `traversal` and pin them with `node_ids` in the aggregation. See
+  [`recipes.md`](references/recipes.md#two-step-pin-by-node_ids) for the pattern.
+- **`ends_with` on the `File.path` column is non-sargable** and times out at 504. Use `starts_with`
+  with a rooted prefix (e.g. `crates/`) or filter on `extension` / `name` instead.
+- **`File → Project` has no `IN_PROJECT` edge variant.** Files reach Project only via
+  `File → ON_BRANCH → Branch → IN_PROJECT → Project`. The compiler accepts a mismatched
+  `IN_PROJECT(File→Project)` edge and silently returns 0 rows. Filter on `File.project_id` directly
+  (it's a stored column), or join through `Branch`. `ON_BRANCH` is sparsely populated for some
+  projects — check before relying on it.
+- **`REFERENCES` is not in the ontology.** Source-code edges are `CALLS`, `DEFINES`, `EXTENDS`,
+  `IMPORTS`, `ON_BRANCH`, `CONTAINS`. The closest "reference" analog is `IMPORTS`
+  (File → ImportedSymbol → Definition).
+- **Definition IDs are content-hashed and branch-scoped.** A single name (e.g. `compile`) can have
+  N IDs, one per indexed branch. Pin all branch variants when you want full coverage; expect
+  large negative i64 strings like `"-3105496773625129529"`.
+- **`raw_query_strings` in `response_format=llm` output is large** (4 KB for a simple traversal,
+  30 KB+ for aggregations). Strip it with `jq 'del(.raw_query_strings)'` unless you're debugging
+  the compiled SQL.
 
 ## Contributing improvements
 

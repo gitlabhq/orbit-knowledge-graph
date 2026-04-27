@@ -116,7 +116,10 @@ Count open merge requests per project, highest first:
 
 ## `path_finding` — shortest path between nodes
 
-Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
+Shortest path between two projects (`max_depth` ≤ 3, server-enforced).
+Always set `rel_types` when the source or target node type is dense
+(`Definition`, `File`, `User`, `MergeRequest`) — omitting it fans out
+to a 504:
 
 ```json
 {
@@ -126,11 +129,85 @@ Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
       {"id": "from", "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/cli"}}},
       {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
     ],
-    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3}
+    "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3, "rel_types": ["CONTAINS", "MEMBER_OF"]}
   },
   "response_format": "llm"
 }
 ```
+
+## Two-step: pin by `node_ids`
+
+When a name filter matches many definitions across branches (e.g.
+`Definition.name = "compile"` returns 10+ branch-scoped IDs), an
+aggregation that groups callers off it will 504. Resolve the IDs first,
+then pin them in the second query.
+
+Step 1 — resolve IDs:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "d", "entity": "Definition",
+      "columns": ["id", "name"],
+      "filters": {"name": {"op": "eq", "value": "compile"}}
+    },
+    "limit": 50
+  },
+  "response_format": "raw"
+}
+```
+
+Step 2 — pin via `node_ids`:
+
+```json
+{
+  "query": {
+    "query_type": "aggregation",
+    "nodes": [
+      {"id": "caller", "entity": "Definition"},
+      {"id": "callee", "entity": "Definition", "node_ids": ["<id1>", "<id2>", "..."]}
+    ],
+    "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+    "aggregations": [{"function": "count", "target": "caller", "group_by": "callee", "alias": "calls"}],
+    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+    "limit": 20
+  },
+  "response_format": "llm"
+}
+```
+
+## Scoping File / Definition queries to a project
+
+`File → Project` has no direct `IN_PROJECT` edge variant. Use the stored
+`File.project_id` column instead — it's faster and unambiguous:
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "node": {
+      "id": "f", "entity": "File",
+      "columns": ["path", "language"],
+      "filters": {
+        "project_id": {"op": "eq", "value": 77960826},
+        "path": {"op": "starts_with", "value": "crates/"}
+      }
+    },
+    "limit": 50
+  },
+  "response_format": "llm"
+}
+```
+
+Notes:
+
+- Prefer `starts_with` over `ends_with` on `path` — `ends_with` is
+  non-sargable and times out at 504 on large file tables.
+- The branch-aware path is `File → ON_BRANCH → Branch → IN_PROJECT → Project`,
+  but `ON_BRANCH` is sparsely populated for some indexed projects; check
+  before relying on it.
 
 ## Filter operators
 
