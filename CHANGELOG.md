@@ -1,3 +1,9 @@
+## [0.34.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.34.0...v0.34.1) (2026-04-27)
+
+### Fixes
+
+* **indexer:** provision full subject union on GKG_INDEXER ([4671b25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4671b25222cb205a3b379efbcb9169c5b14e8bb6)) by Bohdan Parkhomchuk
+
 ## [0.34.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.33.2...v0.34.0) (2026-04-27)
 
 ### Features
