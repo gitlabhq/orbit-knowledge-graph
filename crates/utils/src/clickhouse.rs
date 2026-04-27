@@ -26,12 +26,8 @@ impl ChScalar {
 }
 
 /// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
-///
-/// Scalar variants map directly to ClickHouse types. `Array(ChScalar)` maps
-/// to `Array(T)` for any scalar `T`, used in `IN` clauses with multiple values.
-/// `DateTime64` is used for filter literals targeting `DateTime64(6, 'UTC')`
-/// columns; binding the param with the column's native type avoids ClickHouse
-/// rejecting the implicit String -> DateTime64 cast (TYPE_MISMATCH, code 53).
+/// `Array(ChScalar)` maps to `Array(T)` for any scalar `T`, used in `IN`
+/// clauses with multiple values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChType {
     String,

@@ -370,11 +370,8 @@ impl<'a> Validator<'a> {
     }
 
     /// Annotate every filter with its resolved column [`DataType`].
-    ///
-    /// Runs after `check_filter_types` has already accepted the filter
-    /// shape, so unknown entities/columns silently fall through with
-    /// `data_type = None` and the lowerer falls back to inferring the
-    /// type from the JSON value (legacy behaviour).
+    /// Runs after `check_filter_types`, so unknown columns fall through
+    /// with `data_type = None` and the lowerer infers from the JSON value.
     pub fn annotate_filter_types(&self, input: &mut Input) {
         for node in &mut input.nodes {
             let Some(entity) = node.entity.clone() else {

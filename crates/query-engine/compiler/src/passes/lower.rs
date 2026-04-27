@@ -1981,15 +1981,8 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     }
 }
 
-/// Pick the ClickHouse parameter type for a filter literal. Prefers the
-/// ontology-resolved column type (so `DateTime64` columns get a typed param
-/// and ClickHouse never has to cast a String to DateTime64) and falls back
-/// to inferring from the JSON value when the column type is unknown.
-///
-/// `IN` (Value::Array) currently falls back to value-based inference; the
-/// `Array(ChScalar)` placeholder grammar has no DateTime element type, and
-/// `IN` on temporal columns is uncommon. The fix targets scalar comparisons,
-/// where the lowerer was emitting `String` against `DateTime64(6, 'UTC')`.
+/// `IN` (Value::Array) falls back to value-based inference because
+/// `Array(ChScalar)` has no temporal element type.
 fn filter_value_ch_type(filter: &InputFilter, value: &Value) -> ChType {
     if matches!(value, Value::Array(_) | Value::Null) {
         return ChType::from_value(value);
@@ -2114,7 +2107,6 @@ mod tests {
         input
     }
 
-    /// Collect `(ChType, Value)` for every `Expr::Param` in a query AST.
     fn collect_params(node: &Node) -> Vec<(ChType, Value)> {
         fn walk_expr(e: &Expr, acc: &mut Vec<(ChType, Value)>) {
             match e {
@@ -2169,10 +2161,6 @@ mod tests {
         acc
     }
 
-    /// Regression: the lowerer must bind `DateTime` filter literals as
-    /// `ChType::DateTime64` so ClickHouse never has to cast a String to
-    /// `DateTime64(6, 'UTC')`. Previously this emitted `String`, which
-    /// `ClickHouse 25.x` rejects with `TYPE_MISMATCH` (Code 53).
     #[test]
     fn datetime_filter_binds_typed_param() {
         let mut input = validated_input(
@@ -2203,7 +2191,6 @@ mod tests {
         assert_eq!(format!("{}", dt_param.0), "DateTime64(6, 'UTC')");
     }
 
-    /// Non-temporal filters keep their value-inferred type (no regression).
     #[test]
     fn string_filter_still_binds_as_string() {
         let mut input = validated_input(
