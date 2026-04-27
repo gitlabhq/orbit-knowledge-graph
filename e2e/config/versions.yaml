@@ -31,7 +31,7 @@ gitlab:
     toolbox:
       digest: "sha256:acd5fde0905e3caa8b37d0f0e6d34d8d9b053135a8f19ca5ee305829df01b013"
 gkg:
-  chart: "0.18.1"
+  chart: "0.19.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
     tag: "0.26.1"
