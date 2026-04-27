@@ -389,7 +389,8 @@ fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
     let mut hasher = rustc_hash::FxHasher::default();
     project_id.hash(&mut hasher);
     branch.hash(&mut hasher);
-    hasher.finish() as i64
+    // Mask clears the sign bit so the result is always a positive i64.
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 /// `GraphConverter` for the ClickHouse indexer. Wraps `convert_code_graph`.
@@ -494,5 +495,30 @@ impl code_graph::v2::BatchSink for ClickHouseSink {
                 .await
                 .map_err(|e| code_graph::v2::SinkError(format!("write to {table}: {e}")))
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn compute_branch_id_is_always_non_negative() {
+        // Project/branch pairs whose unmasked FxHash output has the
+        // high bit set previously produced negative i64 ids.
+        let cases = [
+            (1_i64, "main"),
+            (42, "feature/x"),
+            (7, "release/2025-04"),
+            (999, "renovate/deps-update"),
+            (i64::MAX, "main"),
+        ];
+        for (project_id, branch) in cases {
+            let id = compute_branch_id(project_id, branch);
+            assert!(
+                id >= 0,
+                "compute_branch_id({project_id}, {branch:?}) returned {id}"
+            );
+        }
     }
 }
