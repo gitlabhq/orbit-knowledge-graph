@@ -353,9 +353,11 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
     .await;
 
     // Group 100 CONTAINS projects 1000 (edge ns 1/100/1000/) and 1002
-    // (edge ns 1/100/1002/) — both in the 1/100/ subtree
-    resp.assert_node_count(1);
+    // (edge ns 1/100/1002/) — both in the 1/100/ subtree.
+    // Group 200 CONTAINS Project 1010 (edge ns 1/100/200/1010/) — also in scope.
+    resp.assert_node_count(2);
     resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+    resp.assert_node("Group", 200, |n| n.prop_i64("project_count") == Some(1));
 
     // Groups 101 and 102 have CONTAINS edges outside 1/100/ — must not appear
     resp.assert_node_absent("Group", 101);

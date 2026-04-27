@@ -61,9 +61,9 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
     )
     .await;
 
-    // 6 users total, offset=4 → users 5, 6
-    resp.assert_node_count(2);
-    resp.assert_node_order("User", &[5, 6]);
+    // 7 users total, offset=4 → users 5, 6, 7
+    resp.assert_node_count(3);
+    resp.assert_node_order("User", &[5, 6, 7]);
 }
 
 pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
@@ -184,7 +184,7 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 6 users in pages of 2, collecting IDs from each page.
+    // Page through all 7 users in pages of 2, collecting IDs from each page.
     let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
@@ -221,7 +221,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 
     assert_eq!(
         all_ids,
-        vec![1, 2, 3, 4, 5, 6],
+        vec![1, 2, 3, 4, 5, 6, 7],
         "pages should cover all users in order"
     );
 }
@@ -358,7 +358,7 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
 }
 
 pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 6 users in pages of 2 without explicit order_by.
+    // Page through all 7 users in pages of 2 without explicit order_by.
     // The default ORDER BY id ASC should give stable, non-overlapping pages.
     let mut all_ids: Vec<i64> = Vec::new();
 
@@ -392,7 +392,7 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
 
     assert_eq!(
         all_ids,
-        vec![1, 2, 3, 4, 5, 6],
+        vec![1, 2, 3, 4, 5, 6, 7],
         "pages without explicit order_by should cover all users in id-ascending order"
     );
 }

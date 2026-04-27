@@ -755,4 +755,50 @@ mod tests {
             "intermediate MR table must remain in FROM, got:\n{sql}"
         );
     }
+
+    /// Variable-length CONTAINS×{1..3} traversal: each UNION ALL arm should
+    /// carry static `e1.source_kind = 'Group'` and `e<depth>.target_kind = 'Project'`
+    /// literals so ClickHouse can use the kind-led PK projection
+    /// (`by_rel_source_kind`/`by_rel_target_kind`) for granule pruning at every
+    /// depth, instead of relying on dynamic IN-subqueries.
+    #[test]
+    fn variable_length_traversal_emits_per_arm_kind_literals() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
+            ],
+            "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+            "limit": 3
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("e1.source_kind") && sql.contains("'Group'"),
+            "depth-1 arm must inject e1.source_kind = 'Group', got:\n{sql}"
+        );
+        assert!(
+            sql.contains("e3.target_kind") && sql.contains("'Project'"),
+            "depth-3 arm must inject e3.target_kind = 'Project', got:\n{sql}"
+        );
+        // With both endpoints kind-literal-pinned, the per-arm to-side IN
+        // subquery is redundant with the outer node-table SIP and must be
+        // suppressed. The redundant probe was costing 30%+ wall time.
+        assert!(
+            !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
+            "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
+        );
+    }
 }

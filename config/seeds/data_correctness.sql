@@ -9,6 +9,7 @@
 --     4 diana   (active,  project_bot)
 --     5 eve     (blocked, service_account)
 --     6 用户_émoji_🎉 (active, human) — unicode stress test
+--     7 frank   (active,  human) — variable-length cliff reproducer
 --
 --   Groups:
 --     100 Public Group   (public,   path 1/100/)
@@ -23,6 +24,7 @@
 --     1002 Internal Project (internal, path 1/100/1002/)
 --     1003 Secret Project   (private,  path 1/101/1003/)
 --     1004 Shared Project   (public,   path 1/102/1004/)
+--     1010 Deep Project     (public,   path 1/100/200/1010/) — under Group 200, depth-2 from Group 100
 --
 --   MergeRequests:
 --     2000 Add feature A (opened, path 1/100/1000/)
@@ -51,6 +53,7 @@
 --     Group 100 -> Project 1000, Group 100 -> Project 1002
 --     Group 100 -> Group 200 (subgroup)
 --     Group 200 -> Group 300 (subgroup depth 2)
+--     Group 200 -> Project 1010 (enables depth>1 Group->Project paths)
 --     Group 101 -> Project 1001, Group 101 -> Project 1003
 --     Group 102 -> Project 1004
 --
@@ -58,6 +61,7 @@
 --     User 1 -> MR 2000, User 1 -> MR 2001
 --     User 2 -> MR 2002, User 3 -> MR 2003
 --     User 1 -> Note 3000
+--     User 7 -> WI 4010 (reproducer for variable-length cliff)
 --
 --   HAS_NOTE edges:
 --     MR 2000 -> Note 3000, MR 2000 -> Note 3002, MR 2000 -> Note 3003
@@ -81,6 +85,11 @@
 --     4001 Fix auth bug          (closed, incident, confidential,     weight 8,  path 1/100/)
 --     4002 Write unit tests      (opened, task,     not confidential, no weight, path 1/101/)
 --     4003 Q1 Objective          (opened, epic,     not confidential, weight 13, path 1/102/)
+--     4010 Deep WI               (opened, issue,    not confidential, weight 5,  path 1/100/200/1010/) — User 7's WI in Project 1010
+--
+--   IN_PROJECT edges:
+--     WI 4000 -> Project 1000, WI 4001 -> Project 1000
+--     WI 4010 -> Project 1010 (depth-2 reproducer)
 --
 --   APPROVED edges:
 --     User 2 -> MR 2000, User 3 -> MR 2000
@@ -117,7 +126,8 @@ INSERT INTO gl_user (id, username, name, state, user_type, email) VALUES
     (3, 'charlie', 'Charlie Private', 'active', 'human', 'charlie@example.com'),
     (4, 'diana', 'Diana Developer', 'active', 'project_bot', 'diana@example.com'),
     (5, 'eve', 'Eve External', 'blocked', 'service_account', 'eve@example.com'),
-    (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human', 'unicode@example.com');
+    (6, '用户_émoji_🎉', 'Ünïcödé Üser', 'active', 'human', 'unicode@example.com'),
+    (7, 'frank', 'Frank Deep', 'active', 'human', 'frank@example.com');
 
 INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VALUES
     (100, 'Public Group', 'public-group', 'public', '1/100/'),
@@ -131,7 +141,8 @@ INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) V
     (1001, 'Private Project', 'private-group/private-project', 'private', '1/101/1001/'),
     (1002, 'Internal Project', 'public-group/internal-project', 'internal', '1/100/1002/'),
     (1003, 'Secret Project', 'private-group/secret-project', 'private', '1/101/1003/'),
-    (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/');
+    (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/'),
+    (1010, 'Deep Project', 'public-group/deep-a/deep-project', 'public', '1/100/200/1010/');
 
 INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
     (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
@@ -178,7 +189,8 @@ INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, w
     (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, '1/100/'),
     (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', '1/100/'),
     (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, '1/101/'),
-    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, '1/102/');
+    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, '1/102/'),
+    (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, '1/100/200/1010/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
@@ -197,6 +209,7 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
     ('1/101/1003/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
     ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project'),
+    ('1/100/200/1010/', 200, 'Group', 'CONTAINS', 1010, 'Project'),
     ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
     ('1/100/1000/', 1, 'User', 'AUTHORED', 2001, 'MergeRequest'),
     ('1/101/1001/', 2, 'User', 'AUTHORED', 2002, 'MergeRequest'),
@@ -229,6 +242,8 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
     ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
+    ('1/100/200/1010/', 4010, 'WorkItem', 'IN_PROJECT', 1010, 'Project'),
+    ('1/100/200/1010/', 7, 'User', 'AUTHORED', 4010, 'WorkItem'),
     ('1/100/', 2, 'User', 'CLOSED', 4001, 'WorkItem');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
