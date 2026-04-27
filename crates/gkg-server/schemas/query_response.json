@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://gitlab.com/gitlab-org/orbit/knowledge-graph/schemas/query_response/v1",
   "title": "GKG unified query response",
-  "description": "JSON payload returned by the query pipeline. All five query types (search, traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
+  "description": "JSON payload returned by the query pipeline. All four query types (traversal, aggregation, path_finding, neighbors) produce this shape. Display metadata (labels, styles, domains) comes from the cached ontology, not from this response.",
   "type": "object",
   "required": ["format_version", "query_type", "nodes", "edges"],
   "additionalProperties": false,
@@ -14,8 +14,8 @@
     },
     "query_type": {
       "type": "string",
-      "description": "Which query type produced this result. The frontend uses this to pick a default view (table for search/aggregation, graph for traversal/path_finding/neighbors).",
-      "enum": ["search", "traversal", "aggregation", "path_finding", "neighbors"]
+      "description": "Which query type produced this result. The frontend uses this to pick a default view (table for single-node traversal/aggregation, graph for multi-node traversal/path_finding/neighbors).",
+      "enum": ["traversal", "aggregation", "path_finding", "neighbors"]
     },
     "nodes": {
       "description": "Deduplicated entity objects. Each entity appears once even if it participates in many edges. The frontend groups nodes by type for stacked table display and passes them to Three.js for graph rendering.",
@@ -23,7 +23,7 @@
       "items": { "$ref": "#/$defs/node" }
     },
     "edges": {
-      "description": "Instance-level relationships between nodes. Each edge connects two specific nodes by their type and ID. Empty for search and aggregation queries.",
+      "description": "Instance-level relationships between nodes. Each edge connects two specific nodes by their type and ID. Empty for single-node traversal and aggregation queries.",
       "type": "array",
       "items": { "$ref": "#/$defs/edge" }
     },

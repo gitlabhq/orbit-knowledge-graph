@@ -209,7 +209,7 @@ mod tests {
 
     fn input_with_columns(cols: Vec<&str>) -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -232,7 +232,7 @@ mod tests {
             },
         );
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -321,7 +321,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: None,
@@ -335,7 +335,7 @@ mod tests {
 
     fn input_with_order_by(property: &str) -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -571,7 +571,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -616,7 +616,7 @@ mod tests {
             },
         );
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -630,7 +630,7 @@ mod tests {
 
     fn user_order_by_input(field: &str) -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -659,7 +659,7 @@ mod tests {
         let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
         let ctx = non_admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -725,7 +725,7 @@ mod tests {
         let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
         let ctx = admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),

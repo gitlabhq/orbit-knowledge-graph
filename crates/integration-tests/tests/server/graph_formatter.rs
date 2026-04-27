@@ -239,7 +239,7 @@ async fn search_exact_properties(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state", "name"]},
             "limit": 10
         }"#,
@@ -247,7 +247,7 @@ async fn search_exact_properties(ctx: &TestContext) {
     )
     .await;
 
-    assert_eq!(value["query_type"], "search");
+    assert_eq!(value["query_type"], "traversal");
     assert!(value["edges"].as_array().unwrap().is_empty());
 
     let nodes = value["nodes"].as_array().unwrap();
@@ -287,7 +287,7 @@ async fn search_unicode_properties(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name"]},
             "limit": 10
         }"#,
@@ -308,7 +308,7 @@ async fn search_redaction_exact(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
@@ -336,7 +336,7 @@ async fn search_no_authorization_returns_empty(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
@@ -1605,7 +1605,7 @@ async fn search_boolean_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}, "columns": ["note", "confidential", "internal"]},
             "limit": 10
         }"#,
@@ -1645,7 +1645,7 @@ async fn search_datetime_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [9000]},
             "limit": 10
         }"#,
@@ -1678,7 +1678,7 @@ async fn search_nullable_columns(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note", "created_at"], "node_ids": [3000]},
             "limit": 10
         }"#,
@@ -1710,7 +1710,7 @@ async fn search_wildcard_columns(ctx: &TestContext) {
     let value = run_pipeline_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": "*", "node_ids": [1]},
             "limit": 10
         }"#,
@@ -1937,7 +1937,7 @@ async fn filter_in_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "in", "value": ["alice", "charlie"]}}},
             "limit": 10
         }"#,
@@ -1962,7 +1962,7 @@ async fn filter_contains_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "contains", "value": "lic"}}},
             "limit": 10
         }"#,
@@ -1986,7 +1986,7 @@ async fn filter_starts_with_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "filters": {"username": {"op": "starts_with", "value": "ali"}}},
             "limit": 10
         }"#,
@@ -2007,7 +2007,7 @@ async fn filter_is_null_operator(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username", "created_at"], "filters": {"created_at": {"op": "is_null"}}},
             "limit": 10
         }"#,
@@ -2039,7 +2039,7 @@ async fn search_node_ids_filtering(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [2, 4]},
             "limit": 10
         }"#,
@@ -2067,7 +2067,7 @@ async fn search_with_order_by(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10
@@ -2095,7 +2095,7 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
             "limit": 10
         }"#,
@@ -2103,7 +2103,7 @@ async fn empty_result_all_fields_present(ctx: &TestContext) {
     )
     .await;
 
-    assert_eq!(value["query_type"], "search");
+    assert_eq!(value["query_type"], "traversal");
     assert!(value["nodes"].is_array());
     assert!(value["edges"].is_array());
     assert!(value["nodes"].as_array().unwrap().is_empty());
@@ -2336,7 +2336,7 @@ async fn pagination_present_in_response(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -2365,7 +2365,7 @@ async fn pagination_absent_without_cursor(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 10
         }"#,
@@ -2383,7 +2383,7 @@ async fn pagination_last_page_has_more_false(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
@@ -2410,7 +2410,7 @@ async fn pagination_with_redaction(ctx: &TestContext) {
     let value = run_pipeline(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -2533,7 +2533,7 @@ async fn graph_formatter_e2e() {
 #[test]
 fn schema_rejects_response_missing_format_version() {
     let value = serde_json::json!({
-        "query_type": "search",
+        "query_type": "traversal",
         "nodes": [],
         "edges": []
     });
@@ -2548,7 +2548,7 @@ fn schema_rejects_response_missing_format_version() {
 fn schema_rejects_invalid_format_version_string() {
     let value = serde_json::json!({
         "format_version": "not-a-version",
-        "query_type": "search",
+        "query_type": "traversal",
         "nodes": [],
         "edges": []
     });
@@ -2563,7 +2563,7 @@ fn schema_rejects_invalid_format_version_string() {
 fn schema_accepts_valid_format_version() {
     let value = serde_json::json!({
         "format_version": "1.0.0",
-        "query_type": "search",
+        "query_type": "traversal",
         "nodes": [],
         "edges": []
     });

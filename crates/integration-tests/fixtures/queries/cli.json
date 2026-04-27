@@ -1,6 +1,6 @@
 {
   "files": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {
       "id": "f",
       "entity": "File",
@@ -10,7 +10,7 @@
     "limit": 50
   },
   "files_simple": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {
       "id": "f",
       "entity": "File",

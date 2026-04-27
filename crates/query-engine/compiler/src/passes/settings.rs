@@ -33,13 +33,13 @@ mod tests {
 
     #[test]
     fn resolve_enables_cache_for_cursor() {
-        let cfg = resolve("search", true);
+        let cfg = resolve("traversal", true);
         assert_eq!(cfg.use_query_cache, Some(true));
     }
 
     #[test]
     fn resolve_does_not_enable_cache_without_cursor() {
-        let cfg = resolve("search", false);
+        let cfg = resolve("traversal", false);
         // Without global init, default is None
         assert_eq!(cfg.use_query_cache, None);
     }

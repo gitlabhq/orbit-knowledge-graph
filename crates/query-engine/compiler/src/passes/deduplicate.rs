@@ -143,8 +143,7 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
             let table = table.clone();
 
             match input.query_type {
-                QueryType::Search
-                | QueryType::Traversal
+                QueryType::Traversal
                 | QueryType::Aggregation
                 | QueryType::PathFinding
                 | QueryType::Neighbors => {
@@ -827,7 +826,7 @@ mod tests {
             limit: Some(50),
             ..Default::default()
         }));
-        deduplicate(&mut node, &input_for(QueryType::Search), &ont);
+        deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
         let Node::Query(q) = &node else {
             unreachable!()

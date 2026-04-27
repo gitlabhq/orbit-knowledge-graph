@@ -22,7 +22,7 @@
 //! let ctx = SecurityContext::new(1, vec!["1/".into()]).unwrap();
 //!
 //! let json = r#"{
-//!     "query_type": "search",
+//!     "query_type": "traversal",
 //!     "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
 //!     "limit": 10
 //! }"#;
@@ -208,7 +208,7 @@ mod tests {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let prefixed = ontology.with_schema_version_prefix("v1_");
 
-        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
@@ -237,13 +237,47 @@ mod tests {
     fn compile_without_prefix_uses_unprefixed_tables() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
-        let query = r#"{"query_type":"search","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
+        let query = r#"{"query_type":"traversal","node":{"id":"g","entity":"Group","node_ids":[1],"columns":["name"]},"limit":1}"#;
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
         assert!(
             sql.contains("gl_group") && !sql.contains("v1_gl_group"),
             "unprefixed search should use gl_group, got: {sql}"
+        );
+    }
+
+    /// Traversal with 1 node + 0 relationships is a search shape.
+    /// It should compile to the same flat table scan as query_type: "search".
+    #[test]
+    fn traversal_single_node_compiles_as_search() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let search_query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let traversal_query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let search_sql = compile(search_query, &ontology, &security_ctx())
+            .expect("search should compile")
+            .base
+            .render();
+
+        let traversal_sql = compile(traversal_query, &ontology, &security_ctx())
+            .expect("single-node traversal should compile")
+            .base
+            .render();
+
+        assert_eq!(
+            search_sql, traversal_sql,
+            "single-node traversal SQL should match search SQL"
         );
     }
 

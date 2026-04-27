@@ -7,7 +7,7 @@ use compiler::{Node, QueryError, compile};
 #[test]
 fn compile_to_ast_works() {
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 10
     }"#;
@@ -48,7 +48,7 @@ fn traversal_query() {
 #[test]
 fn bool_filter_value_is_preserved() {
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "n",
             "entity": "Note",
@@ -186,7 +186,7 @@ fn neighbors_query() {
 #[test]
 fn filter_operators() {
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {
             "id": "u",
             "entity": "User",
