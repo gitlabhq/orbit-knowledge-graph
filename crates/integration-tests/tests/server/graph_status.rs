@@ -472,11 +472,10 @@ async fn reporter_excludes_security_entity_counts(ctx: &TestContext) {
         .expect("should succeed");
     let status = extract_structured(response);
 
-    let security = find_domain(&status.domains, "security");
-    assert_eq!(
-        find_item(security, "Vulnerability"),
-        0,
-        "Reporter should not see vulnerability counts"
+    let security = status.domains.iter().find(|d| d.name == "security");
+    assert!(
+        security.is_none(),
+        "Reporter should not see security domain at all"
     );
 
     let core = find_domain(&status.domains, "core");
