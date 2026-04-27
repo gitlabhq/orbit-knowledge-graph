@@ -14,9 +14,14 @@ E2E_CH_GRAPH_READ_PASS=$(openssl rand -base64 24)
 E2E_PG_SIPHON_PASS=$(openssl rand -base64 24)
 E2E_CH_GITLAB_PASS=$(openssl rand -base64 24)
 E2E_GITLAB_ROOT_PASS=$(openssl rand -base64 24)
+E2E_PG_GITLAB_PASS=$(openssl rand -base64 24)
+E2E_PG_POSTGRES_PASS=$(openssl rand -base64 24)
+E2E_PG_REPLICATION_PASS=$(openssl rand -base64 24)
+E2E_REDIS_PASS=$(openssl rand -base64 24)
 export E2E_JWT_KEY E2E_CH_DEFAULT_PASS E2E_CH_SIPHON_PASS E2E_CH_DATALAKE_PASS
 export E2E_CH_GRAPH_PASS E2E_CH_GRAPH_READ_PASS E2E_PG_SIPHON_PASS E2E_CH_GITLAB_PASS
 export E2E_GITLAB_ROOT_PASS
+export E2E_PG_GITLAB_PASS E2E_PG_POSTGRES_PASS E2E_PG_REPLICATION_PASS E2E_REDIS_PASS
 
 # Root CA for gRPC TLS (pre-existing cluster resource from cert-manager)
 log "Extracting root CA from cert-manager"
@@ -37,6 +42,11 @@ helmfile --file helmfile.yaml.gotmpl sync
 # EE-gated features (epics, work item hierarchies, etc.) are available in the
 # test suite. Runs after helmfile sync because it requires a Ready toolbox pod.
 "$E2E_DIR/scripts/activate-license.sh"
+
+# Create a root PAT via rails-runner. Replaces the OAuth password grant (ROPC)
+# flow that GitLab 19.0 removed. Robot runner reads the PAT from the
+# `gitlab-root-pat` secret as the GITLAB_ROOT_PAT env var.
+"$E2E_DIR/scripts/create-root-pat.sh"
 
 # Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
 # vs-namespaces race window for new namespaces is sub-second instead of the

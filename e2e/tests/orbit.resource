@@ -19,24 +19,11 @@ Orbit Query Node
     [Arguments]    ${entity}    ${node_id}
     ${headers}=    GitLab Auth Headers
     ${node}=    Create Dictionary    id=n    entity=${entity}    node_ids=${{[${node_id}]}}
-    ${query}=    Create Dictionary    query_type=search    node=${node}
+    ${query}=    Create Dictionary    query_type=traversal    node=${node}
     ${body}=    Create Dictionary    query=${query}
     ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
     ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
-
-Orbit Count Nodes
-    [Documentation]    Count all nodes of a given entity type. Used for smoke checks.
-    [Arguments]    ${entity}
-    ${headers}=    GitLab Auth Headers
-    ${agg}=    Create Dictionary    function=count    target=n
-    ${node}=    Create Dictionary    id=n    entity=${entity}
-    ${query}=    Create Dictionary
-    ...    query_type=aggregation    nodes=${{[${node}]}}    aggregations=${{[${agg}]}}
-    ${body}=    Create Dictionary    query=${query}
-    ${resp}=    POST    ${GITLAB_URL}/api/v4/orbit/query
-    ...    headers=${headers}    json=${body}    expected_status=200
-    RETURN    ${resp.json()["result"]["columns"][0]["value"]}
 
 Verify Node Indexed
     [Documentation]    Assert that one node of ${entity} with id=${node_id} is queryable.
@@ -56,18 +43,6 @@ Wait For Node Indexed
     ...    ${label_field}=name    ${timeout}=120s    ${interval}=3s
     Wait Until Keyword Succeeds    ${timeout}    ${interval}
     ...    Verify Node Indexed    ${entity}    ${node_id}    ${expected_label}    ${label_field}
-
-Wait For Entity Population
-    [Documentation]    Wait until at least one node of ${entity} is indexed.
-    [Arguments]    ${entity}    ${minimum}=1    ${timeout}=120s    ${interval}=3s
-    Wait Until Keyword Succeeds    ${timeout}    ${interval}
-    ...    Entity Count Is At Least    ${entity}    ${minimum}
-
-Entity Count Is At Least
-    [Arguments]    ${entity}    ${minimum}
-    ${count}=    Orbit Count Nodes    ${entity}
-    Should Be True    ${count} >= ${minimum}
-    ...    Only ${count} ${entity} nodes indexed (need >= ${minimum})
 
 Start Indexing Budget
     [Documentation]    Begin a shared time budget consumed by Wait For * Within Budget calls.
@@ -116,7 +91,7 @@ Orbit Search Nodes With Filters
     [Arguments]    ${entity}    ${filters}    ${limit}=30
     ${limit_int}=    Convert To Integer    ${limit}
     ${node}=    Create Dictionary    id=n    entity=${entity}    filters=${filters}
-    ${query}=    Create Dictionary    query_type=search    node=${node}    limit=${limit_int}
+    ${query}=    Create Dictionary    query_type=traversal    node=${node}    limit=${limit_int}
     ${resp}=    Orbit Query    ${query}
     RETURN    ${resp}
 

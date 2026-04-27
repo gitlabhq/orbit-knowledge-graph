@@ -14,3 +14,7 @@ secrets:
   chGraphPass: {{ requiredEnv "E2E_CH_GRAPH_PASS" | quote }}
   chGraphReadPass: {{ requiredEnv "E2E_CH_GRAPH_READ_PASS" | quote }}
   gitlabRootPass: {{ requiredEnv "E2E_GITLAB_ROOT_PASS" | quote }}
+  pgGitlabPass: {{ requiredEnv "E2E_PG_GITLAB_PASS" | quote }}
+  pgPostgresPass: {{ requiredEnv "E2E_PG_POSTGRES_PASS" | quote }}
+  pgReplicationPass: {{ requiredEnv "E2E_PG_REPLICATION_PASS" | quote }}
+  redisPass: {{ requiredEnv "E2E_REDIS_PASS" | quote }}
