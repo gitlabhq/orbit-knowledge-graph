@@ -296,7 +296,7 @@ mod tests {
                 {"id": "p", "entity": "Project", "node_ids": [278964]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-            "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "total_mrs"}],
             "limit": 10
         }"#;
 
@@ -778,7 +778,7 @@ mod tests {
                 {"type": "IN_PROJECT", "from": "mr", "to": "p"},
                 {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 3}
             ],
-            "aggregations": [{"function": "count", "target": "u", "alias": "n"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g", "alias": "n"}],
             "limit": 3
         }"#;
 
