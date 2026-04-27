@@ -31,6 +31,11 @@ pub struct QueryOptions {
     /// `All` returns every column; `Default` returns the entity's `default_columns`.
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
+    /// When true, includes compiled ClickHouse SQL in the response metadata.
+    /// Only honored for authorized users (instance admins and direct GitLab
+    /// org members with Reporter+ access).
+    #[serde(default)]
+    pub include_debug_sql: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -890,6 +895,35 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
+        assert!(!input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_include_debug_sql_true() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"include_debug_sql": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_include_debug_sql_defaults_false() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"dynamic_columns": "*"}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(!input.options.include_debug_sql);
     }
 
     #[test]
