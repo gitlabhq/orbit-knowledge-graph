@@ -7,12 +7,6 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use code_graph::legacy::linker::analysis::types::GraphData;
-use code_graph::legacy::linker::indexer::{
-    ErroredFile as LegacyErroredFile, IndexingConfig, RepositoryIndexer,
-    SkippedFile as LegacySkippedFile,
-};
-use code_graph::legacy::linker::loading::DirectoryFileSource;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{self, ResultFormatter};
@@ -91,10 +85,9 @@ struct IndexGraphStats {
 
 struct IndexRunResult {
     total_processing_time: Duration,
-    skipped_files: Vec<LegacySkippedFile>,
-    errored_files: Vec<LegacyErroredFile>,
-    graph_data: Option<GraphData>,
-    graph_stats: Option<IndexGraphStats>,
+    skipped_files: Vec<code_graph::v2::pipeline::SkippedFile>,
+    errored_files: Vec<code_graph::v2::pipeline::PipelineError>,
+    graph_stats: IndexGraphStats,
     database_path: Option<String>,
 }
 
@@ -147,12 +140,6 @@ enum Commands {
         /// Verbose logging to stderr
         #[arg(short, long)]
         verbose: bool,
-
-        /// Opt out of the v2 code-graph pipeline and run the legacy v1
-        /// linker. Kept for migration safety; v2 is the production default
-        /// and emits the only edge variants the current ontology declares.
-        #[arg(long, default_value_t = false)]
-        legacy: bool,
     },
     /// Query the local DuckDB graph (~/.orbit/graph.duckdb)
     Query {
@@ -261,7 +248,6 @@ async fn main() -> Result<()> {
             threads,
             stats,
             verbose,
-            legacy,
         } => {
             let level = if verbose { Level::DEBUG } else { Level::WARN };
             let subscriber = tracing_subscriber::fmt()
@@ -280,7 +266,7 @@ async fn main() -> Result<()> {
             tracing::subscriber::set_global_default(subscriber)
                 .expect("setting default subscriber failed");
 
-            run_index(path, threads, stats, !legacy).await
+            run_index(path, threads, stats).await
         }
         Commands::Query {
             json,
@@ -551,7 +537,7 @@ fn run_schema_diff(generated_stmts: &[String], sql_path: &PathBuf) -> Result<()>
     Ok(())
 }
 
-async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool) -> Result<()> {
+async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()> {
     let store = workspace::Workspace::open_default()?;
     let repos = store.resolve_repos(&path)?;
 
@@ -575,10 +561,11 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
             .context("failed to create schema")?;
     }
 
-    let config = IndexingConfig {
-        worker_threads: threads,
+    let pipeline_config = code_graph::v2::PipelineConfig {
         max_file_size: 5_000_000,
         respect_gitignore: true,
+        worker_threads: threads,
+        ..Default::default()
     };
 
     let mut failed = 0usize;
@@ -616,11 +603,7 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
             )?;
         }
 
-        let result = if use_v2 {
-            index_repo_v2(&git, &store, &ontology, &config).await
-        } else {
-            index_repo(&git, &config, &store, &ontology).await
-        };
+        let result = index_repo(&git, &store, &ontology, pipeline_config.clone()).await;
         match result {
             Ok(result) => {
                 let repo_name = git
@@ -659,101 +642,14 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool, use_v2: bool
 
 async fn index_repo(
     git: &workspace::GitInfo,
-    config: &IndexingConfig,
     store: &workspace::Workspace,
     ontology: &Ontology,
-) -> Result<IndexRunResult> {
-    // v1 pipeline — unchanged
-    let key = git.repo_path.to_string_lossy().to_string();
-    let repo_name = git
-        .repo_path
-        .file_name()
-        .map(|n| n.to_string_lossy().to_string())
-        .unwrap_or_else(|| "repository".to_string());
-
-    let file_source = DirectoryFileSource::new(key.clone());
-    let indexer = RepositoryIndexer::new(repo_name, key.clone());
-
-    let mut result = indexer
-        .index_files(file_source, config)
-        .await
-        .context("indexing failed")?;
-
-    if let Some(ref mut graph_data) = result.graph_data {
-        graph_data.assign_node_ids(git.project_id, &git.branch);
-
-        let local_data = duckdb_client::convert_graph_data(
-            graph_data,
-            git.project_id,
-            &git.branch,
-            &git.commit_sha,
-            ontology,
-        )
-        .context("failed to convert graph data to Arrow")?;
-
-        let db_path = store.db_path();
-        let client = duckdb_client::DuckDbClient::open(&db_path)
-            .context("failed to open DuckDB for writing")?;
-
-        let node_tables: Vec<String> = ontology
-            .local_entity_names()
-            .iter()
-            .map(|name| {
-                ontology
-                    .get_node(name)
-                    .expect("local entity must exist")
-                    .destination_table
-                    .clone()
-            })
-            .collect();
-        let edge_table = ontology
-            .local_edge_table_name()
-            .context("local_db.edge_table.name must be configured")?;
-
-        client
-            .delete_project(git.project_id, &node_tables, edge_table)
-            .context("failed to clear existing project data")?;
-        client
-            .insert_graph(local_data)
-            .context("failed to insert graph data")?;
-        workspace::set_status(
-            &client,
-            &key,
-            git.project_id,
-            workspace::RepoStatus::Indexed,
-            None,
-            Some(git),
-        )?;
-        result.database_path = Some(db_path.display().to_string());
-    }
-
-    Ok(IndexRunResult {
-        total_processing_time: result.total_processing_time,
-        skipped_files: result.skipped_files,
-        errored_files: result.errored_files,
-        graph_data: result.graph_data,
-        graph_stats: None,
-        database_path: result.database_path,
-    })
-}
-
-async fn index_repo_v2(
-    git: &workspace::GitInfo,
-    store: &workspace::Workspace,
-    ontology: &Ontology,
-    config: &IndexingConfig,
+    pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
-    // Run v2 pipeline
-    let pipeline_config = code_graph::v2::PipelineConfig {
-        max_file_size: config.max_file_size as u64,
-        respect_gitignore: config.respect_gitignore,
-        worker_threads: config.worker_threads,
-        ..Default::default()
-    };
     let tracer = code_graph::v2::trace::Tracer::new(false);
 
     let db_path = store.db_path();
@@ -791,7 +687,7 @@ async fn index_repo_v2(
 
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
-        pipeline_config,
+        pipeline_config.clone(),
         tracer,
         converter,
         sink,
@@ -799,7 +695,7 @@ async fn index_repo_v2(
 
     if !v2_result.errors.is_empty() {
         for err in &v2_result.errors {
-            tracing::warn!("v2 pipeline error: {} ({})", err.error, err.file_path);
+            tracing::warn!("pipeline error: {} ({})", err.error, err.file_path);
         }
     }
     // Re-open for workspace status (client was moved into sink)
@@ -814,13 +710,19 @@ async fn index_repo_v2(
         Some(git),
     )?;
 
-    // Return a minimal v1-compatible result for stats output
     Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),
-        skipped_files: vec![],
-        errored_files: vec![],
-        graph_data: None,
-        graph_stats: None,
+        skipped_files: v2_result.files_skipped,
+        errored_files: v2_result.errors,
+        graph_stats: IndexGraphStats {
+            directories: 0,
+            files: v2_result.stats.files_parsed,
+            definitions: v2_result.stats.definitions_count,
+            imported_symbols: v2_result.stats.imports_count,
+            relationships: v2_result.stats.edges_count,
+            relationship_types: HashMap::new(),
+            definition_types: HashMap::new(),
+        },
         database_path: Some(db_path.display().to_string()),
     })
 }
@@ -831,64 +733,22 @@ fn build_index_output(
     result: &IndexRunResult,
     show_stats: bool,
 ) -> IndexOutput {
-    let (graph, rel_counts, def_counts) =
-        match (result.graph_data.as_ref(), result.graph_stats.as_ref()) {
-            (Some(gd), _) => {
-                let mut rel_counts: HashMap<String, usize> = HashMap::new();
-                for rel in &gd.relationships {
-                    *rel_counts
-                        .entry(format!("{:?}", rel.relationship_type))
-                        .or_default() += 1;
-                }
-                let mut def_counts: HashMap<String, usize> = HashMap::new();
-                for def in &gd.definition_nodes {
-                    *def_counts
-                        .entry(format!("{:?}", def.definition_type))
-                        .or_default() += 1;
-                }
-                (
-                    GraphStats {
-                        directories: gd.directory_nodes.len(),
-                        files: gd.file_nodes.len(),
-                        definitions: gd.definition_nodes.len(),
-                        imported_symbols: gd.imported_symbol_nodes.len(),
-                        relationships: gd.relationships.len(),
-                    },
-                    rel_counts,
-                    def_counts,
-                )
-            }
-            (None, Some(stats)) => (
-                GraphStats {
-                    directories: stats.directories,
-                    files: stats.files,
-                    definitions: stats.definitions,
-                    imported_symbols: stats.imported_symbols,
-                    relationships: stats.relationships,
-                },
-                stats.relationship_types.clone(),
-                stats.definition_types.clone(),
-            ),
-            (None, None) => (
-                GraphStats {
-                    directories: 0,
-                    files: 0,
-                    definitions: 0,
-                    imported_symbols: 0,
-                    relationships: 0,
-                },
-                HashMap::new(),
-                HashMap::new(),
-            ),
-        };
+    let stats = &result.graph_stats;
+    let graph = GraphStats {
+        directories: stats.directories,
+        files: stats.files,
+        definitions: stats.definitions,
+        imported_symbols: stats.imported_symbols,
+        relationships: stats.relationships,
+    };
 
     let detailed = show_stats.then(|| DetailedStats {
         skipped_files: result
             .skipped_files
             .iter()
             .map(|s| SkippedFile {
-                path: s.file_path.clone(),
-                reason: s.reason.clone(),
+                path: s.path.clone(),
+                reason: s.reason.to_string(),
             })
             .collect(),
         errored_files: result
@@ -896,11 +756,11 @@ fn build_index_output(
             .iter()
             .map(|e| ErroredFile {
                 path: e.file_path.clone(),
-                error: e.error_message.clone(),
+                error: e.error.clone(),
             })
             .collect(),
-        relationship_types: rel_counts,
-        definition_types: def_counts,
+        relationship_types: stats.relationship_types.clone(),
+        definition_types: stats.definition_types.clone(),
     });
 
     IndexOutput {
