@@ -1858,6 +1858,642 @@
          },
          "id": 40,
          "panels": [ ],
+         "title": "Resources",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Aggregate CPU seconds used per second divided by configured CPU limit, across all indexer replicas. 1.0 means the pool is fully consuming its quota.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 0,
+            "y": 70
+         },
+         "id": 41,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28rate%28container_cpu_usage_seconds_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20cpu%3D\\%22total\\%22%7D%5B5m%5D%29%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22cpu\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "((sum(rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))) / (sum(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"}) > 0)) or vector(0)",
+               "legendFormat": "CPU: usage / limit (5m)",
+               "refId": "A"
+            }
+         ],
+         "title": "CPU: usage / limit (5m)",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Working-set memory across all replicas as a fraction of the aggregate memory limit. Watch for sustained values above ~0.85 — that is OOM-kill territory.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 6,
+            "y": 70
+         },
+         "id": 42,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22%28sum%28container_memory_working_set_bytes%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%29%29%20%2F%20%28sum%28kube_pod_container_resource_limits%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%2C%20resource%3D\\%22memory\\%22%7D%29%20%3E%200%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "((sum(container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\"$cluster\"})) / (sum(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"}) > 0)) or vector(0)",
+               "legendFormat": "Memory: working set / limit",
+               "refId": "A"
+            }
+         ],
+         "title": "Memory: working set / limit",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total OOM-killer events across indexer replicas in the last hour. Any non-zero value warrants a look at the memory panel below.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 12,
+            "y": 70
+         },
+         "id": 43,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28container_oom_events_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(container_oom_events_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[1h]))) or vector(0)",
+               "legendFormat": "OOM events (1h)",
+               "refId": "A"
+            }
+         ],
+         "title": "OOM events (1h)",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Container restarts across indexer replicas in the last hour. Crash-loops show up here before they show up in the app metrics.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 6,
+            "x": 18,
+            "y": 70
+         },
+         "id": 44,
+         "links": [
+            {
+               "targetBlank": false,
+               "title": "Open in Explore",
+               "url": "/explore?orgId=1&left=%7B%22datasource%22%3A%22mimir-analytics-eventsdot%22%2C%22queries%22%3A%5B%7B%22datasource%22%3A%7B%22type%22%3A%22prometheus%22%2C%22uid%22%3A%22mimir-analytics-eventsdot%22%7D%2C%22expr%22%3A%22sum%28increase%28kube_pod_container_status_restarts_total%7Bcontainer%3D\\%22gkg-indexer\\%22%2C%20cluster%3D~\\%22$cluster\\%22%2C%20namespace%3D\\%22gkg\\%22%7D%5B1h%5D%29%29%22%2C%22range%22%3Atrue%2C%22refId%22%3A%22A%22%7D%5D%2C%22range%22%3A%7B%22from%22%3A%22$__from%22%2C%22to%22%3A%22$__to%22%7D%7D"
+            }
+         ],
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum(increase(kube_pod_container_status_restarts_total{container=\"gkg-indexer\", cluster=~\"$cluster\", namespace=\"gkg\"}[1h]))) or vector(0)",
+               "legendFormat": "Restarts (1h)",
+               "refId": "A"
+            }
+         ],
+         "title": "Restarts (1h)",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Per-pod CPU seconds consumed per second. The dashed reference line is the per-pod CPU limit from kube-state-metrics; pods bumping against it should be cross-checked with the throttling panel.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 74
+         },
+         "id": 45,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (rate(container_cpu_usage_seconds_total{container=\"gkg-indexer\", cluster=~\"$cluster\", cpu=\"total\"}[5m]))",
+               "legendFormat": "{{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "avg(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"cpu\"})",
+               "legendFormat": "limit",
+               "refId": "B"
+            }
+         ],
+         "title": "CPU: cores used per pod",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Share of CFS periods where the cgroup was throttled. Anything sustained above ~5% means the pod is hitting its CPU quota and pipelines will queue.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "percentunit"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 74
+         },
+         "id": 46,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "(sum by (pod) (rate(container_cpu_cfs_throttled_periods_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))) / (sum by (pod) (rate(container_cpu_cfs_periods_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])) > 0)",
+               "legendFormat": "{{pod}}",
+               "refId": "A"
+            }
+         ],
+         "title": "CPU: throttled time fraction per pod",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "container_memory_working_set_bytes per replica. The dashed reference line is the per-pod memory limit. Working set is what the OOM killer reads, not RSS.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 82
+         },
+         "id": 47,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (container_memory_working_set_bytes{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "avg(kube_pod_container_resource_limits{container=\"gkg-indexer\", cluster=~\"$cluster\", namespace=\"gkg\", resource=\"memory\"})",
+               "legendFormat": "limit",
+               "refId": "B"
+            }
+         ],
+         "title": "Memory: working set per pod",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Resident set and page cache, per pod. RSS dominating with a tiny cache often means heap growth; cache dominating typically means Gitaly archive I/O.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "bytes"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 82
+         },
+         "id": 48,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (container_memory_rss{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "rss / {{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (container_memory_cache{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "cache / {{pod}}",
+               "refId": "B"
+            }
+         ],
+         "title": "Memory: RSS and cache per pod",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Read and write throughput from cAdvisor. A sustained climb on writes during code indexing usually points at archive extraction; reads spike during ClickHouse query bursts.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "Bps"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 90
+         },
+         "id": 49,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (rate(container_fs_reads_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "read / {{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (rate(container_fs_writes_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "write / {{pod}}",
+               "refId": "B"
+            }
+         ],
+         "title": "Filesystem I/O bytes per pod",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "PSI seconds per second. IO pressure rising means processes are waiting on disk; memory pressure rising means the kernel is reclaiming pages, often the leading edge of an OOM.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "s"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 12,
+            "y": 90
+         },
+         "id": 50,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (rate(container_pressure_io_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "io / {{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (rate(container_pressure_memory_waiting_seconds_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "mem / {{pod}}",
+               "refId": "B"
+            }
+         ],
+         "title": "Pressure stall: IO and memory",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "OS-level concurrency counters. Threads climbing without a corresponding workload increase usually points at a tokio blocking-pool growth event; sockets climbing flags a NATS or ClickHouse connection leak.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 12,
+            "x": 0,
+            "y": 98
+         },
+         "id": 51,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (container_threads{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "threads / {{pod}}",
+               "refId": "A"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (pod) (container_sockets{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "sockets / {{pod}}",
+               "refId": "B"
+            }
+         ],
+         "title": "Threads and sockets per pod",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 106
+         },
+         "id": 52,
+         "panels": [ ],
          "title": "Schema migration",
          "type": "row"
       },
@@ -1882,9 +2518,9 @@
             "h": 8,
             "w": 12,
             "x": 0,
-            "y": 70
+            "y": 107
          },
-         "id": 41,
+         "id": 53,
          "options": {
             "legend": {
                "calcs": [
@@ -1933,9 +2569,9 @@
             "h": 8,
             "w": 12,
             "x": 12,
-            "y": 70
+            "y": 107
          },
-         "id": 42,
+         "id": 54,
          "options": {
             "legend": {
                "calcs": [
@@ -1984,9 +2620,9 @@
             "h": 8,
             "w": 8,
             "x": 0,
-            "y": 78
+            "y": 115
          },
-         "id": 43,
+         "id": 55,
          "options": {
             "legend": {
                "calcs": [
@@ -2020,9 +2656,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 86
+            "y": 123
          },
-         "id": 44,
+         "id": 56,
          "panels": [
             {
                "datasource": {
@@ -2045,9 +2681,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 87
+                  "y": 124
                },
-               "id": 45,
+               "id": 57,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2096,9 +2732,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 87
+                  "y": 124
                },
-               "id": 46,
+               "id": 58,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2165,9 +2801,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 87
+                  "y": 124
                },
-               "id": 47,
+               "id": 59,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2216,9 +2852,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 95
+                  "y": 132
                },
-               "id": 48,
+               "id": 60,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2267,9 +2903,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 95
+                  "y": 132
                },
-               "id": 49,
+               "id": 61,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2318,9 +2954,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 95
+                  "y": 132
                },
-               "id": 50,
+               "id": 62,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2387,9 +3023,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 103
+                  "y": 140
                },
-               "id": 51,
+               "id": 63,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2438,9 +3074,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 103
+                  "y": 140
                },
-               "id": 52,
+               "id": 64,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2489,9 +3125,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 103
+                  "y": 140
                },
-               "id": 53,
+               "id": 65,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2558,9 +3194,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 111
+                  "y": 148
                },
-               "id": 54,
+               "id": 66,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2609,9 +3245,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 111
+                  "y": 148
                },
-               "id": 55,
+               "id": 67,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2660,9 +3296,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 111
+                  "y": 148
                },
-               "id": 56,
+               "id": 68,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2729,9 +3365,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 119
+                  "y": 156
                },
-               "id": 57,
+               "id": 69,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2780,9 +3416,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 119
+                  "y": 156
                },
-               "id": 58,
+               "id": 70,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2849,9 +3485,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 119
+                  "y": 156
                },
-               "id": 59,
+               "id": 71,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2900,9 +3536,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 127
+                  "y": 164
                },
-               "id": 60,
+               "id": 72,
                "options": {
                   "legend": {
                      "calcs": [
@@ -2940,9 +3576,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 135
+            "y": 172
          },
-         "id": 61,
+         "id": 73,
          "panels": [
             {
                "datasource": {
@@ -2965,9 +3601,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 136
+                  "y": 173
                },
-               "id": 62,
+               "id": 74,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3016,9 +3652,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 136
+                  "y": 173
                },
-               "id": 63,
+               "id": 75,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3067,9 +3703,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 136
+                  "y": 173
                },
-               "id": 64,
+               "id": 76,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3118,9 +3754,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 144
+                  "y": 181
                },
-               "id": 65,
+               "id": 77,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3169,9 +3805,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 144
+                  "y": 181
                },
-               "id": 66,
+               "id": 78,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3238,9 +3874,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 144
+                  "y": 181
                },
-               "id": 67,
+               "id": 79,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3289,9 +3925,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 152
+                  "y": 189
                },
-               "id": 68,
+               "id": 80,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3358,9 +3994,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 152
+                  "y": 189
                },
-               "id": 69,
+               "id": 81,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3409,9 +4045,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 152
+                  "y": 189
                },
-               "id": 70,
+               "id": 82,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3460,9 +4096,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 160
+                  "y": 197
                },
-               "id": 71,
+               "id": 83,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3511,9 +4147,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 160
+                  "y": 197
                },
-               "id": 72,
+               "id": 84,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3562,9 +4198,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 160
+                  "y": 197
                },
-               "id": 73,
+               "id": 85,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3631,9 +4267,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 168
+                  "y": 205
                },
-               "id": 74,
+               "id": 86,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3682,9 +4318,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 168
+                  "y": 205
                },
-               "id": 75,
+               "id": 87,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3733,9 +4369,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 168
+                  "y": 205
                },
-               "id": 76,
+               "id": 88,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3784,9 +4420,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 176
+                  "y": 213
                },
-               "id": 77,
+               "id": 89,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3853,9 +4489,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 176
+                  "y": 213
                },
-               "id": 78,
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3893,9 +4529,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 184
+            "y": 221
          },
-         "id": 79,
+         "id": 91,
          "panels": [
             {
                "datasource": {
@@ -3918,9 +4554,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 185
+                  "y": 222
                },
-               "id": 80,
+               "id": 92,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3969,9 +4605,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 185
+                  "y": 222
                },
-               "id": 81,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4038,9 +4674,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 185
+                  "y": 222
                },
-               "id": 82,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4089,9 +4725,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 193
+                  "y": 230
                },
-               "id": 83,
+               "id": 95,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4158,9 +4794,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 193
+                  "y": 230
                },
-               "id": 84,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4209,9 +4845,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 193
+                  "y": 230
                },
-               "id": 85,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4278,9 +4914,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 201
+                  "y": 238
                },
-               "id": 86,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4329,9 +4965,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 201
+                  "y": 238
                },
-               "id": 87,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4380,9 +5016,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 201
+                  "y": 238
                },
-               "id": 88,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4431,9 +5067,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 209
+                  "y": 246
                },
-               "id": 89,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4500,9 +5136,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 209
+                  "y": 246
                },
-               "id": 90,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4551,9 +5187,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 209
+                  "y": 246
                },
-               "id": 91,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4591,9 +5227,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 217
+            "y": 254
          },
-         "id": 92,
+         "id": 104,
          "panels": [
             {
                "datasource": {
@@ -4616,9 +5252,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 218
+                  "y": 255
                },
-               "id": 93,
+               "id": 105,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4685,9 +5321,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 218
+                  "y": 255
                },
-               "id": 94,
+               "id": 106,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4736,9 +5372,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 218
+                  "y": 255
                },
-               "id": 95,
+               "id": 107,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4776,9 +5412,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 226
+            "y": 263
          },
-         "id": 96,
+         "id": 108,
          "panels": [
             {
                "datasource": {
@@ -4801,9 +5437,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 227
+                  "y": 264
                },
-               "id": 97,
+               "id": 109,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4870,9 +5506,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 227
+                  "y": 264
                },
-               "id": 98,
+               "id": 110,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4921,9 +5557,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 227
+                  "y": 264
                },
-               "id": 99,
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4972,9 +5608,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 235
+                  "y": 272
                },
-               "id": 100,
+               "id": 112,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5041,9 +5677,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 235
+                  "y": 272
                },
-               "id": 101,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5092,9 +5728,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 235
+                  "y": 272
                },
-               "id": 102,
+               "id": 114,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5143,9 +5779,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 243
+                  "y": 280
                },
-               "id": 103,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5194,9 +5830,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 243
+                  "y": 280
                },
-               "id": 104,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
