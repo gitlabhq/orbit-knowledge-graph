@@ -82,6 +82,12 @@ impl NatsBroker {
         self.inner.nats_client()
     }
 
+    pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
+        self.ensure_managed_streams(subscriptions).await?;
+        self.ensure_unmanaged_streams_exist(subscriptions).await?;
+        Ok(())
+    }
+
     pub(crate) async fn ensure_managed_streams(
         &self,
         subscriptions: &[Subscription],
@@ -110,12 +116,6 @@ impl NatsBroker {
 
         self.ensure_dead_letter_stream().await?;
 
-        Ok(())
-    }
-
-    pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
-        self.ensure_managed_streams(subscriptions).await?;
-        self.ensure_unmanaged_streams_exist(subscriptions).await?;
         Ok(())
     }
 
