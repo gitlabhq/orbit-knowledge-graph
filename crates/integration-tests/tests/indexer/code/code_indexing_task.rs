@@ -127,15 +127,18 @@ async fn indexes_calls_and_extends_edges() {
     // CALLS traversal Definition -> Definition. The compiler resolves the
     // CALLS edge through the embedded ontology (proves schema.yaml
     // registration works) and the SQL must hit gl_code_edge.
-    let json = r#"{
+    let json = format!(
+        r#"{{
         "query_type": "traversal",
         "nodes": [
-            {"id": "caller", "entity": "Definition", "columns": ["name", "fqn"]},
-            {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+            {{"id": "caller", "entity": "Definition", "filters": {{"project_id": {project_id}}}, "columns": ["name", "fqn"]}},
+            {{"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}}
         ],
-        "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+        "relationships": [{{"type": "CALLS", "from": "caller", "to": "callee"}}],
         "limit": 25
-    }"#;
+    }}"#
+    );
+    let json = json.as_str();
     let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
         .expect("security context")
         .with_role(true, None);
