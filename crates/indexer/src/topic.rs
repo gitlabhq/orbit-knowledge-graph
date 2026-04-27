@@ -4,6 +4,18 @@ use serde::{Deserialize, Serialize};
 
 pub const INDEXER_STREAM: &str = "GKG_INDEXER";
 
+/// Full subject union accepted by `GKG_INDEXER`. Must be passed to stream
+/// provisioning regardless of `engine.modules`, or specialised pools narrow
+/// the stream to their own slice and reject publishes from sibling pools.
+pub fn all_managed_subscriptions() -> Vec<Subscription> {
+    vec![
+        Subscription::new(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT),
+        Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN),
+        Subscription::new(INDEXER_STREAM, CODE_INDEXING_TASK_SUBJECT_PATTERN),
+        Subscription::new(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN),
+    ]
+}
+
 pub const GLOBAL_INDEXING_SUBJECT: &str = "sdlc.global.indexing.requested";
 
 pub const NAMESPACE_INDEXING_SUBJECT_PREFIX: &str = "sdlc.namespace.indexing.requested";

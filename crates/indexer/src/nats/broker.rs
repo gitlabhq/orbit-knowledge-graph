@@ -82,14 +82,19 @@ impl NatsBroker {
         self.inner.nats_client()
     }
 
-    pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
+    /// Creates or updates managed streams. The underlying NATS call replaces
+    /// the stream's subject list, so callers must pass the full union of
+    /// subjects the stream should accept — never a process-local subset.
+    pub async fn ensure_managed_streams(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
         if !self.config.auto_create_streams {
             return Ok(());
         }
 
         let mut managed_streams: std::collections::HashMap<&Arc<str>, Vec<String>> =
             std::collections::HashMap::new();
-        let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
         for subscription in subscriptions {
             if subscription.manage_stream {
@@ -97,8 +102,6 @@ impl NatsBroker {
                     .entry(&subscription.stream)
                     .or_default()
                     .push(subscription.subject.to_string());
-            } else {
-                unmanaged_streams.push(&subscription.stream);
             }
         }
 
@@ -108,11 +111,35 @@ impl NatsBroker {
                 .await?;
         }
 
-        for stream_name in unmanaged_streams {
+        self.ensure_dead_letter_stream().await?;
+
+        Ok(())
+    }
+
+    /// Single-process convenience: provisions managed streams and validates
+    /// unmanaged ones from the same subscription set. Only safe when the
+    /// caller is the sole publisher to those streams.
+    pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
+        self.ensure_managed_streams(subscriptions).await?;
+        self.ensure_unmanaged_streams_exist(subscriptions).await?;
+        Ok(())
+    }
+
+    /// Validates that streams this process consumes from but does not own
+    /// already exist. Called by the engine for each registered subscription.
+    pub async fn ensure_unmanaged_streams_exist(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
+        let unmanaged: Vec<&Arc<str>> = subscriptions
+            .iter()
+            .filter(|s| !s.manage_stream)
+            .map(|s| &s.stream)
+            .collect();
+
+        for stream_name in unmanaged {
             self.inner.get_stream(stream_name).await?;
         }
-
-        self.ensure_dead_letter_stream().await?;
 
         Ok(())
     }
