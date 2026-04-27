@@ -70,7 +70,7 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub namespaced: bool,
     pub extract: ExtractPlan,
     /// Node properties projected onto the edge row (denormalized).
-    /// Empty for standalone edges (source table lacks node properties).
+    /// Standalone edges populate this via LEFT JOIN at extract time.
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 

@@ -441,15 +441,30 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         }
     }
 
-    // Phase 3: Neighbors — replace InSubquery in q.union_all arm WHEREs.
-    // Edge alias in neighbors arms is "e" (from lower_neighbors build_arm).
-    for arm in &mut q.union_all {
-        replace_in_subquery_in_where(
-            &mut arm.where_clause,
-            &ctes_to_remove,
-            &filters_per_cte,
-            "e",
-        );
+    // Phase 3: Neighbors — replace InSubquery in main query and union_all arm
+    // WHEREs. The center node is source in the outgoing arm and target in the
+    // incoming arm, so we need direction-specific filters per arm.
+    if input.neighbors.is_some() {
+        // Build direction-specific filter maps for neighbors.
+        let neighbors_filters = build_neighbors_denorm_filters(&ctes_to_remove, input);
+        if let Some((outgoing_filters, incoming_filters)) = neighbors_filters {
+            // Main query is the outgoing arm (or single-direction arm).
+            replace_in_subquery_in_where(
+                &mut q.where_clause,
+                &ctes_to_remove,
+                &outgoing_filters,
+                "e",
+            );
+            // union_all[0] is the incoming arm (only present for Direction::Both).
+            for arm in &mut q.union_all {
+                replace_in_subquery_in_where(
+                    &mut arm.where_clause,
+                    &ctes_to_remove,
+                    &incoming_filters,
+                    "e",
+                );
+            }
+        }
     }
 
     // Phase 4: PathFinding — replace InSubquery inside frontier CTE queries.
@@ -468,10 +483,6 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                 &filters_per_cte,
                 "e1",
             );
-        }
-        inject_filters_into_from_unions(&mut cte.query.from, &[]);
-        for union_arm in &mut cte.query.union_all {
-            inject_filters_into_from_unions(&mut union_arm.from, &[]);
         }
     }
 
@@ -536,13 +547,56 @@ fn resolve_denorm_direction(node: &InputNode, input: &Input) -> Option<&'static 
             return Some("target");
         }
     }
-    // Neighbors: center node filters on the center-side edge column.
-    // Outgoing arm → source, incoming arm → target. Since the filter
-    // applies to both arms, use "source" (the outgoing arm's center side).
-    if input.neighbors.is_some() {
-        return Some("source");
-    }
+    // Neighbors: handled per-arm in Phase 3, not here.
     None
+}
+
+type FilterMap = HashMap<String, Vec<Expr>>;
+
+/// Build direction-specific filter maps for neighbors queries.
+/// Returns (outgoing_filters, incoming_filters) where outgoing uses source_*
+/// columns and incoming uses target_* columns for the center node's properties.
+fn build_neighbors_denorm_filters(
+    ctes_to_remove: &[String],
+    input: &Input,
+) -> Option<(FilterMap, FilterMap)> {
+    let mut outgoing: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut incoming: HashMap<String, Vec<Expr>> = HashMap::new();
+
+    for cte_name in ctes_to_remove {
+        let alias = cte_name.strip_prefix("_nf_")?;
+        let node = input.nodes.iter().find(|n| n.id == alias)?;
+        let entity = node.entity.as_ref()?;
+
+        let mut out_filters = Vec::new();
+        let mut in_filters = Vec::new();
+        let mut all_ok = true;
+
+        for (prop_name, filter) in &node.filters {
+            let src_key = (entity.clone(), prop_name.clone(), "source".to_string());
+            let tgt_key = (entity.clone(), prop_name.clone(), "target".to_string());
+            let src_col = input.compiler.denormalized_columns.get(&src_key);
+            let tgt_col = input.compiler.denormalized_columns.get(&tgt_key);
+            match (src_col, tgt_col) {
+                (Some(sc), Some(tc)) => {
+                    out_filters.push(filter_expr_for_edge("EDGE", sc, filter));
+                    in_filters.push(filter_expr_for_edge("EDGE", tc, filter));
+                }
+                _ => {
+                    all_ok = false;
+                    break;
+                }
+            }
+        }
+
+        if !all_ok {
+            return None;
+        }
+        outgoing.insert(cte_name.clone(), out_filters);
+        incoming.insert(cte_name.clone(), in_filters);
+    }
+
+    Some((outgoing, incoming))
 }
 
 /// Replace column references matching `(from_table, from_col)` with
