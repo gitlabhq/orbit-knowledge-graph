@@ -276,6 +276,7 @@ pub trait LanguagePipeline {
     ) -> Result<(), Vec<PipelineError>>;
 }
 
+#[derive(Clone)]
 pub struct PipelineConfig {
     pub max_file_size: u64,
     /// Max language-supported files accepted for one pipeline run.

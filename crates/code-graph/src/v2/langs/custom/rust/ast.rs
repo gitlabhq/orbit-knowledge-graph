@@ -208,8 +208,7 @@ impl RustStructureExtractor {
         sema: Option<&Semantics<'_, RootDatabase>>,
         workspace: Option<&WorkspaceIndex>,
     ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX)
-            < crate::legacy::parser::MINIMUM_STACK_REMAINING
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             return;
         }
