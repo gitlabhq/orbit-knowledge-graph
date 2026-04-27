@@ -381,9 +381,10 @@ Count vulnerabilities in each project and return results in descending order.
 
 Presentation preferences that do not affect query semantics.
 
-| Field             | Required   | Type     | Description                                                                                                                                                                                          |
-|-------------------|------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `dynamic_columns` | {{< no >}} | `string` | Columns fetched for dynamically discovered entities in `path_finding` and `neighbors` queries. `"default"` returns each entity's default columns. `"*"` returns all columns. Default: `"default"`.  |
+| Field               | Required   | Type      | Description                                                                                                                                                                                          |
+|---------------------|------------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dynamic_columns`   | {{< no >}} | `string`  | Columns fetched for dynamically discovered entities in `path_finding` and `neighbors` queries. `"default"` returns each entity's default columns. `"*"` returns all columns. Default: `"default"`.  |
+| `include_debug_sql` | {{< no >}} | `boolean` | When `true`, includes the compiled ClickHouse SQL in response metadata. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Default: `false`.  |
 
 `dynamic_columns` has no effect on `traversal` queries, where column selection is controlled through the `columns` field.
 

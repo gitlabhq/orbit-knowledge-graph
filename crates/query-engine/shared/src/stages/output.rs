@@ -28,7 +28,8 @@ impl PipelineStage for OutputStage {
 
         let compiled = ctx.compiled()?;
 
-        let raw_query_strings = if can_see_debug_sql(ctx) {
+        let requested = compiled.input.options.include_debug_sql;
+        let raw_query_strings = if requested && can_see_debug_sql(ctx) {
             let debug_json = json!({
                 "base": compiled.base.sql,
                 "base_rendered": compiled.base.render(),
