@@ -11,7 +11,7 @@
     },
     "node": {
       "$ref": "#/$defs/NodeSelector",
-      "description": "Single node for search queries"
+      "description": "Single node selector"
     },
     "nodes": {
       "type": "array",
@@ -152,7 +152,7 @@
         }
       },
       "then": {
-        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal (search shape) requires only a node.",
+        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires only a node.",
         "oneOf": [
           {
             "required": ["relationships"],
@@ -170,7 +170,7 @@
           {
             "required": ["node"],
             "not": { "required": ["relationships"] },
-            "description": "Single-node traversal: equivalent to search"
+            "description": "Single-node traversal (table scan)"
           }
         ]
       }
