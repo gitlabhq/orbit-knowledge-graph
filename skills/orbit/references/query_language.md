@@ -210,7 +210,7 @@ Path finding configuration. Required when `query_type` is `path_finding`.
 | `from`      | {{< yes >}} | `string`  | The `id` of the start node selector.                                  |
 | `to`        | {{< yes >}} | `string`  | The `id` of the end node selector.                                    |
 | `max_depth` | {{< yes >}} | `integer` | Maximum path depth. Range: `1`-`3`.                                   |
-| `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. If omitted, all types are considered. |
+| `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. Required when an endpoint uses `filters` or `id_range`. Optional when both endpoints use `node_ids`. |
 
 Supported path types:
 
