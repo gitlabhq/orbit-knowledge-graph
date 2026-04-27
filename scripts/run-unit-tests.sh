@@ -1,18 +1,27 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Discover all integration-tests test targets except "containers" (which
-# needs Docker/testcontainers) and run them alongside lib + bin tests.
+# Run (or archive) unit + non-Docker integration tests.
+#
+# Usage:
+#   run-unit-tests.sh [run] [extra args...]      # default: cargo nextest run
+#   run-unit-tests.sh archive [extra args...]    # cargo nextest archive
 #
 # Test targets are auto-discovered from tests/*.rs files in the
-# integration-tests crate — no Cargo.toml or CI changes needed.
+# integration-tests crate, excluding "containers" (Docker-required) and
+# "cli" (has its own job that builds the orbit binary).
 #
-# Extra arguments are forwarded to cargo nextest (e.g. --profile ci).
+# Extra arguments are forwarded to cargo nextest (e.g. --profile ci,
+# --archive-file target/nextest-archive.tar.zst).
 
 command -v jq >/dev/null 2>&1 || { echo "error: jq is required but not found" >&2; exit 1; }
 
-# Query cargo metadata for integration-tests test targets, excluding the
-# "containers" target which requires Docker via testcontainers.
+mode="run"
+if [[ ${1:-} == "archive" || ${1:-} == "run" ]]; then
+  mode="$1"
+  shift
+fi
+
 NON_DOCKER_TESTS=$(
   cargo metadata --no-deps --format-version 1 | \
   jq -r '.packages[]
@@ -22,13 +31,11 @@ NON_DOCKER_TESTS=$(
     | .name'
 )
 
-# Build the command as an array to preserve argument boundaries.
-# --lib --bins runs unit tests from all workspace crates, then each
-# --test flag adds a discovered integration test target.
-#
-# integration-tests-codegraph is excluded here — it has its own CI job
-# to avoid pulling code-graph/lance-graph/datafusion deps into this job.
-args=(cargo nextest run --workspace \
+# --lib --bins covers unit tests from all workspace crates; each --test flag
+# adds a discovered integration test target. integration-tests-codegraph,
+# gkg-fuzz, and query-profiler are excluded — they have separate jobs or are
+# not test crates.
+args=(cargo nextest "$mode" --workspace \
   --exclude integration-tests-codegraph \
   --exclude gkg-fuzz \
   --exclude query-profiler \
@@ -37,8 +44,6 @@ while IFS= read -r t; do
   [[ -n "$t" ]] && args+=(--test "$t")
 done <<<"$NON_DOCKER_TESTS"
 
-# Append caller's arguments last (e.g. --profile ci) so they can
-# override defaults.
 args+=("$@")
 
 echo "+ ${args[*]}"

@@ -85,6 +85,9 @@ stages:
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
+    # lld is required by .cargo/config.toml. The build image ships clang but
+    # not lld; install once here. Cheaper than the link-time savings.
+    - command -v ld.lld >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y --no-install-recommends lld)
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"
@@ -393,15 +396,42 @@ docs_hugo_build:
 
 # Test Stage
 
+# Build all unit + non-Docker integration test binaries once into a nextest
+# archive on a large runner, then fan out partitioned test runs in parallel.
+# Saves ~20 CPU-minutes vs. recompiling per shard. Archive is reusable by any
+# `cargo nextest run --archive-file` consumer.
+build-test-archive:
+  stage: test
+  extends:
+    - .test-template
+    - .mr-and-main-rules
+  tags:
+    - saas-linux-large-amd64
+  needs: []
+  script:
+    - ./scripts/run-unit-tests.sh archive --archive-file target/nextest-archive.tar.zst
+    - sccache --show-stats || true
+  artifacts:
+    when: on_success
+    paths:
+      - target/nextest-archive.tar.zst
+    expire_in: 6 hours
+
 unit-test:
   stage: test
   extends:
     - .test-template
     - .mr-and-main-rules
-  needs: []
+  needs:
+    - build-test-archive
+  parallel: 3
+  before_script:
+    - mise install
   script:
-    - ./scripts/run-unit-tests.sh --profile ci
-    - sccache --show-stats || true
+    - cargo nextest run --profile ci
+        --archive-file target/nextest-archive.tar.zst
+        --workspace-remap .
+        --partition hash:${CI_NODE_INDEX}/${CI_NODE_TOTAL}
 
 integration-tests-codegraph:
   stage: test
