@@ -85,9 +85,9 @@ stages:
     DUCKDB_DOWNLOAD_LIB: "1"
   before_script:
     - mise install
-    # lld is required by .cargo/config.toml. The build image ships clang but
-    # not lld; install once here. Cheaper than the link-time savings.
-    - command -v ld.lld >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y --no-install-recommends lld)
+    # mold is required by .cargo/config.toml. The build image does not ship
+    # mold; install once here. Cheaper than the link-time savings.
+    - command -v mold >/dev/null 2>&1 || (apt-get update -qq && apt-get install -y --no-install-recommends mold)
     - |
       if [ -n "${SCCACHE_GCS_KEY}" ]; then
         export RUSTC_WRAPPER="sccache"

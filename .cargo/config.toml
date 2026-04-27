@@ -1,12 +1,12 @@
 [alias]
 xtask = "run --package xtask --"
 
-# Use lld for faster linking on Linux. lld ships with clang in the CI build
-# image and is also the default on most modern dev setups. Saves ~minutes of
-# wall time on test jobs which link 27+ binaries.
+# Use mold for faster linking on Linux. Saves ~minutes of wall time on test
+# jobs that link 27+ binaries. mold is installed in CI's sccache template;
+# devs need it on PATH locally (apt install mold / brew install mold).
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
-rustflags = ["-C", "link-arg=-fuse-ld=lld"]
+rustflags = ["-C", "link-arg=-fuse-ld=mold"]
 
 [env]
 CONFIG_DIR = { value = "config", relative = true }
