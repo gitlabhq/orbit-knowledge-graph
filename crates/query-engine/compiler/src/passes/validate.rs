@@ -687,16 +687,28 @@ impl<'a> Validator<'a> {
             )));
         }
 
-        // Without rel_types the frontier explores all 50+ edge types across
-        // every physical edge table, producing O(anchors × |E|^depth) scans
-        // where |E| is the entire edge corpus. Require explicit types so
-        // the frontier only traverses relevant relationships.
+        // When an endpoint uses filters or id_range (not node_ids), the
+        // anchor CTE can resolve up to MAX_PATH_ANCHOR_LIMIT (500) nodes.
+        // Without rel_types each of those seeds fans out through every edge
+        // type across all physical tables — O(500 × |E|^depth). Require
+        // rel_types so the frontier only traverses relevant relationships.
+        // Pinned endpoints (node_ids) have a known, small anchor set where
+        // the hop-frontier optimizer bounds intermediate work adequately.
         if path.rel_types.is_empty() {
-            return Err(QueryError::Validation(
-                "path_finding requires rel_types to constrain which relationship \
-                 types are traversed; without it the frontier scans all edge tables"
-                    .into(),
-            ));
+            let both_pinned = [&path.from, &path.to].iter().all(|endpoint| {
+                input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == **endpoint)
+                    .is_some_and(|n| !n.node_ids.is_empty())
+            });
+            if !both_pinned {
+                return Err(QueryError::Validation(
+                    "path_finding requires rel_types when an endpoint uses filters \
+                     or id_range; without it the frontier scans all edge tables"
+                        .into(),
+                ));
+            }
         }
 
         Ok(())
@@ -1781,8 +1793,20 @@ mod tests {
             }"#,
             "endpoint \"b\"",
         );
-        // Missing rel_types
+        // Missing rel_types with filtered endpoint: rejected
         assert_rejects(
+            r#"{
+                "query_type": "path_finding",
+                "nodes": [
+                    {"id": "a", "entity": "User", "filters": {"username": "alice"}},
+                    {"id": "b", "entity": "Project", "node_ids": [2]}
+                ],
+                "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
+            }"#,
+            "requires rel_types",
+        );
+        // Missing rel_types with both endpoints pinned: OK
+        assert_ok(
             r#"{
                 "query_type": "path_finding",
                 "nodes": [
@@ -1791,7 +1815,6 @@ mod tests {
                 ],
                 "path": {"type": "shortest", "from": "a", "to": "b", "max_depth": 2}
             }"#,
-            "requires rel_types",
         );
 
         // ── Neighbors ───────────────────────────────────────────────

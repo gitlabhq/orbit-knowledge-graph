@@ -548,7 +548,7 @@
     "PathConfig": {
       "type": "object",
       "description": "Configuration for path finding queries",
-      "required": ["type", "from", "to", "max_depth", "rel_types"],
+      "required": ["type", "from", "to", "max_depth"],
       "properties": {
         "type": {
           "$ref": "#/$defs/PathType",
@@ -570,11 +570,10 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Relationship types to traverse. Required to constrain the frontier and avoid scanning all edge tables.",
+          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
-          "minItems": 1,
           "maxItems": 10
         }
       },
