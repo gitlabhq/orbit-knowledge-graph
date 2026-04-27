@@ -290,6 +290,7 @@ enum SourceType {
 message GetGraphStatusRequest {
   string traversal_path = 1;  // traversal_path prefix to scope counts (e.g. "1/2/")
   SourceType source_type = 2;
+  ResponseFormat format = 3;  // RAW: structured JSON; LLM: TOON text
 }
 
 // Derived indexing lifecycle state.
@@ -313,6 +314,14 @@ message IndexingStatus {
 
 // Response containing project coverage and entity counts grouped by domain.
 message GetGraphStatusResponse {
+  oneof content {
+    StructuredGraphStatus structured = 1;  // format = RAW
+    string formatted_text = 2;            // format = LLM (TOON notation)
+  }
+}
+
+// Structured graph status with project coverage, entity counts, and indexing state.
+message StructuredGraphStatus {
   ProjectsStatus projects = 1;
   repeated GraphStatusDomain domains = 2;
   IndexingStatus indexing = 3;
