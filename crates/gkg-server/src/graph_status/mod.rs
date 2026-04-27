@@ -1,5 +1,6 @@
 mod input;
 mod lower;
+mod toon;
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -16,7 +17,7 @@ use tracing::{debug, info, warn};
 
 use crate::proto::{
     GetGraphStatusResponse, GraphStatusDomain, GraphStatusItem, IndexingState, IndexingStatus,
-    ProjectsStatus,
+    ProjectsStatus, ResponseFormat, StructuredGraphStatus, get_graph_status_response,
 };
 
 use self::input::GraphStatusInput;
@@ -41,7 +42,11 @@ impl GraphStatusService {
         self
     }
 
-    pub async fn get_status(&self, traversal_path: &str) -> Result<GetGraphStatusResponse, Status> {
+    pub async fn get_status(
+        &self,
+        traversal_path: &str,
+        format: i32,
+    ) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
@@ -75,10 +80,22 @@ impl GraphStatusService {
         );
 
         let domains = present_domain_response(&self.ontology, &entity_counts);
-        Ok(GetGraphStatusResponse {
+        let structured = StructuredGraphStatus {
             projects: Some(projects),
             domains,
             indexing,
+        };
+
+        let content = if format == ResponseFormat::Llm as i32 {
+            get_graph_status_response::Content::FormattedText(toon::format_status_as_toon(
+                &structured,
+            ))
+        } else {
+            get_graph_status_response::Content::Structured(structured)
+        };
+
+        Ok(GetGraphStatusResponse {
+            content: Some(content),
         })
     }
 
@@ -306,7 +323,7 @@ mod tests {
         let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
         let service = GraphStatusService::new(client, test_ontology());
 
-        let result = service.get_status("").await;
+        let result = service.get_status("", ResponseFormat::Raw as i32).await;
 
         assert!(result.is_err());
         let status = result.unwrap_err();

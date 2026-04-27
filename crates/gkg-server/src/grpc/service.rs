@@ -286,9 +286,12 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
 
-        info!(traversal_path = %req.traversal_path, "Fetching graph status for user");
+        info!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
 
-        let response = self.graph_status.get_status(&req.traversal_path).await?;
+        let response = self
+            .graph_status
+            .get_status(&req.traversal_path, req.format)
+            .await?;
         Ok(Response::new(response))
     }
 }
