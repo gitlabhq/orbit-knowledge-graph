@@ -276,6 +276,7 @@ pub trait LanguagePipeline {
     ) -> Result<(), Vec<PipelineError>>;
 }
 
+#[derive(Clone)]
 pub struct PipelineConfig {
     pub max_file_size: u64,
     /// Max language-supported files accepted for one pipeline run.
@@ -1123,7 +1124,7 @@ mod tests {
 
     fn fixture_path(relative: &str) -> String {
         let manifest = env!("CARGO_MANIFEST_DIR");
-        format!("{manifest}/src/legacy/parser/{relative}")
+        format!("{manifest}/../../fixtures/code/{relative}")
     }
 
     fn parse_fixture_file(path: &str, language: Language) -> CodeGraph {
@@ -1172,7 +1173,7 @@ mod tests {
 
     #[test]
     fn python_definitions_fixture() {
-        let path = fixture_path("python/fixtures/definitions.py");
+        let path = fixture_path("python/definitions.py");
         let cg = parse_fixture_file(&path, Language::Python);
 
         let defs: Vec<_> = cg.definitions().collect();
@@ -1202,7 +1203,7 @@ mod tests {
 
     #[test]
     fn java_comprehensive_fixture() {
-        let path = fixture_path("java/fixtures/ComprehensiveJavaDefinitions.java");
+        let path = fixture_path("java/ComprehensiveJavaDefinitions.java");
         let cg = parse_fixture_file(&path, Language::Java);
 
         let defs: Vec<_> = cg.definitions().collect();
@@ -1221,7 +1222,7 @@ mod tests {
 
     #[test]
     fn kotlin_comprehensive_fixture() {
-        let path = fixture_path("kotlin/fixtures/ComprehensiveKotlinDefinitions.kt");
+        let path = fixture_path("kotlin/ComprehensiveKotlinDefinitions.kt");
         let cg = parse_fixture_file(&path, Language::Kotlin);
 
         let defs: Vec<_> = cg.definitions().collect();
@@ -1240,7 +1241,7 @@ mod tests {
 
     #[test]
     fn csharp_comprehensive_fixture() {
-        let path = fixture_path("csharp/fixtures/ComprehensiveCSharp.cs");
+        let path = fixture_path("csharp/ComprehensiveCSharp.cs");
         let cg = parse_fixture_file(&path, Language::CSharp);
 
         let defs: Vec<_> = cg.definitions().collect();

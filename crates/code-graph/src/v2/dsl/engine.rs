@@ -681,8 +681,7 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
     ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX)
-            < crate::legacy::parser::MINIMUM_STACK_REMAINING
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             tracing::warn!("stack limit reached during AST walk, subtree truncated");
             return;

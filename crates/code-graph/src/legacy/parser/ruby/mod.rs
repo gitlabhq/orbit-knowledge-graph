@@ -1,9 +1,0 @@
-pub mod analyzer;
-pub mod definitions;
-pub mod fqn;
-pub mod imports;
-pub mod parser;
-pub mod references;
-pub mod types;
-pub mod utils;
-pub mod visit;

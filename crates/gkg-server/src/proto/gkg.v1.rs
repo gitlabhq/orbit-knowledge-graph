@@ -55,7 +55,7 @@ pub mod execute_query_result {
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct QueryMetadata {
-    /// e.g. "traversal", "aggregation", "path_finding"
+    /// e.g. "traversal", "aggregation", "search"
     #[prost(string, tag = "1")]
     pub query_type: ::prost::alloc::string::String,
     /// compiled ClickHouse SQL(s) for debugging

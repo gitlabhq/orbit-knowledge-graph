@@ -1,5 +1,9 @@
 //! Common utilities and types for the parser core
 
+/// Minimum stack space (128 KiB) that must remain before recursing into
+/// tree-sitter visitors. Guards against stack overflow on deeply nested ASTs.
+pub const MINIMUM_STACK_REMAINING: usize = 128 * 1024;
+
 use rust_lapper::{Interval, Lapper};
 use serde::{Deserialize, Serialize};
 use treesitter_visit::tree_sitter::StrDoc;
