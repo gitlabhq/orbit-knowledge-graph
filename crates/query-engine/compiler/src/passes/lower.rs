@@ -498,7 +498,24 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             // those aggregations are property-less (e.g. COUNT without a
             // property field). Nodes that are not targeted by any aggregation
             // (intermediate join nodes) must keep their table scan in FROM.
-            if !targeting_aggs.is_empty() && targeting_aggs.iter().all(|a| a.property.is_none()) {
+            let all_property_less =
+                !targeting_aggs.is_empty() && targeting_aggs.iter().all(|a| a.property.is_none());
+
+            // Skipping the node table for an edge-only aggregation means the
+            // compiler's security pass has no alias to hang a role filter on.
+            // For entities whose ontology requires a stricter role than the
+            // default (Reporter), that would let a Reporter-only user count
+            // e.g. Vulnerability rows via an IN_PROJECT edge group-by. Keep
+            // the node scan so the security pass can emit `Bool(false)` for
+            // the target alias when the user lacks the required role.
+            let requires_node_scan_for_role = node
+                .entity
+                .as_deref()
+                .and_then(|e| input.entity_auth.get(e))
+                .is_some_and(|cfg| {
+                    cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+                });
+            if all_property_less && !requires_node_scan_for_role {
                 edge_only_targets.insert(node.id.clone());
             }
         }
