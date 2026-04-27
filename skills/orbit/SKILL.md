@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.2.0
+version: 0.3.0
 license: MIT
 metadata:
   audience: developers
@@ -117,8 +117,12 @@ External links (require internet):
 7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
 8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
-9. **Read-only.** All endpoints are idempotent queries — no data is modified.
-10. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
+9. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
+   When an endpoint uses `filters` or `id_range`, specify `rel_types` in the `path` config to
+   constrain which relationship types the frontier traverses. When both endpoints use `node_ids`,
+   `rel_types` is optional.
+10. **Read-only.** All endpoints are idempotent queries — no data is modified.
+11. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
     (see `HTTP 429` in troubleshooting). Prefer aggregation/traversal in one
     query over N separate queries.
 
