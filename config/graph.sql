@@ -274,6 +274,13 @@ CREATE TABLE IF NOT EXISTS gl_job (
     started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     queued_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    runner_id Nullable(Int64) CODEC(ZSTD(1)),
+    timeout Nullable(Int64) CODEC(ZSTD(1)),
+    timeout_source LowCardinality(Nullable(String)) CODEC(LZ4),
+    exit_code Nullable(Int64) CODEC(ZSTD(1)),
+    scheduling_type Nullable(Int64) CODEC(ZSTD(1)),
+    auto_canceled_by_id Nullable(Int64) CODEC(ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -289,6 +296,26 @@ CREATE TABLE IF NOT EXISTS gl_job (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_job_metadata (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    build_id Int64 CODEC(Delta(8), ZSTD(1)),
+    interruptible Nullable(Bool),
+    timeout Nullable(Int64) CODEC(ZSTD(1)),
+    timeout_source LowCardinality(Nullable(String)) CODEC(LZ4),
+    exit_code Nullable(Int64) CODEC(ZSTD(1)),
+    has_exposed_artifacts Nullable(Bool),
+    expanded_environment_name Nullable(String) CODEC(ZSTD(1)),
+    environment_auto_stop_in Nullable(String) CODEC(ZSTD(1)),
+    debug_trace_enabled Bool DEFAULT false,
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_build_id (SELECT * ORDER BY build_id)
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, build_id) PRIMARY KEY (traversal_path, build_id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_label (
@@ -493,6 +520,12 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    committed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    before_sha Nullable(String) CODEC(ZSTD(1)),
+    yaml_errors Nullable(String) CODEC(ZSTD(3)),
+    protected Nullable(Bool),
+    auto_canceled_by_id Nullable(Int64) CODEC(ZSTD(1)),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -532,6 +565,28 @@ CREATE TABLE IF NOT EXISTS gl_project (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
+CREATE TABLE IF NOT EXISTS gl_runner (
+    id Int64 CODEC(Delta(8), ZSTD(1)),
+    runner_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
+    name Nullable(String) CODEC(ZSTD(1)),
+    description Nullable(String) CODEC(ZSTD(1)),
+    active Bool DEFAULT true,
+    locked Bool DEFAULT false,
+    run_untagged Bool DEFAULT true,
+    access_level Int64 DEFAULT 0 CODEC(ZSTD(1)),
+    maximum_timeout Nullable(Int64) CODEC(ZSTD(1)),
+    organization_id Nullable(Int64) CODEC(ZSTD(1)),
+    created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    contacted_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_runner_type runner_type TYPE set(8) GRANULARITY 2,
+    INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    PROJECTION by_id (SELECT * ORDER BY id)
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_security_scan (

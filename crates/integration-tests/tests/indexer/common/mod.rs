@@ -13,5 +13,6 @@ pub use integration_testkit::{
 };
 pub use siphon::{
     create_member, create_namespace, create_namespace_with_path, create_project,
-    create_project_with_path, create_route, create_user,
+    create_project_with_path, create_route, create_runner, create_runner_namespace,
+    create_runner_project, create_user,
 };

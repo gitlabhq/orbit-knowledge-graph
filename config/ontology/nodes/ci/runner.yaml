@@ -1,0 +1,122 @@
+# config/ontology/nodes/ci/runner.yaml
+
+node_type: Runner
+domain: ci
+description: A CI/CD runner that executes jobs
+label: name
+destination_table: gl_runner
+default_columns: [id, runner_type, name, active]
+sort_key: [id]
+
+style:
+  size: 22
+  color: "#A78BFA"
+
+redaction:
+  resource_type: ci_runner
+  id_column: id
+  ability: read_runner
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Global identifier for the runner."
+
+  runner_type:
+    type: enum
+    source: runner_type
+    nullable: false
+    description: "Scope of the runner (instance, group, or project)."
+    values:
+      1: instance_type
+      2: group_type
+      3: project_type
+
+  name:
+    type: string
+    source: name
+    nullable: true
+    description: "Human-readable runner name."
+
+  description:
+    type: string
+    source: description
+    nullable: true
+    description: "Maintainer-provided description."
+
+  active:
+    type: boolean
+    source: active
+    nullable: false
+    description: "Whether the runner is currently accepting jobs."
+
+  locked:
+    type: boolean
+    source: locked
+    nullable: false
+    description: "Whether the runner is locked to its assignment."
+
+  run_untagged:
+    type: boolean
+    source: run_untagged
+    nullable: false
+    description: "Whether the runner picks up jobs that have no tags."
+
+  access_level:
+    type: int64
+    source: access_level
+    nullable: false
+    description: "Access level required for the runner to run a job."
+
+  maximum_timeout:
+    type: int64
+    source: maximum_timeout
+    nullable: true
+    description: "Maximum job timeout (seconds) enforced by this runner."
+
+  organization_id:
+    type: int64
+    source: organization_id
+    nullable: true
+    description: "Cell organization the runner belongs to."
+
+  created_at:
+    type: timestamp
+    source: created_at
+    nullable: true
+    description: "Timestamp when the runner was registered."
+
+  contacted_at:
+    type: timestamp
+    source: contacted_at
+    nullable: true
+    description: "Last time the runner contacted the GitLab instance."
+
+etl:
+  type: table
+  scope: global
+  source: siphon_ci_runners
+  order_by: [id, runner_type]
+
+storage:
+  primary_key: [id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: active, type: "Bool", default: "true"}
+    - {name: locked, type: "Bool", default: "false"}
+    - {name: run_untagged, type: "Bool", default: "true"}
+    - {name: access_level, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: maximum_timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: organization_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: contacted_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+  indexes:
+    - {name: idx_runner_type, column: runner_type, type: "set(8)", granularity: 2}
+    - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_id, order_by: [id]}

@@ -1,0 +1,121 @@
+# config/ontology/nodes/ci/job_metadata.yaml
+
+node_type: JobMetadata
+domain: ci
+description: Per-job runtime metadata including effective timeout, interruptibility, and expanded environment name
+label: build_id
+destination_table: gl_job_metadata
+default_columns: [id, build_id, interruptible, timeout, exit_code]
+sort_key: [traversal_path, build_id]
+
+style:
+  size: 16
+  color: "#C4B5FD"
+
+redaction:
+  resource_type: ci_build
+  id_column: build_id
+  ability: read_build
+
+properties:
+  id:
+    type: int64
+    source: id
+    nullable: false
+    description: "Internal id of the job metadata row."
+
+  build_id:
+    type: int64
+    source: build_id
+    nullable: false
+    description: "Foreign key to the Job (Ci::Build.id) this metadata describes."
+
+  interruptible:
+    type: boolean
+    source: interruptible
+    nullable: true
+    description: "Whether the job can be auto-canceled by a newer pipeline."
+
+  timeout:
+    type: int64
+    source: timeout
+    nullable: true
+    description: "Effective timeout for the job in seconds (resolved from project, runner, or job-level config)."
+
+  timeout_source:
+    type: enum
+    source: timeout_source
+    nullable: true
+    description: "Origin of the effective timeout: project, runner, or job."
+    values:
+      1: unknown_timeout_source
+      2: project_timeout_source
+      3: runner_timeout_source
+      4: job_timeout_source
+
+  exit_code:
+    type: int64
+    source: exit_code
+    nullable: true
+    description: "Process exit code reported by the runner."
+
+  has_exposed_artifacts:
+    type: boolean
+    source: has_exposed_artifacts
+    nullable: true
+    description: "Whether the job exposed artifacts to merge requests."
+
+  expanded_environment_name:
+    type: string
+    source: expanded_environment_name
+    nullable: true
+    description: "Resolved environment name after CI variable interpolation."
+
+  environment_auto_stop_in:
+    type: string
+    source: environment_auto_stop_in
+    nullable: true
+    description: "Duration after which the deployed environment auto-stops."
+
+  debug_trace_enabled:
+    type: boolean
+    source: debug_trace_enabled
+    nullable: false
+    description: "Whether the job ran with CI_DEBUG_TRACE enabled."
+
+  traversal_path:
+    type: string
+    source: traversal_path
+    filterable: false
+    nullable: false
+    description: "Namespace traversal path for authentication and authorization."
+
+etl:
+  type: table
+  scope: namespaced
+  source: siphon_p_ci_builds_metadata
+  order_by: [traversal_path, build_id, partition_id]
+  edges:
+    build_id:
+      to: Job
+      as: HAS_METADATA
+      direction: incoming
+
+storage:
+  primary_key: [traversal_path, build_id]
+  columns:
+    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: build_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: interruptible, type: "Nullable(Bool)"}
+    - {name: timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: has_exposed_artifacts, type: "Nullable(Bool)"}
+    - {name: expanded_environment_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: environment_auto_stop_in, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: debug_trace_enabled, type: "Bool", default: "false"}
+    - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+  indexes:
+    - {name: idx_build_id, column: build_id, type: "bloom_filter(0.01)", granularity: 1}
+  projections:
+    - {type: reorder, name: by_build_id, order_by: [build_id]}
