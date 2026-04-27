@@ -168,6 +168,16 @@ impl Context {
             parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
         }
 
+        // ClickHouse binds a trailing ORDER BY / LIMIT to the last branch of an
+        // unparenthesized UNION ALL, not the whole union. Wrap so they apply
+        // to the combined result.
+        if !q.union_all.is_empty()
+            && (q.limit.is_some() || q.limit_by.is_some() || !q.order_by.is_empty())
+        {
+            let body = std::mem::take(&mut parts).join(" ");
+            parts.push(format!("SELECT * FROM ({body})"));
+        }
+
         // ORDER BY
         if !q.order_by.is_empty() {
             let orders: Vec<_> = q
@@ -810,11 +820,14 @@ mod tests {
             QueryConfig::default(),
         )
         .unwrap();
-        assert!(result.sql.contains("UNION ALL"));
-        assert!(result.sql.contains("LIMIT 10"));
-        let union_pos = result.sql.find("UNION ALL").unwrap();
-        let limit_pos = result.sql.find("LIMIT").unwrap();
-        assert!(union_pos < limit_pos);
+        // Outer LIMIT must apply to the whole union, not just the last branch.
+        // ClickHouse binds a trailing LIMIT after a bare UNION ALL to the last
+        // SELECT only, so the union is wrapped in a subquery.
+        assert_eq!(
+            result.sql,
+            "SELECT * FROM (SELECT u.id AS id FROM gl_user AS u UNION ALL \
+             SELECT p.id AS id FROM gl_project AS p) LIMIT 10"
+        );
     }
 
     #[test]
