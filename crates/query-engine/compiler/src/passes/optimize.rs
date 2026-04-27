@@ -868,11 +868,15 @@ fn build_multihop_cascade_for_node(
 
     let mut arms: Vec<Query> = Vec::new();
     for depth in 1..=max_hops {
-        let last = format!("e{depth}");
         let first_alias = if depth == 1 {
             CASCADE_EDGE_ALIAS.to_string()
         } else {
             "e1".to_string()
+        };
+        let last = if depth == 1 {
+            CASCADE_EDGE_ALIAS.to_string()
+        } else {
+            format!("e{depth}")
         };
 
         // Build join chain: e1 JOIN e2 ON ... JOIN e3 ON ...

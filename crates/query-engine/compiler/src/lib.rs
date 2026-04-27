@@ -748,6 +748,10 @@ mod tests {
             sql.contains("_cascade_f"),
             "multi-hop aggregation should generate _cascade_f CTE, got:\n{sql}"
         );
+        assert!(
+            sql.contains("startsWith"),
+            "cascade CTE edge scans should have traversal_path security filters, got:\n{sql}"
+        );
     }
 
     /// Intermediate nodes (referenced by 2+ relationships) must NOT be pruned
