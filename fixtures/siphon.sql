@@ -814,6 +814,72 @@ PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source tables for merge request reviewers (standalone edge)
+CREATE TABLE IF NOT EXISTS siphon_merge_request_reviewers
+(
+    `id` Int64,
+    `user_id` Int64,
+    `merge_request_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `state` Int16 DEFAULT 0,
+    `project_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, merge_request_id, id)
+ORDER BY (traversal_path, merge_request_id, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for approvals (standalone edge)
+CREATE TABLE IF NOT EXISTS siphon_approvals
+(
+    `id` Int64,
+    `merge_request_id` Int64,
+    `user_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `patch_id_sha` Nullable(String),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, merge_request_id, id)
+ORDER BY (traversal_path, merge_request_id, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source tables for merge request assignees (standalone edge)
+CREATE TABLE IF NOT EXISTS siphon_merge_request_assignees
+(
+    `id` Int64,
+    `user_id` Int64,
+    `merge_request_id` Int64,
+    `created_at` DateTime64(6, 'UTC'),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, merge_request_id, id)
+ORDER BY (traversal_path, merge_request_id, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
 -- Siphon source tables for merge requests closing issues (join table)
 CREATE TABLE IF NOT EXISTS siphon_merge_requests_closing_issues
 (
