@@ -120,7 +120,7 @@ impl WorkerPool {
                 wait_ms = wait_duration.as_millis() as u64,
                 "group permit acquired"
             );
-            attributes.push(group_label);
+            attributes.push(KeyValue::new("permit_kind", group_name.to_owned()));
         }
 
         let global_start = Instant::now();
