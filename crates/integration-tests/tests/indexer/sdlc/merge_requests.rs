@@ -189,3 +189,107 @@ pub async fn processes_merge_requests_closing_issues(ctx: &TestContext) {
 
     assert_edges_have_traversal_path(ctx, "CLOSES", "MergeRequest", "WorkItem", "1/100/", 2).await;
 }
+
+pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    ctx.execute(
+        "INSERT INTO merge_requests
+            (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+             draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 101, 'Add auth', 'Auth feature', 'feat-auth', 'main', 1, 'can_be_merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+            (20, 102, 'Fix crash', 'Crash fix', 'fix-crash', 'main', 3, 'merged',
+             false, false, 1000, 2, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_merge_request_reviewers
+            (id, user_id, merge_request_id, created_at, state, project_id,
+             traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 10, 10, '2024-01-15 10:00:00', 0, 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, 11, 10, '2024-01-15 11:00:00', 0, 1000, '1/100/', '2024-01-20 12:00:00'),
+            (3, 10, 20, '2024-01-16 09:00:00', 0, 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "REVIEWER", "User", "MergeRequest", "1/100/", 3).await;
+}
+
+pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    ctx.execute(
+        "INSERT INTO merge_requests
+            (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+             draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 101, 'Add auth', 'Auth feature', 'feat-auth', 'main', 3, 'merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+            (20, 102, 'Fix crash', 'Crash fix', 'fix-crash', 'main', 3, 'merged',
+             false, false, 1000, 2, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_approvals
+            (id, merge_request_id, user_id, created_at, updated_at, project_id,
+             traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 10, 10, '2024-01-15 10:00:00', '2024-01-15 10:00:00', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, 10, 11, '2024-01-15 11:00:00', '2024-01-15 11:00:00', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (3, 20, 12, '2024-01-16 09:00:00', '2024-01-16 09:00:00', 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "APPROVED", "User", "MergeRequest", "1/100/", 3).await;
+}
+
+pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    ctx.execute(
+        "INSERT INTO merge_requests
+            (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+             draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 101, 'Add auth', 'Auth feature', 'feat-auth', 'main', 1, 'can_be_merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00'),
+            (20, 102, 'Fix crash', 'Crash fix', 'fix-crash', 'main', 3, 'merged',
+             false, false, 1000, 2, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_merge_request_assignees
+            (id, user_id, merge_request_id, created_at, project_id,
+             traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 10, 10, '2024-01-15 10:00:00', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, 10, 20, '2024-01-16 09:00:00', 1000, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
+}
