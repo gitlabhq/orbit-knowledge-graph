@@ -10,14 +10,3 @@ variants:
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Job, id: id }
     description: "Pipeline contains job (skips the Stage hop, matches the natural CI mental model)."
-
-etl:
-  scope: namespaced
-  source: siphon_p_ci_builds
-  order_by: [traversal_path, id, partition_id]
-  from:
-    id: commit_id
-    type: Pipeline
-  to:
-    id: id
-    type: Job

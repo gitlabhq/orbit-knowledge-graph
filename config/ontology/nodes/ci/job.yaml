@@ -245,9 +245,8 @@ etl:
       as: TRIGGERED
       direction: incoming
     commit_id:
-      to: Pipeline
-      as: IN_PIPELINE
-      direction: outgoing
+      - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+      - { to: Pipeline, as: HAS_JOB, direction: incoming }
     runner_id:
       to: Runner
       as: RUNS_ON
