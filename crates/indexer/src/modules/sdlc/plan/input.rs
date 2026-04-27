@@ -417,6 +417,62 @@ fn resolve_standalone_edge(
         append_missing(&mut extract_columns, &[TRAVERSAL_PATH_COLUMN.to_string()]);
     }
 
+    // Build denormalized column projections and LEFT JOINs for node properties.
+    let endpoints: [(&str, &str, DenormDirection); 2] = [
+        (&config.from.id_column, "source", DenormDirection::Source),
+        (&config.to.id_column, "target", DenormDirection::Target),
+    ];
+    let mut denormalized_columns = Vec::new();
+    let mut joins: Vec<String> = Vec::new();
+    let mut join_idx = 0usize;
+
+    for (fk_col, _dir_label, direction) in &endpoints {
+        let props: Vec<_> = ontology
+            .denormalized_properties()
+            .iter()
+            .filter(|dp| dp.relationship_kind == relationship_kind && dp.direction == *direction)
+            .collect();
+        if props.is_empty() {
+            continue;
+        }
+        // Resolve the node's datalake source table.
+        let node_kind = &props[0].node_kind;
+        let Some(node) = ontology.get_node(node_kind) else {
+            continue;
+        };
+        let Some(etl) = &node.etl else { continue };
+        let node_table = match etl {
+            EtlConfig::Table { source, .. } => source.as_str(),
+            EtlConfig::Query { from, .. } => from.as_str(),
+        };
+
+        let alias = format!("_d{join_idx}");
+        join_idx += 1;
+        joins.push(format!(
+            "LEFT JOIN {node_table} AS {alias} ON _base.{fk_col} = {alias}.id"
+        ));
+
+        for dp in props {
+            let field = node.fields.iter().find(|f| f.name == dp.property_name);
+            let src_col = field
+                .and_then(|f| f.column_name())
+                .unwrap_or(&dp.property_name);
+            let qualified = format!("{alias}.{src_col}");
+            extract_columns.push(ExtractColumn::Bare(qualified));
+            denormalized_columns.push(DenormalizedColumnProjection {
+                source_column: format!("{alias}.{src_col}"),
+                edge_column: dp.edge_column.clone(),
+                enum_mapping: dp.enum_values.clone(),
+            });
+        }
+    }
+
+    let source = if joins.is_empty() {
+        ExtractSource::Table(config.source.clone())
+    } else {
+        ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
+    };
+
     StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
         scope,
@@ -426,11 +482,11 @@ fn resolve_standalone_edge(
         target_kind,
         filters,
         namespaced,
-        denormalized_columns: vec![],
+        denormalized_columns,
         extract: ExtractPlan {
             destination_table: edge_table,
             columns: extract_columns,
-            source: ExtractSource::Table(config.source.clone()),
+            source,
             watermark: config.watermark.clone(),
             deleted: config.deleted.clone(),
             order_by: config.order_by.clone(),
