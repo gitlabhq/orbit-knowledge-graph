@@ -13,6 +13,7 @@ mod labels;
 mod merge_request_diffs;
 mod merge_requests;
 mod milestones;
+mod multi_emit;
 mod notes;
 mod projects;
 mod security;
@@ -67,6 +68,7 @@ async fn namespace_indexing() {
         ci::processes_stages,
         ci::processes_jobs,
         ci::processes_ci_hierarchy,
+        multi_emit::multi_emit_fk_writes_both_edges,
         deployments::processes_deployments,
         deployments::processes_deployment_environment_link,
         deployments::processes_deployment_merge_request_links,
