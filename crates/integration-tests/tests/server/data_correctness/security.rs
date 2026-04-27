@@ -1031,7 +1031,7 @@ pub(super) async fn search_vulnerability_reporter_only_returns_empty(ctx: &TestC
     let resp = run_query_with_security(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "v", "entity": "Vulnerability", "id_range": {"start": 1, "end": 100000}, "columns": ["title", "severity"]},
             "limit": 10
         }"#,
