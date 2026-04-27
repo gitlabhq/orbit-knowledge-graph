@@ -570,7 +570,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },

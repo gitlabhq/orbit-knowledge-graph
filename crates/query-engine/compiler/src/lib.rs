@@ -441,7 +441,8 @@ mod tests {
                 {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
                 {"id": "end", "entity": "Project", "node_ids": [100]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2},
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
             "limit": 10
         }"#;
 
@@ -470,7 +471,8 @@ mod tests {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "id_range": {"start": 100, "end": 200}}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2},
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
             "limit": 10
         }"#;
 
