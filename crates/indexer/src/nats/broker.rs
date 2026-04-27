@@ -82,10 +82,7 @@ impl NatsBroker {
         self.inner.nats_client()
     }
 
-    /// Creates or updates managed streams. The underlying NATS call replaces
-    /// the stream's subject list, so callers must pass the full union of
-    /// subjects the stream should accept — never a process-local subset.
-    pub async fn ensure_managed_streams(
+    pub(crate) async fn ensure_managed_streams(
         &self,
         subscriptions: &[Subscription],
     ) -> Result<(), NatsError> {
@@ -116,18 +113,13 @@ impl NatsBroker {
         Ok(())
     }
 
-    /// Single-process convenience: provisions managed streams and validates
-    /// unmanaged ones from the same subscription set. Only safe when the
-    /// caller is the sole publisher to those streams.
     pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
         self.ensure_managed_streams(subscriptions).await?;
         self.ensure_unmanaged_streams_exist(subscriptions).await?;
         Ok(())
     }
 
-    /// Validates that streams this process consumes from but does not own
-    /// already exist. Called by the engine for each registered subscription.
-    pub async fn ensure_unmanaged_streams_exist(
+    pub(crate) async fn ensure_unmanaged_streams_exist(
         &self,
         subscriptions: &[Subscription],
     ) -> Result<(), NatsError> {
