@@ -62,7 +62,7 @@ For example:
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
