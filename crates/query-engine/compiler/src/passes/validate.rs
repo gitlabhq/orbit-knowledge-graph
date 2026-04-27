@@ -246,9 +246,9 @@ impl<'a> Validator<'a> {
         }
         for rel in &input.relationships {
             // direction: "both" generates OR join conditions that defeat
-            // ClickHouse index and projection usage. Neighbors handles this
-            // correctly via UNION ALL; aggregation uses build_joins which
-            // does not. Reject until UNION ALL lowering is implemented.
+            // ClickHouse index and projection usage. The JSON schema also
+            // rejects this for aggregation, but this guard covers code paths
+            // that bypass schema validation (CLI, internal tests, gRPC).
             if rel.direction == crate::input::Direction::Both
                 && input.query_type == QueryType::Aggregation
             {
