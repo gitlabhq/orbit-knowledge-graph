@@ -47,7 +47,7 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 | `gkg.etl.messages.processed` | Counter | count | `topic`, `outcome` (ack/nack/term/dead_letter) | Total messages processed |
 | `gkg.etl.message.duration` | Histogram | s | `topic` | End-to-end time per message through dispatch |
 | `gkg.etl.handler.duration` | Histogram | s | `handler` | Time inside each handler's `handle()` call |
-| `gkg.etl.handler.errors` | Counter | count | `handler`, `error_kind` | Handler errors at the engine dispatch level |
+| `gkg.etl.handler.errors` | Counter | count | `handler`, `error_kind` (processing/permanent/deserialization) | Handler errors at the engine dispatch level |
 | `gkg.etl.permit.wait.duration` | Histogram | s | `permit_kind` (global/group), `group` | Time waiting for a worker pool permit |
 | `gkg.etl.permits.active` | UpDownCounter | count | `permit_kind` | Worker permits currently held (global or per concurrency group) |
 | `gkg.etl.nats.fetch.duration` | Histogram | s | `outcome` (success/error) | Time to fetch a batch from NATS |
@@ -55,6 +55,8 @@ Latency histograms share a small set of named bucket sets (`LATENCY`, `LATENCY_F
 | `gkg.etl.destination.rows.written` | Counter | count | `table` | Total rows written to ClickHouse |
 | `gkg.etl.destination.written` | Counter | By | `table` | Total bytes written to ClickHouse |
 | `gkg.etl.destination.write.errors` | Counter | count | `table` | Total failed writes to ClickHouse |
+
+Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries on first attempt. `permanent` errors route to DLQ or term-ack based on `PermanentAction`; `deserialization` errors always route to DLQ. Transient `processing` errors follow normal retry logic up to `max_deliver`.
 
 *Scheduled task metrics:*
 
