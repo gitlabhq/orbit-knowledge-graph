@@ -89,6 +89,7 @@ pub fn register_handlers(
         Arc::clone(&checkpoint_store),
         metrics,
         code_indexing_task_config,
+        config.nats.ack_wait(),
     )));
 
     Ok(())
