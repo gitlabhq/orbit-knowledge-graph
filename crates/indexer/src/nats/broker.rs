@@ -83,13 +83,21 @@ impl NatsBroker {
     }
 
     pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
+        self.ensure_managed_streams(subscriptions).await?;
+        self.ensure_unmanaged_streams_exist(subscriptions).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_managed_streams(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
         if !self.config.auto_create_streams {
             return Ok(());
         }
 
         let mut managed_streams: std::collections::HashMap<&Arc<str>, Vec<String>> =
             std::collections::HashMap::new();
-        let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
         for subscription in subscriptions {
             if subscription.manage_stream {
@@ -97,8 +105,6 @@ impl NatsBroker {
                     .entry(&subscription.stream)
                     .or_default()
                     .push(subscription.subject.to_string());
-            } else {
-                unmanaged_streams.push(&subscription.stream);
             }
         }
 
@@ -108,11 +114,24 @@ impl NatsBroker {
                 .await?;
         }
 
-        for stream_name in unmanaged_streams {
+        self.ensure_dead_letter_stream().await?;
+
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_unmanaged_streams_exist(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
+        let unmanaged: Vec<&Arc<str>> = subscriptions
+            .iter()
+            .filter(|s| !s.manage_stream)
+            .map(|s| &s.stream)
+            .collect();
+
+        for stream_name in unmanaged {
             self.inner.get_stream(stream_name).await?;
         }
-
-        self.ensure_dead_letter_stream().await?;
 
         Ok(())
     }
