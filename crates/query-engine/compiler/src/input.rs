@@ -123,6 +123,12 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
+    /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
+    /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
+    /// The hop frontier optimizer uses this to decide whether a CTE is safe
+    /// to forward-chain from.
+    pub lowerer_nf_ctes: HashSet<String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -134,6 +140,7 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            lowerer_nf_ctes: HashSet::new(),
         }
     }
 }

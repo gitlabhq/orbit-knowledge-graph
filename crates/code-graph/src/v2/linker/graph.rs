@@ -910,7 +910,8 @@ fn dir_to_string(dir: &Path) -> String {
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
     components.hash(&mut hasher);
-    hasher.finish() as i64
+    // Mask clears the sign bit so the result is always a positive i64.
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 // ── Arrow serialization ─────────────────────────────────────────
@@ -1289,6 +1290,36 @@ mod tests {
 
         assert_eq!(def_ids.len(), 2);
         assert_ne!(def_ids[0], def_ids[1]);
+    }
+
+    #[test]
+    fn compute_id_is_always_non_negative() {
+        // Inputs hand-picked because their unmasked FxHash output has
+        // the high bit set, which used to produce negative i64 ids.
+        let cases: &[&[&str]] = &[
+            &[
+                "1",
+                "main",
+                "def",
+                "src/lib.rs",
+                "lower_traversal_edge_only",
+                "100:120",
+            ],
+            &[
+                "42",
+                "feature/x",
+                "def",
+                "internal/foo.go",
+                "main.Dup",
+                "200:220",
+            ],
+            &["7", "main", "def", "a.py", "pkg.A.method", "0:5"],
+            &["999", "release/1", "branch", "main", "", "0:0"],
+        ];
+        for components in cases {
+            let id = compute_id(components);
+            assert!(id >= 0, "compute_id({components:?}) returned {id}");
+        }
     }
 
     #[test]

@@ -1508,25 +1508,30 @@ fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
             continue;
         }
 
-        // Skip when neither endpoint of the relationship has pinned `node_ids`.
-        // In that case any `_nf_<from>` CTE that exists was derived backwards
-        // by `narrow_joined_nodes_via_pinned_neighbors` from a `_nf_<to>`
-        // built upstream in the cascade. Forward-chaining from such a derived
-        // CTE produces descendants, not the intermediate hops the arm filter
-        // needs, and silently drops valid depth>1 paths.
-        // `push_kind_literals_into_variable_length_arms` covers this case
-        // with static kind literals + the outer node-table cascade SIP.
-        let from_pinned = input
+        // Skip when neither endpoint has a lowerer-created `_nf_*` CTE or
+        // pinned `node_ids`. Cascade-derived CTEs (from
+        // `narrow_joined_nodes_via_pinned_neighbors`) contain IDs reachable
+        // from another node, not the user's filter result set — forward-
+        // chaining from them produces descendants, not intermediate hops.
+        let from_selective = input
             .nodes
             .iter()
             .find(|n| n.id == rel.from)
-            .is_some_and(|n| !n.node_ids.is_empty());
-        let to_pinned = input
+            .is_some_and(|n| !n.node_ids.is_empty())
+            || input
+                .compiler
+                .lowerer_nf_ctes
+                .contains(&node_filter_cte(&rel.from));
+        let to_selective = input
             .nodes
             .iter()
             .find(|n| n.id == rel.to)
-            .is_some_and(|n| !n.node_ids.is_empty());
-        if !from_pinned && !to_pinned {
+            .is_some_and(|n| !n.node_ids.is_empty())
+            || input
+                .compiler
+                .lowerer_nf_ctes
+                .contains(&node_filter_cte(&rel.to));
+        if !from_selective && !to_selective {
             continue;
         }
 
@@ -3126,6 +3131,154 @@ mod tests {
             q.ctes.is_empty(),
             "no frontier CTEs without _nf_ source, got: {:?}",
             q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_fires_for_lowerer_filter_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let arm1 = Query {
+            select: vec![SelectExpr::new(Expr::col("e1", "target_id"), "end_id")],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::new(Expr::col("e2", "target_id"), "end_id")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let nf_cte = Cte::new(
+            "_nf_mr",
+            Query {
+                select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                from: TableRef::scan("gl_merge_request", "mr"),
+                where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
+                ..Default::default()
+            },
+        );
+
+        let mut q = Query {
+            ctes: vec![nf_cte],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2], "hop_e0"),
+            ..Default::default()
+        };
+
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        input.compiler.lowerer_nf_ctes.insert("_nf_mr".to_string());
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        let cte_names: Vec<&str> = q.ctes.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            cte_names.contains(&"_thop0_1"),
+            "hop frontier should fire for lowerer filter CTE, got: {cte_names:?}"
+        );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_skips_cascade_derived_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let arm1 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let nf_cte = Cte::new(
+            "_nf_mr",
+            Query {
+                select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                from: TableRef::scan("gl_merge_request", "mr"),
+                ..Default::default()
+            },
+        );
+
+        let mut q = Query {
+            ctes: vec![nf_cte],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2], "hop_e0"),
+            ..Default::default()
+        };
+
+        // lowerer_nf_ctes is empty — _nf_mr was cascade-derived
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        assert!(
+            !q.ctes.iter().any(|c| c.name.starts_with("_thop")),
+            "cascade-derived CTE should not trigger hop frontiers"
         );
     }
 

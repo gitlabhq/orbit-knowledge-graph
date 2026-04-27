@@ -245,6 +245,19 @@ impl<'a> Validator<'a> {
             )));
         }
         for rel in &input.relationships {
+            // direction: "both" generates OR join conditions that defeat
+            // ClickHouse index and projection usage. The JSON schema also
+            // rejects this for aggregation, but this guard covers code paths
+            // that bypass schema validation (CLI, internal tests, gRPC).
+            if rel.direction == crate::input::Direction::Both
+                && input.query_type == QueryType::Aggregation
+            {
+                return Err(QueryError::Validation(
+                    "aggregation does not support direction: \"both\" on relationships; \
+                     use separate queries for outgoing and incoming directions"
+                        .into(),
+                ));
+            }
             if rel.max_hops > MAX_HOPS_CAP {
                 return Err(QueryError::DepthExceeded(format!(
                     "max_hops ({}) must not exceed {MAX_HOPS_CAP}",
@@ -1252,6 +1265,22 @@ mod tests {
                 "query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}}
             }"#,
+        );
+    }
+
+    #[test]
+    fn rejects_aggregation_direction_both() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "mr", "entity": "MergeRequest"}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr", "direction": "both"}],
+                "aggregations": [{"function": "count", "target": "mr", "group_by": "u"}]
+            }"#,
+            "does not support direction",
         );
     }
 

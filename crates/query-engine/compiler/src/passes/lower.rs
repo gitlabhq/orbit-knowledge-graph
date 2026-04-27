@@ -320,6 +320,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 ..Default::default()
             };
             ctes.push(Cte::new(&cte_name, cte_query));
+            input.compiler.lowerer_nf_ctes.insert(cte_name.clone());
             where_parts.push(Expr::InSubquery {
                 expr: Box::new(Expr::col(alias, edge_col.as_str())),
                 cte_name,
