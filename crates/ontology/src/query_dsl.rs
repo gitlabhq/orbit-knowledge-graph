@@ -90,7 +90,10 @@ mod tests {
         assert!(json.contains("query_type"), "Should contain query_type");
         assert!(json.contains("traversal"), "Should contain traversal");
         assert!(json.contains("aggregation"), "Should contain aggregation");
-        assert!(json.contains("search"), "Should contain search");
+        assert!(
+            !json.contains("search"),
+            "Should not contain removed search type"
+        );
         assert!(json.contains("neighbors"), "Should contain neighbors");
         assert!(json.contains("path_finding"), "Should contain path_finding");
 

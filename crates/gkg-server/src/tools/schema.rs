@@ -93,7 +93,10 @@ mod tests {
         assert!(toon.contains("query_type"), "Should contain query_type");
         assert!(toon.contains("traversal"), "Should contain traversal");
         assert!(toon.contains("aggregation"), "Should contain aggregation");
-        assert!(toon.contains("search"), "Should contain search");
+        assert!(
+            !toon.contains("search"),
+            "Should not contain removed search type"
+        );
         assert!(toon.contains("neighbors"), "Should contain neighbors");
         assert!(toon.contains("path_finding"), "Should contain path_finding");
 

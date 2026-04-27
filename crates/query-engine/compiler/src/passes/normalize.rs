@@ -207,7 +207,7 @@ mod tests {
     fn enum_coercion_all_variants() {
         // Single int → string
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -216,7 +216,7 @@ mod tests {
 
         // Array of ints → array of strings
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -225,7 +225,7 @@ mod tests {
 
         // Mixed valid/invalid ints in array - unknown values pass through
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -234,7 +234,7 @@ mod tests {
 
         // String values pass through unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -243,7 +243,7 @@ mod tests {
 
         // Unknown int passes through
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -252,7 +252,7 @@ mod tests {
 
         // Null filter value (is_null op) unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
         );
         assert_eq!(r.nodes[0].filters.get("state").unwrap().value, None);
     }
@@ -332,7 +332,7 @@ mod tests {
     fn edge_cases() {
         // Unknown field on known entity - unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("nonexistent_field").unwrap().value,
@@ -341,13 +341,13 @@ mod tests {
 
         // Non-enum int field not coerced (User.id is int, not enum)
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
         );
         assert_eq!(r.nodes[0].filters.get("id").unwrap().value, Some(json!(1)));
 
         // Boolean field unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("squash").unwrap().value,
@@ -356,7 +356,7 @@ mod tests {
 
         // String array on non-enum field unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("source_branch").unwrap().value,
@@ -365,7 +365,7 @@ mod tests {
 
         // Unknown entity rejected
         let input = parse_input(
-            r#"{"query_type": "search", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
         ).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let err = normalize(input, &ontology).unwrap_err();

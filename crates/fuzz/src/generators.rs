@@ -55,13 +55,7 @@ fn pick_edge_name(driver: &mut impl Driver) -> Option<String> {
     }
 }
 
-const QUERY_TYPES: &[&str] = &[
-    "traversal",
-    "aggregation",
-    "path_finding",
-    "search",
-    "neighbors",
-];
+const QUERY_TYPES: &[&str] = &["traversal", "aggregation", "path_finding", "neighbors"];
 const FILTER_OPS: &[&str] = &[
     "eq",
     "gt",
@@ -184,7 +178,7 @@ impl TypeGenerator for FuzzQuery {
         query.insert("query_type".into(), json!(query_type));
 
         match query_type {
-            "traversal" | "search" | "aggregation" => {
+            "traversal" | "aggregation" => {
                 let node_count: u8 = driver.produce()?;
                 let node_count = (node_count % 3) + 1;
 

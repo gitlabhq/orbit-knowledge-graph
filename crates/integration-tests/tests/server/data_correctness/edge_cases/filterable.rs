@@ -7,7 +7,7 @@ pub(crate) async fn filterable_traversal_path_readable_as_column(ctx: &TestConte
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "g", "entity": "Group",
                      "columns": ["name", "traversal_path"],
                      "node_ids": [100]},
@@ -28,7 +28,7 @@ pub(crate) async fn filterable_traversal_path_readable_on_project(ctx: &TestCont
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "p", "entity": "Project",
                      "columns": ["name", "traversal_path"],
                      "node_ids": [1000]},
@@ -49,7 +49,7 @@ pub(crate) async fn filterable_other_filters_still_work_alongside_traversal_path
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "g", "entity": "Group",
                      "columns": ["name", "traversal_path"],
                      "filters": {"name": "Public Group"}},

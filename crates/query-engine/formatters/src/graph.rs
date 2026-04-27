@@ -153,9 +153,6 @@ impl GraphFormatter {
             .collect();
 
         match result_context.query_type {
-            Some(QueryType::Search) => {
-                self.extract_search_nodes(result, result_context, &edge_prefixes, &mut node_map);
-            }
             Some(QueryType::Traversal) => {
                 self.extract_search_nodes(result, result_context, &edge_prefixes, &mut node_map);
                 self.extract_traversal_edges(
@@ -566,17 +563,17 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
+        result_ctx.query_type = Some(QueryType::Traversal);
 
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
         PipelineOutput {
             row_count: qr.authorized_count(),
             redacted_count: 0,
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
+                query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
@@ -586,7 +583,7 @@ mod tests {
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
+                    "query_type": "traversal",
                     "node": {"id": "p", "entity": "Project"},
                     "limit": 10
                 }))
@@ -605,7 +602,7 @@ mod tests {
         let formatter = GraphFormatter;
         let response = formatter.build_response(&output);
 
-        assert_eq!(response.query_type, "search");
+        assert_eq!(response.query_type, "traversal");
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
         assert!(response.columns.is_none(), "search should not have columns");
@@ -683,16 +680,16 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
+        result_ctx.query_type = Some(QueryType::Traversal);
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
         let output = PipelineOutput {
             row_count: qr.authorized_count(),
             redacted_count: 0,
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
+                query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
@@ -702,7 +699,7 @@ mod tests {
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
+                    "query_type": "traversal",
                     "node": {"id": "p", "entity": "Project"},
                     "limit": 10
                 }))

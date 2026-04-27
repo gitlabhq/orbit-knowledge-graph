@@ -111,14 +111,14 @@
   },
 
   "10_search_pipelines_failed_cursor": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "pipe", "entity": "Pipeline", "filters": {"status": "failed"}, "columns": ["id", "status", "ref"]},
     "limit": 50,
     "cursor": {"offset": 0, "page_size": 10}
   },
 
   "11_search_all_mrs_cursor": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "mr", "entity": "MergeRequest", "columns": ["id", "title", "state"]},
     "limit": 100,
     "cursor": {"offset": 0, "page_size": 20}

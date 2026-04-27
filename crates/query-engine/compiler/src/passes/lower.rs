@@ -54,7 +54,7 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
 /// Writes metadata to `input.compiler` for downstream passes.
 pub fn lower(input: &mut Input) -> Result<Node> {
     let node = match input.query_type {
-        QueryType::Search => lower_search(input),
+        QueryType::Traversal if input.is_search() => lower_search(input),
         QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
@@ -2296,7 +2296,7 @@ mod tests {
     fn test_lower_with_filters() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2556,7 +2556,7 @@ mod tests {
     fn test_lower_search() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2590,7 +2590,7 @@ mod tests {
     fn test_lower_search_simple() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "p",
                 "entity": "Project",
@@ -2617,7 +2617,7 @@ mod tests {
     fn test_lower_with_specific_columns() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2643,7 +2643,7 @@ mod tests {
     fn test_lower_with_wildcard_columns() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2696,7 +2696,7 @@ mod tests {
     fn test_lower_no_columns_uses_defaults() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2726,7 +2726,7 @@ mod tests {
     fn test_lower_columns_with_id_in_list() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -3393,7 +3393,7 @@ mod tests {
     fn search_cursor_injects_default_order_by_id() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
@@ -3418,7 +3418,7 @@ mod tests {
     fn search_without_cursor_has_no_default_order() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10
         }"#,
@@ -3435,7 +3435,7 @@ mod tests {
     fn search_explicit_order_by_with_cursor_appends_pk_tiebreaker() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10,
@@ -3475,7 +3475,7 @@ mod tests {
         // When the user already sorts by "id", don't append a redundant PK tie-breaker.
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10,

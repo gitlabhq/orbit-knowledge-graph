@@ -464,7 +464,7 @@ async fn search_produces_no_hydration_plan(_ctx: &TestContext) {
     let security_ctx = test_security_context();
 
     let json = r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
         "limit": 10
     }"#;

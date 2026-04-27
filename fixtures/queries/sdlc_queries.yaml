@@ -11,7 +11,7 @@ q1:
   desc: List active users
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 30,
       "order_by": {"node": "u", "property": "created_at", "direction": "DESC"}
@@ -121,7 +121,7 @@ q8:
   desc: Long-running pipelines
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "pipe", "entity": "Pipeline", "filters": {
         "status": "success",
         "duration": {"op": "gt", "value": 60}
@@ -199,7 +199,7 @@ q13:
   desc: Overdue work items
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "wi", "entity": "WorkItem", "filters": {"state": "opened"}},
       "limit": 30,
       "order_by": {"node": "wi", "property": "due_date", "direction": "ASC"}
@@ -293,7 +293,7 @@ q19:
   desc: Public projects
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "p", "entity": "Project", "filters": {
         "visibility_level": "public",
         "archived": false
@@ -403,7 +403,7 @@ q26:
   desc: Users by state
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
       "limit": 20
     }
@@ -412,7 +412,7 @@ q27:
   desc: Bot accounts
   query: |
     {
-      "query_type": "search",
+      "query_type": "traversal",
       "node": {"id": "u", "entity": "User", "filters": {
         "user_type": {"op": "in", "value": ["project_bot", "service_account", "automation_bot"]}
       }},
