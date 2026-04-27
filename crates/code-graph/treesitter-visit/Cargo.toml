@@ -7,7 +7,7 @@ license = "MIT"
 authors = ["GitLab Inc."]
 
 [dependencies]
-log = { workspace = true }
+tracing = { workspace = true }
 serde = { workspace = true }
 smallvec = { workspace = true }
 thiserror = { workspace = true }
