@@ -1,50 +1,18 @@
-use query_engine::compiler::{SecurityContext, TraversalPath};
+use query_engine::compiler::SecurityContext;
 use thiserror::Error;
 
-use crate::auth::Claims;
+use crate::auth::{Claims, build_security_context};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
 };
-
-/// Access level assigned to the admin org-root path. Matches `Gitlab::Access::OWNER`
-/// so that every entity's `required_role` check passes for admins.
-const ADMIN_ORG_ROOT_ACCESS_LEVEL: u32 = 50;
 
 #[derive(Clone)]
 pub struct SecurityStage;
 
 impl SecurityStage {
     fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
-        let org_id = claims
-            .organization_id
-            .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
-            as i64;
-        let traversal_paths = if claims.admin {
-            // Admins get the org-root path tagged Owner so every entity's
-            // required_role check passes. This mirrors the pre-role-scoping
-            // behavior where admins bypassed all filtering.
-            vec![TraversalPath::new(
-                format!("{org_id}/"),
-                ADMIN_ORG_ROOT_ACCESS_LEVEL,
-            )]
-        } else {
-            if claims.group_traversal_ids.is_empty() {
-                return Err(SecurityError(
-                    "no enabled namespaces for this user".to_string(),
-                ));
-            }
-            claims
-                .group_traversal_ids
-                .iter()
-                .map(|tp| {
-                    TraversalPath::with_access_levels(tp.path.clone(), tp.access_levels.clone())
-                })
-                .collect()
-        };
-        SecurityContext::new_with_roles(org_id, traversal_paths)
-            .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
-            .map_err(|e| SecurityError(e.to_string()))
+        build_security_context(claims).map_err(|e| SecurityError(e.to_string()))
     }
 }
 
@@ -134,11 +102,7 @@ mod tests {
         let ctx = SecurityStage::build_context(&claims).unwrap();
         assert_eq!(ctx.org_id, 42);
         assert_eq!(paths(&ctx), vec!["42/".to_string()]);
-        // Admin is tagged Owner so entity-level required_role gates always pass.
-        assert_eq!(
-            ctx.traversal_paths[0].access_levels,
-            vec![ADMIN_ORG_ROOT_ACCESS_LEVEL]
-        );
+        assert_eq!(ctx.traversal_paths[0].access_levels, vec![50]);
     }
 
     #[test]

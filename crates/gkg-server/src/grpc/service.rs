@@ -11,7 +11,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
-use crate::auth::{Claims, JwtValidator};
+use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
@@ -286,11 +286,14 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
 
+        let security_context =
+            build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
+
         info!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
 
         let response = self
             .graph_status
-            .get_status(&req.traversal_path, req.format)
+            .get_status(&req.traversal_path, req.format, &security_context)
             .await?;
         Ok(Response::new(response))
     }

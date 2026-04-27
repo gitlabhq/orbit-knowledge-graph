@@ -11,7 +11,7 @@ use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::indexing_status::IndexingStatusStore;
 use ontology::Ontology;
-use query_engine::compiler::{ResultContext, codegen};
+use query_engine::compiler::{ResultContext, SecurityContext, codegen};
 use tonic::Status;
 use tracing::{debug, info, warn};
 
@@ -46,12 +46,17 @@ impl GraphStatusService {
         &self,
         traversal_path: &str,
         format: i32,
+        security_context: &SecurityContext,
     ) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        let input = GraphStatusInput::from_ontology(&self.ontology, traversal_path.to_string())?;
+        let input = GraphStatusInput::from_ontology(
+            &self.ontology,
+            traversal_path.to_string(),
+            security_context,
+        )?;
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
@@ -260,6 +265,13 @@ mod tests {
     use chrono::{Duration, Utc};
     use clickhouse_client::ClickHouseConfigurationExt;
     use indexer::indexing_status::IndexingProgress;
+    use query_engine::compiler::TraversalPath;
+
+    fn admin_context() -> SecurityContext {
+        SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
+            .unwrap()
+            .with_role(true, Some(50))
+    }
 
     fn test_ontology() -> Arc<Ontology> {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
@@ -323,7 +335,9 @@ mod tests {
         let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
         let service = GraphStatusService::new(client, test_ontology());
 
-        let result = service.get_status("", ResponseFormat::Raw as i32).await;
+        let result = service
+            .get_status("", ResponseFormat::Raw as i32, &admin_context())
+            .await;
 
         assert!(result.is_err());
         let status = result.unwrap_err();
