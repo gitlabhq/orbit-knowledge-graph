@@ -27,7 +27,7 @@ fn dedup_svc() -> MockRedactionService {
         "merge_request",
         &[
             9100, 9101, 9200, 9201, 9310, 9311, 9400, 9401, 9500, 9501, 9700, 9701, 9800, 9801,
-            9900, 9901,
+            9900, 9901, 9920, 9921,
         ],
     );
     svc
@@ -620,6 +620,114 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     // Control: MR 9801 has a single version.
     let control = resp.find_node("MergeRequest", 9801).unwrap();
     control.assert_str("state", "merged");
+}
+
+/// `path_finding` over a multi-`_version` edge surfaces 4 logical-duplicate
+/// paths from ClickHouse (the compiler's dedup pass excludes edge tables).
+/// The formatter must collapse them to a single path with one dense
+/// `path_id`. Skips `optimize_all()` so duplicate edge versions reach the
+/// formatter; OPTIMIZE FINAL would merge them away at the storage layer.
+pub(super) async fn path_finding_dedupes_multi_version_edges(ctx: &TestContext) {
+    // Two edge rows for User 1 → MR 9920 and two for MR 9920 → Project 1000,
+    // each pair differing only by `_version`. With four combinations the
+    // 2-hop path appears 4× in the raw result.
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9920, 98, 'pf_dedup MR', 'opened', '1/100/1000/', '2024-06-01 00:00:00', false)",
+        t("gl_merge_request")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 9920, 'MergeRequest', '2024-01-01 00:00:00'),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 9920, 'MergeRequest', '2024-06-01 00:00:00'),
+         ('1/100/1000/', 9920, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', '2024-01-01 00:00:00'),
+         ('1/100/1000/', 9920, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', '2024-06-01 00:00:00')",
+        t("gl_edge")
+    ))
+    .await;
+
+    // Deliberately skip optimize_all so the duplicates survive to the formatter.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1000]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["AUTHORED", "IN_PROJECT"]}
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    let through_dup_mr: Vec<_> = pids
+        .iter()
+        .filter(|&&pid| {
+            resp.path(pid)
+                .iter()
+                .any(|e| e.from_id == 9920 || e.to_id == 9920)
+        })
+        .collect();
+    assert_eq!(
+        through_dup_mr.len(),
+        1,
+        "logical path through MR 9920 must surface once, not 4× (one per edge _version permutation)"
+    );
+
+    let signatures: HashSet<Vec<(i64, i64, String)>> = pids
+        .iter()
+        .map(|&pid| {
+            resp.path(pid)
+                .iter()
+                .map(|e| (e.from_id, e.to_id, e.edge_type.clone()))
+                .collect()
+        })
+        .collect();
+    assert_eq!(
+        signatures.len(),
+        pids.len(),
+        "every returned path must have a distinct node-edge signature (no duplicates)"
+    );
+}
+
+/// `neighbors` over a multi-`_version` edge surfaces N duplicate edge rows
+/// from ClickHouse. The formatter must collapse them to one logical edge.
+pub(super) async fn neighbors_dedupes_multi_version_edges(ctx: &TestContext) {
+    // Two edge versions for the same logical (User 1, AUTHORED, MR 9921).
+    ctx.execute(&format!(
+        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
+         (9921, 98, 'nbr_dedup center', 'opened', '1/100/1000/', '2024-06-01 00:00:00', false)",
+        t("gl_merge_request")
+    ))
+    .await;
+    ctx.execute(&format!(
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _version) VALUES
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 9921, 'MergeRequest', '2024-01-01 00:00:00'),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 9921, 'MergeRequest', '2024-06-01 00:00:00')",
+        t("gl_edge")
+    ))
+    .await;
+
+    // Skip optimize_all so the duplicate edge versions reach the formatter.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "neighbors",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [9921]},
+            "neighbors": {"node": "mr", "direction": "both", "rel_types": ["AUTHORED"]}
+        }"#,
+        &dedup_svc(),
+    )
+    .await;
+
+    resp.skip_requirement(Requirement::NodeCount);
+    resp.assert_node_ids("MergeRequest", &[9921]);
+    resp.assert_edge_exists("User", 1, "MergeRequest", 9921, "AUTHORED");
+    resp.assert_edge_count("AUTHORED", 1);
 }
 
 /// Aggregation excludes deleted entities from count via _nf_* CTE dedup.

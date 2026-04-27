@@ -395,9 +395,33 @@ impl GraphFormatter {
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
-        for (row_idx, row) in result.authorized_rows().enumerate() {
+        // Edge-table `_version` rows surface the same logical path multiple
+        // times. Dedupe on the (node-sequence, edge-kind-sequence) signature
+        // and reassign path_id densely so callers don't see path_id 0..3 for
+        // what is one path.
+        let mut seen_paths: HashSet<Vec<(String, i64, String)>> = HashSet::new();
+        let mut path_id_counter: usize = 0;
+
+        for row in result.authorized_rows() {
             let dynamic_nodes = row.dynamic_nodes();
             let edge_kinds = row.edge_kinds();
+
+            let signature: Vec<(String, i64, String)> = dynamic_nodes
+                .iter()
+                .enumerate()
+                .map(|(idx, node)| {
+                    (
+                        node.entity_type.clone(),
+                        node.id,
+                        edge_kinds.get(idx).cloned().unwrap_or_default(),
+                    )
+                })
+                .collect();
+            if !seen_paths.insert(signature) {
+                continue;
+            }
+            let path_id = path_id_counter;
+            path_id_counter += 1;
 
             for node_ref in dynamic_nodes {
                 let key = (node_ref.entity_type.clone(), node_ref.id);
@@ -428,7 +452,7 @@ impl GraphFormatter {
                     to_id: to.id,
                     edge_type,
                     depth: None,
-                    path_id: Some(row_idx),
+                    path_id: Some(path_id),
                     step: Some(hop_idx),
                 });
             }
@@ -450,6 +474,11 @@ impl GraphFormatter {
             .neighbors
             .as_ref()
             .map(|n| n.direction);
+
+        // Edge-table `_version` rows produce duplicate neighbor edges
+        // (same center, same neighbor, same rel_type). Mirror the
+        // traversal dedup so callers see one row per logical edge.
+        let mut edge_set: HashSet<EdgeKey> = HashSet::new();
 
         for row in result.authorized_rows() {
             let mut center: Option<(String, i64)> = None;
@@ -520,6 +549,18 @@ impl GraphFormatter {
                 )
             };
 
+            let key = (
+                from.clone(),
+                from_id,
+                to.clone(),
+                to_id,
+                rel_type.clone(),
+                None,
+            );
+            if !edge_set.insert(key) {
+                continue;
+            }
+
             edges.push(GraphEdge {
                 from,
                 from_id,
@@ -539,7 +580,8 @@ mod tests {
     use super::*;
     use std::collections::HashMap;
 
-    use arrow::array::{Int64Array, StringArray};
+    use arrow::array::{Array, Int64Array, ListArray, StringArray, StructArray};
+    use arrow::buffer::OffsetBuffer;
     use arrow::datatypes::{DataType, Field, Schema};
     use arrow::record_batch::RecordBatch;
     use compiler::{CompiledQueryContext, HydrationPlan, ParameterizedQuery, ResultContext};
@@ -777,5 +819,237 @@ mod tests {
         let json = serde_json::to_value(&edge).unwrap();
         assert_eq!(json["from_id"].as_str().unwrap(), "9007199254740993");
         assert_eq!(json["to_id"].as_str().unwrap(), "-9007199254740993");
+    }
+
+    fn make_path_finding_output(path_node_pairs: Vec<Vec<(i64, &str)>>) -> PipelineOutput {
+        let total_nodes: usize = path_node_pairs.iter().map(|p| p.len()).sum();
+        let mut all_ids: Vec<i64> = Vec::with_capacity(total_nodes);
+        let mut all_types: Vec<&str> = Vec::with_capacity(total_nodes);
+        let mut offsets_vec: Vec<i32> = vec![0];
+        let mut running: i32 = 0;
+        for path in &path_node_pairs {
+            for (id, ty) in path {
+                all_ids.push(*id);
+                all_types.push(ty);
+            }
+            running += path.len() as i32;
+            offsets_vec.push(running);
+        }
+
+        let ids = Int64Array::from(all_ids);
+        let types = StringArray::from(all_types);
+
+        let struct_fields = vec![
+            Arc::new(Field::new("1", DataType::Int64, false)),
+            Arc::new(Field::new("2", DataType::Utf8, false)),
+        ];
+        let struct_array = StructArray::new(
+            struct_fields.into(),
+            vec![Arc::new(ids) as _, Arc::new(types) as _],
+            None,
+        );
+
+        let path_field = Arc::new(Field::new("item", struct_array.data_type().clone(), true));
+        let path_offsets = OffsetBuffer::new(offsets_vec.clone().into());
+        let path_list = ListArray::new(path_field, path_offsets, Arc::new(struct_array), None);
+
+        let edge_kind_count: usize = path_node_pairs
+            .iter()
+            .map(|p| p.len().saturating_sub(1))
+            .sum();
+        let mut edge_kind_offsets: Vec<i32> = vec![0];
+        let mut running_ek: i32 = 0;
+        for path in &path_node_pairs {
+            running_ek += path.len().saturating_sub(1) as i32;
+            edge_kind_offsets.push(running_ek);
+        }
+        let edge_kind_values = StringArray::from(vec!["IN_PROJECT"; edge_kind_count]);
+        let edge_kind_field = Arc::new(Field::new("item", DataType::Utf8, true));
+        let edge_kinds_array = ListArray::new(
+            edge_kind_field,
+            OffsetBuffer::new(edge_kind_offsets.into()),
+            Arc::new(edge_kind_values),
+            None,
+        );
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_path", path_list.data_type().clone(), true),
+            Field::new(
+                "_gkg_edge_kinds",
+                edge_kinds_array.data_type().clone(),
+                true,
+            ),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![Arc::new(path_list) as _, Arc::new(edge_kinds_array) as _],
+        )
+        .unwrap();
+
+        let result_ctx = ResultContext::new().with_query_type(QueryType::PathFinding);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "path_finding".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::PathFinding,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "path_finding",
+                    "nodes": [
+                        {"id": "a", "entity": "User", "node_ids": [1]},
+                        {"id": "b", "entity": "Project", "node_ids": [10]}
+                    ],
+                    "limit": 10
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        }
+    }
+
+    #[test]
+    fn path_finding_dedupes_logical_paths_from_version_rows() {
+        // Same logical 2-hop path returned 4 times (one per edge `_version` row).
+        // The formatter should collapse them to a single path with one path_id.
+        let path = vec![(1, "User"), (5, "Group"), (10, "Project")];
+        let output =
+            make_path_finding_output(vec![path.clone(), path.clone(), path.clone(), path.clone()]);
+
+        let response = GraphFormatter.build_response(&output);
+
+        assert_eq!(response.nodes.len(), 3, "three unique nodes in the path");
+        assert_eq!(
+            response.edges.len(),
+            2,
+            "one path = 2 hops, dedup must remove duplicates"
+        );
+
+        let path_ids: HashSet<_> = response
+            .edges
+            .iter()
+            .map(|e| e.path_id.expect("path_id set"))
+            .collect();
+        assert_eq!(path_ids, [0].into_iter().collect::<HashSet<_>>(),);
+    }
+
+    #[test]
+    fn path_finding_keeps_distinct_paths() {
+        // Different node sequences must remain as separate paths with distinct
+        // path_ids assigned densely starting at 0.
+        let output = make_path_finding_output(vec![
+            vec![(1, "User"), (10, "Project")],
+            vec![(1, "User"), (20, "Project")],
+        ]);
+
+        let response = GraphFormatter.build_response(&output);
+
+        assert_eq!(response.edges.len(), 2);
+        let mut path_ids: Vec<_> = response.edges.iter().filter_map(|e| e.path_id).collect();
+        path_ids.sort();
+        assert_eq!(path_ids, vec![0, 1]);
+    }
+
+    fn make_neighbors_output(
+        center_id: i64,
+        neighbor_rows: Vec<(i64, &str, &str)>,
+    ) -> PipelineOutput {
+        let row_count = neighbor_rows.len();
+        let center_ids: Vec<i64> = vec![center_id; row_count];
+        let center_types: Vec<&str> = vec!["User"; row_count];
+        let neighbor_ids: Vec<i64> = neighbor_rows.iter().map(|(id, _, _)| *id).collect();
+        let neighbor_types: Vec<&str> = neighbor_rows.iter().map(|(_, t, _)| *t).collect();
+        let rel_types: Vec<&str> = neighbor_rows.iter().map(|(_, _, r)| *r).collect();
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_u_id", DataType::Int64, false),
+            Field::new("_gkg_u_type", DataType::Utf8, false),
+            Field::new("_gkg_neighbor_id", DataType::Int64, false),
+            Field::new("_gkg_neighbor_type", DataType::Utf8, false),
+            Field::new("_gkg_relationship_type", DataType::Utf8, false),
+            Field::new("_gkg_neighbor_is_outgoing", DataType::Int64, false),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from(center_ids)),
+                Arc::new(StringArray::from(center_types)),
+                Arc::new(Int64Array::from(neighbor_ids)),
+                Arc::new(StringArray::from(neighbor_types)),
+                Arc::new(StringArray::from(rel_types)),
+                Arc::new(Int64Array::from(vec![1_i64; row_count])),
+            ],
+        )
+        .unwrap();
+
+        let mut result_ctx = ResultContext::new();
+        result_ctx.add_node("u", "User");
+        result_ctx.query_type = Some(QueryType::Neighbors);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "neighbors".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::Neighbors,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "neighbors",
+                    "node": {"id": "u", "entity": "User", "node_ids": [center_id.to_string()]},
+                    "limit": 10
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        }
+    }
+
+    #[test]
+    fn neighbors_dedupes_duplicate_edge_rows() {
+        // Same (center, neighbor, rel_type) returned 4 times (one per `_version`
+        // row in the edge table). Caller should see one logical edge.
+        let output = make_neighbors_output(1, vec![(100, "Project", "MEMBER_OF"); 4]);
+
+        let response = GraphFormatter.build_response(&output);
+
+        assert_eq!(response.edges.len(), 1, "duplicate edge rows must dedup");
+        assert_eq!(response.nodes.len(), 2, "User + Project nodes");
+    }
+
+    #[test]
+    fn neighbors_keeps_distinct_relationships() {
+        // Same neighbor pair via different relationship types must NOT dedup.
+        let output = make_neighbors_output(
+            1,
+            vec![(100, "Project", "MEMBER_OF"), (100, "Project", "OWNS")],
+        );
+
+        let response = GraphFormatter.build_response(&output);
+        assert_eq!(response.edges.len(), 2);
     }
 }

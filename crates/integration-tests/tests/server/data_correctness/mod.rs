@@ -241,6 +241,8 @@ async fn data_correctness() {
         dedup::traversal_deleted_node_visible_via_edge,
         dedup::neighbors_dedup_returns_unique_edges,
         dedup::neighbors_deleted_node_visible_via_edge,
+        dedup::path_finding_dedupes_multi_version_edges,
+        dedup::neighbors_dedupes_multi_version_edges,
         dedup::hydration_returns_latest_properties,
         dedup::traversal_excludes_deleted_edge,
         dedup::search_three_versions_returns_latest,
