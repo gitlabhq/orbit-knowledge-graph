@@ -86,7 +86,12 @@
             "retry_interval_secs": null
           }
         },
-        "max_concurrent_workers": 16
+        "max_concurrent_workers": 16,
+        "modules": [
+          "sdlc",
+          "code",
+          "namespace_deletion"
+        ]
       }
     },
     "gitlab": {
@@ -461,7 +466,7 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers",
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
@@ -526,6 +531,18 @@
           "format": "uint",
           "default": 16,
           "minimum": 0
+        },
+        "modules": {
+          "description": "Modules whose handlers this indexer process should register. Defaults to all\nmodules for backward compatibility (universal indexer). Set to a subset to\nrun a specialised pool, e.g. `[code]` for a code-only Deployment.",
+          "type": "array",
+          "default": [
+            "sdlc",
+            "code",
+            "namespace_deletion"
+          ],
+          "items": {
+            "$ref": "#/$defs/IndexerModule"
+          }
         }
       },
       "additionalProperties": false
@@ -747,6 +764,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "IndexerModule": {
+      "description": "Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.\n\nAn indexer process registers handlers only for the modules listed in\n[`EngineConfiguration::modules`], letting operators run multiple specialised\nindexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the\nsame binary.",
+      "oneOf": [
+        {
+          "description": "SDLC handlers: `global-handler` and `namespace-handler`.",
+          "type": "string",
+          "const": "sdlc"
+        },
+        {
+          "description": "Code indexing handler: clones repositories, runs tree-sitter, writes the code graph.",
+          "type": "string",
+          "const": "code"
+        },
+        {
+          "description": "Namespace deletion handler.",
+          "type": "string",
+          "const": "namespace_deletion"
+        }
+      ]
     },
     "JwtConfig": {
       "type": "object",
