@@ -10,4 +10,3 @@ variants:
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Finding, id: id }
     description: "Security scan has finding."
-

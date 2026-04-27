@@ -41,4 +41,3 @@ etl:
   to:
     id: work_item_id
     type: WorkItem
-

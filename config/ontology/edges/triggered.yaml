@@ -14,4 +14,3 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: Job, id: id }
     description: "User triggered job."
-

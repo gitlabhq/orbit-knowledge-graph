@@ -17,4 +17,3 @@ etl:
   to:
     id: vulnerability_id
     type: Vulnerability
-

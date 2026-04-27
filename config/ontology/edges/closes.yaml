@@ -17,4 +17,3 @@ etl:
   to:
     id: issue_id
     type: WorkItem
-

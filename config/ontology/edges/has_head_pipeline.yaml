@@ -6,4 +6,3 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
     description: "Merge request has head pipeline."
-

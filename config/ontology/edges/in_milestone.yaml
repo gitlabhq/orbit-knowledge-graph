@@ -10,4 +10,3 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Milestone, id: id }
     description: "Merge request assigned to milestone."
-

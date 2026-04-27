@@ -15,4 +15,3 @@ etl:
   to:
     id: merge_request_id
     type: MergeRequest
-

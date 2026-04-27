@@ -66,4 +66,3 @@ variants:
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: Project, id: id }
     description: "Merge request diff belongs to project."
-

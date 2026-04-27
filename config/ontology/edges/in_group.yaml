@@ -14,4 +14,3 @@ variants:
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Group, id: id }
     description: "Work item belongs to group."
-

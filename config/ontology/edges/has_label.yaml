@@ -10,4 +10,3 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Label, id: id }
     description: "Merge request has label."
-

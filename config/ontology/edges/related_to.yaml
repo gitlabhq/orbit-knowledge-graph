@@ -27,4 +27,3 @@ etl:
   to:
     id: target_id
     type: WorkItem
-

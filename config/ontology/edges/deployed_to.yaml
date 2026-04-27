@@ -17,4 +17,3 @@ etl:
   to:
     id: deployment_id
     type: Deployment
-
