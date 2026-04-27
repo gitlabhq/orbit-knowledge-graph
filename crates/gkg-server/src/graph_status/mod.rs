@@ -2,7 +2,7 @@ mod input;
 mod lower;
 mod toon;
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::array::{Array, StringArray, UInt64Array};
@@ -11,7 +11,7 @@ use gkg_server_config::QueryConfig;
 use gkg_utils::arrow::ArrowUtils;
 use indexer::indexing_status::IndexingStatusStore;
 use ontology::Ontology;
-use query_engine::compiler::{ResultContext, codegen};
+use query_engine::compiler::{ResultContext, SecurityContext, codegen};
 use tonic::Status;
 use tracing::{debug, info, warn};
 
@@ -46,12 +46,17 @@ impl GraphStatusService {
         &self,
         traversal_path: &str,
         format: i32,
+        security_context: &SecurityContext,
     ) -> Result<GetGraphStatusResponse, Status> {
         if traversal_path.is_empty() {
             return Err(Status::invalid_argument("traversal_path is required"));
         }
 
-        let input = GraphStatusInput::from_ontology(&self.ontology, traversal_path.to_string())?;
+        let input = GraphStatusInput::from_ontology(
+            &self.ontology,
+            traversal_path.to_string(),
+            security_context,
+        )?;
 
         let entity_counts_future = async {
             if input.nodes.is_empty() {
@@ -79,7 +84,8 @@ impl GraphStatusService {
             "Graph status fetched"
         );
 
-        let domains = present_domain_response(&self.ontology, &entity_counts);
+        let visible_nodes: HashSet<&str> = input.nodes.iter().map(|n| n.name.as_str()).collect();
+        let domains = present_domain_response(&self.ontology, &entity_counts, &visible_nodes);
         let structured = StructuredGraphStatus {
             projects: Some(projects),
             domains,
@@ -233,23 +239,29 @@ fn derive_indexing_state(progress: &indexer::indexing_status::IndexingProgress) 
 fn present_domain_response(
     ontology: &Ontology,
     entity_counts: &HashMap<String, i64>,
+    visible_nodes: &HashSet<&str>,
 ) -> Vec<GraphStatusDomain> {
     ontology
         .domains()
-        .map(|domain| {
-            let items = domain
+        .filter_map(|domain| {
+            let items: Vec<_> = domain
                 .node_names
                 .iter()
+                .filter(|node_name| visible_nodes.contains(node_name.as_str()))
                 .map(|node_name| GraphStatusItem {
                     name: node_name.clone(),
                     count: entity_counts.get(node_name).copied().unwrap_or(0),
                 })
                 .collect();
 
-            GraphStatusDomain {
+            if items.is_empty() {
+                return None;
+            }
+
+            Some(GraphStatusDomain {
                 name: domain.name.clone(),
                 items,
-            }
+            })
         })
         .collect()
 }
@@ -260,19 +272,31 @@ mod tests {
     use chrono::{Duration, Utc};
     use clickhouse_client::ClickHouseConfigurationExt;
     use indexer::indexing_status::IndexingProgress;
+    use query_engine::compiler::TraversalPath;
+
+    fn admin_context() -> SecurityContext {
+        SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 50)])
+            .unwrap()
+            .with_role(true, Some(50))
+    }
 
     fn test_ontology() -> Arc<Ontology> {
         Arc::new(Ontology::load_embedded().expect("ontology must load"))
     }
 
+    fn all_node_names(ontology: &Ontology) -> HashSet<&str> {
+        ontology.nodes().map(|n| n.name.as_str()).collect()
+    }
+
     #[test]
     fn presents_domain_response_groups_by_domain() {
         let ontology = test_ontology();
+        let visible = all_node_names(&ontology);
         let mut entity_counts = HashMap::new();
         entity_counts.insert("Project".to_string(), 42);
         entity_counts.insert("User".to_string(), 10);
 
-        let domains = present_domain_response(&ontology, &entity_counts);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
 
         assert!(!domains.is_empty());
 
@@ -292,9 +316,10 @@ mod tests {
     #[test]
     fn presents_domain_response_missing_entity_defaults_to_zero() {
         let ontology = test_ontology();
+        let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
 
         for domain in &domains {
             for item in &domain.items {
@@ -310,12 +335,37 @@ mod tests {
     #[test]
     fn presents_domain_response_covers_all_domains() {
         let ontology = test_ontology();
+        let visible = all_node_names(&ontology);
         let entity_counts = HashMap::new();
 
-        let domains = present_domain_response(&ontology, &entity_counts);
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
         let domain_count = ontology.domains().count();
 
         assert_eq!(domains.len(), domain_count);
+    }
+
+    #[test]
+    fn presents_domain_response_excludes_invisible_entities() {
+        let ontology = test_ontology();
+        let visible: HashSet<&str> = ["Project", "User", "MergeRequest"].into_iter().collect();
+        let mut entity_counts = HashMap::new();
+        entity_counts.insert("Project".to_string(), 5);
+
+        let domains = present_domain_response(&ontology, &entity_counts, &visible);
+
+        let security = domains.iter().find(|d| d.name == "security");
+        assert!(
+            security.is_none(),
+            "security domain should be excluded when no security nodes visible"
+        );
+
+        let core = domains.iter().find(|d| d.name == "core").unwrap();
+        assert!(core.items.iter().any(|i| i.name == "Project"));
+        assert!(core.items.iter().any(|i| i.name == "User"));
+        assert!(
+            !core.items.iter().any(|i| i.name == "Group"),
+            "Group not in visible set"
+        );
     }
 
     #[tokio::test]
@@ -323,7 +373,9 @@ mod tests {
         let client = Arc::new(gkg_server_config::ClickHouseConfiguration::default().build_client());
         let service = GraphStatusService::new(client, test_ontology());
 
-        let result = service.get_status("", ResponseFormat::Raw as i32).await;
+        let result = service
+            .get_status("", ResponseFormat::Raw as i32, &admin_context())
+            .await;
 
         assert!(result.is_err());
         let status = result.unwrap_err();
