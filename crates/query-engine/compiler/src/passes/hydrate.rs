@@ -521,6 +521,7 @@ mod tests {
             }],
             options: QueryOptions {
                 dynamic_columns: mode,
+                ..Default::default()
             },
             ..Input::default()
         }
