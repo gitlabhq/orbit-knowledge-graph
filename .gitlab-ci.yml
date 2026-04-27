@@ -396,11 +396,7 @@ docs_hugo_build:
 
 # Test Stage
 
-# Build all unit + non-Docker integration test binaries once into a nextest
-# archive on a large runner, then fan out partitioned test runs in parallel.
-# Saves ~20 CPU-minutes vs. recompiling per shard. Archive is reusable by any
-# `cargo nextest run --archive-file` consumer.
-build-test-archive:
+unit-test:
   stage: test
   extends:
     - .test-template
@@ -409,29 +405,8 @@ build-test-archive:
     - saas-linux-large-amd64
   needs: []
   script:
-    - ./scripts/run-unit-tests.sh archive --archive-file target/nextest-archive.tar.zst
+    - ./scripts/run-unit-tests.sh run --profile ci
     - sccache --show-stats || true
-  artifacts:
-    when: on_success
-    paths:
-      - target/nextest-archive.tar.zst
-    expire_in: 6 hours
-
-unit-test:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  needs:
-    - build-test-archive
-  parallel: 3
-  before_script:
-    - mise install
-  script:
-    - cargo nextest run --profile ci
-        --archive-file target/nextest-archive.tar.zst
-        --workspace-remap .
-        --partition hash:${CI_NODE_INDEX}/${CI_NODE_TOTAL}
 
 integration-tests-codegraph:
   stage: test
