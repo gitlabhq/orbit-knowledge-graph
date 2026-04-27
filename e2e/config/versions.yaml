@@ -14,12 +14,12 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "9.11.0-2467057286"
+  chart: "9.11.1-2481647484"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "67938986ad47c7e3d7d54eb8e24ca74054de1801"
+  ref: "097ad6c1ae641ae52416d78fd7606eeb5cb379cb"
   # Per-component digest pins. Only Rails-bearing images need pinning because
   # the schema-version init check lives in their code. Consumed by
   # values/gitlab.yaml.gotmpl which renders them as "master@<digest>" tags.
@@ -37,3 +37,17 @@ gkg:
     tag: "0.26.1"
 nats:
   chart: "2.12.6"
+postgresql:
+  # bitnami/postgresql chart line that ships PG 17 (the version GitLab 19.0
+  # will require — releasing 2026-05-21).
+  chart: "16.7.27"
+  image:
+    # Bitnami's main registry switched to paid in Aug 2025; the legacy free
+    # mirror still publishes the same tags.
+    repository: bitnamilegacy/postgresql
+    tag: "17.6.0-debian-12-r4"
+redis:
+  chart: "25.4.1"
+  image:
+    repository: bitnamilegacy/redis
+    tag: "8.0.3-debian-12-r3"
