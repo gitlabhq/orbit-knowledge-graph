@@ -119,7 +119,7 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: contacted_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
-    - {name: idx_runner_type, column: runner_type, type: "set(8)", granularity: 2}
+    - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}

@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     contacted_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
-    INDEX idx_runner_type runner_type TYPE set(8) GRANULARITY 2,
+    INDEX idx_runner_type runner_type TYPE set(4) GRANULARITY 2,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_runner_type (SELECT * ORDER BY (runner_type, id))
