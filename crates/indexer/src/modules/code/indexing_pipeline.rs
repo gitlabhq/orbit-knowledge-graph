@@ -314,10 +314,13 @@ impl CodeIndexingPipeline {
             self.metrics
                 .errors
                 .add(1, &[KeyValue::new("stage", error.stage)]);
-            return Err(HandlerError::Processing(format!(
-                "fatal code indexing pipeline error during {} for {}: {}",
-                error.stage, error.file_path, error.error
-            )));
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during {} for {}: {}",
+                    error.stage, error.file_path, error.error
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
         }
 
         context.progress.notify_in_progress().await;

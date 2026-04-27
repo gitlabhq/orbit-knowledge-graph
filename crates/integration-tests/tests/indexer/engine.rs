@@ -16,6 +16,7 @@ use gkg_server_config::{
 };
 use gkg_utils::arrow::ArrowUtils;
 use indexer::clickhouse::{ArrowClickHouseClient, ClickHouseDestination};
+use indexer::dead_letter::{DEAD_LETTER_STREAM, DeadLetterEnvelope};
 use indexer::engine::{Engine, EngineBuilder};
 use indexer::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
 use indexer::metrics::EngineMetrics;
@@ -520,5 +521,206 @@ async fn subject_is_unblocked_after_handler_panic() {
         context.query_count().await,
         1,
         "second message should be processed"
+    );
+}
+
+// -- Permanent error test helpers --
+
+use indexer::handler::PermanentAction;
+
+fn permanent_error_subscription(stream: &str, subject: &str) -> Subscription {
+    Subscription::new(stream, subject).dead_letter_on_exhaustion(true)
+}
+
+struct PermanentErrorHandler {
+    stream: String,
+    subject: String,
+    error_message: String,
+    action: PermanentAction,
+}
+
+impl PermanentErrorHandler {
+    fn new(stream: &str, subject: &str, action: PermanentAction, error_message: &str) -> Self {
+        Self {
+            stream: stream.into(),
+            subject: subject.into(),
+            error_message: error_message.into(),
+            action,
+        }
+    }
+}
+
+#[async_trait]
+impl Handler for PermanentErrorHandler {
+    fn name(&self) -> &str {
+        "permanent-error-handler"
+    }
+
+    fn subscription(&self) -> Subscription {
+        permanent_error_subscription(&self.stream, &self.subject)
+    }
+
+    fn engine_config(&self) -> &HandlerConfiguration {
+        static CONFIG: HandlerConfiguration = HandlerConfiguration {
+            concurrency_group: None,
+            max_attempts: Some(5),
+            retry_interval_secs: Some(1),
+        };
+        &CONFIG
+    }
+
+    async fn handle(
+        &self,
+        _context: HandlerContext,
+        _message: Envelope,
+    ) -> Result<(), HandlerError> {
+        Err(HandlerError::Permanent {
+            message: self.error_message.clone(),
+            action: self.action,
+        })
+    }
+}
+
+async fn publish_test_event(broker: &NatsBroker, subscription: &Subscription) {
+    let envelope = Envelope::new(&TestEvent {
+        id: 42,
+        name: "will-fail-permanently".into(),
+    })
+    .expect("envelope");
+    broker
+        .publish(subscription, &envelope)
+        .await
+        .expect("publish should succeed");
+}
+
+async fn dlq_message_count(nats_url: &str) -> u64 {
+    let nats_client = async_nats::connect(format!("nats://{nats_url}"))
+        .await
+        .expect("connect to NATS");
+    let jetstream = async_nats::jetstream::new(nats_client);
+    let mut dlq_stream = jetstream
+        .get_stream(DEAD_LETTER_STREAM)
+        .await
+        .expect("DLQ stream should exist");
+    let info = dlq_stream.info().await.expect("DLQ stream info");
+    info.state.messages
+}
+
+async fn last_dlq_envelope(nats_url: &str) -> DeadLetterEnvelope {
+    let nats_client = async_nats::connect(format!("nats://{nats_url}"))
+        .await
+        .expect("connect to NATS");
+    let jetstream = async_nats::jetstream::new(nats_client);
+    let mut dlq_stream = jetstream
+        .get_stream(DEAD_LETTER_STREAM)
+        .await
+        .expect("DLQ stream should exist");
+    let last_seq = dlq_stream
+        .info()
+        .await
+        .expect("DLQ stream info")
+        .state
+        .last_sequence;
+    let raw = dlq_stream
+        .get_raw_message(last_seq)
+        .await
+        .expect("get DLQ message");
+    serde_json::from_slice(&raw.payload).expect("deserialize DLQ envelope")
+}
+
+#[tokio::test]
+async fn permanent_dlq_error_sends_to_dlq_on_first_attempt() {
+    let context = TestContext::new().await;
+    let stream = "permanent_dlq_stream";
+    let subject = "permanent_dlq.events";
+    let subscription = permanent_error_subscription(stream, subject);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("permanent-dlq-consumer".into()),
+            ..Default::default()
+        })
+        .await;
+    let destination = context.create_destination().await;
+
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = PermanentErrorHandler::new(
+        stream,
+        subject,
+        PermanentAction::DeadLetter,
+        "fatal code indexing pipeline error during parse for main.rs: unsupported",
+    );
+    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(3)).await;
+
+    assert_eq!(
+        context.query_count().await,
+        0,
+        "nothing written to ClickHouse"
+    );
+    assert!(
+        dlq_message_count(&context.nats_url).await >= 1,
+        "DLQ should have a message"
+    );
+
+    let dlq_envelope = last_dlq_envelope(&context.nats_url).await;
+    assert_eq!(dlq_envelope.attempts, 1, "should DLQ on first attempt");
+    assert!(
+        dlq_envelope
+            .last_error
+            .contains("fatal code indexing pipeline error"),
+        "unexpected DLQ error: {}",
+        dlq_envelope.last_error
+    );
+}
+
+#[tokio::test]
+async fn permanent_drop_error_drops_without_dlq() {
+    let context = TestContext::new().await;
+    let stream = "permanent_drop_stream";
+    let subject = "permanent_drop.events";
+    let subscription = permanent_error_subscription(stream, subject);
+
+    let broker = context
+        .create_broker_with_config(NatsConfiguration {
+            url: context.nats_url.clone(),
+            consumer_name: Some("permanent-drop-consumer".into()),
+            ..Default::default()
+        })
+        .await;
+    let destination = context.create_destination().await;
+
+    broker
+        .ensure_streams(std::slice::from_ref(&subscription))
+        .await
+        .expect("stream creation");
+
+    publish_test_event(&broker, &subscription).await;
+
+    let handler = PermanentErrorHandler::new(
+        stream,
+        subject,
+        PermanentAction::Drop,
+        "known unrecoverable state",
+    );
+    let engine = create_engine(broker.clone(), destination, Box::new(handler));
+    run_engine_for(engine, Duration::from_secs(3)).await;
+
+    assert_eq!(
+        context.query_count().await,
+        0,
+        "nothing written to ClickHouse"
+    );
+    assert_eq!(
+        dlq_message_count(&context.nats_url).await,
+        0,
+        "DLQ should be empty"
     );
 }

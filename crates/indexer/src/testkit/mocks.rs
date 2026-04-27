@@ -240,7 +240,16 @@ impl Handler for MockHandler {
         }
 
         if let Some(ref error) = self.error {
-            return Err(HandlerError::Processing(error.to_string()));
+            return match error {
+                HandlerError::Permanent { message, action } => Err(HandlerError::Permanent {
+                    message: message.clone(),
+                    action: *action,
+                }),
+                HandlerError::Deserialization(_) => {
+                    Err(HandlerError::Processing(error.to_string()))
+                }
+                HandlerError::Processing(msg) => Err(HandlerError::Processing(msg.clone())),
+            };
         }
 
         Ok(())
