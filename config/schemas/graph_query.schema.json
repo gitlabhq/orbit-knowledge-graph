@@ -141,6 +141,16 @@
           "nodes": {
             "minItems": 1,
             "description": "Aggregation requires at least 1 node"
+          },
+          "relationships": {
+            "items": {
+              "properties": {
+                "direction": {
+                  "enum": ["outgoing", "incoming"],
+                  "description": "Aggregation only supports outgoing or incoming direction."
+                }
+              }
+            }
           }
         }
       }
