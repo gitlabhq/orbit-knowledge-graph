@@ -390,6 +390,19 @@
           },
           "minProperties": 1
         },
+        "denormalization": {
+          "type": "array",
+          "description": "Node properties to denormalize onto all edge tables. The loader auto-derives which edges need each property based on edge variants.",
+          "items": {
+            "type": "object",
+            "required": ["node", "property"],
+            "properties": {
+              "node": { "type": "string", "description": "Entity type (e.g. Pipeline)." },
+              "property": { "type": "string", "description": "Property name on the node (e.g. status)." }
+            },
+            "additionalProperties": false
+          }
+        },
         "internal_column_prefix": {
           "type": "string",
           "pattern": "^_[a-z_]+$",
@@ -747,21 +760,7 @@
           "items": { "$ref": "#/definitions/edgeVariant" },
           "minItems": 1
         },
-        "etl": { "$ref": "#/definitions/edgeEtlConfig" },
-        "denormalized_properties": {
-          "type": "array",
-          "description": "Node properties to denormalize onto the edge table for filtered aggregation optimization.",
-          "items": {
-            "type": "object",
-            "required": ["node", "property", "direction"],
-            "properties": {
-              "node": { "type": "string", "description": "Entity type (e.g. Pipeline)." },
-              "property": { "type": "string", "description": "Property name on the node (e.g. status)." },
-              "direction": { "type": "string", "enum": ["source", "target"], "description": "Which end of the edge this entity appears on." }
-            },
-            "additionalProperties": false
-          }
-        }
+        "etl": { "$ref": "#/definitions/edgeEtlConfig" }
       },
       "required": ["description", "variants"],
       "additionalProperties": false

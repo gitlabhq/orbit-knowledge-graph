@@ -11,13 +11,3 @@ variants:
     to_node: { type: Milestone, id: id }
     description: "Merge request assigned to milestone."
 
-denormalized_properties:
-  - node: WorkItem
-    property: state
-    direction: source
-  - node: WorkItem
-    property: work_item_type
-    direction: source
-  - node: MergeRequest
-    property: state
-    direction: source

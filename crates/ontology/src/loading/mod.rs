@@ -81,6 +81,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let schema_content = reader.read("schema.yaml")?;
     let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
+    let denormalization_entries = schema.settings.denormalization.clone();
+
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
     ontology.table_prefix = schema.settings.table_prefix.clone();
@@ -245,7 +247,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
 
     for (edge_name, edge_path) in &schema.edges {
         let content = reader.read(edge_path)?;
-        let mut edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
+        let edge_def: EdgeYaml = parse_yaml(&content, edge_path)?;
 
         let entities = edge_def.to_entities(edge_name.clone(), ontology.edge_table());
 
@@ -286,59 +288,88 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .insert(edge_name.clone(), desc.clone());
         }
 
-        let denorm_props = std::mem::take(&mut edge_def.denormalized_properties);
-
         if let Some(etl_config) = edge_def.into_etl_config(&etl_settings)? {
             ontology
                 .edge_etl_configs
                 .insert(edge_name.clone(), etl_config);
         }
+    }
 
-        for dp in denorm_props {
-            let direction = match dp.direction.as_str() {
-                "source" => crate::entities::DenormDirection::Source,
-                "target" => crate::entities::DenormDirection::Target,
-                other => {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}': denormalized_properties direction must be 'source' or 'target', got '{}'",
-                        edge_name, other
-                    )));
+    // Auto-derive denormalized properties from central denormalization list.
+    let mut denorm_columns: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+
+    for entry in &denormalization_entries {
+        let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
+            OntologyError::Validation(format!("denormalization: unknown node '{}'", entry.node))
+        })?;
+        let field = node
+            .fields
+            .iter()
+            .find(|f| f.name == entry.property)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "denormalization: unknown property '{}' on node '{}'",
+                    entry.property, entry.node
+                ))
+            })?;
+        let enum_values = field.enum_values.clone();
+
+        for (edge_name, variants) in &ontology.edges {
+            for variant in variants {
+                let mut directions = Vec::new();
+                if variant.source_kind == entry.node {
+                    directions.push(crate::entities::DenormDirection::Source);
                 }
-            };
-            let edge_column = format!(
-                "{}_{}",
-                match direction {
-                    crate::entities::DenormDirection::Source => "source",
-                    crate::entities::DenormDirection::Target => "target",
-                },
-                dp.property
-            );
+                if variant.target_kind == entry.node {
+                    directions.push(crate::entities::DenormDirection::Target);
+                }
+                for direction in directions {
+                    let edge_column = format!(
+                        "{}_{}",
+                        match direction {
+                            crate::entities::DenormDirection::Source => "source",
+                            crate::entities::DenormDirection::Target => "target",
+                        },
+                        entry.property
+                    );
+                    denorm_columns.insert(edge_column.clone());
 
-            let node = ontology.nodes.get(&dp.node).ok_or_else(|| {
-                OntologyError::Validation(format!(
-                    "edge '{}': denormalized_properties references unknown node '{}'",
-                    edge_name, dp.node
-                ))
-            })?;
-            let field = node.fields.iter().find(|f| f.name == dp.property).ok_or_else(|| {
-                OntologyError::Validation(format!(
-                    "edge '{}': denormalized_properties references unknown property '{}' on node '{}'",
-                    edge_name, dp.property, dp.node
-                ))
-            })?;
-            let enum_values = field.enum_values.clone();
-
-            ontology
-                .denormalized_properties
-                .push(crate::entities::DenormalizedProperty {
-                    relationship_kind: edge_name.clone(),
-                    node_kind: dp.node,
-                    property_name: dp.property,
-                    direction,
-                    edge_column,
-                    enum_values,
-                });
+                    let already_exists = ontology.denormalized_properties.iter().any(|dp| {
+                        dp.relationship_kind == *edge_name
+                            && dp.node_kind == entry.node
+                            && dp.property_name == entry.property
+                            && dp.direction == direction
+                    });
+                    if !already_exists {
+                        ontology.denormalized_properties.push(
+                            crate::entities::DenormalizedProperty {
+                                relationship_kind: edge_name.clone(),
+                                node_kind: entry.node.clone(),
+                                property_name: entry.property.clone(),
+                                direction,
+                                edge_column,
+                                enum_values: enum_values.clone(),
+                            },
+                        );
+                    }
+                }
+            }
         }
+    }
+
+    // Auto-populate denormalized_columns on all edge tables.
+    let auto_columns: Vec<crate::entities::StorageColumn> = denorm_columns
+        .into_iter()
+        .map(|name| crate::entities::StorageColumn {
+            name,
+            ch_type: "Nullable(LowCardinality(String))".to_string(),
+            default: None,
+            codec: Some(vec!["LZ4".to_string()]),
+        })
+        .collect();
+
+    for config in ontology.edge_table_configs.values_mut() {
+        config.storage.denormalized_columns = auto_columns.clone();
     }
 
     // Resolve skip_security_filter_for_entities → physical table names.

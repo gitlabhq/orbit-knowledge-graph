@@ -18,10 +18,3 @@ etl:
     id: deployment_id
     type: Deployment
 
-denormalized_properties:
-  - node: MergeRequest
-    property: state
-    direction: source
-  - node: Deployment
-    property: status
-    direction: target

@@ -15,10 +15,3 @@ variants:
     to_node: { type: Group, id: id }
     description: "Work item belongs to group."
 
-denormalized_properties:
-  - node: WorkItem
-    property: state
-    direction: source
-  - node: WorkItem
-    property: work_item_type
-    direction: source

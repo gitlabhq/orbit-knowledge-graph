@@ -19,20 +19,3 @@ variants:
     to_node: { type: WorkItem, id: id }
     description: "User authored work item."
 
-denormalized_properties:
-  - node: MergeRequest
-    property: state
-    direction: target
-  - node: WorkItem
-    property: state
-    direction: target
-  - node: WorkItem
-    property: work_item_type
-    direction: target
-  - node: Vulnerability
-    property: state
-    direction: target
-  - node: Vulnerability
-    property: severity
-    direction: target
-

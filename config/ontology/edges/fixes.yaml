@@ -18,13 +18,3 @@ etl:
     id: vulnerability_id
     type: Vulnerability
 
-denormalized_properties:
-  - node: MergeRequest
-    property: state
-    direction: source
-  - node: Vulnerability
-    property: state
-    direction: target
-  - node: Vulnerability
-    property: severity
-    direction: target

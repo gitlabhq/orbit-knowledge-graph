@@ -28,16 +28,3 @@ etl:
     id: target_id
     type: WorkItem
 
-denormalized_properties:
-  - node: WorkItem
-    property: state
-    direction: source
-  - node: WorkItem
-    property: work_item_type
-    direction: source
-  - node: WorkItem
-    property: state
-    direction: target
-  - node: WorkItem
-    property: work_item_type
-    direction: target

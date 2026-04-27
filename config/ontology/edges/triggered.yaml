@@ -15,10 +15,3 @@ variants:
     to_node: { type: Job, id: id }
     description: "User triggered job."
 
-denormalized_properties:
-  - node: Pipeline
-    property: status
-    direction: target
-  - node: MergeRequest
-    property: state
-    direction: source

@@ -18,13 +18,3 @@ etl:
     id: issue_id
     type: WorkItem
 
-denormalized_properties:
-  - node: MergeRequest
-    property: state
-    direction: source
-  - node: WorkItem
-    property: state
-    direction: target
-  - node: WorkItem
-    property: work_item_type
-    direction: target

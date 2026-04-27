@@ -19,15 +19,6 @@ pub(crate) struct EdgeYaml {
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
     etl: Option<EdgeEtlYaml>,
-    #[serde(default)]
-    pub denormalized_properties: Vec<DenormalizedPropertyYaml>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct DenormalizedPropertyYaml {
-    pub node: String,
-    pub property: String,
-    pub direction: String,
 }
 
 #[derive(Debug, Deserialize)]

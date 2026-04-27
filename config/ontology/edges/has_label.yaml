@@ -11,13 +11,3 @@ variants:
     to_node: { type: Label, id: id }
     description: "Merge request has label."
 
-denormalized_properties:
-  - node: WorkItem
-    property: state
-    direction: source
-  - node: WorkItem
-    property: work_item_type
-    direction: source
-  - node: MergeRequest
-    property: state
-    direction: source
