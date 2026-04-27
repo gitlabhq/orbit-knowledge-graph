@@ -281,6 +281,7 @@ pub(super) async fn admin_only_non_admin_max_aggregation_rejects_at_compile(ctx:
                 "function": "max",
                 "target": "u",
                 "property": "is_admin",
+                "group_by": "g",
                 "alias": "has_admin"
             }],
             "limit": 10
@@ -314,6 +315,7 @@ pub(super) async fn admin_only_non_admin_count_aggregation_on_auditor_rejects_at
                 "function": "count",
                 "target": "u",
                 "property": "is_auditor",
+                "group_by": "g",
                 "alias": "auditor_count"
             }],
             "limit": 10

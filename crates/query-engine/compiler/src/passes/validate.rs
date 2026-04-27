@@ -547,6 +547,15 @@ impl<'a> Validator<'a> {
             ));
         }
 
+        // Multi-node aggregation without group_by produces a full cross-join
+        // scan that will timeout on any real dataset. Require group_by when
+        // there are 2+ nodes.
+        if input.nodes.len() > 1 && has_ungrouped {
+            return Err(QueryError::Validation(
+                "multi-node aggregation requires 'group_by' on each aggregation".into(),
+            ));
+        }
+
         for (i, agg) in input.aggregations.iter().enumerate() {
             if agg.function == AggFunction::Collect {
                 return Err(QueryError::Validation(format!(
@@ -1173,6 +1182,37 @@ mod tests {
                 ]
             }"#,
             "cannot mix grouped and ungrouped aggregations",
+        );
+    }
+
+    #[test]
+    fn rejects_multi_node_aggregation_without_group_by() {
+        assert_rejects(
+            r#"{
+                "query_type": "aggregation",
+                "nodes": [
+                    {"id": "mr", "entity": "MergeRequest"},
+                    {"id": "p", "entity": "Project", "node_ids": [278964]}
+                ],
+                "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
+                "aggregations": [
+                    {"function": "count", "target": "mr", "alias": "total"}
+                ]
+            }"#,
+            "multi-node aggregation requires 'group_by'",
+        );
+    }
+
+    #[test]
+    fn accepts_single_node_aggregation_without_group_by() {
+        assert_ok(
+            r#"{
+                "query_type": "aggregation",
+                "node": {"id": "u", "entity": "User", "node_ids": [1]},
+                "aggregations": [
+                    {"function": "count", "target": "u", "alias": "total"}
+                ]
+            }"#,
         );
     }
 
