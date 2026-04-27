@@ -220,8 +220,17 @@
             },
             "edges": {
               "type": "object",
-              "description": "Edge generation config keyed by source column name.",
-              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges (for example an outgoing FK plus its inverse).",
+              "additionalProperties": {
+                "oneOf": [
+                  { "$ref": "#/definitions/edgeMappingDefinition" },
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
+                    "minItems": 1
+                  }
+                ]
+              }
             }
           },
           "required": ["type", "scope", "source"],
@@ -264,8 +273,17 @@
             },
             "edges": {
               "type": "object",
-              "description": "Edge generation config keyed by source column name.",
-              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges.",
+              "additionalProperties": {
+                "oneOf": [
+                  { "$ref": "#/definitions/edgeMappingDefinition" },
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
+                    "minItems": 1
+                  }
+                ]
+              }
             }
           },
           "required": ["type", "scope", "select", "from"],

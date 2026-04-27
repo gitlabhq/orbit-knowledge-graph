@@ -175,14 +175,19 @@ fn resolve_node(node: &NodeEntity, etl: &EtlConfig, ontology: &Ontology) -> Node
 fn collect_fk_extract_columns(etl: &EtlConfig, namespaced: bool) -> Vec<String> {
     let mut columns = vec!["id".to_string()];
 
-    for (fk_column, mapping) in etl.edges() {
+    for (fk_column, mapping) in etl.edge_mappings() {
         columns.push(fk_column.clone());
         if let EdgeTarget::Column { column, .. } = &mapping.target {
             columns.push(column.clone());
         }
     }
 
-    if namespaced && !etl.edges().is_empty() {
+    // Dedup since multi-emit on the same FK column would otherwise repeat the
+    // column name in the SELECT list.
+    columns.sort();
+    columns.dedup();
+
+    if namespaced && etl.has_edges() && !columns.iter().any(|c| c == TRAVERSAL_PATH_COLUMN) {
         columns.push(TRAVERSAL_PATH_COLUMN.to_string());
     }
 
@@ -224,8 +229,7 @@ fn resolve_fk_edges(
     namespaced: bool,
     ontology: &Ontology,
 ) -> Vec<FkEdgeTransform> {
-    etl.edges()
-        .iter()
+    etl.edge_mappings()
         .map(|(fk_column, mapping)| {
             let fk_ref = EdgeId::Column(fk_column.clone());
             let node_id = EdgeId::Column("id".to_string());
@@ -555,6 +559,164 @@ mod tests {
         assert!(
             matches!(start, ExtractColumn::DateClamp(_)),
             "Milestone.start_date must be DateClamp"
+        );
+    }
+
+    /// End-to-end check: a node whose `etl.edges.<col>` declares multiple
+    /// mappings produces N FkEdgeTransform entries on the resulting NodePlan,
+    /// all sharing the same parent extract (no extra StandaloneEdgePlan).
+    #[test]
+    fn multi_emit_fk_edges_share_parent_extract() {
+        use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+        use std::collections::BTreeMap;
+
+        let mut edges_map: BTreeMap<String, Vec<EdgeMapping>> = BTreeMap::new();
+        edges_map.insert(
+            "commit_id".to_string(),
+            vec![
+                EdgeMapping {
+                    target: EdgeTarget::Literal("Pipeline".to_string()),
+                    relationship_kind: "IN_PIPELINE".to_string(),
+                    direction: EdgeDirection::Outgoing,
+                    delimiter: None,
+                    array_field: None,
+                    array: false,
+                },
+                EdgeMapping {
+                    target: EdgeTarget::Literal("Pipeline".to_string()),
+                    relationship_kind: "HAS_JOB".to_string(),
+                    direction: EdgeDirection::Incoming,
+                    delimiter: None,
+                    array_field: None,
+                    array: false,
+                },
+            ],
+        );
+
+        let etl = EtlConfig::Table {
+            scope: EtlScope::Namespaced,
+            source: "siphon_p_ci_builds".to_string(),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["traversal_path".to_string(), "id".to_string()],
+            edges: edges_map,
+        };
+
+        let ontology = Ontology::load_embedded().expect("ontology");
+        let fk_edges = resolve_fk_edges(&etl, "Job", true, &ontology);
+
+        assert_eq!(
+            fk_edges.len(),
+            2,
+            "two emissions on the same column should produce two FkEdgeTransforms",
+        );
+
+        let kinds: Vec<&str> = fk_edges
+            .iter()
+            .map(|e| e.relationship_kind.as_str())
+            .collect();
+        assert!(kinds.contains(&"IN_PIPELINE"));
+        assert!(kinds.contains(&"HAS_JOB"));
+
+        // The Job-side commit_id stays as the FK column for both directions:
+        // outgoing IN_PIPELINE -> source=Job.id, target=Pipeline.commit_id
+        // incoming HAS_JOB     -> source=Pipeline.commit_id, target=Job.id
+        let in_pipeline = fk_edges
+            .iter()
+            .find(|e| e.relationship_kind == "IN_PIPELINE")
+            .unwrap();
+        let has_job = fk_edges
+            .iter()
+            .find(|e| e.relationship_kind == "HAS_JOB")
+            .unwrap();
+
+        assert!(
+            matches!(&in_pipeline.source_id, EdgeId::Column(c) if c == "id"),
+            "outgoing source_id should be Job.id"
+        );
+        assert!(
+            matches!(&in_pipeline.target_id, EdgeId::Column(c) if c == "commit_id"),
+            "outgoing target_id should be commit_id"
+        );
+        assert!(
+            matches!(&has_job.source_id, EdgeId::Column(c) if c == "commit_id"),
+            "incoming source_id should be commit_id"
+        );
+        assert!(
+            matches!(&has_job.target_id, EdgeId::Column(c) if c == "id"),
+            "incoming target_id should be Job.id"
+        );
+    }
+
+    /// Backward-compat regression: the embedded ontology (single-emit only,
+    /// pre-MR shape) must still produce exactly one FkEdgeTransform per
+    /// declared FK. Catches accidental fanout from the multi-emit refactor.
+    #[test]
+    fn embedded_ontology_single_emit_fks_still_produce_one_transform_each() {
+        let ontology = Ontology::load_embedded().expect("ontology");
+        let plans = from_ontology(&ontology);
+
+        for node_plan in &plans.node_plans {
+            let node_def = ontology
+                .get_node(&node_plan.name)
+                .expect("node defined in ontology");
+            let Some(etl) = &node_def.etl else { continue };
+            let expected_edge_count: usize = etl.edge_mappings().count();
+            assert_eq!(
+                node_plan.edges.len(),
+                expected_edge_count,
+                "node {}: expected {} FK edge transforms, got {}",
+                node_plan.name,
+                expected_edge_count,
+                node_plan.edges.len(),
+            );
+        }
+    }
+
+    /// `collect_fk_extract_columns` must include each FK column exactly once
+    /// even when it has multiple emissions.
+    #[test]
+    fn multi_emit_fk_does_not_duplicate_extract_columns() {
+        use ontology::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
+        use std::collections::BTreeMap;
+
+        let mut edges_map: BTreeMap<String, Vec<EdgeMapping>> = BTreeMap::new();
+        edges_map.insert(
+            "commit_id".to_string(),
+            vec![
+                EdgeMapping {
+                    target: EdgeTarget::Literal("Pipeline".to_string()),
+                    relationship_kind: "IN_PIPELINE".to_string(),
+                    direction: EdgeDirection::Outgoing,
+                    delimiter: None,
+                    array_field: None,
+                    array: false,
+                },
+                EdgeMapping {
+                    target: EdgeTarget::Literal("Pipeline".to_string()),
+                    relationship_kind: "HAS_JOB".to_string(),
+                    direction: EdgeDirection::Incoming,
+                    delimiter: None,
+                    array_field: None,
+                    array: false,
+                },
+            ],
+        );
+
+        let etl = EtlConfig::Table {
+            scope: EtlScope::Namespaced,
+            source: "siphon_p_ci_builds".to_string(),
+            watermark: "_siphon_replicated_at".to_string(),
+            deleted: "_siphon_deleted".to_string(),
+            order_by: vec!["id".to_string()],
+            edges: edges_map,
+        };
+
+        let columns = collect_fk_extract_columns(&etl, true);
+        let commit_id_count = columns.iter().filter(|c| c.as_str() == "commit_id").count();
+        assert_eq!(
+            commit_id_count, 1,
+            "commit_id should appear exactly once even with two emissions: {columns:?}"
         );
     }
 }

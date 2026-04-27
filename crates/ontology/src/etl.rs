@@ -13,7 +13,7 @@ pub enum EtlScope {
 }
 
 /// Direction of an edge relative to the node defining the FK column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EdgeDirection {
     /// Node with FK is edge source: (this_node) -[edge]-> (fk_target)
@@ -58,7 +58,10 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         /// Edges to generate from columns. Key is the source column name.
-        edges: BTreeMap<String, EdgeMapping>,
+        /// Edges to generate from columns. Key is the source column name.
+        /// Each column may emit one or more edges (e.g. one outgoing FK edge
+        /// plus an incoming inverse edge sourced from the same column).
+        edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
     Query {
         scope: EtlScope,
@@ -69,7 +72,10 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         traversal_path_filter: Option<String>,
-        edges: BTreeMap<String, EdgeMapping>,
+        /// Edges to generate from columns. Key is the source column name.
+        /// Each column may emit one or more edges (e.g. one outgoing FK edge
+        /// plus an incoming inverse edge sourced from the same column).
+        edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
 }
 
@@ -102,11 +108,23 @@ impl EtlConfig {
         }
     }
 
-    pub fn edges(&self) -> &BTreeMap<String, EdgeMapping> {
+    pub fn edges(&self) -> &BTreeMap<String, Vec<EdgeMapping>> {
         match self {
             EtlConfig::Table { edges, .. } => edges,
             EtlConfig::Query { edges, .. } => edges,
         }
+    }
+
+    /// Iterate over every (source-column, mapping) pair, flattening the
+    /// per-column Vec so that callers see one logical edge emission at a time.
+    pub fn edge_mappings(&self) -> impl Iterator<Item = (&String, &EdgeMapping)> + '_ {
+        self.edges()
+            .iter()
+            .flat_map(|(col, mappings)| mappings.iter().map(move |m| (col, m)))
+    }
+
+    pub fn has_edges(&self) -> bool {
+        self.edges().values().any(|v| !v.is_empty())
     }
 
     pub fn validate_query_parameters(&self) -> Vec<&'static str> {
