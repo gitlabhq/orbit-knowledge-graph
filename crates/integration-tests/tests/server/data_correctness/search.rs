@@ -13,8 +13,8 @@ pub(super) async fn search_returns_correct_user_properties(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(6);
-    resp.assert_node_order("User", &[1, 2, 3, 4, 5, 6]);
+    resp.assert_node_count(7);
+    resp.assert_node_order("User", &[1, 2, 3, 4, 5, 6, 7]);
 
     let alice = resp.find_node("User", 1).unwrap();
     alice.assert_str("username", "alice");
@@ -44,7 +44,7 @@ pub(super) async fn search_returns_correct_project_properties(ctx: &TestContext)
     )
     .await;
 
-    resp.assert_node_count(5);
+    resp.assert_node_count(6);
 
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("name") == Some("Public Project")
@@ -95,8 +95,8 @@ pub(super) async fn search_returns_correct_project_full_path(ctx: &TestContext) 
     )
     .await;
 
-    resp.assert_node_count(5);
-    resp.assert_node_order("Project", &[1000, 1001, 1002, 1003, 1004]);
+    resp.assert_node_count(6);
+    resp.assert_node_order("Project", &[1000, 1001, 1002, 1003, 1004, 1010]);
     resp.assert_node("Project", 1000, |n| {
         n.prop_str("full_path") == Some("public-group/public-project")
     });
@@ -157,8 +157,8 @@ pub(super) async fn search_filter_in_returns_matching_rows(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(3);
-    resp.assert_node_ids("Project", &[1000, 1002, 1004]);
+    resp.assert_node_count(4);
+    resp.assert_node_ids("Project", &[1000, 1002, 1004, 1010]);
 
     resp.assert_filter("Project", "visibility_level", |n| {
         let vis = n.prop_str("visibility_level").unwrap_or("");
@@ -246,7 +246,7 @@ pub(super) async fn search_filter_is_null_matches_unset_columns(ctx: &TestContex
     )
     .await;
 
-    resp.assert_node_count(6);
+    resp.assert_node_count(7);
     resp.assert_filter("User", "avatar_url", |n| {
         n.prop_str("username").is_some() && n.prop("avatar_url").is_none()
     });
@@ -265,8 +265,8 @@ pub(super) async fn search_with_order_by_desc(ctx: &TestContext) {
     )
     .await;
 
-    resp.assert_node_count(6);
-    resp.assert_node_order("User", &[6, 5, 4, 3, 2, 1]);
+    resp.assert_node_count(7);
+    resp.assert_node_order("User", &[7, 6, 5, 4, 3, 2, 1]);
 }
 
 pub(super) async fn search_no_auth_returns_empty(ctx: &TestContext) {

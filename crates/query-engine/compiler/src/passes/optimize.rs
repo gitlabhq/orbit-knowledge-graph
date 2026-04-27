@@ -27,7 +27,7 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{Input, InputNode, QueryType};
+use crate::input::{Direction, Input, InputNode, QueryType};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -42,6 +42,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
+            push_kind_literals_into_variable_length_arms(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -245,6 +246,108 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
         let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
         parts.extend(kind_filters);
         q.where_clause = Expr::conjoin(parts);
+    }
+}
+
+/// Push static `source_kind`/`target_kind = '<entity>'` literals into each
+/// arm of a variable-length traversal's UNION ALL.
+///
+/// Lowering already constrains kinds at the OUTER alias (`hop_e{i}`), but
+/// ClickHouse will not propagate those into the arm's per-edge scans. The
+/// literals are static, so each inner edge scan can use the kind-led PK
+/// projection (`by_rel_source_kind` / `by_rel_target_kind`) for granule
+/// pruning. Dynamic IN-subqueries cannot — they force per-row hash probes.
+fn push_kind_literals_into_variable_length_arms(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    if input.relationships.is_empty() {
+        return;
+    }
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops <= 1 {
+            continue;
+        }
+
+        let from_entity = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .and_then(|n| n.entity.as_deref());
+        let to_entity = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .and_then(|n| n.entity.as_deref());
+        if from_entity.is_none() && to_entity.is_none() {
+            continue;
+        }
+
+        // For Outgoing/Both: e1.source_id = rel.from, e<depth>.target_id = rel.to.
+        // For Incoming: e1.target_id = rel.from, e<depth>.source_id = rel.to.
+        let (from_kind_col, to_kind_col) = match rel.direction {
+            Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+            Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+        };
+
+        let alias = format!("hop_e{i}");
+        let union_ref = match find_union_mut(&mut q.from, &alias) {
+            Some(u) => u,
+            None => continue,
+        };
+        let TableRef::Union { queries, .. } = union_ref else {
+            continue;
+        };
+
+        let start = rel.min_hops.max(1);
+        for (arm_idx, arm) in queries.iter_mut().enumerate() {
+            let depth = start + arm_idx as u32;
+            let mut filters: Vec<Expr> = Vec::new();
+            if let Some(ent) = from_entity {
+                filters.push(Expr::eq(
+                    Expr::col("e1", from_kind_col),
+                    Expr::param(ChType::String, ent.to_string()),
+                ));
+            }
+            if let Some(ent) = to_entity {
+                let last = format!("e{depth}");
+                filters.push(Expr::eq(
+                    Expr::col(&last, to_kind_col),
+                    Expr::param(ChType::String, ent.to_string()),
+                ));
+            }
+            if filters.is_empty() {
+                continue;
+            }
+            let mut parts: Vec<Expr> = arm.where_clause.take().into_iter().collect();
+            parts.extend(filters);
+            arm.where_clause = Expr::conjoin(parts);
+        }
+    }
+}
+
+/// Walk a `TableRef` tree to find a `Union` with a given alias.
+fn find_union_mut<'a>(table_ref: &'a mut TableRef, alias: &str) -> Option<&'a mut TableRef> {
+    let is_match = matches!(
+        table_ref,
+        TableRef::Union { alias: a, .. } if a == alias
+    );
+    if is_match {
+        return Some(table_ref);
+    }
+    match table_ref {
+        TableRef::Join { left, right, .. } => {
+            if let Some(found) = find_union_mut(left, alias) {
+                Some(found)
+            } else {
+                find_union_mut(right, alias)
+            }
+        }
+        _ => None,
     }
 }
 
@@ -480,17 +583,39 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
                 cte,
                 &aliases,
                 input,
+                ArmAnchor::First,
             );
         }
         if let Some(ref cte) = to_cte {
-            inject_sip_for_aliases(
-                &mut q.from,
-                &mut q.where_clause,
-                end_col,
-                cte,
-                &aliases,
-                input,
-            );
+            // For variable-length arms whose endpoints both carry static kind
+            // literals (from `push_kind_literals_into_variable_length_arms`),
+            // the per-arm IN-subquery is redundant: the outer to-side node
+            // table is JOIN'd with the same cascade CTE, so the arm rows are
+            // already filtered. Skipping the per-row hash probe inside every
+            // arm lets the kind-led PK projection do its work.
+            let arms_have_kind_literals = rel.max_hops > 1
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.from)
+                    .is_some_and(|n| n.entity.is_some())
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.to)
+                    .is_some_and(|n| n.entity.is_some());
+
+            if !arms_have_kind_literals {
+                inject_sip_for_aliases(
+                    &mut q.from,
+                    &mut q.where_clause,
+                    end_col,
+                    cte,
+                    &aliases,
+                    input,
+                    ArmAnchor::Last,
+                );
+            }
         }
 
         // Cascading SIP: when the root is selective (node_ids, filters, etc.),
@@ -746,16 +871,27 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             &cte_name,
             &aliases,
             input,
+            ArmAnchor::Last,
         );
     }
+}
+
+/// Which edge in a multi-hop UNION arm's left-deep join chain a SIP filter
+/// should target. The chain's start-facing column lives on `e1` (leftmost);
+/// the chain's end-facing column lives on `e<depth>` (rightmost).
+#[derive(Copy, Clone)]
+enum ArmAnchor {
+    First,
+    Last,
 }
 
 /// Walk the FROM tree and inject `{edge_alias}.{edge_col} IN (SELECT <id_col> FROM <cte>)`
 /// into edge table scans whose alias is in `target_aliases`.
 ///
-/// This ensures SIP only pushes IDs into edges that connect to the correct node.
-/// For Union arms (multi-hop), injects into the first (leftmost) edge scan
-/// in each arm — intermediate edge scans connect to hop results, not to root IDs.
+/// For Union arms (multi-hop), the `anchor` controls which edge in the arm's
+/// join chain receives the filter:
+/// - `ArmAnchor::First` for from-side SIP (`edge_col` is the chain's start column).
+/// - `ArmAnchor::Last` for to-side SIP (`edge_col` is the chain's end column).
 fn inject_sip_for_aliases(
     table_ref: &mut TableRef,
     outer_where: &mut Option<Expr>,
@@ -763,6 +899,7 @@ fn inject_sip_for_aliases(
     cte_name: &str,
     target_aliases: &HashSet<String>,
     input: &Input,
+    anchor: ArmAnchor,
 ) {
     match table_ref {
         TableRef::Scan { table, alias, .. }
@@ -773,7 +910,15 @@ fn inject_sip_for_aliases(
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            inject_sip_for_aliases(left, outer_where, edge_col, cte_name, target_aliases, input);
+            inject_sip_for_aliases(
+                left,
+                outer_where,
+                edge_col,
+                cte_name,
+                target_aliases,
+                input,
+                anchor,
+            );
             inject_sip_for_aliases(
                 right,
                 outer_where,
@@ -781,16 +926,18 @@ fn inject_sip_for_aliases(
                 cte_name,
                 target_aliases,
                 input,
+                anchor,
             );
         }
         TableRef::Union { alias, queries, .. } if target_aliases.contains(alias.as_str()) => {
             for arm in queries {
-                inject_sip_first_edge(
+                inject_sip_at_anchor(
                     &mut arm.from,
                     &mut arm.where_clause,
                     edge_col,
                     cte_name,
                     input,
+                    anchor,
                 );
             }
         }
@@ -803,28 +950,35 @@ fn inject_sip_for_aliases(
                 cte_name,
                 target_aliases,
                 input,
+                anchor,
             );
         }
     }
 }
 
-/// Inject SIP into only the first (leftmost) edge scan in a FROM tree.
-/// Used for multi-hop UNION ALL arms where only `e1` connects to root node IDs.
-fn inject_sip_first_edge(
+/// Inject SIP into the first (leftmost) or last (rightmost) edge scan in an
+/// arm's left-deep join chain.
+fn inject_sip_at_anchor(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
     edge_col: &str,
     cte_name: &str,
     input: &Input,
+    anchor: ArmAnchor,
 ) {
     match from {
         TableRef::Scan { table, alias, .. } if is_edge_table(table, input) => {
             let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
         }
-        TableRef::Join { left, .. } => {
-            inject_sip_first_edge(left, where_clause, edge_col, cte_name, input);
-        }
+        TableRef::Join { left, right, .. } => match anchor {
+            ArmAnchor::First => {
+                inject_sip_at_anchor(left, where_clause, edge_col, cte_name, input, anchor);
+            }
+            ArmAnchor::Last => {
+                inject_sip_at_anchor(right, where_clause, edge_col, cte_name, input, anchor);
+            }
+        },
         _ => {}
     }
 }
@@ -1188,6 +1342,28 @@ fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
 
     for (i, rel) in input.relationships.iter().enumerate() {
         if rel.max_hops <= 1 {
+            continue;
+        }
+
+        // Skip when neither endpoint of the relationship has pinned `node_ids`.
+        // In that case any `_nf_<from>` CTE that exists was derived backwards
+        // by `narrow_joined_nodes_via_pinned_neighbors` from a `_nf_<to>`
+        // built upstream in the cascade. Forward-chaining from such a derived
+        // CTE produces descendants, not the intermediate hops the arm filter
+        // needs, and silently drops valid depth>1 paths.
+        // `push_kind_literals_into_variable_length_arms` covers this case
+        // with static kind literals + the outer node-table cascade SIP.
+        let from_pinned = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .is_some_and(|n| !n.node_ids.is_empty());
+        let to_pinned = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .is_some_and(|n| !n.node_ids.is_empty());
+        if !from_pinned && !to_pinned {
             continue;
         }
 
@@ -2733,5 +2909,216 @@ mod tests {
             "no frontier CTEs without _nf_ source, got: {:?}",
             q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn variable_length_arms_get_static_kind_literals() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "g".into(),
+                    entity: Some("Group".into()),
+                    table: Some("gl_group".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "g".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 3,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let arm = |depth: u32| {
+            let mut from = TableRef::scan("gl_edge", "e1");
+            for i in 2..=depth {
+                let prev = format!("e{}", i - 1);
+                let curr = format!("e{i}");
+                from = TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    from,
+                    TableRef::scan("gl_edge", &curr),
+                    Expr::eq(Expr::col(&prev, "target_id"), Expr::col(&curr, "source_id")),
+                );
+            }
+            Query {
+                select: vec![SelectExpr::star()],
+                from,
+                ..Default::default()
+            }
+        };
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(vec![arm(1), arm(2), arm(3)], "hop_e0"),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected hop_e0 union");
+        };
+        assert_eq!(queries.len(), 3);
+
+        let w1 = queries[0].where_clause.as_ref().expect("arm1 WHERE");
+        assert!(has_kind_filter(w1, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w1, "e1", "target_kind", "Project"));
+
+        let w2 = queries[1].where_clause.as_ref().expect("arm2 WHERE");
+        assert!(has_kind_filter(w2, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w2, "e2", "target_kind", "Project"));
+        assert!(!has_kind_filter(w2, "e1", "target_kind", "Project"));
+
+        let w3 = queries[2].where_clause.as_ref().expect("arm3 WHERE");
+        assert!(has_kind_filter(w3, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w3, "e3", "target_kind", "Project"));
+    }
+
+    #[test]
+    fn variable_length_arms_skip_when_no_entity_pinned() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "g".into(),
+                    entity: None,
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: None,
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "g".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(
+                vec![
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::join(
+                            crate::ast::JoinType::Inner,
+                            TableRef::scan("gl_edge", "e1"),
+                            TableRef::scan("gl_edge", "e2"),
+                            Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+                        ),
+                        ..Default::default()
+                    },
+                ],
+                "hop_e0",
+            ),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected union");
+        };
+        for arm in queries {
+            assert!(arm.where_clause.is_none(), "no kinds → no injection");
+        }
+    }
+
+    #[test]
+    fn variable_length_arms_incoming_swaps_kind_columns() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "g".into(),
+                    entity: Some("Group".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "g".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Incoming,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(
+                vec![
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::join(
+                            crate::ast::JoinType::Inner,
+                            TableRef::scan("gl_edge", "e1"),
+                            TableRef::scan("gl_edge", "e2"),
+                            Expr::eq(Expr::col("e1", "source_id"), Expr::col("e2", "target_id")),
+                        ),
+                        ..Default::default()
+                    },
+                ],
+                "hop_e0",
+            ),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected union");
+        };
+        let w1 = queries[0].where_clause.as_ref().expect("arm1 WHERE");
+        assert!(has_kind_filter(w1, "e1", "target_kind", "Project"));
+        assert!(has_kind_filter(w1, "e1", "source_kind", "Group"));
+
+        let w2 = queries[1].where_clause.as_ref().expect("arm2 WHERE");
+        assert!(has_kind_filter(w2, "e1", "target_kind", "Project"));
+        assert!(has_kind_filter(w2, "e2", "source_kind", "Group"));
     }
 }
