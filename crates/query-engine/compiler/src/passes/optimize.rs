@@ -22,12 +22,12 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{Direction, Input, InputNode, QueryType};
+use crate::input::{AggFunction, Direction, FilterOp, Input, InputFilter, InputNode, QueryType};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -43,6 +43,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             push_kind_literals_into_variable_length_arms(q, input);
+            rewrite_denormalized_node_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -326,6 +327,192 @@ fn push_kind_literals_into_variable_length_arms(q: &mut Query, input: &Input) {
             let mut parts: Vec<Expr> = arm.where_clause.take().into_iter().collect();
             parts.extend(filters);
             arm.where_clause = Expr::conjoin(parts);
+        }
+    }
+}
+
+/// Rewrite `_nf_` CTEs to edge-column filters when ALL node filters
+/// reference properties denormalized onto the edge table.
+///
+/// Before:
+///   WITH _nf_pipe AS (SELECT id FROM gl_pipeline WHERE status='failed' ... LIMIT 1 BY id)
+///   SELECT COUNT(e0.source_id) FROM gl_edge e0
+///   WHERE e0.source_id IN (SELECT id FROM _nf_pipe) AND e0.target_id=278964
+///
+/// After:
+///   SELECT COUNT() FROM gl_edge e0
+///   WHERE e0.source_status='failed' AND e0.source_kind='Pipeline' AND e0.target_id=278964
+fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
+    if input.compiler.denormalized_columns.is_empty() {
+        return;
+    }
+    // Skip aggregation queries: fold_filters_into_aggregates runs later and
+    // depends on _nf_ CTEs + node-alias WHERE conjuncts to build -If combinators.
+    if input.query_type == QueryType::Aggregation {
+        return;
+    }
+    // Only single-hop, single-relationship queries for now.
+    if input.relationships.len() != 1 {
+        return;
+    }
+    let rel = &input.relationships[0];
+    if rel.max_hops > 1 {
+        return;
+    }
+
+    let mut ctes_to_remove: Vec<String> = Vec::new();
+    let mut filters_to_add: Vec<Expr> = Vec::new();
+
+    for cte in &q.ctes {
+        let Some(alias) = cte.name.strip_prefix("_nf_") else {
+            continue;
+        };
+        let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
+            continue;
+        };
+        if node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some() {
+            continue;
+        }
+        let entity = match &node.entity {
+            Some(e) => e,
+            None => continue,
+        };
+
+        // Determine direction: is this node the source or target of the relationship?
+        let dir_prefix = if node.id == rel.from {
+            match rel.direction {
+                Direction::Outgoing | Direction::Both => "source",
+                Direction::Incoming => "target",
+            }
+        } else {
+            match rel.direction {
+                Direction::Outgoing | Direction::Both => "target",
+                Direction::Incoming => "source",
+            }
+        };
+
+        // Check if ALL filters have denormalized counterparts.
+        let mut all_rewritable = true;
+        let mut edge_filters: Vec<Expr> = Vec::new();
+
+        for (prop_name, filter) in &node.filters {
+            let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
+            if let Some(edge_column) = input.compiler.denormalized_columns.get(&key) {
+                let edge_alias = "e0";
+                edge_filters.push(filter_expr_for_edge(edge_alias, edge_column, filter));
+            } else {
+                all_rewritable = false;
+                break;
+            }
+        }
+
+        if !all_rewritable {
+            continue;
+        }
+
+        ctes_to_remove.push(cte.name.clone());
+        filters_to_add.extend(edge_filters);
+    }
+
+    if ctes_to_remove.is_empty() {
+        return;
+    }
+
+    // Remove the _nf_ CTEs.
+    q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
+
+    // Remove InSubquery WHERE conjuncts referencing removed CTEs,
+    // and add the new edge-column filters.
+    if let Some(ref mut where_clause) = q.where_clause {
+        let conjuncts = where_clause.clone().flatten_and();
+        let mut kept: Vec<Expr> = Vec::new();
+        for conj in conjuncts {
+            if let Expr::InSubquery { cte_name, .. } = &conj
+                && ctes_to_remove.contains(cte_name)
+            {
+                continue;
+            }
+            kept.push(conj);
+        }
+        kept.extend(filters_to_add);
+        *where_clause = Expr::conjoin(kept).unwrap_or(Expr::int(1));
+    }
+
+    // Rewrite COUNT(e0.source_id) → COUNT() for edge-only targets whose
+    // _nf_ CTE was the only filter.
+    for cte_name in &ctes_to_remove {
+        let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
+        let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
+            continue;
+        };
+        let is_edge_only = input.compiler.node_edge_col.contains_key(alias);
+        if !is_edge_only {
+            continue;
+        }
+        let all_bare_count = input
+            .aggregations
+            .iter()
+            .filter(|a| a.target.as_deref() == Some(alias))
+            .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
+        if !all_bare_count || !node.node_ids.is_empty() {
+            continue;
+        }
+        // Find the edge column for this node and rewrite COUNT(col) → COUNT()
+        if let Some((edge_alias, edge_col)) = input.compiler.node_edge_col.get(alias) {
+            rewrite_count_to_bare(q, edge_alias, edge_col);
+        }
+    }
+}
+
+/// Build a filter expression for a denormalized edge column.
+/// Mirrors `filter_expr` in lower.rs but uses the edge alias and edge column name.
+fn filter_expr_for_edge(edge_alias: &str, edge_column: &str, filter: &InputFilter) -> Expr {
+    let col = Expr::col(edge_alias, edge_column);
+    let val = || {
+        let v = filter.value.clone().unwrap_or(serde_json::Value::Null);
+        Expr::param(ChType::from_value(&v), v)
+    };
+
+    match filter.op {
+        None | Some(FilterOp::Eq) => Expr::eq(col, val()),
+        Some(FilterOp::Gt) => Expr::binary(Op::Gt, col, val()),
+        Some(FilterOp::Lt) => Expr::binary(Op::Lt, col, val()),
+        Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, val()),
+        Some(FilterOp::Lte) => Expr::binary(Op::Le, col, val()),
+        Some(FilterOp::In) => Expr::binary(Op::In, col, val()),
+        Some(FilterOp::Contains) => {
+            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            Expr::binary(Op::Like, col, Expr::string(format!("%{raw}%")))
+        }
+        Some(FilterOp::StartsWith) => {
+            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            Expr::binary(Op::Like, col, Expr::string(format!("{raw}%")))
+        }
+        Some(FilterOp::EndsWith) => {
+            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            Expr::binary(Op::Like, col, Expr::string(format!("%{raw}")))
+        }
+        Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
+        Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+    }
+}
+
+/// Rewrite `COUNT(alias.col)` → `COUNT()` in SELECT expressions.
+fn rewrite_count_to_bare(q: &mut Query, edge_alias: &str, edge_col: &str) {
+    for sel in &mut q.select {
+        if let Expr::FuncCall { name, args } = &sel.expr {
+            let is_count = name.eq_ignore_ascii_case("count");
+            let refs_edge_col = args.len() == 1
+                && matches!(
+                    &args[0],
+                    Expr::Column { table, column } if table == edge_alias && column == edge_col
+                );
+            if is_count && refs_edge_col {
+                sel.expr = Expr::FuncCall {
+                    name: "count".to_string(),
+                    args: vec![],
+                };
+            }
         }
     }
 }

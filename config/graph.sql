@@ -745,6 +745,9 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(Delta(8), ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
+    source_status Nullable(LowCardinality(String)) CODEC(LZ4),
+    source_state Nullable(LowCardinality(String)) CODEC(LZ4),
+    source_severity Nullable(LowCardinality(String)) CODEC(LZ4),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
@@ -757,6 +760,18 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     PROJECTION agg_counts_by_target (
       SELECT relationship_kind, source_kind, target_id, traversal_path, count()
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_source_status (
+      SELECT relationship_kind, source_kind, source_status, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_status, target_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_source_state (
+      SELECT relationship_kind, source_kind, source_state, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_state, target_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_source_severity (
+      SELECT relationship_kind, source_kind, source_severity, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_severity, target_id, traversal_path
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
@@ -770,6 +785,9 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(Delta(8), ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
+    source_status Nullable(LowCardinality(String)) CODEC(LZ4),
+    source_state Nullable(LowCardinality(String)) CODEC(LZ4),
+    source_severity Nullable(LowCardinality(String)) CODEC(LZ4),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
@@ -788,6 +806,18 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
+    ),
+    PROJECTION agg_counts_by_source_status (
+      SELECT relationship_kind, source_kind, source_status, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_status, target_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_source_state (
+      SELECT relationship_kind, source_kind, source_state, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_state, target_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_source_severity (
+      SELECT relationship_kind, source_kind, source_severity, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, source_severity, target_id, traversal_path
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)

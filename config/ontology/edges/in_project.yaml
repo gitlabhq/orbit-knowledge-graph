@@ -66,3 +66,20 @@ variants:
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: Project, id: id }
     description: "Merge request diff belongs to project."
+
+denormalized_properties:
+  - node: Pipeline
+    property: status
+    direction: source
+  - node: MergeRequest
+    property: state
+    direction: source
+  - node: Vulnerability
+    property: state
+    direction: source
+  - node: WorkItem
+    property: state
+    direction: source
+  - node: Vulnerability
+    property: severity
+    direction: source

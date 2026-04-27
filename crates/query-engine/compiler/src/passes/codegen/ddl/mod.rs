@@ -292,15 +292,30 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
         .iter()
         .map(storage_col_to_def)
         .collect();
+    // Denormalized node properties follow structural columns, before system columns.
+    columns.extend(
+        config
+            .storage
+            .denormalized_columns
+            .iter()
+            .map(storage_col_to_def),
+    );
     columns.extend(system_columns(None));
 
     let indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
-    let projections: Vec<ProjectionDef> = config
+    let mut projections: Vec<ProjectionDef> = config
         .storage
         .projections
         .iter()
         .map(convert_projection)
         .collect();
+    projections.extend(
+        config
+            .storage
+            .denormalized_projections
+            .iter()
+            .map(convert_projection),
+    );
 
     CreateTable {
         name: name.into(),

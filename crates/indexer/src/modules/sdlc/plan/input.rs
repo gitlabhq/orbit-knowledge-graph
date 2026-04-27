@@ -1,10 +1,20 @@
 use ontology::{
-    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EnumType,
-    EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
+    DataType, DenormDirection, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget,
+    EnumType, EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::BTreeMap;
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
+/// A node property to project onto the edge row during transform.
+pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
+    /// Column in the source MemTable (e.g. "status").
+    pub source_column: String,
+    /// Column on the edge table (e.g. "source_status").
+    pub edge_column: String,
+    /// For int-based enums: integer → string mapping.
+    pub enum_mapping: Option<BTreeMap<i64, String>>,
+}
 
 pub(in crate::modules::sdlc) struct PlanInput {
     pub node_plans: Vec<NodePlan>,
@@ -44,6 +54,8 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub namespaced: bool,
     /// Resolved edge table for this relationship kind (prefixed).
     pub destination_table: String,
+    /// Node properties projected onto the edge row (denormalized).
+    pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
 /// A standalone edge has its own dedicated source table and extraction.
@@ -57,6 +69,9 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
     pub extract: ExtractPlan,
+    /// Node properties projected onto the edge row (denormalized).
+    /// Empty for standalone edges (source table lacks node properties).
+    pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
 pub(in crate::modules::sdlc) enum EdgeId {
@@ -313,6 +328,35 @@ fn resolve_fk_edges(
                 ontology.edge_table_for_relationship(&mapping.relationship_kind),
                 *SCHEMA_VERSION,
             );
+
+            let denormalized_columns = ontology
+                .denormalized_properties()
+                .iter()
+                .filter(|dp| {
+                    dp.relationship_kind == mapping.relationship_kind
+                        && dp.node_kind == node_name
+                        && matches!(
+                            (&dp.direction, &mapping.direction),
+                            (DenormDirection::Source, EdgeDirection::Outgoing)
+                                | (DenormDirection::Target, EdgeDirection::Incoming)
+                        )
+                })
+                .map(|dp| {
+                    let field = ontology
+                        .get_node(&dp.node_kind)
+                        .and_then(|n| n.fields.iter().find(|f| f.name == dp.property_name));
+                    let source_column = field
+                        .and_then(|f| f.column_name())
+                        .unwrap_or(&dp.property_name)
+                        .to_string();
+                    DenormalizedColumnProjection {
+                        source_column,
+                        edge_column: dp.edge_column.clone(),
+                        enum_mapping: dp.enum_values.clone(),
+                    }
+                })
+                .collect();
+
             FkEdgeTransform {
                 relationship_kind: mapping.relationship_kind.clone(),
                 source_id,
@@ -322,6 +366,7 @@ fn resolve_fk_edges(
                 filters,
                 namespaced,
                 destination_table: edge_dest,
+                denormalized_columns,
             }
         })
         .collect()
@@ -381,6 +426,7 @@ fn resolve_standalone_edge(
         target_kind,
         filters,
         namespaced,
+        denormalized_columns: vec![],
         extract: ExtractPlan {
             destination_table: edge_table,
             columns: extract_columns,

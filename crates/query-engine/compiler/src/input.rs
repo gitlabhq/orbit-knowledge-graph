@@ -118,6 +118,10 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// Maps (node_kind, property_name, direction_prefix) → edge column name.
+    /// Populated by normalize from ontology denormalized properties.
+    /// Example: ("Pipeline", "status", "source") → "source_status"
+    pub denormalized_columns: HashMap<(String, String, String), String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -129,6 +133,7 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            denormalized_columns: HashMap::new(),
         }
     }
 }
