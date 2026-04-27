@@ -25,14 +25,14 @@ from inside the skill directory:
 
 For the full field reference see [`query_language.md`](query_language.md).
 
-## `search` — find nodes matching filters
+## `traversal` (single-node) — find nodes matching filters
 
 Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 
 ```json
 {
   "query": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {
       "id": "p",
       "entity": "Project",
@@ -47,7 +47,7 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
 }
 ```
 
-## `traversal` — start from nodes, follow relationships
+## `traversal` (multi-node) — start from nodes, follow relationships
 
 List opened merge requests and their authors. Requires at least two nodes and
 one relationship:
@@ -155,7 +155,7 @@ Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 10
 ```json
 {
   "query": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "p", "entity": "Project"},
     "limit": 200,
     "cursor": {"offset": 0, "page_size": 50}

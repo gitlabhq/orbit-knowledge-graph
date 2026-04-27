@@ -49,13 +49,12 @@ Queries support the following fields:
 
 The type of query to run:
 
-| Query type    | Description                                                   |
-|---------------|---------------------------------------------------------------|
-| `search`      | Find nodes that match filters.                                |
-| `traversal`   | Start from one or more nodes and follow relationships.        |
-| `aggregation` | Search nodes and group the results.                           |
-| `path_finding`| Find paths between nodes.                                     |
-| `neighbors`   | Find nodes directly connected to a starting node.             |
+| Query type    | Description                                                          |
+|---------------|----------------------------------------------------------------------|
+| `traversal`   | Find nodes that match filters, optionally following relationships.   |
+| `aggregation` | Search nodes and group the results.                                  |
+| `path_finding`| Find paths between nodes.                                            |
+| `neighbors`   | Find nodes directly connected to a starting node.                    |
 
 Example:
 
@@ -77,7 +76,7 @@ Find all users who have authored open merge requests and return up to 10 results
 
 ## `node`
 
-A single graph node. Use with `search` and `neighbors` queries.
+A single graph node. Use with `traversal` and `neighbors` queries.
 
 | Field         | Required    | Type             | Description                                                                                                                        |
 |---------------|-------------|------------------|------------------------------------------------------------------------------------------------------------------------------------|
@@ -95,7 +94,7 @@ Search for users whose username starts with `admin` and return their username an
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
@@ -112,7 +111,7 @@ Search for users whose username starts with `admin` and return their username an
 
 An array of graph nodes. Use with `traversal`, `aggregation`, and `path_finding` queries.
 
-For `traversal` queries, you must specify at least two nodes. For all other queries, you must specify at least one node.
+For multi-node `traversal` queries, you must specify at least two nodes. For all other queries, you must specify at least one node.
 You can't specify more than five nodes in one query.
 
 Each node uses the same fields as [`node`](#node).
@@ -279,7 +278,7 @@ Search for all projects in the graph and return the name and full path of up to 
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "p",
     "entity": "Project",
@@ -291,7 +290,7 @@ Search for all projects in the graph and return the name and full path of up to 
 
 ## `order_by`
 
-Result ordering for `search` and `traversal` queries.
+Result ordering for `traversal` queries.
 
 | Field       | Required    | Type     | Description                               |
 |-------------|-------------|----------|-------------------------------------------|
@@ -333,7 +332,7 @@ Return usernames for up to 20 users at a time, starting at the 21st user.
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
@@ -386,7 +385,7 @@ Presentation preferences that do not affect query semantics.
 |-------------------|------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | `dynamic_columns` | {{< no >}} | `string` | Columns fetched for dynamically discovered entities in `path_finding` and `neighbors` queries. `"default"` returns each entity's default columns. `"*"` returns all columns. Default: `"default"`.  |
 
-`dynamic_columns` has no effect on `search` and `traversal` queries, where column selection is controlled through the `columns` field.
+`dynamic_columns` has no effect on `traversal` queries, where column selection is controlled through the `columns` field.
 
 Example:
 
