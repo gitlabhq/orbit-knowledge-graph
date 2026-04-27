@@ -622,6 +622,13 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         // chain CTEs through relationships so every edge AND node table scan
         // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
         // the cascade CTE itself would scan as many edge rows as the main query.
+        //
+        // NOTE: this only runs for Aggregation (Traversal returns early above).
+        // Traversal's `cascade_node_filter_ctes` handles single-hop cascades
+        // but not multi-hop. Extending it to use `build_multihop_cascade_for_node`
+        // would cover multi-rel + multi-hop traversals (e.g. Project[pinned]
+        // --CONTAINS(max_hops:2)--> File --DEFINES--> Definition), but that
+        // combination is rare enough to defer until profiling shows a need.
         if !has_explicit_selectivity {
             continue;
         }
