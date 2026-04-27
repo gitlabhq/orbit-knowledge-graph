@@ -205,7 +205,7 @@ async fn path_finding_dynamic_hydration(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let (result, _ctx_ref, plan) =
@@ -265,7 +265,7 @@ async fn path_finding_hydrated_property_values(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let (result, _ctx_ref, _plan) =
@@ -325,7 +325,7 @@ async fn path_finding_json_format(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let (result, ctx_ref, _plan) =
@@ -532,7 +532,7 @@ async fn path_finding_hydration_after_partial_redaction(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1, 2]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     // Allow User 1's path, deny User 2
@@ -653,7 +653,7 @@ async fn path_finding_all_denied_then_hydrate(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     // Deny everything
@@ -687,7 +687,7 @@ async fn consolidated_path_hydrates_all_entity_types(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let (result, _ctx_ref, _plan) =
@@ -763,7 +763,7 @@ async fn consolidated_hydration_multiple_ids_same_type(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1, 2]},
             {"id": "end", "entity": "Project", "node_ids": [1000, 1001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let (result, _ctx_ref, _plan) =
@@ -805,7 +805,7 @@ async fn consolidated_hydration_single_query_execution(ctx: &TestContext) {
             {"id": "start", "entity": "User", "node_ids": [1]},
             {"id": "end", "entity": "Project", "node_ids": [1000]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let compiled = compile(json, &ontology, &security_ctx).unwrap();
@@ -1000,7 +1000,7 @@ async fn path_finding_dynamic_hydration_indirect_auth_entities(ctx: &TestContext
             {"id": "start", "entity": "File", "node_ids": [5001]},
             {"id": "end", "entity": "Definition", "node_ids": [6001]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2, "rel_types": ["DEFINES"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
     }"#;
 
     let (result, _ctx_ref, plan) =

@@ -286,7 +286,7 @@ fn path_finding_uses_gkg_path_not_node_columns() {
             {"id": "start", "entity": "Project", "node_ids": [100], "columns": ["name"]},
             {"id": "end", "entity": "Project", "node_ids": [200], "columns": ["name"]}
         ],
-        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["CONTAINS"]}
+        "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();

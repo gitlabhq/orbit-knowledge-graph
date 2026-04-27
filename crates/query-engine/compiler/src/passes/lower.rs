@@ -2219,8 +2219,7 @@ mod tests {
                 {"id": "start", "entity": "Project", "node_ids": [100]},
                 {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
-                     "rel_types": ["CONTAINS"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#,
         );
 
@@ -2245,8 +2244,7 @@ mod tests {
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [100]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["CONTAINS"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
         }"#,
         );
 
@@ -2775,8 +2773,7 @@ mod tests {
                 {"id": "start", "entity": "Project", "node_ids": [100]},
                 {"id": "end", "entity": "Project", "node_ids": [200]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2,
-                     "rel_types": ["CONTAINS"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 2}
         }"#,
         );
 
@@ -3773,8 +3770,7 @@ mod tests {
                 {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project", "node_ids": [100]}
             ],
-            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2,
-                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
+            "path": {"type": "shortest", "from": "u", "to": "p", "max_depth": 2}
         }"#,
         );
 

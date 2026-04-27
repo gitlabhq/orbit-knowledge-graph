@@ -134,7 +134,7 @@ pub(super) async fn path_finding_max_depth_too_shallow_returns_empty(ctx: &TestC
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 1}
         }"#,
         &allow_all(),
     )
@@ -160,7 +160,7 @@ pub(super) async fn path_finding_redaction_blocks_intermediate_node(ctx: &TestCo
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3}
         }"#,
         &svc,
     )
@@ -220,7 +220,7 @@ pub(super) async fn path_finding_any_returns_at_least_one_path(ctx: &TestContext
                 {"id": "start", "entity": "User", "node_ids": [1]},
                 {"id": "end", "entity": "Project", "node_ids": [1000]}
             ],
-            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 3, "rel_types": ["MEMBER_OF", "CONTAINS"]}
+            "path": {"type": "any", "from": "start", "to": "end", "max_depth": 3}
         }"#,
         &allow_all(),
     )
