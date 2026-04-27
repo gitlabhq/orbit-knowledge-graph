@@ -27,7 +27,7 @@ Get Root OAuth Token
     RETURN    ${resp.json()["access_token"]}
 
 Bootstrap E2E Credentials
-    [Documentation]    Idempotently create e2e-bot admin user and a PAT, expose PAT as a global variable.
+    [Documentation]    Idempotently create e2e-bot admin user and a PAT, expose PAT and user id as global variables.
     ${token}=    Wait Until Keyword Succeeds    120s    5s    Get Root OAuth Token
     ${root_headers}=    Create Dictionary
     ...    Authorization=Bearer ${token}    Content-Type=application/json
@@ -35,6 +35,7 @@ Bootstrap E2E Credentials
     ${user_id}=    Ensure E2E Bot User    ${root_headers}
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
+    Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}
     Log    E2E credentials bootstrapped (user_id=${user_id})
 
 Ensure E2E Bot User
