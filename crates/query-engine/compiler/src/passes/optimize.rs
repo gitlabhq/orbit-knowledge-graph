@@ -22,14 +22,13 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Op, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
 use crate::input::{
-    AggFunction, ColumnSelection, Direction, FilterOp, Input, InputFilter, InputNode,
-    InputRelationship, QueryType,
+    AggFunction, ColumnSelection, Direction, Input, InputFilter, InputNode, QueryType,
 };
 
 use ontology::constants::{
@@ -421,7 +420,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                 && ctes_to_remove.contains(cte_name)
             {
                 if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
-                    kept.extend(filters.iter().map(|f| replace_edge_alias_in_expr(f, "e0")));
+                    kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
                 }
                 continue;
             }
@@ -435,10 +434,8 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     if has_union_in_from {
         for cte_name in &ctes_to_remove {
             if let Some(filters) = filters_per_cte.get(cte_name) {
-                let arm_filters: Vec<Expr> = filters
-                    .iter()
-                    .map(|f| replace_edge_alias_in_expr(f, "e1"))
-                    .collect();
+                let arm_filters: Vec<Expr> =
+                    filters.iter().map(|f| set_edge_alias(f, "e1")).collect();
                 inject_filters_into_from_unions(&mut q.from, &arm_filters);
             }
         }
@@ -480,9 +477,8 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
     // GROUP BY rewrite — only for single-relationship queries where we can
     // unambiguously resolve the edge alias.
-    if input.query_type == QueryType::Aggregation && input.relationships.len() == 1 {
-        let rel = &input.relationships[0];
-        rewrite_denormalized_group_by(q, input, rel);
+    if input.query_type == QueryType::Aggregation {
+        rewrite_denormalized_group_by(q, input);
     }
 
     // Rewrite COUNT(e0.source_id) → COUNT() for edge-only targets whose
@@ -549,29 +545,50 @@ fn resolve_denorm_direction(node: &InputNode, input: &Input) -> Option<&'static 
     None
 }
 
-/// Replace the placeholder edge alias "EDGE" with a concrete alias in an
-/// expression tree.
-fn replace_edge_alias_in_expr(expr: &Expr, alias: &str) -> Expr {
+/// Replace column references matching `(from_table, from_col)` with
+/// `(to_table, to_col)` throughout an expression tree. When `from_col`
+/// is `None`, all columns on `from_table` are rewritten (keeping the
+/// original column name).
+fn rewrite_column_refs(
+    expr: &mut Expr,
+    from_table: &str,
+    from_col: Option<&str>,
+    to_table: &str,
+    to_col: Option<&str>,
+) {
     match expr {
-        Expr::Column { table, column } if table == "EDGE" => Expr::col(alias, column.as_str()),
-        Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
-            op: *op,
-            left: Box::new(replace_edge_alias_in_expr(left, alias)),
-            right: Box::new(replace_edge_alias_in_expr(right, alias)),
-        },
-        Expr::UnaryOp { op, expr: inner } => Expr::UnaryOp {
-            op: *op,
-            expr: Box::new(replace_edge_alias_in_expr(inner, alias)),
-        },
-        Expr::FuncCall { name, args } => Expr::FuncCall {
-            name: name.clone(),
-            args: args
-                .iter()
-                .map(|a| replace_edge_alias_in_expr(a, alias))
-                .collect(),
-        },
-        other => other.clone(),
+        Expr::Column { table, column }
+            if table == from_table && from_col.is_none_or(|fc| column.as_str() == fc) =>
+        {
+            *table = to_table.to_string();
+            if let Some(tc) = to_col {
+                *column = tc.to_string();
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            rewrite_column_refs(left, from_table, from_col, to_table, to_col);
+            rewrite_column_refs(right, from_table, from_col, to_table, to_col);
+        }
+        Expr::UnaryOp { expr: inner, .. } => {
+            rewrite_column_refs(inner, from_table, from_col, to_table, to_col);
+        }
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                rewrite_column_refs(arg, from_table, from_col, to_table, to_col);
+            }
+        }
+        Expr::InSubquery { expr: inner, .. } => {
+            rewrite_column_refs(inner, from_table, from_col, to_table, to_col);
+        }
+        _ => {}
     }
+}
+
+/// Replace the placeholder edge alias "EDGE" with a concrete alias.
+fn set_edge_alias(expr: &Expr, alias: &str) -> Expr {
+    let mut out = expr.clone();
+    rewrite_column_refs(&mut out, "EDGE", None, alias, None);
+    out
 }
 
 /// Check whether a `TableRef` tree contains a `Union` node.
@@ -625,11 +642,7 @@ fn replace_in_subquery_in_where(
             && ctes_to_remove.contains(cte_name)
         {
             if let Some(filters) = filters_per_cte.get(cte_name) {
-                kept.extend(
-                    filters
-                        .iter()
-                        .map(|f| replace_edge_alias_in_expr(f, edge_alias)),
-                );
+                kept.extend(filters.iter().map(|f| set_edge_alias(f, edge_alias)));
             }
             found_any = true;
             continue;
@@ -641,37 +654,9 @@ fn replace_in_subquery_in_where(
     }
 }
 
-/// Build a filter expression for a denormalized edge column.
-/// Mirrors `filter_expr` in lower.rs but uses the edge alias and edge column name.
+/// Reuse the shared `filter_expr` from lowering with edge alias and column.
 fn filter_expr_for_edge(edge_alias: &str, edge_column: &str, filter: &InputFilter) -> Expr {
-    let col = Expr::col(edge_alias, edge_column);
-    let val = || {
-        let v = filter.value.clone().unwrap_or(serde_json::Value::Null);
-        Expr::param(ChType::from_value(&v), v)
-    };
-
-    match filter.op {
-        None | Some(FilterOp::Eq) => Expr::eq(col, val()),
-        Some(FilterOp::Gt) => Expr::binary(Op::Gt, col, val()),
-        Some(FilterOp::Lt) => Expr::binary(Op::Lt, col, val()),
-        Some(FilterOp::Gte) => Expr::binary(Op::Ge, col, val()),
-        Some(FilterOp::Lte) => Expr::binary(Op::Le, col, val()),
-        Some(FilterOp::In) => Expr::binary(Op::In, col, val()),
-        Some(FilterOp::Contains) => {
-            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-            Expr::binary(Op::Like, col, Expr::string(format!("%{raw}%")))
-        }
-        Some(FilterOp::StartsWith) => {
-            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-            Expr::binary(Op::Like, col, Expr::string(format!("{raw}%")))
-        }
-        Some(FilterOp::EndsWith) => {
-            let raw = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-            Expr::binary(Op::Like, col, Expr::string(format!("%{raw}")))
-        }
-        Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
-        Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
-    }
+    super::lower::filter_expr(edge_alias, edge_column, filter)
 }
 
 /// Rewrite `COUNT(alias.col)` → `COUNT()` in SELECT expressions.
@@ -705,7 +690,7 @@ fn rewrite_count_to_bare(q: &mut Query, edge_alias: &str, edge_col: &str) {
 /// After:
 ///   SELECT e0.source_status AS pipe_status, COUNT() FROM gl_edge e0
 ///   WHERE ... GROUP BY e0.source_status
-fn rewrite_denormalized_group_by(q: &mut Query, input: &Input, rel: &InputRelationship) {
+fn rewrite_denormalized_group_by(q: &mut Query, input: &Input) {
     let mut nodes_to_prune: HashSet<String> = HashSet::new();
 
     for agg in &input.aggregations {
@@ -718,17 +703,8 @@ fn rewrite_denormalized_group_by(q: &mut Query, input: &Input, rel: &InputRelati
         let Some(entity) = &node.entity else {
             continue;
         };
-
-        let dir_prefix = if node.id == rel.from {
-            match rel.direction {
-                Direction::Outgoing | Direction::Both => "source",
-                Direction::Incoming => "target",
-            }
-        } else {
-            match rel.direction {
-                Direction::Outgoing | Direction::Both => "target",
-                Direction::Incoming => "source",
-            }
+        let Some(dir_prefix) = resolve_denorm_direction(node, input) else {
+            continue;
         };
 
         // Check which columns in SELECT/GROUP BY reference denormalized properties.
@@ -780,7 +756,13 @@ fn rewrite_denormalized_group_by(q: &mut Query, input: &Input, rel: &InputRelati
                 .into_iter()
                 .map(|mut c| {
                     for (node_col, edge_col) in &rewrites {
-                        replace_column_ref(&mut c, group_alias, node_col, edge_alias, edge_col);
+                        rewrite_column_refs(
+                            &mut c,
+                            group_alias,
+                            Some(node_col),
+                            edge_alias,
+                            Some(edge_col),
+                        );
                     }
                     c
                 })
@@ -793,38 +775,6 @@ fn rewrite_denormalized_group_by(q: &mut Query, input: &Input, rel: &InputRelati
 
     if !nodes_to_prune.is_empty() {
         prune_table_joins(&mut q.from, &nodes_to_prune);
-    }
-}
-
-/// Replace column references in an expression tree.
-fn replace_column_ref(
-    expr: &mut Expr,
-    from_table: &str,
-    from_col: &str,
-    to_table: &str,
-    to_col: &str,
-) {
-    match expr {
-        Expr::Column { table, column } if table == from_table && column == from_col => {
-            *table = to_table.to_string();
-            *column = to_col.to_string();
-        }
-        Expr::BinaryOp { left, right, .. } => {
-            replace_column_ref(left, from_table, from_col, to_table, to_col);
-            replace_column_ref(right, from_table, from_col, to_table, to_col);
-        }
-        Expr::UnaryOp { expr: inner, .. } => {
-            replace_column_ref(inner, from_table, from_col, to_table, to_col);
-        }
-        Expr::FuncCall { args, .. } => {
-            for arg in args {
-                replace_column_ref(arg, from_table, from_col, to_table, to_col);
-            }
-        }
-        Expr::InSubquery { expr: inner, .. } => {
-            replace_column_ref(inner, from_table, from_col, to_table, to_col);
-        }
-        _ => {}
     }
 }
 
