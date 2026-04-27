@@ -10,7 +10,7 @@ Library             DateTime
 
 *** Variables ***
 ${GITLAB_URL}                       %{GITLAB_URL}
-${GITLAB_ROOT_PASSWORD}             %{GITLAB_ROOT_PASSWORD}
+${GITLAB_ROOT_PAT}                  %{GITLAB_ROOT_PAT}
 ${E2E_BOT_USERNAME}                 e2e-bot
 ${E2E_BOT_EMAIL}                    e2e-bot@example.com
 ${E2E_BOT_NAME}                     E2E Bot
@@ -19,20 +19,15 @@ ${PAT_NAME}                         e2e-pat
 
 
 *** Keywords ***
-Get Root OAuth Token
-    [Documentation]    Exchange the deploy-time root password for an OAuth token.
-    ${auth}=    Create Dictionary
-    ...    grant_type=password    username=root    password=${GITLAB_ROOT_PASSWORD}
-    ${resp}=    POST    ${GITLAB_URL}/oauth/token    data=${auth}    expected_status=200
-    RETURN    ${resp.json()["access_token"]}
-
 Bootstrap E2E Credentials
     [Documentation]    Idempotently create e2e-bot admin user and a PAT, expose PAT and user id as global variables.
-    ${token}=    Wait Until Keyword Succeeds    120s    5s    Get Root OAuth Token
+    ...                Uses the deploy-time root PAT (created via rails runner since GitLab 19.0 removed
+    ...                the OAuth password grant) instead of an OAuth token.
     ${root_headers}=    Create Dictionary
-    ...    Authorization=Bearer ${token}    Content-Type=application/json
+    ...    PRIVATE-TOKEN=${GITLAB_ROOT_PAT}    Content-Type=application/json
 
-    ${user_id}=    Ensure E2E Bot User    ${root_headers}
+    ${user_id}=    Wait Until Keyword Succeeds    120s    5s
+    ...    Ensure E2E Bot User    ${root_headers}
     ${pat}=    Issue PAT For User    ${root_headers}    ${user_id}
     Set Global Variable    ${GITLAB_PAT}    ${pat}
     Set Global Variable    ${E2E_BOT_USER_ID}    ${user_id}

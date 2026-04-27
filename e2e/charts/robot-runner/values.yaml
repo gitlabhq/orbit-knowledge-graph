@@ -18,5 +18,7 @@ namespaces:
 
 configMap: e2e-robot-tests
 fixturesConfigMap: e2e-robot-fixtures
-rootCredentialsSecret: gitlab-root-credentials
+rootPatSecret: gitlab-root-pat
+rootPatSecretNamespace: ""
+rootPatSecretKey: pat
 ttlSecondsAfterFinished: 600

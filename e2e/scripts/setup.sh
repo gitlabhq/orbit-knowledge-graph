@@ -43,6 +43,11 @@ helmfile --file helmfile.yaml.gotmpl sync
 # test suite. Runs after helmfile sync because it requires a Ready toolbox pod.
 "$E2E_DIR/scripts/activate-license.sh"
 
+# Create a root PAT via rails-runner. Replaces the OAuth password grant (ROPC)
+# flow that GitLab 19.0 removed. Robot runner reads the PAT from the
+# `gitlab-root-pat` secret as the GITLAB_ROOT_PAT env var.
+"$E2E_DIR/scripts/create-root-pat.sh"
+
 # Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
 # vs-namespaces race window for new namespaces is sub-second instead of the
 # upstream 60-300s. Must run after GitLab CH migrations created the dicts.
