@@ -141,7 +141,22 @@ impl ArrowClickHouseClient {
     /// arrays `ch_type` determines the element type for binding.
     pub fn bind_param(query: ArrowQuery, key: &str, value: &Value, ch_type: &ChType) -> ArrowQuery {
         match value {
-            Value::String(s) => query.param(key, s.as_str()),
+            Value::String(s) => {
+                // ClickHouse parses HTTP query parameters of type
+                // `DateTime64(N, ...)` / `Date` / `Date32` with the same parser
+                // as a string-literal cast: it accepts `2026-03-28 00:00:00`
+                // and `2026-03-28T00:00:00`, but rejects ISO 8601's trailing
+                // `Z` ("BAD_QUERY_PARAMETER, only 19 of 20 bytes was parsed").
+                // We strip a single trailing `Z` so callers can pass the
+                // canonical UTC ISO 8601 form their data is already serialized
+                // with — the column type already pins UTC, so dropping the
+                // marker doesn't change the wall-clock value.
+                let normalized = match ch_type {
+                    ChType::DateTime64 | ChType::Date => s.strip_suffix('Z').unwrap_or(s),
+                    _ => s.as_str(),
+                };
+                query.param(key, normalized)
+            }
             Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     query.param(key, i)

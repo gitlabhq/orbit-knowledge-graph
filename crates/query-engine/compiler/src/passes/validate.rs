@@ -369,6 +369,28 @@ impl<'a> Validator<'a> {
         Ok(())
     }
 
+    /// Annotate every filter with its resolved column [`DataType`].
+    ///
+    /// Runs after `check_filter_types` has already accepted the filter
+    /// shape, so unknown entities/columns silently fall through with
+    /// `data_type = None` and the lowerer falls back to inferring the
+    /// type from the JSON value (legacy behaviour).
+    pub fn annotate_filter_types(&self, input: &mut Input) {
+        for node in &mut input.nodes {
+            let Some(entity) = node.entity.clone() else {
+                continue;
+            };
+            for (prop, filter) in node.filters.iter_mut() {
+                filter.data_type = self.ontology.get_field_type(&entity, prop);
+            }
+        }
+        for rel in &mut input.relationships {
+            for (prop, filter) in rel.filters.iter_mut() {
+                filter.data_type = self.ontology.get_edge_column_type(prop);
+            }
+        }
+    }
+
     /// Minimum number of characters required in a LIKE filter value.
     const MIN_LIKE_PATTERN_LEN: usize = 3;
 

@@ -489,3 +489,41 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
     resp.assert_node_absent("User", 5);
 }
+
+/// Regression: filtering on a `DateTime64(6, 'UTC')` column with an ISO 8601
+/// string literal must compile and execute without ClickHouse rejecting the
+/// implicit String -> DateTime64 cast (TYPE_MISMATCH, code 53). Production
+/// hit this on `merge_request.merged_at >= "2026-03-28T00:00:00Z"`.
+///
+/// Of the seeded merged MRs, 2002 (2024-03-15) is below the cutoff and
+/// 2004 (2024-06-10) + 2005 (2024-08-20) are above; the assertion pins
+/// the exact set so the SQL shape and the row filter both stay correct.
+pub(super) async fn search_filter_gte_on_datetime_returns_matching_rows(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": {"op": "gte", "value": "2024-06-01T00:00:00Z"}
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2005, 2004]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some_and(|s| s >= "2024-06-01")
+    });
+    resp.assert_node_absent("MergeRequest", 2002);
+}

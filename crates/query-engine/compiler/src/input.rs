@@ -393,10 +393,16 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// Resolved column data type, populated by the validate pass once the
+    /// filter has been matched to its ontology field. Used by the lowerer
+    /// to bind the value with the correct ClickHouse type so DateTime64
+    /// columns get a typed parameter instead of a String literal.
+    #[doc(hidden)]
+    pub data_type: Option<ontology::DataType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -431,11 +437,13 @@ fn parse_filter(value: Value) -> InputFilter {
         return InputFilter {
             op: Some(op),
             value: obj.get("value").cloned(),
+            ..Default::default()
         };
     }
     InputFilter {
         op: None,
         value: Some(value),
+        ..Default::default()
     }
 }
 

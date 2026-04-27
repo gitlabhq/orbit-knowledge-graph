@@ -16,6 +16,7 @@ use crate::input::{
     AggFunction, ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter,
     InputNode, InputRelationship, OrderDirection, QueryType,
 };
+use ontology::DataType;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -1962,7 +1963,7 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || {
         let v = filter.value.clone().unwrap_or(Value::Null);
-        Expr::param(ChType::from_value(&v), v)
+        Expr::param(filter_value_ch_type(filter, &v), v)
     };
 
     match filter.op {
@@ -1977,6 +1978,26 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+    }
+}
+
+/// Pick the ClickHouse parameter type for a filter literal. Prefers the
+/// ontology-resolved column type (so `DateTime64` columns get a typed param
+/// and ClickHouse never has to cast a String to DateTime64) and falls back
+/// to inferring from the JSON value when the column type is unknown.
+///
+/// `IN` (Value::Array) currently falls back to value-based inference; the
+/// `Array(ChScalar)` placeholder grammar has no DateTime element type, and
+/// `IN` on temporal columns is uncommon. The fix targets scalar comparisons,
+/// where the lowerer was emitting `String` against `DateTime64(6, 'UTC')`.
+fn filter_value_ch_type(filter: &InputFilter, value: &Value) -> ChType {
+    if matches!(value, Value::Array(_) | Value::Null) {
+        return ChType::from_value(value);
+    }
+    match filter.data_type {
+        Some(DataType::DateTime) => ChType::DateTime64,
+        Some(DataType::Date) => ChType::Date,
+        _ => ChType::from_value(value),
     }
 }
 
@@ -2086,10 +2107,126 @@ mod tests {
     fn validated_input(json: &str) -> Input {
         let ontology = test_ontology();
         let input = parse_input(json).unwrap();
-        validate::Validator::new(&ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, &ontology).unwrap()
+        let validator = validate::Validator::new(&ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, &ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
+    }
+
+    /// Collect `(ChType, Value)` for every `Expr::Param` in a query AST.
+    fn collect_params(node: &Node) -> Vec<(ChType, Value)> {
+        fn walk_expr(e: &Expr, acc: &mut Vec<(ChType, Value)>) {
+            match e {
+                Expr::Param { data_type, value } => acc.push((*data_type, value.clone())),
+                Expr::BinaryOp { left, right, .. } => {
+                    walk_expr(left, acc);
+                    walk_expr(right, acc);
+                }
+                Expr::UnaryOp { expr, .. } => walk_expr(expr, acc),
+                Expr::FuncCall { args, .. } => args.iter().for_each(|a| walk_expr(a, acc)),
+                Expr::InSubquery { expr, .. } => walk_expr(expr, acc),
+                _ => {}
+            }
+        }
+        fn walk_table(t: &TableRef, acc: &mut Vec<(ChType, Value)>) {
+            match t {
+                TableRef::Scan { .. } => {}
+                TableRef::Join {
+                    left, right, on, ..
+                } => {
+                    walk_table(left, acc);
+                    walk_table(right, acc);
+                    walk_expr(on, acc);
+                }
+                TableRef::Union { queries, .. } => {
+                    for q in queries {
+                        walk_query(q, acc);
+                    }
+                }
+                TableRef::Subquery { query, .. } => walk_query(query, acc),
+            }
+        }
+        fn walk_query(q: &Query, acc: &mut Vec<(ChType, Value)>) {
+            for sel in &q.select {
+                walk_expr(&sel.expr, acc);
+            }
+            walk_table(&q.from, acc);
+            if let Some(w) = q.where_clause.as_ref() {
+                walk_expr(w, acc);
+            }
+            for cte in &q.ctes {
+                walk_query(&cte.query, acc);
+            }
+            for u in &q.union_all {
+                walk_query(u, acc);
+            }
+        }
+        let mut acc = Vec::new();
+        if let Node::Query(q) = node {
+            walk_query(q, &mut acc);
+        }
+        acc
+    }
+
+    /// Regression: the lowerer must bind `DateTime` filter literals as
+    /// `ChType::DateTime64` so ClickHouse never has to cast a String to
+    /// `DateTime64(6, 'UTC')`. Previously this emitted `String`, which
+    /// `ClickHouse 25.x` rejects with `TYPE_MISMATCH` (Code 53).
+    #[test]
+    fn datetime_filter_binds_typed_param() {
+        let mut input = validated_input(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "n", "entity": "Note", "filters": {
+                        "created_at": {"op": "gte", "value": "2026-03-28T00:00:00Z"}
+                    }}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+                "limit": 25
+            }"#,
+        );
+        let node = lower(&mut input).unwrap();
+        let params = collect_params(&node);
+        let dt_param = params
+            .iter()
+            .find(|(_, v)| v.as_str() == Some("2026-03-28T00:00:00Z"))
+            .expect("expected the datetime filter literal in lowered params");
+        assert_eq!(
+            dt_param.0,
+            ChType::DateTime64,
+            "datetime filter should bind as DateTime64, got {:?}",
+            dt_param.0
+        );
+        assert_eq!(format!("{}", dt_param.0), "DateTime64(6, 'UTC')");
+    }
+
+    /// Non-temporal filters keep their value-inferred type (no regression).
+    #[test]
+    fn string_filter_still_binds_as_string() {
+        let mut input = validated_input(
+            r#"{
+                "query_type": "traversal",
+                "nodes": [
+                    {"id": "u", "entity": "User", "node_ids": [1]},
+                    {"id": "n", "entity": "Note", "filters": {
+                        "confidential": {"op": "eq", "value": false}
+                    }}
+                ],
+                "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+                "limit": 5
+            }"#,
+        );
+        let node = lower(&mut input).unwrap();
+        let params = collect_params(&node);
+        assert!(
+            params
+                .iter()
+                .any(|(t, v)| matches!(v, Value::Bool(false)) && *t == ChType::Bool),
+            "bool filter should still bind as Bool, params={params:?}"
+        );
     }
 
     #[test]
@@ -3869,10 +4006,11 @@ mod tests {
 
     fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
         let input = parse_input(json).unwrap();
-        validate::Validator::new(ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, ontology).unwrap()
+        let validator = validate::Validator::new(ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
     }
 
     fn has_union(t: &TableRef) -> bool {

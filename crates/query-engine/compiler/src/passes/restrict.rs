@@ -229,6 +229,7 @@ mod tests {
             InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(value),
+                ..Default::default()
             },
         );
         Input {
@@ -512,6 +513,7 @@ mod tests {
             InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(Value::String("bob".into())),
+                ..Default::default()
             },
         );
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
@@ -613,6 +615,7 @@ mod tests {
             InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(value),
+                ..Default::default()
             },
         );
         Input {
