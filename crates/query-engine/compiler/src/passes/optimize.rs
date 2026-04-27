@@ -345,21 +345,20 @@ fn push_kind_literals_into_variable_length_arms(q: &mut Query, input: &Input) {
 /// After:
 ///   SELECT COUNT() FROM gl_edge e0
 ///   WHERE e0.source_status='failed' AND e0.source_kind='Pipeline' AND e0.target_id=278964
+///
+/// Handles all query shapes:
+/// - Single-hop: filters added to outer WHERE with `e0`
+/// - Multi-hop: filters injected into UNION ALL arm WHEREs with `e1`
+/// - Neighbors: filters replaced in `q.union_all` arm WHEREs
+/// - PathFinding: filters replaced inside frontier CTE queries
 fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     if input.compiler.denormalized_columns.is_empty() {
         return;
     }
-    // Only single-hop, single-relationship queries for now.
-    if input.relationships.len() != 1 {
-        return;
-    }
-    let rel = &input.relationships[0];
-    if rel.max_hops > 1 {
-        return;
-    }
 
     let mut ctes_to_remove: Vec<String> = Vec::new();
-    let mut filters_to_add: Vec<Expr> = Vec::new();
+    // Map CTE name → edge-column filter exprs (using placeholder alias "EDGE")
+    let mut filters_per_cte: HashMap<String, Vec<Expr>> = HashMap::new();
 
     for cte in &q.ctes {
         let Some(alias) = cte.name.strip_prefix("_nf_") else {
@@ -376,28 +375,18 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             None => continue,
         };
 
-        // Determine direction: is this node the source or target of the relationship?
-        let dir_prefix = if node.id == rel.from {
-            match rel.direction {
-                Direction::Outgoing | Direction::Both => "source",
-                Direction::Incoming => "target",
-            }
-        } else {
-            match rel.direction {
-                Direction::Outgoing | Direction::Both => "target",
-                Direction::Incoming => "source",
-            }
+        let Some(dir_prefix) = resolve_denorm_direction(node, input) else {
+            continue;
         };
 
-        // Check if ALL filters have denormalized counterparts.
         let mut all_rewritable = true;
         let mut edge_filters: Vec<Expr> = Vec::new();
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
             if let Some(edge_column) = input.compiler.denormalized_columns.get(&key) {
-                let edge_alias = "e0";
-                edge_filters.push(filter_expr_for_edge(edge_alias, edge_column, filter));
+                // Use placeholder "EDGE" — replaced with actual alias at injection site
+                edge_filters.push(filter_expr_for_edge("EDGE", edge_column, filter));
             } else {
                 all_rewritable = false;
                 break;
@@ -409,7 +398,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         }
 
         ctes_to_remove.push(cte.name.clone());
-        filters_to_add.extend(edge_filters);
+        filters_per_cte.insert(cte.name.clone(), edge_filters);
     }
 
     if ctes_to_remove.is_empty() {
@@ -419,8 +408,11 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     // Remove the _nf_ CTEs.
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
-    // Remove InSubquery WHERE conjuncts referencing removed CTEs,
-    // and add the new edge-column filters.
+    let has_union_in_from = has_union_table_ref(&q.from);
+
+    // Phase 1: Replace InSubquery in outer WHERE.
+    // Single-hop: add edge-column filters to outer WHERE with e0.
+    // Multi-hop: don't add to outer WHERE (column lives on inner e1); injection below.
     if let Some(ref mut where_clause) = q.where_clause {
         let conjuncts = where_clause.clone().flatten_and();
         let mut kept: Vec<Expr> = Vec::new();
@@ -428,43 +420,224 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             if let Expr::InSubquery { cte_name, .. } = &conj
                 && ctes_to_remove.contains(cte_name)
             {
+                if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                    kept.extend(filters.iter().map(|f| replace_edge_alias_in_expr(f, "e0")));
+                }
                 continue;
             }
             kept.push(conj);
         }
-        kept.extend(filters_to_add);
         *where_clause = Expr::conjoin(kept).unwrap_or(Expr::int(1));
     }
 
-    // Rewrite GROUP BY on denormalized properties: replace node-table column
-    // references with edge-column references so the node-table join can be pruned.
-    if input.query_type == QueryType::Aggregation {
+    // Phase 2: Multi-hop — inject filters into UNION ALL arms in FROM.
+    // The first edge in each arm is always e1 (from build_hop_arm).
+    if has_union_in_from {
+        for cte_name in &ctes_to_remove {
+            if let Some(filters) = filters_per_cte.get(cte_name) {
+                let arm_filters: Vec<Expr> = filters
+                    .iter()
+                    .map(|f| replace_edge_alias_in_expr(f, "e1"))
+                    .collect();
+                inject_filters_into_from_unions(&mut q.from, &arm_filters);
+            }
+        }
+    }
+
+    // Phase 3: Neighbors — replace InSubquery in q.union_all arm WHEREs.
+    // Edge alias in neighbors arms is "e" (from lower_neighbors build_arm).
+    for arm in &mut q.union_all {
+        replace_in_subquery_in_where(
+            &mut arm.where_clause,
+            &ctes_to_remove,
+            &filters_per_cte,
+            "e",
+        );
+    }
+
+    // Phase 4: PathFinding — replace InSubquery inside frontier CTE queries.
+    // Frontier arms use e1 as the first edge (from build_frontier_arm).
+    for cte in &mut q.ctes {
+        replace_in_subquery_in_where(
+            &mut cte.query.where_clause,
+            &ctes_to_remove,
+            &filters_per_cte,
+            "e1",
+        );
+        for union_arm in &mut cte.query.union_all {
+            replace_in_subquery_in_where(
+                &mut union_arm.where_clause,
+                &ctes_to_remove,
+                &filters_per_cte,
+                "e1",
+            );
+        }
+        inject_filters_into_from_unions(&mut cte.query.from, &[]);
+        for union_arm in &mut cte.query.union_all {
+            inject_filters_into_from_unions(&mut union_arm.from, &[]);
+        }
+    }
+
+    // GROUP BY rewrite — only for single-relationship queries where we can
+    // unambiguously resolve the edge alias.
+    if input.query_type == QueryType::Aggregation && input.relationships.len() == 1 {
+        let rel = &input.relationships[0];
         rewrite_denormalized_group_by(q, input, rel);
     }
 
     // Rewrite COUNT(e0.source_id) → COUNT() for edge-only targets whose
-    // _nf_ CTE was the only filter.
-    for cte_name in &ctes_to_remove {
-        let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
-        let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
-            continue;
-        };
-        let is_edge_only = input.compiler.node_edge_col.contains_key(alias);
-        if !is_edge_only {
+    // _nf_ CTE was the only filter (single-relationship only).
+    if input.relationships.len() == 1 {
+        for cte_name in &ctes_to_remove {
+            let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
+            let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
+                continue;
+            };
+            let is_edge_only = input.compiler.node_edge_col.contains_key(alias);
+            if !is_edge_only {
+                continue;
+            }
+            let all_bare_count = input
+                .aggregations
+                .iter()
+                .filter(|a| a.target.as_deref() == Some(alias))
+                .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
+            if !all_bare_count || !node.node_ids.is_empty() {
+                continue;
+            }
+            if let Some((edge_alias, edge_col)) = input.compiler.node_edge_col.get(alias) {
+                rewrite_count_to_bare(q, edge_alias, edge_col);
+            }
+        }
+    }
+}
+
+/// Determine which side of which relationship a node occupies.
+/// Returns `"source"` or `"target"` for the denormalized column prefix.
+fn resolve_denorm_direction(node: &InputNode, input: &Input) -> Option<&'static str> {
+    for rel in &input.relationships {
+        if node.id == rel.from {
+            return Some(match rel.direction {
+                Direction::Outgoing | Direction::Both => "source",
+                Direction::Incoming => "target",
+            });
+        }
+        if node.id == rel.to {
+            return Some(match rel.direction {
+                Direction::Outgoing | Direction::Both => "target",
+                Direction::Incoming => "source",
+            });
+        }
+    }
+    // Neighbors query: center node with no relationships in input.
+    // PathFinding: node is referenced via input.path, not relationships.
+    // Check path endpoints.
+    if let Some(path) = &input.path {
+        if node.id == path.from {
+            return Some("source");
+        }
+        if node.id == path.to {
+            return Some("target");
+        }
+    }
+    // Neighbors: center node filters on the center-side edge column.
+    // Outgoing arm → source, incoming arm → target. Since the filter
+    // applies to both arms, use "source" (the outgoing arm's center side).
+    if input.neighbors.is_some() {
+        return Some("source");
+    }
+    None
+}
+
+/// Replace the placeholder edge alias "EDGE" with a concrete alias in an
+/// expression tree.
+fn replace_edge_alias_in_expr(expr: &Expr, alias: &str) -> Expr {
+    match expr {
+        Expr::Column { table, column } if table == "EDGE" => Expr::col(alias, column.as_str()),
+        Expr::BinaryOp { op, left, right } => Expr::BinaryOp {
+            op: *op,
+            left: Box::new(replace_edge_alias_in_expr(left, alias)),
+            right: Box::new(replace_edge_alias_in_expr(right, alias)),
+        },
+        Expr::UnaryOp { op, expr: inner } => Expr::UnaryOp {
+            op: *op,
+            expr: Box::new(replace_edge_alias_in_expr(inner, alias)),
+        },
+        Expr::FuncCall { name, args } => Expr::FuncCall {
+            name: name.clone(),
+            args: args
+                .iter()
+                .map(|a| replace_edge_alias_in_expr(a, alias))
+                .collect(),
+        },
+        other => other.clone(),
+    }
+}
+
+/// Check whether a `TableRef` tree contains a `Union` node.
+fn has_union_table_ref(table_ref: &TableRef) -> bool {
+    match table_ref {
+        TableRef::Union { .. } => true,
+        TableRef::Join { left, right, .. } => {
+            has_union_table_ref(left) || has_union_table_ref(right)
+        }
+        _ => false,
+    }
+}
+
+/// Walk a `TableRef` tree and add filters to every `Union` arm's WHERE clause.
+fn inject_filters_into_from_unions(table_ref: &mut TableRef, filters: &[Expr]) {
+    match table_ref {
+        TableRef::Union { queries, .. } => {
+            for query in queries {
+                if !filters.is_empty() {
+                    let mut parts: Vec<Expr> = query.where_clause.take().into_iter().collect();
+                    parts.extend(filters.iter().cloned());
+                    query.where_clause = Expr::conjoin(parts);
+                }
+                inject_filters_into_from_unions(&mut query.from, filters);
+            }
+        }
+        TableRef::Join { left, right, .. } => {
+            inject_filters_into_from_unions(left, filters);
+            inject_filters_into_from_unions(right, filters);
+        }
+        _ => {}
+    }
+}
+
+/// Remove `InSubquery` conjuncts referencing any of the given CTE names from
+/// a WHERE clause, and inject replacement edge-column filters.
+fn replace_in_subquery_in_where(
+    where_clause: &mut Option<Expr>,
+    ctes_to_remove: &[String],
+    filters_per_cte: &HashMap<String, Vec<Expr>>,
+    edge_alias: &str,
+) {
+    let Some(w) = where_clause.as_ref() else {
+        return;
+    };
+    let conjuncts = w.clone().flatten_and();
+    let mut kept: Vec<Expr> = Vec::new();
+    let mut found_any = false;
+    for conj in conjuncts {
+        if let Expr::InSubquery { cte_name, .. } = &conj
+            && ctes_to_remove.contains(cte_name)
+        {
+            if let Some(filters) = filters_per_cte.get(cte_name) {
+                kept.extend(
+                    filters
+                        .iter()
+                        .map(|f| replace_edge_alias_in_expr(f, edge_alias)),
+                );
+            }
+            found_any = true;
             continue;
         }
-        let all_bare_count = input
-            .aggregations
-            .iter()
-            .filter(|a| a.target.as_deref() == Some(alias))
-            .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
-        if !all_bare_count || !node.node_ids.is_empty() {
-            continue;
-        }
-        // Find the edge column for this node and rewrite COUNT(col) → COUNT()
-        if let Some((edge_alias, edge_col)) = input.compiler.node_edge_col.get(alias) {
-            rewrite_count_to_bare(q, edge_alias, edge_col);
-        }
+        kept.push(conj);
+    }
+    if found_any {
+        *where_clause = Expr::conjoin(kept);
     }
 }
 

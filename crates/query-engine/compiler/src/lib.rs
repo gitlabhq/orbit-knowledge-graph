@@ -381,20 +381,20 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Filter is captured via SIP CTE (`_nf_mr` filtered by state='opened',
-        // edge `source_id IN _nf_mr`). The COUNT must reference the edge column
-        // so that filtered edges are what's counted; emitting bare `count()`
-        // here would not be wrong (the IN-filter still bounds rows) but would
-        // suppress the projection-routing decision based on filter presence.
+        // The MR state filter is denormalized onto the edge as source_state.
+        // The denorm pass rewrites the _nf_mr CTE into a direct edge-column
+        // filter (e0.source_state = 'opened'), and the COUNT becomes bare
+        // count() since the WHERE clause already bounds rows correctly.
         assert!(
             sql.contains("COUNT(e0.source_id)")
                 || sql.contains("countIf")
-                || sql.contains("COUNTIF"),
-            "filtered count must reference edge column or use countIf, got:\n{sql}"
+                || sql.contains("COUNTIF")
+                || sql.contains("count()"),
+            "count must reference edge column, use countIf, or be bare count(), got:\n{sql}"
         );
         assert!(
-            sql.contains("state = 'opened'"),
-            "state filter must reach the SQL (in _nf_* or WHERE), got:\n{sql}"
+            sql.contains("source_state") && sql.contains("opened"),
+            "state filter must reach the SQL as denormalized edge column, got:\n{sql}"
         );
     }
 
