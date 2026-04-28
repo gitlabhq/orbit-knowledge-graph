@@ -417,11 +417,120 @@ fn resolve_standalone_edge(
         );
     }
 
-    // Standalone edges don't populate denormalized columns. The join table
-    // lacks node properties, and adding LEFT JOINs to the datalake at extract
-    // time adds complexity for edges that are rarely filtered-aggregated.
-    // If standalone edge denormalization is needed later, extend the edge ETL
-    // to support `type: query` with an explicit FROM clause.
+    // Build LEFT JOINs for endpoint columns declared in the ETL config.
+    // Each endpoint can request extra columns from its node's datalake table.
+    let endpoints_with_cols: [(&EdgeSourceEtlConfig, &str, DenormDirection); 2] = [
+        (config, "from", DenormDirection::Source),
+        (config, "to", DenormDirection::Target),
+    ];
+    let mut denormalized_columns = Vec::new();
+    let mut joins: Vec<String> = Vec::new();
+    let mut join_idx = 0usize;
+
+    for (cfg, side, direction) in &endpoints_with_cols {
+        let endpoint = if *side == "from" { &cfg.from } else { &cfg.to };
+        if endpoint.columns.is_empty() {
+            continue;
+        }
+        // Resolve the node type to find its datalake source table.
+        let node_kind = match &endpoint.node_type {
+            EdgeEndpointType::Literal(t) => t.as_str(),
+            _ => continue, // Polymorphic endpoints: skip for now.
+        };
+        let Some(node) = ontology.get_node(node_kind) else {
+            continue;
+        };
+        let Some(etl) = &node.etl else { continue };
+        let node_table = match etl {
+            EtlConfig::Table { source, .. } => source.as_str(),
+            EtlConfig::Query { from, .. } => from.as_str(),
+        };
+        let watermark_col = etl.watermark();
+        let deleted_col = etl.deleted();
+        let fk_col = &endpoint.id_column;
+
+        let alias = format!("_d{join_idx}");
+        join_idx += 1;
+
+        let sub_cols = std::iter::once("id".to_string())
+            .chain(endpoint.columns.iter().cloned())
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        joins.push(format!(
+            "LEFT JOIN (SELECT {sub_cols} FROM {node_table} \
+             WHERE {deleted_col} = false \
+             ORDER BY id, {watermark_col} DESC \
+             LIMIT 1 BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
+        ));
+
+        for col_name in &endpoint.columns {
+            let mem_col = format!("{alias}_{col_name}");
+            let select_expr = format!("{alias}.{col_name} AS {mem_col}");
+            extract_columns.push(ExtractColumn::Bare(select_expr));
+
+            // Match against denormalized properties to find the edge column.
+            if let Some(dp) = ontology.denormalized_properties().iter().find(|dp| {
+                dp.relationship_kind == relationship_kind
+                    && dp.direction == *direction
+                    && dp.node_kind == node_kind
+            }) {
+                // Check if this column matches the property's source column.
+                let field = node.fields.iter().find(|f| f.name == dp.property_name);
+                let src_col = field
+                    .and_then(|f| f.column_name())
+                    .unwrap_or(&dp.property_name);
+                if src_col == col_name {
+                    denormalized_columns.push(DenormalizedColumnProjection {
+                        source_column: mem_col,
+                        edge_column: dp.edge_column.clone(),
+                        enum_mapping: dp.enum_values.clone(),
+                    });
+                }
+            }
+        }
+    }
+
+    let has_joins = !joins.is_empty();
+    let source = if has_joins {
+        for col in &mut extract_columns {
+            if let ExtractColumn::Bare(name) = col {
+                if !name.contains('.') {
+                    *name = format!("_base.{name}");
+                }
+            }
+        }
+        ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
+    } else {
+        ExtractSource::Table(config.source.clone())
+    };
+    let order_by = if has_joins {
+        config
+            .order_by
+            .iter()
+            .map(|c| format!("_base.{c}"))
+            .collect()
+    } else {
+        config.order_by.clone()
+    };
+    let watermark = if has_joins {
+        format!("_base.{}", config.watermark)
+    } else {
+        config.watermark.clone()
+    };
+    let deleted = if has_joins {
+        format!("_base.{}", config.deleted)
+    } else {
+        config.deleted.clone()
+    };
+    let traversal_path_filter = if has_joins && namespaced {
+        Some(format!(
+            "startsWith(_base.{}, {{traversal_path:String}})",
+            TRAVERSAL_PATH_COLUMN
+        ))
+    } else {
+        None
+    };
 
     StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
@@ -432,16 +541,16 @@ fn resolve_standalone_edge(
         target_kind,
         filters,
         namespaced,
-        denormalized_columns: vec![],
+        denormalized_columns,
         extract: ExtractPlan {
             destination_table: edge_table,
             columns: extract_columns,
-            source: ExtractSource::Table(config.source.clone()),
-            watermark: config.watermark.clone(),
-            deleted: config.deleted.clone(),
-            order_by: config.order_by.clone(),
+            source,
+            watermark,
+            deleted,
+            order_by,
             namespaced,
-            traversal_path_filter: None,
+            traversal_path_filter,
             additional_where: None,
         },
     }
