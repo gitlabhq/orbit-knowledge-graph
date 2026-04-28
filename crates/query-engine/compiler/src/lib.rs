@@ -718,6 +718,42 @@ mod tests {
         );
     }
 
+    /// Multi-hop aggregation with a pinned root must generate a multi-hop
+    /// cascade CTE for the far-side node, narrowing its table scan.
+    #[test]
+    fn multi_hop_aggregation_generates_cascade_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [278964]},
+                {"id": "f", "entity": "File"}
+            ],
+            "relationships": [{
+                "type": "CONTAINS",
+                "from": "p",
+                "to": "f",
+                "min_hops": 1,
+                "max_hops": 2
+            }],
+            "aggregations": [{"function": "count", "target": "f", "group_by": "p"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_cascade_f"),
+            "multi-hop aggregation should generate _cascade_f CTE, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("startsWith"),
+            "cascade CTE edge scans should have traversal_path security filters, got:\n{sql}"
+        );
+    }
+
     /// Intermediate nodes (referenced by 2+ relationships) must NOT be pruned
     /// even when they're absent from the aggregation target/group_by. Pruning
     /// them leaves adjacent edge JOINs dangling on the now-undefined alias
