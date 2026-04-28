@@ -393,8 +393,8 @@ mod tests {
             "count must reference edge column, use countIf, or be bare count(), got:\n{sql}"
         );
         assert!(
-            sql.contains("hasToken(e0.source_tags, 'state:opened')"),
-            "state filter must reach the SQL as hasToken on source_tags, got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'state:opened')"),
+            "state filter must reach the SQL as has on source_tags, got:\n{sql}"
         );
     }
 
@@ -868,8 +868,8 @@ mod tests {
             "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
         );
         assert!(
-            sql.contains("hasToken(e0.source_tags, 'status:failed')"),
-            "denorm pass should inject hasToken edge filter, got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "denorm pass should inject has edge filter, got:\n{sql}"
         );
     }
 
@@ -898,8 +898,8 @@ mod tests {
             "partial denorm must keep _nf_pipe CTE when not all filters are denormalized, got:\n{sql}"
         );
         assert!(
-            !sql.contains("hasToken"),
-            "partial denorm must not inject hasToken edge filter, got:\n{sql}"
+            !sql.contains("has"),
+            "partial denorm must not inject has edge filter, got:\n{sql}"
         );
     }
 
@@ -921,7 +921,7 @@ mod tests {
         let sql = compiled.base.render();
 
         assert!(
-            !sql.contains("hasToken"),
+            !sql.contains("has"),
             "denorm pass must skip rewrite when node_ids are present, got:\n{sql}"
         );
     }
@@ -955,8 +955,8 @@ mod tests {
         let sql = compiled.base.render();
 
         assert!(
-            sql.contains("hasToken(e0.source_tags, 'status:failed')"),
-            "filter on denormalized property must use hasToken edge filter, got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "filter on denormalized property must use has edge filter, got:\n{sql}"
         );
         // The _nf_pipe node-filter CTE (with status filter + LIMIT 1 BY)
         // should be eliminated. gl_pipeline may still appear in SIP/cascade

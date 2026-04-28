@@ -380,7 +380,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         };
 
         let mut all_rewritable = true;
-        // Collect tag values per edge column for hasAllTokens batching.
+        // Collect tag values per edge column for hasAll batching.
         let mut tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
 
         for (prop_name, filter) in &node.filters {
@@ -401,18 +401,15 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             }
         }
 
-        // Build filter expressions: hasToken for single tag, hasAllTokens for multiple.
+        // Build filter expressions: has() for single tag, hasAll() for multiple.
         let edge_filters: Vec<Expr> = tags_per_column
             .into_iter()
             .map(|(col, tags)| {
                 if tags.len() == 1 {
-                    Expr::func(
-                        "hasToken",
-                        vec![Expr::col("EDGE", &col), Expr::string(&tags[0])],
-                    )
+                    Expr::func("has", vec![Expr::col("EDGE", &col), Expr::string(&tags[0])])
                 } else {
                     Expr::func(
-                        "hasAllTokens",
+                        "hasAll",
                         vec![
                             Expr::col("EDGE", &col),
                             Expr::func("array", tags.iter().map(Expr::string).collect()),
@@ -639,13 +636,10 @@ fn build_neighbors_denorm_filters(
                 .into_iter()
                 .map(|(col, tags)| {
                     if tags.len() == 1 {
-                        Expr::func(
-                            "hasToken",
-                            vec![Expr::col("EDGE", &col), Expr::string(&tags[0])],
-                        )
+                        Expr::func("has", vec![Expr::col("EDGE", &col), Expr::string(&tags[0])])
                     } else {
                         Expr::func(
-                            "hasAllTokens",
+                            "hasAll",
                             vec![
                                 Expr::col("EDGE", &col),
                                 Expr::func("array", tags.iter().map(Expr::string).collect()),
