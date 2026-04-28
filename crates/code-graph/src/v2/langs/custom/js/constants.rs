@@ -32,19 +32,11 @@ pub const EVAL_EXTENSIONS: &[&str] = &[
     "js", "jsx", "cjs", "mjs", "ts", "tsx", "mts", "cts", "json", "graphql", "gql", "vue",
 ];
 
-/// Filenames whose presence marks a project as Bun-first.
-pub const BUN_SIGNAL_FILES: &[&str] = &["bun.lock", "bun.lockb", "bunfig.toml"];
-
-/// Basename prefix of a webpack config file. The webpack module walks
-/// the indexed file list (in memory) for anything whose basename starts
-/// with `WEBPACK_CONFIG_STEM.` and ends in a JS/TS extension, so configs
-/// tucked away in any sub-folder are discovered without re-walking the
-/// filesystem.
-pub const WEBPACK_CONFIG_STEM: &str = "webpack.config";
-
-/// Extensions the webpack-config probe accepts. Kept narrow (plain JS
-/// / CJS / MJS / TS) because that is what webpack itself loads.
-pub const WEBPACK_CONFIG_EXTENSIONS: &[&str] = &["js", "cjs", "mjs", "ts"];
+// Sourced from `v2::config::resolver_files` so the upstream extraction
+// filter (which decides what survives onto disk) and the in-pipeline
+// discovery here (which decides what to evaluate) cannot drift. Adding
+// a filename or extension only there propagates here automatically.
+pub use crate::v2::config::{BUN_SIGNAL_FILES, WEBPACK_CONFIG_EXTENSIONS, WEBPACK_CONFIG_STEM};
 
 /// True iff `relative_path` looks like a webpack config, based on its
 /// basename (`webpack.config.{js,cjs,mjs,ts}`). Folder-agnostic.
