@@ -278,7 +278,7 @@ Direct Vulnerability Search
     [Arguments]    ${vulnerability_id}
     ${id}=    Convert To Integer    ${vulnerability_id}
     ${filters}=    Create Dictionary    id=${id}
-    ${query}=    Create Dictionary    query_type=search
+    ${query}=    Create Dictionary    query_type=traversal
     ...    node=${{{"id": "v", "entity": "Vulnerability", "filters": $filters}}}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
