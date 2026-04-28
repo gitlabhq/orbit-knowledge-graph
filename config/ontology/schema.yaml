@@ -107,7 +107,7 @@ settings:
     - {node: Pipeline, property: status}
     - {node: MergeRequest, property: state}
     - {node: WorkItem, property: state}
-    - {node: WorkItem, property: work_item_type}
+    - {node: WorkItem, property: work_item_type, as: wi_type}
     - {node: Vulnerability, property: state}
     - {node: Vulnerability, property: severity}
     - {node: Job, property: status}

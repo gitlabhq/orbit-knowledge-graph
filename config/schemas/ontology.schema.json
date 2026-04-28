@@ -416,7 +416,8 @@
             "required": ["node", "property"],
             "properties": {
               "node": { "type": "string", "description": "Entity type (e.g. Pipeline)." },
-              "property": { "type": "string", "description": "Property name on the node (e.g. status)." }
+              "property": { "type": "string", "description": "Property name on the node (e.g. status)." },
+              "as": { "type": "string", "description": "Edge column suffix. Defaults to property name. Full column is {direction}_{as}." }
             },
             "additionalProperties": false
           }

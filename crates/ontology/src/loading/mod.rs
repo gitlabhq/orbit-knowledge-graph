@@ -331,7 +331,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                             crate::entities::DenormDirection::Source => "source",
                             crate::entities::DenormDirection::Target => "target",
                         },
-                        entry.property
+                        entry.column_alias.as_deref().unwrap_or(&entry.property)
                     );
                     denorm_columns.insert(edge_column.clone());
 

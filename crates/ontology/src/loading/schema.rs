@@ -69,6 +69,10 @@ pub(super) struct SettingsYaml {
 pub(super) struct DenormalizationEntryYaml {
     pub node: String,
     pub property: String,
+    /// Edge column suffix. Defaults to `property` if omitted.
+    /// The full column name is `{direction}_{as}`, e.g. `source_status`.
+    #[serde(rename = "as", default)]
+    pub column_alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
