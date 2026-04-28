@@ -14,8 +14,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id]  # denorm: MR state
+      # enrich: [state_id]  # denorm: MR state
     to:
       id: vulnerability_id
       type: Vulnerability
-      enrich: [state, severity]  # denorm: vulnerability state + severity
+      # enrich: [state, severity]  # denorm: vulnerability state + severity
