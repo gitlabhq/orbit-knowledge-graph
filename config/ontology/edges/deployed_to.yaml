@@ -14,8 +14,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      columns: [state_id]  # denorm: MR state
+      enrich: [state_id]  # denorm: MR state
     to:
       id: deployment_id
       type: Deployment
-      columns: [status]  # denorm: deployment status
+      enrich: [status]  # denorm: deployment status

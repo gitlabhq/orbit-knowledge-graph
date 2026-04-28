@@ -724,9 +724,9 @@
           "description": "Maps raw column values to entity types (e.g., Namespace -> Group).",
           "additionalProperties": { "type": "string" }
         },
-        "columns": {
+        "enrich": {
           "type": "array",
-          "description": "Source columns to carry from the join table for denormalization.",
+          "description": "Columns to enrich from this endpoint's node datalake table via LEFT JOIN. Makes node properties available for denormalization onto edge rows.",
           "items": { "type": "string" },
           "minItems": 1
         }

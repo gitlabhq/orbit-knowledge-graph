@@ -313,10 +313,10 @@ pub struct EdgeEndpoint {
     pub id_column: String,
     /// How the node type is determined.
     pub node_type: EdgeEndpointType,
-    /// Extra columns to bring from this endpoint's node datalake table via
-    /// LEFT JOIN at extract time. Used for denormalization of node properties
-    /// onto standalone edge rows.
-    pub columns: Vec<String>,
+    /// Columns to enrich from this endpoint's node datalake table via LEFT
+    /// JOIN at extract time. Makes node properties available in the MemTable
+    /// for the denormalization system to project onto edge rows.
+    pub enrich: Vec<String>,
 }
 
 /// How an edge endpoint's node type is determined.

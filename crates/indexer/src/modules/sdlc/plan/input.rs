@@ -429,7 +429,7 @@ fn resolve_standalone_edge(
 
     for (cfg, side, direction) in &endpoints_with_cols {
         let endpoint = if *side == "from" { &cfg.from } else { &cfg.to };
-        if endpoint.columns.is_empty() {
+        if endpoint.enrich.is_empty() {
             continue;
         }
         // Resolve the node type to find its datalake source table.
@@ -453,7 +453,7 @@ fn resolve_standalone_edge(
         join_idx += 1;
 
         let sub_cols = std::iter::once("id".to_string())
-            .chain(endpoint.columns.iter().cloned())
+            .chain(endpoint.enrich.iter().cloned())
             .collect::<Vec<_>>()
             .join(", ");
 
@@ -464,7 +464,7 @@ fn resolve_standalone_edge(
              LIMIT 1 BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
         ));
 
-        for col_name in &endpoint.columns {
+        for col_name in &endpoint.enrich {
             let mem_col = format!("{alias}_{col_name}");
             let select_expr = format!("{alias}.{col_name} AS {mem_col}");
             extract_columns.push(ExtractColumn::Bare(select_expr));

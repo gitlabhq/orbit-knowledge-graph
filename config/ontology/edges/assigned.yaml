@@ -21,7 +21,7 @@ etl:
     to:
       id: merge_request_id
       type: MergeRequest
-      columns: [state_id]  # denorm: MR state
+      enrich: [state_id]  # denorm: MR state
   - scope: namespaced
     source: siphon_issue_assignees
     order_by: [traversal_path, issue_id, user_id]
@@ -31,4 +31,4 @@ etl:
     to:
       id: issue_id
       type: WorkItem
-      columns: [state_id, work_item_type_id]  # denorm: WorkItem state + type
+      enrich: [state_id, work_item_type_id]  # denorm: WorkItem state + type
