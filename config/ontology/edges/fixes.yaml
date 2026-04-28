@@ -8,12 +8,12 @@ variants:
     description: "Merge request fixes vulnerability."
 
 etl:
-  scope: namespaced
-  source: siphon_vulnerability_merge_request_links
-  order_by: [traversal_path, id]
-  from:
-    id: merge_request_id
-    type: MergeRequest
-  to:
-    id: vulnerability_id
-    type: Vulnerability
+  - scope: namespaced
+    source: siphon_vulnerability_merge_request_links
+    order_by: [traversal_path, id]
+    from:
+      id: merge_request_id
+      type: MergeRequest
+    to:
+      id: vulnerability_id
+      type: Vulnerability

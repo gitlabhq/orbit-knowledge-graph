@@ -18,12 +18,12 @@ variants:
     description: "Work item is related to another work item."
 
 etl:
-  scope: namespaced
-  source: siphon_issue_links
-  order_by: [traversal_path, source_id, id]
-  from:
-    id: source_id
-    type: WorkItem
-  to:
-    id: target_id
-    type: WorkItem
+  - scope: namespaced
+    source: siphon_issue_links
+    order_by: [traversal_path, source_id, id]
+    from:
+      id: source_id
+      type: WorkItem
+    to:
+      id: target_id
+      type: WorkItem

@@ -407,13 +407,21 @@ fn resolve_endpoint(
             column,
             type_mapping,
         } => {
-            let allowed = resolve_allowed_types();
-            let filter = if allowed.is_empty() {
+            // The TypeIn filter runs in the source table before the CASE in
+            // `lower_edge_kind` rewrites raw Rails values to ontology names.
+            // Include mapping source values so polymorphic rows survive.
+            let mut filter_types = resolve_allowed_types();
+            for raw in type_mapping.keys() {
+                if !filter_types.iter().any(|t| t == raw) {
+                    filter_types.push(raw.clone());
+                }
+            }
+            let filter = if filter_types.is_empty() {
                 None
             } else {
                 Some(EdgeFilter::TypeIn {
                     column: column.clone(),
-                    types: allowed,
+                    types: filter_types,
                 })
             };
             let kind = EdgeKind::Column {
@@ -661,6 +669,36 @@ mod tests {
                 node_plan.edges.len(),
             );
         }
+    }
+
+    #[test]
+    fn standalone_edge_type_mapping_keys_survive_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology");
+        let plans = from_ontology(&ontology);
+
+        let has_label = plans
+            .standalone_edge_plans
+            .iter()
+            .find(|p| p.relationship_kind == "HAS_LABEL")
+            .expect("HAS_LABEL standalone plan");
+
+        let type_filter = has_label
+            .filters
+            .iter()
+            .find_map(|f| match f {
+                EdgeFilter::TypeIn { column, types } if column == "target_type" => Some(types),
+                _ => None,
+            })
+            .expect("HAS_LABEL should have a target_type TypeIn filter");
+
+        assert!(
+            type_filter.iter().any(|t| t == "Issue"),
+            "filter must include the raw Rails value that maps to WorkItem; got {type_filter:?}"
+        );
+        assert!(
+            type_filter.iter().any(|t| t == "MergeRequest"),
+            "filter must keep the ontology-native MergeRequest value; got {type_filter:?}"
+        );
     }
 
     #[test]

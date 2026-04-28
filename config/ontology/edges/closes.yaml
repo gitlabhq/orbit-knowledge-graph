@@ -8,12 +8,12 @@ variants:
     description: "Merge request closes work item."
 
 etl:
-  scope: namespaced
-  source: siphon_merge_requests_closing_issues
-  order_by: [traversal_path, issue_id, id]
-  from:
-    id: merge_request_id
-    type: MergeRequest
-  to:
-    id: issue_id
-    type: WorkItem
+  - scope: namespaced
+    source: siphon_merge_requests_closing_issues
+    order_by: [traversal_path, issue_id, id]
+    from:
+      id: merge_request_id
+      type: MergeRequest
+    to:
+      id: issue_id
+      type: WorkItem

@@ -18,7 +18,7 @@ pub(crate) struct EdgeYaml {
     #[serde(default)]
     variants: Vec<EdgeVariantYaml>,
     #[serde(default)]
-    etl: Option<EdgeEtlYaml>,
+    etl: Vec<EdgeEtlYaml>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -78,31 +78,32 @@ impl EdgeYaml {
             .collect()
     }
 
-    pub(crate) fn into_etl_config(
+    pub(crate) fn into_etl_configs(
         self,
         etl_settings: &EtlSettings,
-    ) -> Result<Option<EdgeSourceEtlConfig>, OntologyError> {
-        let Some(etl) = self.etl else {
-            return Ok(None);
-        };
+    ) -> Result<Vec<EdgeSourceEtlConfig>, OntologyError> {
+        self.etl
+            .into_iter()
+            .map(|etl| {
+                let from = convert_endpoint(etl.from, "from")?;
+                let to = convert_endpoint(etl.to, "to")?;
 
-        let from = convert_endpoint(etl.from, "from")?;
-        let to = convert_endpoint(etl.to, "to")?;
+                let watermark = etl
+                    .watermark
+                    .unwrap_or_else(|| etl_settings.watermark.clone());
+                let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
 
-        let watermark = etl
-            .watermark
-            .unwrap_or_else(|| etl_settings.watermark.clone());
-        let deleted = etl.deleted.unwrap_or_else(|| etl_settings.deleted.clone());
-
-        Ok(Some(EdgeSourceEtlConfig {
-            scope: etl.scope,
-            source: etl.source,
-            watermark,
-            deleted,
-            order_by: etl.order_by,
-            from,
-            to,
-        }))
+                Ok(EdgeSourceEtlConfig {
+                    scope: etl.scope,
+                    source: etl.source,
+                    watermark,
+                    deleted,
+                    order_by: etl.order_by,
+                    from,
+                    to,
+                })
+            })
+            .collect()
     }
 }
 

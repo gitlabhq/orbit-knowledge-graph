@@ -8,12 +8,12 @@ variants:
     description: "Runner serves jobs for this project."
 
 etl:
-  scope: namespaced
-  source: siphon_ci_runner_projects
-  order_by: [traversal_path, id]
-  from:
-    id: runner_id
-    type: Runner
-  to:
-    id: project_id
-    type: Project
+  - scope: namespaced
+    source: siphon_ci_runner_projects
+    order_by: [traversal_path, id]
+    from:
+      id: runner_id
+      type: Runner
+    to:
+      id: project_id
+      type: Project

@@ -284,16 +284,6 @@ etl:
       to: Milestone
       as: IN_MILESTONE
       direction: outgoing
-    assignees:
-      to: User
-      as: ASSIGNED
-      direction: incoming
-      array_field: user_id
-    label_ids:
-      to: Label
-      as: HAS_LABEL
-      direction: outgoing
-      array_field: label_id
     reviewers:
       to: User
       as: REVIEWER

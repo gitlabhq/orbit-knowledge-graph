@@ -43,15 +43,15 @@ variants:
     description: "User has access to project (via direct membership or group inheritance)."
 
 etl:
-  scope: namespaced
-  source: siphon_members
-  order_by: [traversal_path, id]
-  from:
-    id: user_id
-    type: User
-  to:
-    id: source_id
-    type_column: source_type
-    type_mapping:
-      Namespace: Group
-      Project: Project
+  - scope: namespaced
+    source: siphon_members
+    order_by: [traversal_path, id]
+    from:
+      id: user_id
+      type: User
+    to:
+      id: source_id
+      type_column: source_type
+      type_mapping:
+        Namespace: Group
+        Project: Project

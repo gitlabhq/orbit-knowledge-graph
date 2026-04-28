@@ -12,12 +12,12 @@ variants:
     description: "Vulnerability occurrence has identifier."
 
 etl:
-  scope: namespaced
-  source: siphon_vulnerability_occurrence_identifiers
-  order_by: [traversal_path, id]
-  from:
-    id: occurrence_id
-    type: VulnerabilityOccurrence
-  to:
-    id: identifier_id
-    type: VulnerabilityIdentifier
+  - scope: namespaced
+    source: siphon_vulnerability_occurrence_identifiers
+    order_by: [traversal_path, id]
+    from:
+      id: occurrence_id
+      type: VulnerabilityOccurrence
+    to:
+      id: identifier_id
+      type: VulnerabilityIdentifier

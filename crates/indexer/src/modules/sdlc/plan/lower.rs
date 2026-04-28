@@ -136,6 +136,7 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
 
 fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> PipelinePlan {
     let destination_table = input.extract.destination_table.clone();
+    let name = plan_name(&input.relationship_kind, &input.extract.source);
     let extract_query = lower_extract_plan(input.extract, batch_size);
 
     let transform_query = Query {
@@ -154,12 +155,19 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
     };
 
     PipelinePlan {
-        name: input.relationship_kind,
+        name,
         extract_query,
         transforms: vec![Transformation {
             query: transform_query,
             destination_table,
         }],
+    }
+}
+
+fn plan_name(relationship_kind: &str, source: &ExtractSource) -> String {
+    match source {
+        ExtractSource::Table(table) => format!("{relationship_kind}_{table}"),
+        ExtractSource::Raw(_) => relationship_kind.to_string(),
     }
 }
 
