@@ -28,6 +28,12 @@ fn escape_setting_str(s: &str) -> String {
 const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
 /// Default max_memory_usage: 1 GiB per query.
 const DEFAULT_MAX_MEMORY_USAGE: u64 = 1_073_741_824;
+/// Default max_bytes_to_read: 500 MiB.
+const DEFAULT_MAX_BYTES_TO_READ: u64 = 524_288_000;
+/// Default max_rows_to_read: 10 million rows.
+const DEFAULT_MAX_ROWS_TO_READ: u64 = 10_000_000;
+/// Default max_rows_in_set: 10,000 (IN subquery hash table).
+const DEFAULT_MAX_ROWS_IN_SET: u64 = 10_000;
 /// Default query_cache_ttl: 60 seconds.
 const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
 
@@ -43,6 +49,23 @@ pub struct QueryConfig {
     /// ClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED.
     #[serde(default = "default_max_memory_usage", skip_serializing_if = "Option::is_none")]
     pub max_memory_usage: Option<u64>,
+
+    /// ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data
+    /// read from tables. Catches full table scans early before data is
+    /// decompressed into RAM.
+    #[serde(default = "default_max_bytes_to_read", skip_serializing_if = "Option::is_none")]
+    pub max_bytes_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_to_read`. Limits the total number of rows
+    /// read from tables during query execution.
+    #[serde(default = "default_max_rows_to_read", skip_serializing_if = "Option::is_none")]
+    pub max_rows_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_in_set`. Limits the size of hash tables built
+    /// for IN (subquery) clauses. Catches runaway _nf_* and cascade CTEs
+    /// that resolve broad filters into massive ID sets.
+    #[serde(default = "default_max_rows_in_set", skip_serializing_if = "Option::is_none")]
+    pub max_rows_in_set: Option<u64>,
 
     /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -69,6 +92,15 @@ fn default_max_execution_time() -> Option<u64> {
 fn default_max_memory_usage() -> Option<u64> {
     Some(DEFAULT_MAX_MEMORY_USAGE)
 }
+fn default_max_bytes_to_read() -> Option<u64> {
+    Some(DEFAULT_MAX_BYTES_TO_READ)
+}
+fn default_max_rows_to_read() -> Option<u64> {
+    Some(DEFAULT_MAX_ROWS_TO_READ)
+}
+fn default_max_rows_in_set() -> Option<u64> {
+    Some(DEFAULT_MAX_ROWS_IN_SET)
+}
 fn default_query_cache_ttl() -> Option<u32> {
     Some(DEFAULT_QUERY_CACHE_TTL)
 }
@@ -78,6 +110,9 @@ impl Default for QueryConfig {
         Self {
             max_execution_time: Some(DEFAULT_MAX_EXECUTION_TIME),
             max_memory_usage: Some(DEFAULT_MAX_MEMORY_USAGE),
+            max_bytes_to_read: Some(DEFAULT_MAX_BYTES_TO_READ),
+            max_rows_to_read: Some(DEFAULT_MAX_ROWS_TO_READ),
+            max_rows_in_set: Some(DEFAULT_MAX_ROWS_IN_SET),
             use_query_cache: None,
             query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
             graph_query_cache_enabled: None,
@@ -93,6 +128,9 @@ impl QueryConfig {
         QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
             max_memory_usage: overrides.max_memory_usage.or(self.max_memory_usage),
+            max_bytes_to_read: overrides.max_bytes_to_read.or(self.max_bytes_to_read),
+            max_rows_to_read: overrides.max_rows_to_read.or(self.max_rows_to_read),
+            max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
             graph_query_cache_enabled: overrides
@@ -232,6 +270,9 @@ mod tests {
         let cfg = QueryConfig {
             max_execution_time: Some(30),
             max_memory_usage: Some(1_073_741_824),
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
             use_query_cache: Some(true),
             query_cache_ttl: None,
             graph_query_cache_enabled: None,

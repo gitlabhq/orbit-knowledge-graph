@@ -326,6 +326,9 @@ query:
 |-------------|---------|-------------|
 | `query.default.max_execution_time` | `30` | ClickHouse `max_execution_time` in seconds |
 | `query.default.max_memory_usage` | `1073741824` | ClickHouse `max_memory_usage` in bytes (1 GiB) |
+| `query.default.max_bytes_to_read` | `524288000` | ClickHouse `max_bytes_to_read` in bytes (500 MiB) |
+| `query.default.max_rows_to_read` | `10000000` | ClickHouse `max_rows_to_read` (10M rows) |
+| `query.default.max_rows_in_set` | `10000` | ClickHouse `max_rows_in_set` (IN subquery cap) |
 | `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
 | `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
 

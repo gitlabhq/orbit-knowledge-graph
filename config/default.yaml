@@ -110,7 +110,10 @@ grpc:
 query:
   default:
     max_execution_time: 30
-    max_memory_usage: 1073741824  # 1 GiB per query
+    max_memory_usage: 1073741824   # 1 GiB per query
+    max_bytes_to_read: 524288000   # 500 MiB uncompressed
+    max_rows_to_read: 10000000     # 10M rows
+    max_rows_in_set: 10000         # IN subquery hash table cap
     use_query_cache: false
     query_cache_ttl: 60
     graph_query_cache_enabled: false
