@@ -1,4 +1,4 @@
-# E2E test driver: pins ai-review-bot to feat/anthropic-api-key for validation.
+# E2E test driver: pins ai-review-bot to feat/anthropic-api-key for validation
 # See: https://gitlab.com/gitlab-org/orbit/experiments/ai-review-bot/-/merge_requests/12
 # This file change will be reverted when the bot MR merges.
 variables:
