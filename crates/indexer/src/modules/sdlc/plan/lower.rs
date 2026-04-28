@@ -287,13 +287,16 @@ fn lower_edge_select(
                     })
                     .collect();
                 format!(
-                    "concat('{}:', CASE {} ELSE toString({}) END)",
+                    "concat('{}:', CASE {} ELSE CAST({} AS VARCHAR) END)",
                     d.tag_key,
                     cases.join(" "),
                     d.source_column
                 )
             }
-            None => format!("concat('{}:', toString({}))", d.tag_key, d.source_column),
+            None => format!(
+                "concat('{}:', CAST({} AS VARCHAR))",
+                d.tag_key, d.source_column
+            ),
         };
         tag_groups
             .entry(d.edge_column.clone())
@@ -302,7 +305,7 @@ fn lower_edge_select(
     }
 
     for (col_name, tag_exprs) in tag_groups {
-        let array_expr = format!("array({})", tag_exprs.join(", "));
+        let array_expr = format!("make_array({})", tag_exprs.join(", "));
         cols.push(SelectExpr::new(Expr::raw(array_expr), &col_name));
     }
 
