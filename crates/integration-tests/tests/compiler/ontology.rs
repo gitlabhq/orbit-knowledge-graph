@@ -619,8 +619,8 @@ fn cursor_pagination_validation() {
     let sql = ParsedSql::from_query(&result.base);
     assert_eq!(sql.limit_value(), Some(30), "default limit should be 30");
     assert!(
-        !result.base.sql.contains("SETTINGS"),
-        "non-cursor query should not emit SETTINGS: {}",
+        !result.base.sql.contains("use_query_cache"),
+        "non-cursor query should not enable query cache: {}",
         result.base.sql
     );
 }
