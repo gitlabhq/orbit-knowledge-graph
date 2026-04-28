@@ -854,8 +854,8 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\))$",
-          "description": "Index type. Must be minmax, set(N), or bloom_filter(N.NN)."
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\))$",
+          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), or text(tokenizer = ...)."
         },
         "granularity": { "type": "integer", "minimum": 1, "default": 1 }
       },

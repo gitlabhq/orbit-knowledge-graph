@@ -178,8 +178,9 @@ storage:
   indexes:
     - {name: idx_state, column: state, type: "set(4)", granularity: 2}
     - {name: idx_tier, column: tier, type: "set(8)", granularity: 2}
-    - {name: idx_environment_type, column: environment_type, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_environment_type, column: environment_type, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_tier_state, order_by: [tier, state, id]}
