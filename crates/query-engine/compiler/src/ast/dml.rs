@@ -460,6 +460,19 @@ impl Expr {
         }
     }
 
+    /// Returns true if this expression tree contains an `InSubquery` node.
+    pub fn contains_in_subquery(&self) -> bool {
+        match self {
+            Expr::InSubquery { .. } => true,
+            Expr::BinaryOp { left, right, .. } => {
+                left.contains_in_subquery() || right.contains_in_subquery()
+            }
+            Expr::FuncCall { args, .. } => args.iter().any(|a| a.contains_in_subquery()),
+            Expr::UnaryOp { expr, .. } => expr.contains_in_subquery(),
+            _ => false,
+        }
+    }
+
     /// Collect all column names (not aliases) referenced by this expression.
     pub fn referenced_columns(&self) -> HashSet<String> {
         let mut cols = HashSet::new();
