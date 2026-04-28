@@ -11,8 +11,9 @@ db-path = "~/.cargo/advisory-db"
 db-urls = ["https://github.com/rustsec/advisory-db"]
 yanked = "warn"
 ignore = [
-    # Transitive dev dependencies from testcontainers - no safe upgrade available
-    "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
+    # rustls-pemfile unmaintained - transitive dep from object_store -> datafusion
+    # Remove when object_store drops rustls-pemfile (check: cargo tree -i rustls-pemfile)
+    "RUSTSEC-2025-0134",
     # atomic-polyfill is pulled in transitively by rust-analyzer's postcard/proc-macro stack.
     # We disable the proc-macro server in the Rust v2 indexing path, and there is no safe
     # upgrade available until upstream refreshes that dependency chain.
@@ -24,17 +25,6 @@ ignore = [
     "RUSTSEC-2023-0071",
     # paste unmaintained - transitive dep from clickhouse crate
     "RUSTSEC-2024-0436",
-    # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
-    # Remove when async-nats drops rustls-webpki 0.102.x (check: cargo tree -i rustls-webpki@0.102.8)
-    "RUSTSEC-2026-0049",
-    # lru 0.12.5 IterMut unsoundness (Stacked Borrows). Fix requires >=0.16.3 which is a
-    # breaking change. Pulled in transitively from tantivy 0.24.2 -> lance / lance-index.
-    # Remove when tantivy bumps lru (check: cargo tree -i lru@0.12.5)
-    "RUSTSEC-2026-0002",
-    # astral-tokio-tar 0.6.0 symlink/PAX vulnerabilities — fix needs testcontainers >= 0.28
-    # Remove when testcontainers bumps astral-tokio-tar (check: cargo tree -i astral-tokio-tar)
-    "RUSTSEC-2026-0112",
-    "RUSTSEC-2026-0113",
 ]
 
 [licenses]
