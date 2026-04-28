@@ -102,33 +102,102 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
         0 => Expr::param(ChType::Bool, false),
         1 => starts_with_expr(alias, paths[0]),
         _ => {
-            let owned: Vec<String> = paths.iter().map(|s| (*s).to_string()).collect();
-            let prefix = lowest_common_prefix(&owned);
-            let prefix_filter = starts_with_expr(alias, &prefix);
-            match Expr::or_all(paths.iter().map(|p| Some(starts_with_expr(alias, p)))) {
-                Some(or_filters) => Expr::and(prefix_filter, or_filters),
-                None => prefix_filter,
+            let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
+            if collapsed.len() == 1 {
+                return starts_with_expr(alias, &collapsed[0]);
+            }
+            let lcp = lowest_common_prefix(&collapsed);
+            let lcp_filter = starts_with_expr(alias, &lcp);
+            match Expr::or_all(collapsed.iter().map(|p| Some(starts_with_expr(alias, p)))) {
+                Some(or_filters) => Expr::and(lcp_filter, or_filters),
+                None => lcp_filter,
             }
         }
     }
 }
 
-/// Find the lowest common path prefix.
+// ─────────────────────────────────────────────────────────────────────────────
+// PathTrie — segment-level trie for collapsing traversal paths
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// A trie keyed on path segments (`"1"`, `"100"`, …). Each node tracks
+/// whether it was explicitly inserted (i.e., the user has access to that
+/// exact namespace prefix). Inserting `"1/100/"` marks the `1 → 100` node
+/// as terminal.
+#[derive(Default)]
+struct PathTrie {
+    children: std::collections::BTreeMap<String, PathTrie>,
+    terminal: bool,
+}
+
+impl PathTrie {
+    fn from_paths(paths: &[&str]) -> Self {
+        let mut root = Self::default();
+        for path in paths {
+            root.insert(path);
+        }
+        root
+    }
+
+    fn insert(&mut self, path: &str) {
+        let segments: Vec<&str> = path
+            .trim_end_matches('/')
+            .split('/')
+            .filter(|s| !s.is_empty())
+            .collect();
+        let mut node = self;
+        for seg in segments {
+            node = node.children.entry(seg.to_string()).or_default();
+        }
+        node.terminal = true;
+    }
+
+    /// Walk the trie and emit the minimal set of prefixes. A terminal
+    /// node emits its path and prunes all descendants (subsumption).
+    /// A non-terminal node with exactly one child merges into that
+    /// child (prefix compression).
+    fn to_minimal_prefixes(&self) -> Vec<String> {
+        let mut result = Vec::new();
+        self.collect(&mut String::new(), &mut result);
+        result
+    }
+
+    fn collect(&self, prefix: &mut String, out: &mut Vec<String>) {
+        if self.terminal {
+            // This node is authorized — emit the prefix, skip children.
+            let mut p = prefix.clone();
+            if !p.is_empty() {
+                p.push('/');
+            }
+            out.push(p);
+            return;
+        }
+
+        for (seg, child) in &self.children {
+            let restore_len = prefix.len();
+            if !prefix.is_empty() {
+                prefix.push('/');
+            }
+            prefix.push_str(seg);
+            child.collect(prefix, out);
+            prefix.truncate(restore_len);
+        }
+    }
+}
+
+/// Find the lowest common path prefix across a set of paths.
 fn lowest_common_prefix(paths: &[String]) -> String {
     if paths.is_empty() {
         return String::new();
     }
-
     let segments: Vec<Vec<&str>> = paths
         .iter()
         .map(|p| p.trim_end_matches('/').split('/').collect())
         .collect();
-
     let first = &segments[0];
     let common_len = (0..first.len())
         .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
         .count();
-
     if common_len == 0 {
         String::new()
     } else {
@@ -479,6 +548,79 @@ mod tests {
         assert_eq!(lowest_common_prefix(&["1/2/".into(), "1/3/".into()]), "1/");
         assert_eq!(lowest_common_prefix(&["1/".into(), "2/".into()]), "");
         assert_eq!(lowest_common_prefix(&["42/".into()]), "42/");
+    }
+
+    #[test]
+    fn path_trie_subsumes_children() {
+        let t = PathTrie::from_paths(&["1/100/", "1/100/200/", "1/100/201/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+    }
+
+    #[test]
+    fn path_trie_keeps_siblings() {
+        let t = PathTrie::from_paths(&["1/100/", "1/200/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[test]
+    fn path_trie_siblings_under_shared_parent() {
+        // Three children under 1/100/ — trie keeps all three since
+        // the parent 1/100/ is not itself authorized.
+        let t = PathTrie::from_paths(&["1/100/200/", "1/100/201/", "1/100/202/", "1/200/300/"]);
+        let result = t.to_minimal_prefixes();
+        assert_eq!(result.len(), 4);
+        assert!(result.contains(&"1/200/300/".to_string()));
+    }
+
+    #[test]
+    fn path_trie_single_path() {
+        let t = PathTrie::from_paths(&["1/100/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/"]);
+    }
+
+    #[test]
+    fn path_trie_deduplicates() {
+        let t = PathTrie::from_paths(&["1/100/", "1/100/", "1/200/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "1/200/"]);
+    }
+
+    #[test]
+    fn path_trie_deep_subsumption() {
+        let t = PathTrie::from_paths(&["1/", "1/100/", "1/100/200/", "1/100/200/300/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/"]);
+    }
+
+    #[test]
+    fn path_trie_mixed_orgs() {
+        let t = PathTrie::from_paths(&["1/100/", "2/100/"]);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/100/", "2/100/"]);
+    }
+
+    #[test]
+    fn path_trie_realistic_38_paths() {
+        // Simulate a user with access to 38 groups, 30 under 1/10/
+        // and 8 scattered elsewhere. The trie should keep all 38
+        // (no subsumption since no parent path is authorized), but
+        // the LCP in build_path_filter will be "1/" which is correct.
+        let mut paths: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
+        paths.extend((200..208).map(|i| format!("1/{i}/")));
+        let refs: Vec<&str> = paths.iter().map(|s| s.as_str()).collect();
+        let t = PathTrie::from_paths(&refs);
+        let result = t.to_minimal_prefixes();
+        // No subsumption possible — all are leaf groups
+        assert_eq!(result.len(), 38);
+    }
+
+    #[test]
+    fn path_trie_parent_collapses_many_children() {
+        // User has access to parent group 1/10/ plus individual
+        // subgroups — parent subsumes everything underneath.
+        let mut paths = vec!["1/10/"];
+        let children: Vec<String> = (100..130).map(|i| format!("1/10/{i}/")).collect();
+        let refs: Vec<&str> = children.iter().map(|s| s.as_str()).collect();
+        paths.extend(refs);
+        let t = PathTrie::from_paths(&paths);
+        assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
     }
 
     // ─────────────────────────────────────────────────────────────────────────
