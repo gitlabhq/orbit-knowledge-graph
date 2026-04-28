@@ -1,3 +1,25 @@
+## [0.36.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.35.0...v0.36.0) (2026-04-28)
+
+### Features
+
+* **server:** classify execution errors with diagnostic hints ([ed15068](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ed15068738b4ed4caa8260f201451134015bd6d9)) by Michael Usachenko
+
+### Fixes
+
+* **indexer:** report SDLC row count metric per batch instead of per pipeline ([63906d9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63906d9ebbed279e7464a02e121bd00ce84ff8d4)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** extend hop frontiers and multi-hop cascade to all query types ([1689c77](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1689c774afa16e1caea67a72029687d606c78f49)) by Michael Usachenko
+* **compiler:** inline _nf_* CTE filters into dedup subqueries ([589a4e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/589a4e8970c981bae86e89a07dd0caf66dd201a1)) by Michael Usachenko
+* **indexer:** skip non-parsable files during archive extraction ([5eb0250](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5eb0250c00d04da55b793b9c0117bf15e9f8faea)) by Bohdan Parkhomchuk
+* **ontology:** add text indexes on hot string columns (CH 26.2+) ([90a4e9f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/90a4e9fd0fa2fa318dd1d5eae8578f25ea89ea62)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** typed file outcomes replace string-classified errors ([43e3321](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/43e33210bf36b939128d9a2c59b960757937ca40)) by Michael Angelo Rivera
+* **deps:** bump testcontainers 0.27.1 -> 0.27.3 and fix advisories ([b3b4cb5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b3b4cb5b381bfaed9adffd0ef04e5f162b103550)) by Jean-Gabriel Doyon
+
 ## [0.35.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.34.1...v0.35.0) (2026-04-28)
 
 ### Features
