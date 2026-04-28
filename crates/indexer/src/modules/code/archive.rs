@@ -596,21 +596,31 @@ mod tests {
         assert!(!dir.path().join("dangling").exists());
     }
 
-    /// End-to-end contract for !1110: real archive → real extraction →
-    /// post-extraction filter (`is_parsable || is_required_by_indexer`)
-    /// → real `Pipeline::run`. The pipeline must produce graph output;
-    /// if the filter dropped any indexer input (Cargo.toml, package.json,
+    /// End-to-end contract for !1110: spin up an axum server that
+    /// emulates the GitLab archive endpoint, fetch from it via reqwest,
+    /// stream the response into the real `extract_tar_gz_from_reader`
+    /// extraction path, apply the upstream filter
+    /// (`is_parsable || is_required_by_indexer`) by deleting files the
+    /// filter would refuse, then run the real `Pipeline::run`. The
+    /// pipeline must produce non-zero defs and edges; if the filter
+    /// dropped any indexer input (Cargo.toml, package.json,
     /// tsconfig.json, .gitignore, etc.) the resolvers would silently
     /// degrade and we'd see zero defs / edges instead.
-    #[test]
-    fn pipeline_runs_against_filtered_extracted_archive() {
+    #[tokio::test]
+    async fn pipeline_runs_against_filtered_archive_endpoint() {
         use std::sync::Arc;
         use std::sync::atomic::{AtomicUsize, Ordering};
 
+        use axum::Router;
+        use axum::body::Body;
+        use axum::http::header;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
         use code_graph::v2::config::{detect_language_from_path, is_required_by_indexer};
         use code_graph::v2::{
             BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
         };
+        use tokio_util::io::SyncIoBridge;
 
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
@@ -662,8 +672,51 @@ mod tests {
             Entry::File("root/pkg/server_test.go", b"package pkg\n"),
         ]);
 
-        // 1. Real archival extraction endpoint.
-        extract_tar_gz(&data, dir.path()).unwrap();
+        // 1. Spin up an axum server that returns the tar.gz body the
+        //    way GitLab's `/repository/archive` endpoint does.
+        let archive_bytes = data.clone();
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{project_id}/repository/archive",
+            get(move || {
+                let body = archive_bytes.clone();
+                async move {
+                    (
+                        [(header::CONTENT_TYPE, "application/x-gzip")],
+                        Body::from(body),
+                    )
+                        .into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        // 2. Fetch from that endpoint with reqwest, stream the body
+        //    through the real `extract_tar_gz_from_reader` extraction
+        //    path. `SyncIoBridge` mirrors what `LocalRepositoryCache`
+        //    does in production (`cache.rs::store_archive`).
+        let url = format!(
+            "http://{}/api/v4/internal/orbit/project/42/repository/archive?ref=main",
+            addr
+        );
+        let response = reqwest::get(&url).await.unwrap();
+        assert!(response.status().is_success(), "fetch failed: {url}");
+        let stream = response.bytes_stream();
+        use futures::StreamExt;
+        let async_reader =
+            tokio_util::io::StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
+        let target_dir = dir.path().to_path_buf();
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
+            extract_tar_gz_from_reader(bridge, &target_dir).unwrap();
+        })
+        .await
+        .unwrap();
+        server.abort();
 
         // 2. Apply the filter !1110 will compose, by deleting files the
         //    filter would have refused to write to disk.
@@ -755,13 +808,19 @@ mod tests {
             defs: AtomicUsize::new(0),
             edges: AtomicUsize::new(0),
         });
-        let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
-        let result = Pipeline::run(
-            dir.path(),
-            PipelineConfig::default(),
-            counter.clone() as Arc<dyn GraphConverter>,
-            sink,
-        );
+        let counter_for_pipeline = counter.clone();
+        let root = dir.path().to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
+            Pipeline::run(
+                &root,
+                PipelineConfig::default(),
+                counter_for_pipeline as Arc<dyn GraphConverter>,
+                sink,
+            )
+        })
+        .await
+        .unwrap();
         assert!(
             result.errors.is_empty(),
             "pipeline errors: {:#?}",
