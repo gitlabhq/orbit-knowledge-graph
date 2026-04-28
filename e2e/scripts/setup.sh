@@ -23,13 +23,22 @@ for r in json.load(sys.stdin).get('items', []):
     if ns.startswith('e2e-') and ns not in existing:
         print(r['metadata']['name'])
 " 2>/dev/null) || true
-  if [ -n "$ORPHANS" ]; then
-    # --wait=false + --timeout=30s: gateway-api controllers can hold finalizers
-    # for minutes while cleaning attached routes; without these, kubectl delete
-    # blocks until the resource is gone and exhausted the 1h job budget once.
-    echo "$ORPHANS" | xargs -I{} $KC delete "$kind" "{}" \
+  for orphan in $ORPHANS; do
+    # 1. Mark for deletion (--wait=false avoids hanging on finalizers).
+    $KC delete "$kind" "$orphan" \
       --ignore-not-found=true --wait=false --timeout=30s 2>/dev/null || true
-  fi
+    # 2. Strip finalizers so the API server actually removes the object;
+    #    gateway-api/envoy-gateway controllers from a torn-down namespace
+    #    are gone, so their finalizers will never reconcile on their own.
+    $KC patch "$kind" "$orphan" --type=merge \
+      -p '{"metadata":{"finalizers":[]}}' 2>/dev/null || true
+    # 3. Poll up to 30s for actual removal — helm install fails if the
+    #    object is still present (even with deletionTimestamp set).
+    for _ in $(seq 1 30); do
+      $KC get "$kind" "$orphan" >/dev/null 2>&1 || break
+      sleep 1
+    done
+  done
 done
 
 # Generate random credentials
