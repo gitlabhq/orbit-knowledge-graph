@@ -26,9 +26,8 @@ impl ChScalar {
 }
 
 /// ClickHouse types used in parameterized query placeholders (`{pN:Type}`).
-///
-/// Scalar variants map directly to ClickHouse types. `Array(ChScalar)` maps
-/// to `Array(T)` for any scalar `T`, used in `IN` clauses with multiple values.
+/// `Array(ChScalar)` maps to `Array(T)` for any scalar `T`, used in `IN`
+/// clauses with multiple values.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum ChType {
     String,
@@ -36,6 +35,7 @@ pub enum ChType {
     UInt32,
     Float64,
     Bool,
+    DateTime64,
     Array(ChScalar),
 }
 
@@ -47,6 +47,7 @@ impl fmt::Display for ChType {
             ChType::UInt32 => write!(f, "UInt32"),
             ChType::Float64 => write!(f, "Float64"),
             ChType::Bool => write!(f, "Bool"),
+            ChType::DateTime64 => write!(f, "DateTime64(6, 'UTC')"),
             ChType::Array(s) => write!(f, "Array({s})"),
         }
     }
@@ -79,7 +80,7 @@ impl ChType {
     /// Promote a scalar type to its array equivalent.
     pub fn to_array(self) -> Self {
         match self {
-            ChType::String => ChType::Array(ChScalar::String),
+            ChType::String | ChType::DateTime64 => ChType::Array(ChScalar::String),
             ChType::Int64 | ChType::UInt32 => ChType::Array(ChScalar::Int64),
             ChType::Float64 => ChType::Array(ChScalar::Float64),
             ChType::Bool => ChType::Array(ChScalar::Bool),

@@ -16,6 +16,7 @@ use crate::input::{
     AggFunction, ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter,
     InputNode, InputRelationship, OrderDirection, QueryType,
 };
+use ontology::DataType;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -1963,7 +1964,7 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || {
         let v = filter.value.clone().unwrap_or(Value::Null);
-        Expr::param(ChType::from_value(&v), v)
+        Expr::param(filter_value_ch_type(filter, &v), v)
     };
 
     match filter.op {
@@ -1978,6 +1979,18 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+    }
+}
+
+/// `IN` (Value::Array) falls back to value-based inference because
+/// `Array(ChScalar)` has no temporal element type.
+fn filter_value_ch_type(filter: &InputFilter, value: &Value) -> ChType {
+    if matches!(value, Value::Array(_) | Value::Null) {
+        return ChType::from_value(value);
+    }
+    match filter.data_type {
+        Some(DataType::DateTime) => ChType::DateTime64,
+        _ => ChType::from_value(value),
     }
 }
 
@@ -2087,10 +2100,21 @@ mod tests {
     fn validated_input(json: &str) -> Input {
         let ontology = test_ontology();
         let input = parse_input(json).unwrap();
-        validate::Validator::new(&ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, &ontology).unwrap()
+        let validator = validate::Validator::new(&ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, &ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
+    }
+
+    #[test]
+    fn filter_value_ch_type_uses_datetime64_for_datetime_columns() {
+        let value = Value::String("2026-03-28T00:00:00Z".into());
+        let filter = InputFilter {
+            data_type: Some(DataType::DateTime),
+            ..Default::default()
+        };
+        assert_eq!(filter_value_ch_type(&filter, &value), ChType::DateTime64);
     }
 
     #[test]
@@ -3870,10 +3894,11 @@ mod tests {
 
     fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
         let input = parse_input(json).unwrap();
-        validate::Validator::new(ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, ontology).unwrap()
+        let validator = validate::Validator::new(ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
     }
 
     fn has_union(t: &TableRef) -> bool {
