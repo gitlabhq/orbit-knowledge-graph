@@ -48,8 +48,7 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
-    ref: 'feat/anthropic-api-key'
-  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@feat/anthropic-api-key
+  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
     inputs:
       automatic: manual
       labels_enabled: "false"
