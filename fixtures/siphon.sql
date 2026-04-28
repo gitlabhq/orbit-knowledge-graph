@@ -1268,7 +1268,7 @@ SELECT
     snm._siphon_replicated_at     AS _siphon_replicated_at,
     snm._siphon_deleted           AS _siphon_deleted
 FROM siphon_system_note_metadata snm
-INNER JOIN siphon_notes sn USING (note_id)
+INNER JOIN siphon_notes sn ON sn.id = snm.note_id
 WHERE snm.action = 'merged';
 
 CREATE VIEW IF NOT EXISTS siphon_system_note_closed AS
@@ -1282,7 +1282,7 @@ SELECT
     snm._siphon_replicated_at     AS _siphon_replicated_at,
     snm._siphon_deleted           AS _siphon_deleted
 FROM siphon_system_note_metadata snm
-INNER JOIN siphon_notes sn USING (note_id)
+INNER JOIN siphon_notes sn ON sn.id = snm.note_id
 WHERE snm.action = 'closed';
 
 CREATE VIEW IF NOT EXISTS siphon_system_note_reopened AS
@@ -1296,7 +1296,7 @@ SELECT
     snm._siphon_replicated_at     AS _siphon_replicated_at,
     snm._siphon_deleted           AS _siphon_deleted
 FROM siphon_system_note_metadata snm
-INNER JOIN siphon_notes sn USING (note_id)
+INNER JOIN siphon_notes sn ON sn.id = snm.note_id
 WHERE snm.action = 'reopened';
 
 -- Siphon source table for label links (polymorphic join table)
