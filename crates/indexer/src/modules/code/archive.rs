@@ -595,4 +595,187 @@ mod tests {
         );
         assert!(!dir.path().join("dangling").exists());
     }
+
+    /// End-to-end contract for !1110: real archive → real extraction →
+    /// post-extraction filter (`is_parsable || is_required_by_indexer`)
+    /// → real `Pipeline::run`. The pipeline must produce graph output;
+    /// if the filter dropped any indexer input (Cargo.toml, package.json,
+    /// tsconfig.json, .gitignore, etc.) the resolvers would silently
+    /// degrade and we'd see zero defs / edges instead.
+    #[test]
+    fn pipeline_runs_against_filtered_extracted_archive() {
+        use std::sync::Arc;
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        use code_graph::v2::config::{detect_language_from_path, is_required_by_indexer};
+        use code_graph::v2::{
+            BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
+        };
+
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            // Rust workspace with cross-crate dep so resolution is exercised.
+            Entry::File(
+                "root/Cargo.toml",
+                b"[workspace]\nmembers = [\"crates/lib\", \"crates/app\"]\nresolver = \"2\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/Cargo.toml",
+                b"[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/src/lib.rs",
+                b"pub fn greet() -> &'static str { \"hi\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/Cargo.toml",
+                b"[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nlib = { path = \"../lib\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/src/main.rs",
+                b"fn main() { println!(\"{}\", lib::greet()); }\n",
+            ),
+            // JS workspace with a tsconfig path alias so the alias must resolve.
+            Entry::File(
+                "root/frontend/package.json",
+                b"{\"name\":\"frontend\",\"version\":\"0.0.0\"}\n",
+            ),
+            Entry::File(
+                "root/frontend/tsconfig.json",
+                b"{\"compilerOptions\":{\"baseUrl\":\".\",\"paths\":{\"@/*\":[\"src/*\"]}}}\n",
+            ),
+            Entry::File(
+                "root/frontend/src/utils.ts",
+                b"export function helper() { return 42; }\n",
+            ),
+            Entry::File(
+                "root/frontend/src/main.ts",
+                b"import { helper } from '@/utils';\nexport function run() { return helper(); }\n",
+            ),
+            Entry::File("root/.gitignore", b"node_modules/\ntarget/\n"),
+            // Noise the filter must drop.
+            Entry::File("root/README.md", b"# project\n"),
+            Entry::File("root/Cargo.lock", b"# generated\n"),
+            Entry::File("root/frontend/yarn.lock", b"# generated\n"),
+            Entry::File("root/assets/logo.png", b"\x89PNG..."),
+            Entry::File("root/vendor/jquery.min.js", b"/* min */\n"),
+            Entry::File("root/pkg/server_test.go", b"package pkg\n"),
+        ]);
+
+        // 1. Real archival extraction endpoint.
+        extract_tar_gz(&data, dir.path()).unwrap();
+
+        // 2. Apply the filter !1110 will compose, by deleting files the
+        //    filter would have refused to write to disk.
+        let keep = |rel: &Path| -> bool {
+            let s = rel.to_string_lossy();
+            let parsable = detect_language_from_path(&s)
+                .map(|l| !l.exclude_extensions().iter().any(|e| s.ends_with(e)))
+                .unwrap_or(false);
+            parsable || is_required_by_indexer(rel)
+        };
+        let extracted = [
+            "Cargo.toml",
+            "crates/lib/Cargo.toml",
+            "crates/lib/src/lib.rs",
+            "crates/app/Cargo.toml",
+            "crates/app/src/main.rs",
+            "frontend/package.json",
+            "frontend/tsconfig.json",
+            "frontend/src/utils.ts",
+            "frontend/src/main.ts",
+            ".gitignore",
+            "README.md",
+            "Cargo.lock",
+            "frontend/yarn.lock",
+            "assets/logo.png",
+            "vendor/jquery.min.js",
+            "pkg/server_test.go",
+        ];
+        for rel in extracted {
+            let abs = dir.path().join(rel);
+            assert!(abs.exists(), "extraction missed: {rel}");
+            if !keep(Path::new(rel)) {
+                std::fs::remove_file(&abs).unwrap();
+            }
+        }
+        for required in [
+            "Cargo.toml",
+            "crates/lib/Cargo.toml",
+            "crates/app/Cargo.toml",
+            "frontend/package.json",
+            "frontend/tsconfig.json",
+            ".gitignore",
+            "crates/lib/src/lib.rs",
+            "crates/app/src/main.rs",
+            "frontend/src/utils.ts",
+            "frontend/src/main.ts",
+        ] {
+            assert!(
+                dir.path().join(required).exists(),
+                "filter dropped indexer input: {required}"
+            );
+        }
+        for noise in [
+            "README.md",
+            "Cargo.lock",
+            "frontend/yarn.lock",
+            "assets/logo.png",
+            "vendor/jquery.min.js",
+            "pkg/server_test.go",
+        ] {
+            assert!(
+                !dir.path().join(noise).exists(),
+                "filter kept noise: {noise}"
+            );
+        }
+
+        // 3. Run the real code-indexing pipeline against the filtered tree
+        //    and verify it produced graph content. Counting via a custom
+        //    converter: a Pipeline that finds no manifests would produce
+        //    zero defs because Rust falls back to standalone parsing and
+        //    JS bare-specifier resolution collapses.
+        struct CountingConverter {
+            defs: AtomicUsize,
+            edges: AtomicUsize,
+        }
+        impl GraphConverter for CountingConverter {
+            fn convert(
+                &self,
+                graph: code_graph::v2::linker::CodeGraph,
+            ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
+                self.defs.fetch_add(graph.defs.len(), Ordering::Relaxed);
+                self.edges
+                    .fetch_add(graph.graph.edge_count(), Ordering::Relaxed);
+                Ok(Vec::new())
+            }
+        }
+
+        let counter = Arc::new(CountingConverter {
+            defs: AtomicUsize::new(0),
+            edges: AtomicUsize::new(0),
+        });
+        let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
+        let result = Pipeline::run(
+            dir.path(),
+            PipelineConfig::default(),
+            counter.clone() as Arc<dyn GraphConverter>,
+            sink,
+        );
+        assert!(
+            result.errors.is_empty(),
+            "pipeline errors: {:#?}",
+            result.errors
+        );
+        let defs = counter.defs.load(Ordering::Relaxed);
+        let edges = counter.edges.load(Ordering::Relaxed);
+        assert!(
+            defs > 0,
+            "pipeline produced zero defs against filtered tree (resolvers likely degraded)"
+        );
+        assert!(
+            edges > 0,
+            "pipeline produced zero graph edges against filtered tree"
+        );
+    }
 }
