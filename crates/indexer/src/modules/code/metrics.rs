@@ -22,6 +22,8 @@ pub struct CodeMetrics {
     pub(super) errors: Counter<u64>,
     pub(super) files_skipped: Counter<u64>,
     pub(super) file_faults: Counter<u64>,
+    pub(super) archive_entries_skipped: Counter<u64>,
+    pub(super) archive_bytes_skipped: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -48,6 +50,8 @@ impl CodeMetrics {
             errors: code::ERRORS.build_counter_u64(meter),
             files_skipped: code::FILES_SKIPPED.build_counter_u64(meter),
             file_faults: code::FILE_FAULTS.build_counter_u64(meter),
+            archive_entries_skipped: code::ARCHIVE_ENTRIES_SKIPPED.build_counter_u64(meter),
+            archive_bytes_skipped: code::ARCHIVE_BYTES_SKIPPED.build_counter_u64(meter),
         }
     }
 }
@@ -105,6 +109,12 @@ impl CodeMetrics {
     pub(super) fn record_file_fault(&self, kind: &'static str) {
         self.file_faults
             .add(1, &[KeyValue::new(code::labels::KIND, kind)]);
+    }
+
+    pub(super) fn record_archive_entry_skipped(&self, reason: &'static str, bytes: u64) {
+        let labels = [KeyValue::new(code::labels::REASON, reason)];
+        self.archive_entries_skipped.add(1, &labels);
+        self.archive_bytes_skipped.add(bytes, &labels);
     }
 }
 

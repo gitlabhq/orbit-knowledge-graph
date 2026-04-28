@@ -139,6 +139,28 @@ pub const FILE_FAULTS: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.entries.skipped",
+    "Tar archive entries dropped before extraction so they never touch disk. \
+     Reasons: `excluded_extension` (basename matches the binary-asset / \
+     media / archive denylist in `code-graph::v2::config::filter::\
+     EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the \
+     configured per-file ceiling).",
+    None,
+    &[labels::REASON],
+    DOMAIN,
+);
+
+pub const ARCHIVE_BYTES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.bytes.skipped",
+    "Total bytes that the archive extractor refused to write to disk, \
+     summed from the tar header sizes of skipped entries. Same `reason` \
+     labels as `gkg.indexer.code.archive.entries.skipped`.",
+    Some("By"),
+    &[labels::REASON],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &EVENTS_PROCESSED,
     &HANDLER_DURATION,
@@ -154,4 +176,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &ERRORS,
     &FILES_SKIPPED,
     &FILE_FAULTS,
+    &ARCHIVE_ENTRIES_SKIPPED,
+    &ARCHIVE_BYTES_SKIPPED,
 ];

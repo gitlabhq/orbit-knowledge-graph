@@ -56,8 +56,11 @@ impl CodeIndexingDeps {
         let metrics = CodeMetrics::new();
 
         let cache_dir = tempfile::TempDir::new().expect("failed to create temp dir for cache");
-        let cache: Arc<dyn RepositoryCache> =
-            Arc::new(LocalRepositoryCache::new(cache_dir.path().to_path_buf()));
+        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+            cache_dir.path().to_path_buf(),
+            u64::MAX,
+            metrics.clone(),
+        ));
         let resolver =
             RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 

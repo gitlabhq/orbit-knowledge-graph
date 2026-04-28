@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use tracing::warn;
+use tracing::{trace, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -42,19 +42,32 @@ fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
-    let decoder = GzDecoder::new(data);
-    unpack_tar(decoder, target_dir)
+    extract_tar_gz_from_reader(data, target_dir, accept_all_filter)
 }
 
-pub fn extract_tar_gz_from_reader<R: Read>(
+#[cfg(test)]
+fn accept_all_filter(_path: &Path, _size: u64) -> bool {
+    true
+}
+
+/// `filter` receives the archive-root-stripped path and the tar header size,
+/// and is consulted only for regular files; symlinks and directories pass through.
+pub fn extract_tar_gz_from_reader<R: Read, F>(
     reader: R,
     target_dir: &Path,
-) -> Result<(), ArchiveError> {
+    filter: F,
+) -> Result<(), ArchiveError>
+where
+    F: Fn(&Path, u64) -> bool,
+{
     let decoder = GzDecoder::new(reader);
-    unpack_tar(decoder, target_dir)
+    unpack_tar(decoder, target_dir, filter)
 }
 
-fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError> {
+fn unpack_tar<R: Read, F>(reader: R, target_dir: &Path, filter: F) -> Result<(), ArchiveError>
+where
+    F: Fn(&Path, u64) -> bool,
+{
     std::fs::create_dir_all(target_dir)?;
 
     let mut archive = tar::Archive::new(reader);
@@ -142,6 +155,18 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
                 .unwrap_or_default();
             deferred_symlinks.push((dest, link_target));
             continue;
+        }
+
+        if entry_type == tar::EntryType::Regular {
+            let declared_size = entry.header().size().unwrap_or(0);
+            if !filter(&relative_path, declared_size) {
+                trace!(
+                    path = %relative_path.display(),
+                    size = declared_size,
+                    "skipping archive entry filtered out before extraction"
+                );
+                continue;
+            }
         }
 
         let dest_canonical = if dest.exists() {
@@ -581,6 +606,59 @@ mod tests {
     }
 
     #[test]
+    fn filter_skips_unwanted_files_before_extraction() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File("project-main/assets/logo.png", b"\x89PNG\r\n\x1a\nbinary"),
+            Entry::File("project-main/Cargo.lock", b"# lockfile"),
+        ]);
+
+        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
+            path.extension().and_then(|e| e.to_str()) == Some("rs")
+        })
+        .unwrap();
+
+        assert!(dir.path().join("src/main.rs").exists());
+        assert!(!dir.path().join("assets/logo.png").exists());
+        assert!(!dir.path().join("Cargo.lock").exists());
+    }
+
+    #[test]
+    fn filter_receives_size_from_tar_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/small.rs", b"fn s() {}"),
+            Entry::File("project-main/big.rs", &vec![b'x'; 4096]),
+        ]);
+
+        extract_tar_gz_from_reader(&data[..], dir.path(), |_path, size| size <= 100).unwrap();
+
+        assert!(dir.path().join("small.rs").exists());
+        assert!(
+            !dir.path().join("big.rs").exists(),
+            "oversize file must be skipped before unpack"
+        );
+    }
+
+    #[test]
+    fn filter_does_not_apply_to_symlinks() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/src/lib.rs", b"real"),
+            Entry::Symlink("project-main/bin/run", "../src/lib.rs"),
+        ]);
+
+        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
+            path.extension().and_then(|e| e.to_str()) == Some("rs")
+        })
+        .unwrap();
+
+        assert!(dir.path().join("src/lib.rs").exists());
+        assert!(dir.path().join("bin/run").exists());
+    }
+
+    #[test]
     fn tolerates_dangling_symlink() {
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
@@ -594,5 +672,265 @@ mod tests {
             "hello"
         );
         assert!(!dir.path().join("dangling").exists());
+    }
+
+    // ── Archive-endpoint pipeline tests ─────────────────────────────
+    //
+    // Stand up an axum server emulating the GitLab `/repository/archive`
+    // endpoint, fetch via reqwest, stream the response through the real
+    // `extract_tar_gz_from_reader` (with the production exclusion
+    // filter), and run `Pipeline::run`. These tests verify that the
+    // resolver inputs the indexer needs (Cargo.toml, package.json,
+    // tsconfig.json, .gitignore) survive the round trip and that
+    // resolution actually works against the extracted tree. They mirror
+    // the cargo-workspace and JS module-resolution YAML suites in
+    // `integration-tests-codegraph/fixtures/...` but go through the
+    // real archival path.
+
+    use code_graph::v2::config::is_excluded_from_indexing;
+    use code_graph::v2::linker::CodeGraph;
+    use code_graph::v2::linker::graph::GraphNode;
+    use code_graph::v2::types::EdgeKind;
+    use code_graph::v2::{
+        BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
+    };
+    use std::sync::{Arc, Mutex};
+
+    struct CapturingConverter {
+        graphs: Mutex<Vec<CodeGraph>>,
+    }
+
+    impl GraphConverter for CapturingConverter {
+        fn convert(
+            &self,
+            graph: CodeGraph,
+        ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
+            self.graphs.lock().unwrap().push(graph);
+            Ok(Vec::new())
+        }
+    }
+
+    /// Stand up the archive endpoint, fetch via reqwest, stream into
+    /// `extract_tar_gz_from_reader` with the production exclusion
+    /// filter. Mirrors `LocalRepositoryCache::store_archive` end-to-end.
+    async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) {
+        use axum::Router;
+        use axum::body::Body;
+        use axum::http::header;
+        use axum::response::IntoResponse;
+        use axum::routing::get;
+        use futures::StreamExt;
+        use tokio_util::io::SyncIoBridge;
+
+        let archive_bytes = build_archive(entries);
+        let app = Router::new().route(
+            "/api/v4/internal/orbit/project/{project_id}/repository/archive",
+            get(move || {
+                let body = archive_bytes.clone();
+                async move {
+                    (
+                        [(header::CONTENT_TYPE, "application/x-gzip")],
+                        Body::from(body),
+                    )
+                        .into_response()
+                }
+            }),
+        );
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let server = tokio::spawn(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let url = format!(
+            "http://{}/api/v4/internal/orbit/project/42/repository/archive?ref=main",
+            addr
+        );
+        let response = reqwest::get(&url).await.unwrap();
+        assert!(response.status().is_success(), "fetch failed: {url}");
+        let async_reader = tokio_util::io::StreamReader::new(
+            response
+                .bytes_stream()
+                .map(|r| r.map_err(std::io::Error::other)),
+        );
+        let target = target.to_path_buf();
+        let handle = tokio::runtime::Handle::current();
+        tokio::task::spawn_blocking(move || {
+            let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
+            extract_tar_gz_from_reader(bridge, &target, |rel, _size| {
+                !is_excluded_from_indexing(rel)
+            })
+            .unwrap();
+        })
+        .await
+        .unwrap();
+        server.abort();
+    }
+
+    async fn run_pipeline(root: &Path) -> Vec<CodeGraph> {
+        let capturer = Arc::new(CapturingConverter {
+            graphs: Mutex::new(Vec::new()),
+        });
+        let capturer_for_pipeline = capturer.clone();
+        let root = root.to_path_buf();
+        let result = tokio::task::spawn_blocking(move || {
+            let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
+            Pipeline::run(
+                &root,
+                PipelineConfig::default(),
+                capturer_for_pipeline as Arc<dyn GraphConverter>,
+                sink,
+            )
+        })
+        .await
+        .unwrap();
+        assert!(
+            result.errors.is_empty(),
+            "pipeline errors: {:#?}",
+            result.errors
+        );
+        Arc::try_unwrap(capturer)
+            .ok()
+            .expect("capturer still has outstanding refs")
+            .graphs
+            .into_inner()
+            .unwrap()
+    }
+
+    fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
+        graphs.iter().any(|g| {
+            g.graph.node_indices().any(|idx| {
+                if let GraphNode::Definition { file_path, id } = &g.graph[idx] {
+                    if !file_path.ends_with(file) {
+                        return false;
+                    }
+                    let def = &g.defs[id.0 as usize];
+                    g.str(def.name) == name
+                } else {
+                    false
+                }
+            })
+        })
+    }
+
+    fn edge_count(graphs: &[CodeGraph], kind: EdgeKind) -> usize {
+        graphs
+            .iter()
+            .map(|g| {
+                g.graph
+                    .raw_edges()
+                    .iter()
+                    .filter(|e| e.weight.relationship.edge_kind == kind)
+                    .count()
+            })
+            .sum()
+    }
+
+    /// Mirrors the cargo workspace YAML suites: cross-crate `lib::greet`
+    /// callable from `app::main` only resolves if both `Cargo.toml`s
+    /// survive the round-trip — they aren't parsable source, so an
+    /// inclusion filter would have dropped them.
+    #[tokio::test]
+    async fn cargo_workspace_resolves_through_archive_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File(
+                "root/Cargo.toml",
+                b"[workspace]\nmembers = [\"crates/lib\", \"crates/app\"]\nresolver = \"2\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/Cargo.toml",
+                b"[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/src/lib.rs",
+                b"pub fn greet() -> &'static str { \"hi\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/Cargo.toml",
+                b"[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nlib = { path = \"../lib\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/src/main.rs",
+                b"fn main() { lib::greet(); }\n",
+            ),
+            // Noise the exclusion filter must drop.
+            Entry::File("root/assets/logo.png", b"\x89PNG"),
+            Entry::File("root/dist/build.zip", b"PK"),
+        ];
+        extract_via_archive_endpoint(&entries, dir.path()).await;
+
+        // Resolver inputs survived.
+        assert!(dir.path().join("Cargo.toml").exists());
+        assert!(dir.path().join("crates/lib/Cargo.toml").exists());
+        assert!(dir.path().join("crates/app/Cargo.toml").exists());
+        // Excluded extensions dropped.
+        assert!(!dir.path().join("assets/logo.png").exists());
+        assert!(!dir.path().join("dist/build.zip").exists());
+
+        let graphs = run_pipeline(dir.path()).await;
+        assert!(
+            has_def(&graphs, "crates/lib/src/lib.rs", "greet"),
+            "Rust workspace resolver missed lib::greet"
+        );
+        assert!(
+            has_def(&graphs, "crates/app/src/main.rs", "main"),
+            "Rust workspace resolver missed app::main"
+        );
+        assert!(
+            edge_count(&graphs, EdgeKind::Calls) > 0,
+            "no Calls edges emitted; cross-crate resolution likely failed"
+        );
+    }
+
+    /// Mirrors the JS module-resolution YAML suites: a tsconfig
+    /// `paths` alias only resolves to `src/utils.ts` if both
+    /// `tsconfig.json` and `package.json` survive the round-trip.
+    #[tokio::test]
+    async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File(
+                "root/package.json",
+                b"{\"name\":\"frontend\",\"version\":\"0.0.0\"}\n",
+            ),
+            Entry::File(
+                "root/tsconfig.json",
+                b"{\"compilerOptions\":{\"baseUrl\":\".\",\"paths\":{\"@/*\":[\"src/*\"]}}}\n",
+            ),
+            Entry::File(
+                "root/src/utils.ts",
+                b"export function helper() { return 42; }\n",
+            ),
+            Entry::File(
+                "root/src/main.ts",
+                b"import { helper } from '@/utils';\nexport function run() { return helper(); }\n",
+            ),
+            // Noise the exclusion filter must drop.
+            Entry::File("root/static/banner.gif", b"GIF89a"),
+            Entry::File("root/fonts/Inter.woff2", b""),
+        ];
+        extract_via_archive_endpoint(&entries, dir.path()).await;
+
+        // Resolver inputs survived.
+        assert!(dir.path().join("package.json").exists());
+        assert!(dir.path().join("tsconfig.json").exists());
+        // Excluded extensions dropped.
+        assert!(!dir.path().join("static/banner.gif").exists());
+        assert!(!dir.path().join("fonts/Inter.woff2").exists());
+
+        let graphs = run_pipeline(dir.path()).await;
+        assert!(
+            has_def(&graphs, "src/utils.ts", "helper"),
+            "JS resolver missed utils::helper"
+        );
+        assert!(
+            has_def(&graphs, "src/main.ts", "run"),
+            "JS resolver missed main::run"
+        );
+        assert!(
+            edge_count(&graphs, EdgeKind::Imports) > 0,
+            "no Imports edges emitted; tsconfig alias likely failed to resolve"
+        );
     }
 }

@@ -1,12 +1,14 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use code_graph::v2::config::is_excluded_from_indexing;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
 use crate::modules::code::archive::{ArchiveError, extract_tar_gz_from_reader};
+use crate::modules::code::metrics::CodeMetrics;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryCacheError {
@@ -40,19 +42,21 @@ const REPOSITORY_DIR: &str = "repository";
 
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
-}
-
-impl Default for LocalRepositoryCache {
-    fn default() -> Self {
-        Self {
-            base_dir: std::env::temp_dir().join(CACHE_DIR_NAME),
-        }
-    }
+    max_file_size: u64,
+    metrics: CodeMetrics,
 }
 
 impl LocalRepositoryCache {
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    pub fn new(base_dir: PathBuf, max_file_size: u64, metrics: CodeMetrics) -> Self {
+        Self {
+            base_dir,
+            max_file_size,
+            metrics,
+        }
+    }
+
+    pub fn default_dir() -> PathBuf {
+        std::env::temp_dir().join(CACHE_DIR_NAME)
     }
 
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
@@ -91,9 +95,21 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
+        let max_file_size = self.max_file_size;
+        let metrics = self.metrics.clone();
         tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(bridge, &repo_dir_owned)
+            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
+                if size > max_file_size {
+                    metrics.record_archive_entry_skipped("oversize", size);
+                    return false;
+                }
+                if is_excluded_from_indexing(rel_path) {
+                    metrics.record_archive_entry_skipped("excluded_extension", size);
+                    return false;
+                }
+                true
+            })
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
@@ -126,8 +142,16 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
+        create_cache_with_size(u64::MAX)
+    }
+
+    fn create_cache_with_size(max_file_size: u64) -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
-        let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf());
+        let cache = LocalRepositoryCache::new(
+            temp_dir.path().to_path_buf(),
+            max_file_size,
+            CodeMetrics::default(),
+        );
         (temp_dir, cache)
     }
 
@@ -329,5 +353,74 @@ mod tests {
 
         assert!(safe_path.starts_with(dir.path().join("42")));
         assert!(!safe_path.to_string_lossy().contains(".."));
+    }
+
+    #[tokio::test]
+    async fn extract_archive_drops_excluded_extensions_and_keeps_resolver_inputs() {
+        let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[
+            // Source.
+            ("project-abc/src/main.rs", b"fn main() {}"),
+            // Excluded extensions: dropped at extraction.
+            ("project-abc/assets/logo.png", b"\x89PNG\r\n\x1a\nfake"),
+            ("project-abc/static/banner.gif", b"GIF89a"),
+            ("project-abc/fonts/Inter.woff2", b""),
+            ("project-abc/dist/build.zip", b"PK"),
+            // Resolver inputs: must survive even though they aren't
+            // parsable source. Inclusion filters historically dropped
+            // these and silently broke cross-crate / cross-module
+            // resolution.
+            (
+                "project-abc/Cargo.toml",
+                b"[workspace]\nmembers = [\"src/foo\"]\n",
+            ),
+            ("project-abc/Cargo.lock", b"# generated"),
+            ("project-abc/package.json", b"{}\n"),
+            ("project-abc/tsconfig.json", b"{\"compilerOptions\":{}}\n"),
+            ("project-abc/.gitignore", b"target/\n"),
+            ("project-abc/README.md", b"# Title"),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        // Source kept.
+        assert!(path.join("src/main.rs").exists());
+        // Excluded extensions dropped.
+        assert!(!path.join("assets/logo.png").exists());
+        assert!(!path.join("static/banner.gif").exists());
+        assert!(!path.join("fonts/Inter.woff2").exists());
+        assert!(!path.join("dist/build.zip").exists());
+        // Resolver inputs preserved.
+        assert!(path.join("Cargo.toml").exists());
+        assert!(path.join("Cargo.lock").exists());
+        assert!(path.join("package.json").exists());
+        assert!(path.join("tsconfig.json").exists());
+        assert!(path.join(".gitignore").exists());
+        // Anything outside the denylist passes through, even if the
+        // parser will ignore it later.
+        assert!(path.join("README.md").exists());
+    }
+
+    #[tokio::test]
+    async fn extract_archive_skips_files_above_max_size() {
+        let (_dir, cache) = create_cache_with_size(64);
+        let archive = build_tar_gz(&[
+            ("project-abc/small.rs", b"fn s() {}"),
+            ("project-abc/big.rs", &vec![b'x'; 4096][..]),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(path.join("small.rs").exists());
+        assert!(
+            !path.join("big.rs").exists(),
+            "files larger than max_file_size must not be written to disk"
+        );
     }
 }

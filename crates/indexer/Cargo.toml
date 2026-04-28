@@ -53,6 +53,7 @@ zstd = "0.13.3"
 [dev-dependencies]
 nats-client = { workspace = true, features = ["testkit"] }
 internment = { workspace = true }
+reqwest = { workspace = true, features = ["stream", "rustls"] }
 serde_yaml = { workspace = true }
 smallvec = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread", "time", "test-util", "macros"] }
