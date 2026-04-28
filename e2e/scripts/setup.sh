@@ -24,7 +24,11 @@ for r in json.load(sys.stdin).get('items', []):
         print(r['metadata']['name'])
 " 2>/dev/null) || true
   if [ -n "$ORPHANS" ]; then
-    echo "$ORPHANS" | xargs -I{} $KC delete "$kind" "{}" 2>/dev/null || true
+    # --wait=false + --timeout=30s: gateway-api controllers can hold finalizers
+    # for minutes while cleaning attached routes; without these, kubectl delete
+    # blocks until the resource is gone and exhausted the 1h job budget once.
+    echo "$ORPHANS" | xargs -I{} $KC delete "$kind" "{}" \
+      --ignore-not-found=true --wait=false --timeout=30s 2>/dev/null || true
   fi
 done
 
