@@ -363,7 +363,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         .into_iter()
         .map(|name| crate::entities::StorageColumn {
             name,
-            ch_type: "Nullable(LowCardinality(String))".to_string(),
+            ch_type: "LowCardinality(Nullable(String))".to_string(),
             default: None,
             codec: Some(vec!["LZ4".to_string()]),
         })
