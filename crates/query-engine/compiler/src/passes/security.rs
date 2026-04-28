@@ -655,10 +655,10 @@ mod tests {
         let ctx = SecurityContext::new_with_roles(
             1,
             vec![
-                TraversalPath::new(String::from("1/100/"), 20),     // Reporter
+                TraversalPath::new(String::from("1/100/"), 20), // Reporter
                 TraversalPath::new(String::from("1/100/200/"), 20), // Reporter
                 TraversalPath::new(String::from("1/100/200/"), 30), // Developer
-                TraversalPath::new(String::from("1/300/"), 30),     // Developer
+                TraversalPath::new(String::from("1/300/"), 30), // Developer
             ],
         )
         .unwrap();
