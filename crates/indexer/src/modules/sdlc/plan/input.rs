@@ -451,9 +451,6 @@ fn resolve_standalone_edge(
 
             let alias = format!("_d{join_idx}");
             join_idx += 1;
-            joins.push(format!(
-                "LEFT JOIN {node_table} AS {alias} ON _base.{fk_col} = {alias}.id"
-            ));
 
             let props: Vec<_> = ontology
                 .denormalized_properties()
@@ -464,6 +461,29 @@ fn resolve_standalone_edge(
                         && dp.node_kind == *node_kind
                 })
                 .collect();
+
+            // Build a deduplicating subquery that selects only the columns we
+            // need, ordered by the node's dedup key with latest-version-first
+            // so LIMIT 1 BY id picks the newest row.
+            let mut sub_cols: Vec<String> = vec!["id".to_string()];
+            for dp in &props {
+                let field = node.fields.iter().find(|f| f.name == dp.property_name);
+                let src_col = field
+                    .and_then(|f| f.column_name())
+                    .unwrap_or(&dp.property_name);
+                if !sub_cols.contains(&src_col.to_string()) {
+                    sub_cols.push(src_col.to_string());
+                }
+            }
+            let sub_select = sub_cols.join(", ");
+            let watermark_col = etl.watermark();
+            let deleted_col = etl.deleted();
+            joins.push(format!(
+                "LEFT JOIN (SELECT {sub_select} FROM {node_table} \
+                 WHERE {deleted_col} = false \
+                 ORDER BY id, {watermark_col} DESC \
+                 LIMIT 1 BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
+            ));
 
             for dp in props {
                 let field = node.fields.iter().find(|f| f.name == dp.property_name);
