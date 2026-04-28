@@ -28,8 +28,6 @@ pub fn parsable_language(rel_path: &Path) -> Option<Language> {
 }
 
 /// Returns `true` when `rel_path` would be picked up by the parsing pipeline.
-/// Thin wrapper over [`parsable_language`] for callers that don't need the
-/// language identity.
 pub fn is_parsable(rel_path: &Path) -> bool {
     parsable_language(rel_path).is_some()
 }
@@ -72,7 +70,6 @@ mod tests {
     fn excluded_suffix_is_not_parsable() {
         // `foo.min.js` has extension `js` but is excluded by suffix.
         assert!(!is_parsable(&p("vendor/jquery.min.js")));
-        // Go test files are excluded.
         assert!(!is_parsable(&p("pkg/server_test.go")));
     }
 

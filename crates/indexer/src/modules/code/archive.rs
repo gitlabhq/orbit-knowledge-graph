@@ -50,19 +50,8 @@ fn accept_all_filter(_path: &Path, _size: u64) -> bool {
     true
 }
 
-/// Extract a gzip-compressed tar stream into `target_dir`, consulting `filter`
-/// before each regular-file entry to decide whether the body should be written
-/// to disk.
-///
-/// `filter` is invoked with the entry path relative to the archive root (after
-/// the Gitaly `<slug>-<ref>/` prefix is stripped) and the size declared in the
-/// tar header. Returning `false` skips the entry without consuming its body
-/// from the input stream — the tar crate seeks past the data automatically on
-/// the next iteration.
-///
-/// Symlinks and directories bypass the filter: symlinks cost negligible disk
-/// and may legitimately point at parsable files, and directories are created
-/// lazily during file extraction anyway.
+/// `filter` receives the archive-root-stripped path and the tar header size,
+/// and is consulted only for regular files; symlinks and directories pass through.
 pub fn extract_tar_gz_from_reader<R: Read, F>(
     reader: R,
     target_dir: &Path,
@@ -168,10 +157,6 @@ where
             continue;
         }
 
-        // Drop entries the caller doesn't want on disk before they are
-        // unpacked. Applied to regular files only — directories are still
-        // created (file unpacking handles that lazily) and symlinks were
-        // already deferred above.
         if entry_type == tar::EntryType::Regular {
             let declared_size = entry.header().size().unwrap_or(0);
             if !filter(&relative_path, declared_size) {
@@ -629,7 +614,6 @@ mod tests {
             Entry::File("project-main/Cargo.lock", b"# lockfile"),
         ]);
 
-        // Accept only `.rs` files.
         extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
             path.extension().and_then(|e| e.to_str()) == Some("rs")
         })
@@ -648,7 +632,6 @@ mod tests {
             Entry::File("project-main/big.rs", &vec![b'x'; 4096]),
         ]);
 
-        // Reject anything bigger than 100 bytes.
         extract_tar_gz_from_reader(&data[..], dir.path(), |_path, size| size <= 100).unwrap();
 
         assert!(dir.path().join("small.rs").exists());
@@ -660,8 +643,6 @@ mod tests {
 
     #[test]
     fn filter_does_not_apply_to_symlinks() {
-        // Symlinks should still be created regardless of the filter so a
-        // valid symlink to a parsable file can resolve after extraction.
         let dir = tempfile::tempdir().unwrap();
         let data = build_archive(&[
             Entry::File("project-main/src/lib.rs", b"real"),

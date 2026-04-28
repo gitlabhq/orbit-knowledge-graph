@@ -42,9 +42,6 @@ const REPOSITORY_DIR: &str = "repository";
 
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
-    /// Upper bound applied to each archive entry before extraction. Files
-    /// larger than this — and files the parser would never accept — are
-    /// dropped while still in the tar stream so they never touch disk.
     max_file_size: u64,
     metrics: CodeMetrics,
 }
