@@ -44,6 +44,8 @@ pub(super) struct EdgeTableStorageYaml {
     #[serde(default)]
     pub denormalized_columns: Vec<StorageColumnYaml>,
     #[serde(default)]
+    pub denormalized_indexes: Vec<StorageIndexYaml>,
+    #[serde(default)]
     pub denormalized_projections: Vec<StorageProjectionYaml>,
 }
 

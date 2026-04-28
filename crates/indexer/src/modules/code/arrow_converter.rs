@@ -202,8 +202,8 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 if seen.insert(col.name.clone()) {
                     specs.push(ColumnSpec {
                         name: col.name.clone(),
-                        col_type: ColumnType::Str,
-                        nullable: true,
+                        col_type: ColumnType::StrList,
+                        nullable: false,
                     });
                 }
             }
@@ -344,7 +344,7 @@ fn convert_edges(
             b.col("target_id")?.push_int(self.target_id)?;
             b.col("target_kind")?.push_str(self.target_node_kind)?;
             for col_name in self.denormalized_column_names {
-                b.col(col_name)?.push_opt_str::<&str>(None)?;
+                b.col(col_name)?.push_empty_str_list()?;
             }
             b.col("_version")?
                 .push_timestamp_micros(self.env.version_micros)?;

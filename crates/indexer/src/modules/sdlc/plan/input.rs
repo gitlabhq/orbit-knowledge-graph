@@ -10,8 +10,10 @@ use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
     /// Column in the source MemTable (e.g. "status").
     pub source_column: String,
-    /// Column on the edge table (e.g. "source_status").
+    /// Array column on the edge table (e.g. "source_tags").
     pub edge_column: String,
+    /// Tag key prefix (e.g. "status"). Values become `"status:failed"` tokens.
+    pub tag_key: String,
     /// For int-based enums: integer → string mapping.
     pub enum_mapping: Option<BTreeMap<i64, String>>,
 }
@@ -349,6 +351,7 @@ fn resolve_fk_edges(
                     DenormalizedColumnProjection {
                         source_column,
                         edge_column: dp.edge_column.clone(),
+                        tag_key: dp.tag_key.clone(),
                         enum_mapping: dp.enum_values.clone(),
                     }
                 })
@@ -484,6 +487,7 @@ fn resolve_standalone_edge(
                     denormalized_columns.push(DenormalizedColumnProjection {
                         source_column: mem_col,
                         edge_column: dp.edge_column.clone(),
+                        tag_key: dp.tag_key.clone(),
                         enum_mapping: dp.enum_values.clone(),
                     });
                 }

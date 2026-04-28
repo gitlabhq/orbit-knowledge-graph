@@ -127,6 +127,9 @@ fn parse_column_type(s: &str) -> ColumnType {
     if let Some(inner) = strip_wrapper(s, "LowCardinality") {
         return ColumnType::LowCardinality(Box::new(parse_column_type(inner)));
     }
+    if let Some(inner) = strip_wrapper(s, "Array") {
+        return ColumnType::Array(Box::new(parse_column_type(inner)));
+    }
     if s.starts_with("DateTime64") {
         // DateTime64(6, 'UTC') or DateTime64(6)
         let inner = &s[11..s.len() - 1]; // strip "DateTime64(" and ")"
@@ -237,10 +240,6 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
             name: name.clone(),
             order_by: order_by.clone(),
         },
-        StorageProjection::PartOffsetIndex { name, column } => ProjectionDef::PartOffsetIndex {
-            name: name.clone(),
-            column: column.clone(),
-        },
         StorageProjection::Aggregate {
             name,
             select,
@@ -313,7 +312,14 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
     );
     columns.extend(system_columns(None));
 
-    let indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
+    let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
+    indexes.extend(
+        config
+            .storage
+            .denormalized_indexes
+            .iter()
+            .map(convert_index),
+    );
     let mut projections: Vec<ProjectionDef> = config
         .storage
         .projections

@@ -129,6 +129,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                         codec: col.codec,
                     })
                     .collect(),
+                denormalized_indexes: s
+                    .denormalized_indexes
+                    .into_iter()
+                    .map(node::convert_storage_index)
+                    .collect(),
                 denormalized_projections: s
                     .denormalized_projections
                     .into_iter()
@@ -298,7 +303,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     }
 
     // Auto-derive denormalized properties from central denormalization list.
-    let mut denorm_columns: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
+    let has_denorm = !denormalization_entries.is_empty();
 
     for entry in &denormalization_entries {
         let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
@@ -316,6 +321,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
             })?;
         let enum_values = field.enum_values.clone();
 
+        let tag_key = entry
+            .column_alias
+            .as_deref()
+            .or(denorm_default_as.as_deref())
+            .unwrap_or(&entry.property)
+            .to_string();
+
         for (edge_name, variants) in &ontology.edges {
             for variant in variants {
                 let mut directions = Vec::new();
@@ -326,19 +338,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     directions.push(crate::entities::DenormDirection::Target);
                 }
                 for direction in directions {
-                    let edge_column = format!(
-                        "{}_{}",
-                        match direction {
-                            crate::entities::DenormDirection::Source => "source",
-                            crate::entities::DenormDirection::Target => "target",
-                        },
-                        entry
-                            .column_alias
-                            .as_deref()
-                            .or(denorm_default_as.as_deref())
-                            .unwrap_or(&entry.property)
-                    );
-                    denorm_columns.insert(edge_column.clone());
+                    let edge_column = match direction {
+                        crate::entities::DenormDirection::Source => "source_tags",
+                        crate::entities::DenormDirection::Target => "target_tags",
+                    }
+                    .to_string();
 
                     let already_exists = ontology.denormalized_properties.iter().any(|dp| {
                         dp.relationship_kind == *edge_name
@@ -354,6 +358,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                                 property_name: entry.property.clone(),
                                 direction,
                                 edge_column,
+                                tag_key: tag_key.clone(),
                                 enum_values: enum_values.clone(),
                             },
                         );
@@ -363,31 +368,49 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         }
     }
 
-    // Auto-populate denormalized_columns on all edge tables.
-    let auto_columns: Vec<crate::entities::StorageColumn> = denorm_columns
-        .into_iter()
-        .map(|name| crate::entities::StorageColumn {
-            name,
-            ch_type: "LowCardinality(Nullable(String))".to_string(),
-            default: None,
-            codec: Some(vec!["LZ4".to_string()]),
-        })
-        .collect();
+    // Auto-populate denormalized Array columns and text indexes on all edge tables.
+    let auto_columns: Vec<crate::entities::StorageColumn> = if has_denorm {
+        vec![
+            crate::entities::StorageColumn {
+                name: "source_tags".to_string(),
+                ch_type: "Array(LowCardinality(String))".to_string(),
+                default: None,
+                codec: None,
+            },
+            crate::entities::StorageColumn {
+                name: "target_tags".to_string(),
+                ch_type: "Array(LowCardinality(String))".to_string(),
+                default: None,
+                codec: None,
+            },
+        ]
+    } else {
+        vec![]
+    };
 
-    // Auto-generate _part_offset projections for granule-level pruning on
-    // denormalized columns. These enable multi-predicate granule intersection
-    // on ClickHouse 25.11+.
-    let auto_projections: Vec<crate::entities::StorageProjection> = auto_columns
-        .iter()
-        .map(|col| crate::entities::StorageProjection::PartOffsetIndex {
-            name: format!("idx_{}", col.name),
-            column: col.name.clone(),
-        })
-        .collect();
+    let auto_indexes: Vec<crate::entities::StorageIndex> = if has_denorm {
+        vec![
+            crate::entities::StorageIndex {
+                name: "source_tags_idx".to_string(),
+                column: "source_tags".to_string(),
+                index_type: "text(tokenizer = 'array')".to_string(),
+                granularity: 64,
+            },
+            crate::entities::StorageIndex {
+                name: "target_tags_idx".to_string(),
+                column: "target_tags".to_string(),
+                index_type: "text(tokenizer = 'array')".to_string(),
+                granularity: 64,
+            },
+        ]
+    } else {
+        vec![]
+    };
 
     for config in ontology.edge_table_configs.values_mut() {
         config.storage.denormalized_columns = auto_columns.clone();
-        config.storage.denormalized_projections = auto_projections.clone();
+        config.storage.denormalized_indexes = auto_indexes.clone();
+        config.storage.denormalized_projections = vec![];
     }
 
     // Resolve skip_security_filter_for_entities → physical table names.

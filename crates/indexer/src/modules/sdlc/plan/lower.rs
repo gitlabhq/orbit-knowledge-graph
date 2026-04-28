@@ -268,8 +268,12 @@ fn lower_edge_select(
         SelectExpr::bare(Expr::col("", DELETED_ALIAS)),
     ];
 
+    // Group denormalized columns by edge_column (source_tags / target_tags)
+    // and build a single array expression per direction.
+    let mut tag_groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
     for d in denormalized {
-        let expr = match &d.enum_mapping {
+        let tag_expr = match &d.enum_mapping {
             Some(mapping) => {
                 let cases: Vec<String> = mapping
                     .iter()
@@ -282,11 +286,24 @@ fn lower_edge_select(
                         )
                     })
                     .collect();
-                Expr::raw(format!("CASE {} ELSE NULL END", cases.join(" ")))
+                format!(
+                    "concat('{}:', CASE {} ELSE toString({}) END)",
+                    d.tag_key,
+                    cases.join(" "),
+                    d.source_column
+                )
             }
-            None => Expr::col("", &d.source_column),
+            None => format!("concat('{}:', toString({}))", d.tag_key, d.source_column),
         };
-        cols.push(SelectExpr::new(expr, &d.edge_column));
+        tag_groups
+            .entry(d.edge_column.clone())
+            .or_default()
+            .push(tag_expr);
+    }
+
+    for (col_name, tag_exprs) in tag_groups {
+        let array_expr = format!("arrayFilter(x -> x != '', array({}))", tag_exprs.join(", "));
+        cols.push(SelectExpr::new(Expr::raw(array_expr), &col_name));
     }
 
     cols

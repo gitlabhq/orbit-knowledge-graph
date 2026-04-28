@@ -27,9 +27,7 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{
-    AggFunction, ColumnSelection, Direction, Input, InputFilter, InputNode, QueryType,
-};
+use crate::input::{AggFunction, ColumnSelection, Direction, Input, InputNode, QueryType};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -386,9 +384,19 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
-            if let Some(edge_column) = input.compiler.denormalized_columns.get(&key) {
+            if let Some((edge_column, tag_key)) = input.compiler.denormalized_columns.get(&key) {
+                // Only eq filters can be expressed as hasToken on the array column.
+                if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
+                    all_rewritable = false;
+                    break;
+                }
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                let tag_value = format!("{tag_key}:{val}");
                 // Use placeholder "EDGE" — replaced with actual alias at injection site
-                edge_filters.push(filter_expr_for_edge("EDGE", edge_column, filter));
+                edge_filters.push(Expr::func(
+                    "hasToken",
+                    vec![Expr::col("EDGE", edge_column), Expr::string(tag_value)],
+                ));
             } else {
                 all_rewritable = false;
                 break;
@@ -578,12 +586,23 @@ fn build_neighbors_denorm_filters(
         for (prop_name, filter) in &node.filters {
             let src_key = (entity.clone(), prop_name.clone(), "source".to_string());
             let tgt_key = (entity.clone(), prop_name.clone(), "target".to_string());
-            let src_col = input.compiler.denormalized_columns.get(&src_key);
-            let tgt_col = input.compiler.denormalized_columns.get(&tgt_key);
-            match (src_col, tgt_col) {
-                (Some(sc), Some(tc)) => {
-                    out_filters.push(filter_expr_for_edge("EDGE", sc, filter));
-                    in_filters.push(filter_expr_for_edge("EDGE", tc, filter));
+            let src_entry = input.compiler.denormalized_columns.get(&src_key);
+            let tgt_entry = input.compiler.denormalized_columns.get(&tgt_key);
+            match (src_entry, tgt_entry) {
+                (Some((sc, sk)), Some((tc, tk))) => {
+                    if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
+                        all_ok = false;
+                        break;
+                    }
+                    let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                    out_filters.push(Expr::func(
+                        "hasToken",
+                        vec![Expr::col("EDGE", sc), Expr::string(format!("{sk}:{val}"))],
+                    ));
+                    in_filters.push(Expr::func(
+                        "hasToken",
+                        vec![Expr::col("EDGE", tc), Expr::string(format!("{tk}:{val}"))],
+                    ));
                 }
                 _ => {
                     all_ok = false;
@@ -711,11 +730,6 @@ fn replace_in_subquery_in_where(
     }
 }
 
-/// Reuse the shared `filter_expr` from lowering with edge alias and column.
-fn filter_expr_for_edge(edge_alias: &str, edge_column: &str, filter: &InputFilter) -> Expr {
-    super::lower::filter_expr(edge_alias, edge_column, filter)
-}
-
 /// Rewrite `COUNT(alias.col)` → `COUNT()` in SELECT expressions.
 fn rewrite_count_to_bare(q: &mut Query, edge_alias: &str, edge_col: &str) {
     for sel in &mut q.select {
@@ -775,7 +789,7 @@ fn rewrite_denormalized_group_by(q: &mut Query, input: &Input) {
 
         for col in cols {
             let key = (entity.clone(), col.clone(), dir_prefix.to_string());
-            if let Some(edge_column) = input.compiler.denormalized_columns.get(&key) {
+            if let Some((edge_column, _tag_key)) = input.compiler.denormalized_columns.get(&key) {
                 rewrites.push((col.clone(), edge_column.clone()));
             } else {
                 all_denormalized = false;

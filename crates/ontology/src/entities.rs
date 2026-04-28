@@ -70,13 +70,6 @@ pub enum StorageProjection {
         select: Vec<String>,
         group_by: Vec<String>,
     },
-    /// Lightweight granule-pruning index: `SELECT _part_offset ORDER BY col`.
-    /// Uses minimal storage (just row offsets) while enabling WHERE col = X
-    /// to skip non-matching granules via projection intersection.
-    PartOffsetIndex {
-        name: String,
-        column: String,
-    },
 }
 
 /// Storage config for edge tables (in schema.yaml).
@@ -88,6 +81,7 @@ pub struct EdgeTableStorage {
     pub indexes: Vec<StorageIndex>,
     pub projections: Vec<StorageProjection>,
     pub denormalized_columns: Vec<StorageColumn>,
+    pub denormalized_indexes: Vec<StorageIndex>,
     pub denormalized_projections: Vec<StorageProjection>,
 }
 
@@ -349,8 +343,11 @@ pub struct DenormalizedProperty {
     pub property_name: String,
     /// Which side of the edge this entity sits on.
     pub direction: DenormDirection,
-    /// Derived column name on the edge table (e.g. "source_status").
+    /// Array column on the edge table: `"source_tags"` or `"target_tags"`.
     pub edge_column: String,
+    /// Tag key inside the array (e.g. `"status"`, `"state"`).
+    /// Values are stored as `"key:value"` tokens in the array.
+    pub tag_key: String,
     /// Enum value mapping if the property is an int-based enum.
     pub enum_values: Option<BTreeMap<i64, String>>,
 }

@@ -864,17 +864,13 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(Delta(8), ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
-    source_severity LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_state LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_status LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_wi_type LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_severity LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_state LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_status LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_wi_type LowCardinality(Nullable(String)) CODEC(LZ4),
+    source_tags Array(LowCardinality(String)),
+    target_tags Array(LowCardinality(String)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
+    INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)),
     PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind)),
     PROJECTION agg_counts_by_source (
@@ -884,15 +880,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     PROJECTION agg_counts_by_target (
       SELECT relationship_kind, source_kind, target_id, traversal_path, count()
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
-    ),
-    PROJECTION idx_source_severity (SELECT _part_offset ORDER BY source_severity),
-    PROJECTION idx_source_state (SELECT _part_offset ORDER BY source_state),
-    PROJECTION idx_source_status (SELECT _part_offset ORDER BY source_status),
-    PROJECTION idx_source_wi_type (SELECT _part_offset ORDER BY source_wi_type),
-    PROJECTION idx_target_severity (SELECT _part_offset ORDER BY target_severity),
-    PROJECTION idx_target_state (SELECT _part_offset ORDER BY target_state),
-    PROJECTION idx_target_status (SELECT _part_offset ORDER BY target_status),
-    PROJECTION idx_target_wi_type (SELECT _part_offset ORDER BY target_wi_type)
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
@@ -905,17 +893,13 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     relationship_kind LowCardinality(String) CODEC(LZ4),
     target_id Int64 CODEC(Delta(8), ZSTD(1)),
     target_kind LowCardinality(String) CODEC(LZ4),
-    source_severity LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_state LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_status LowCardinality(Nullable(String)) CODEC(LZ4),
-    source_wi_type LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_severity LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_state LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_status LowCardinality(Nullable(String)) CODEC(LZ4),
-    target_wi_type LowCardinality(Nullable(String)) CODEC(LZ4),
+    source_tags Array(LowCardinality(String)),
+    target_tags Array(LowCardinality(String)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
+    INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
     PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)),
     PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind)),
     PROJECTION by_rel_source_kind (SELECT * ORDER BY (relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind)),
@@ -931,15 +915,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
-    ),
-    PROJECTION idx_source_severity (SELECT _part_offset ORDER BY source_severity),
-    PROJECTION idx_source_state (SELECT _part_offset ORDER BY source_state),
-    PROJECTION idx_source_status (SELECT _part_offset ORDER BY source_status),
-    PROJECTION idx_source_wi_type (SELECT _part_offset ORDER BY source_wi_type),
-    PROJECTION idx_target_severity (SELECT _part_offset ORDER BY target_severity),
-    PROJECTION idx_target_state (SELECT _part_offset ORDER BY target_state),
-    PROJECTION idx_target_status (SELECT _part_offset ORDER BY target_status),
-    PROJECTION idx_target_wi_type (SELECT _part_offset ORDER BY target_wi_type)
+    )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)

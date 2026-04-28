@@ -53,6 +53,8 @@ pub enum ColumnType {
     Nullable(Box<ColumnType>),
     /// Dictionary-encoded / low-cardinality wrapper.
     LowCardinality(Box<ColumnType>),
+    /// ClickHouse `Array(T)`.
+    Array(Box<ColumnType>),
 }
 
 /// Compression codec applied to a column's on-disk representation.
@@ -98,10 +100,6 @@ pub enum ProjectionDef {
         select: Vec<String>,
         group_by: Vec<String>,
     },
-    /// Lightweight granule-pruning index using only row offsets.
-    /// Emits: `SELECT _part_offset ORDER BY col`.
-    /// Enables multi-predicate granule intersection on 25.11+.
-    PartOffsetIndex { name: String, column: String },
 }
 
 /// Table engine with arguments.

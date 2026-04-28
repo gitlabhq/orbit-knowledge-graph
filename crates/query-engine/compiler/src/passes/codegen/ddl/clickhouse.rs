@@ -55,6 +55,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
         ColumnType::LowCardinality(inner) => {
             format!("LowCardinality({})", emit_column_type(inner))
         }
+        ColumnType::Array(inner) => format!("Array({})", emit_column_type(inner)),
     }
 }
 
@@ -175,9 +176,6 @@ fn emit_projection(proj: &ProjectionDef) -> String {
                 format!("({})", order_by.join(", "))
             };
             format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
-        }
-        ProjectionDef::PartOffsetIndex { name, column } => {
-            format!("    PROJECTION {name} (SELECT _part_offset ORDER BY {column})")
         }
         ProjectionDef::Aggregate {
             name,

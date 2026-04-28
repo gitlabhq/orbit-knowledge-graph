@@ -92,7 +92,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 dp.property_name.clone(),
                 dir_prefix.to_string(),
             ),
-            dp.edge_column.clone(),
+            (dp.edge_column.clone(), dp.tag_key.clone()),
         );
     }
 
