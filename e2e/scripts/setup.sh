@@ -3,6 +3,31 @@ source "$(dirname "${BASH_SOURCE[0]}")/lib.sh"
 
 log "E2E Setup (SHA: $E2E_SHA)"
 
+# Clean cluster-scoped resources orphaned by previous e2e runs whose owning
+# namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
+# resources (e.g. GatewayClass "gitlab-gw") that survive `kubectl delete ns`
+# and that helm validates by `meta.helm.sh/release-namespace` annotation;
+# a stale entry from a prior e2e-<oldsha>-gitlab release blocks subsequent
+# installs in any new e2e-<sha>-gitlab namespace with:
+#   "GatewayClass <name> exists and cannot be imported into the current release"
+log "Cleaning orphaned e2e cluster-scoped resources"
+EXISTING_E2E_NS=$($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
+  | tr ' ' '\n' | grep '^e2e-' || true)
+for kind in gatewayclass; do
+  ORPHANS=$(EXISTING="$EXISTING_E2E_NS" $KC get "$kind" -o json 2>/dev/null \
+    | python3 -c "
+import json, os, sys
+existing = set(os.environ.get('EXISTING','').split())
+for r in json.load(sys.stdin).get('items', []):
+    ns = r.get('metadata', {}).get('annotations', {}).get('meta.helm.sh/release-namespace', '')
+    if ns.startswith('e2e-') and ns not in existing:
+        print(r['metadata']['name'])
+" 2>/dev/null) || true
+  if [ -n "$ORPHANS" ]; then
+    echo "$ORPHANS" | xargs -I{} $KC delete "$kind" "{}" 2>/dev/null || true
+  fi
+done
+
 # Generate random credentials
 log "Generating secrets"
 E2E_JWT_KEY=$(openssl rand -base64 32)
