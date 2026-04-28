@@ -206,11 +206,7 @@
       "$ref": "#/$defs/QuerySettings",
       "default": {
         "default": {
-          "max_bytes_to_read": 524288000,
           "max_execution_time": 30,
-          "max_memory_usage": 1073741824,
-          "max_rows_in_set": 10000,
-          "max_rows_to_read": 10000000,
           "query_cache_ttl": 60
         }
       }
@@ -1248,13 +1244,12 @@
           "writeOnly": true
         },
         "max_bytes_to_read": {
-          "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Catches full table scans early before data is\ndecompressed into RAM.",
+          "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Unset by default.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 524288000,
           "minimum": 0
         },
         "max_execution_time": {
@@ -1268,33 +1263,30 @@
           "minimum": 0
         },
         "max_memory_usage": {
-          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED.",
+          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by\ndefault (ClickHouse uses its server-level setting).",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 1073741824,
           "minimum": 0
         },
         "max_rows_in_set": {
-          "description": "ClickHouse `max_rows_in_set`. Limits the size of hash tables built\nfor IN (subquery) clauses. Catches runaway _nf_* and cascade CTEs\nthat resolve broad filters into massive ID sets.",
+          "description": "ClickHouse `max_rows_in_set`. Limits the size of hash tables built\nfor IN (subquery) clauses. Unset by default.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 10000,
           "minimum": 0
         },
         "max_rows_to_read": {
-          "description": "ClickHouse `max_rows_to_read`. Limits the total number of rows\nread from tables during query execution.",
+          "description": "ClickHouse `max_rows_to_read`. Limits the total number of rows\nread from tables during query execution. Unset by default.",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": 10000000,
           "minimum": 0
         },
         "query_cache_ttl": {
@@ -1324,11 +1316,7 @@
         "default": {
           "$ref": "#/$defs/QueryConfig",
           "default": {
-            "max_bytes_to_read": 524288000,
             "max_execution_time": 30,
-            "max_memory_usage": 1073741824,
-            "max_rows_in_set": 10000,
-            "max_rows_to_read": 10000000,
             "query_cache_ttl": 60
           }
         }
