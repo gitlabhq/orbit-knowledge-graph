@@ -596,85 +596,53 @@ mod tests {
         assert!(!dir.path().join("dangling").exists());
     }
 
-    /// End-to-end contract for !1110: spin up an axum server that
-    /// emulates the GitLab archive endpoint, fetch from it via reqwest,
-    /// stream the response into the real `extract_tar_gz_from_reader`
-    /// extraction path, apply the upstream filter
-    /// (`is_parsable || is_required_by_indexer`) by deleting files the
-    /// filter would refuse, then run the real `Pipeline::run`. The
-    /// pipeline must produce non-zero defs and edges; if the filter
-    /// dropped any indexer input (Cargo.toml, package.json,
-    /// tsconfig.json, .gitignore, etc.) the resolvers would silently
-    /// degrade and we'd see zero defs / edges instead.
-    #[tokio::test]
-    async fn pipeline_runs_against_filtered_archive_endpoint() {
-        use std::sync::Arc;
-        use std::sync::atomic::{AtomicUsize, Ordering};
+    // ── Archive-endpoint pipeline tests ─────────────────────────────
+    //
+    // These tests stand up an axum server that emulates the GitLab
+    // `/repository/archive` endpoint, fetch from it with reqwest, stream
+    // the response through the real `extract_tar_gz_from_reader`, and
+    // run `Pipeline::run` against the extracted tree. They mirror the
+    // YAML resolver suites (`integration-tests-codegraph/fixtures/...`)
+    // but go through the actual archival path, so resolver regressions
+    // tied to manifest files on disk surface here too.
 
+    use code_graph::v2::linker::CodeGraph;
+    use code_graph::v2::linker::graph::GraphNode;
+    use code_graph::v2::types::EdgeKind;
+    use code_graph::v2::{
+        BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
+    };
+    use std::sync::{Arc, Mutex};
+
+    /// Captures every `CodeGraph` the pipeline emits so tests can make
+    /// assertions about specific defs / edges.
+    struct CapturingConverter {
+        graphs: Mutex<Vec<CodeGraph>>,
+    }
+
+    impl GraphConverter for CapturingConverter {
+        fn convert(
+            &self,
+            graph: CodeGraph,
+        ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
+            self.graphs.lock().unwrap().push(graph);
+            Ok(Vec::new())
+        }
+    }
+
+    /// Stand up the archive endpoint, fetch via reqwest, stream into
+    /// `extract_tar_gz_from_reader`. Mirrors `LocalRepositoryCache::
+    /// store_archive` end-to-end.
+    async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) {
         use axum::Router;
         use axum::body::Body;
         use axum::http::header;
         use axum::response::IntoResponse;
         use axum::routing::get;
-        use code_graph::v2::config::{detect_language_from_path, is_required_by_indexer};
-        use code_graph::v2::{
-            BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
-        };
+        use futures::StreamExt;
         use tokio_util::io::SyncIoBridge;
 
-        let dir = tempfile::tempdir().unwrap();
-        let data = build_archive(&[
-            // Rust workspace with cross-crate dep so resolution is exercised.
-            Entry::File(
-                "root/Cargo.toml",
-                b"[workspace]\nmembers = [\"crates/lib\", \"crates/app\"]\nresolver = \"2\"\n",
-            ),
-            Entry::File(
-                "root/crates/lib/Cargo.toml",
-                b"[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
-            ),
-            Entry::File(
-                "root/crates/lib/src/lib.rs",
-                b"pub fn greet() -> &'static str { \"hi\" }\n",
-            ),
-            Entry::File(
-                "root/crates/app/Cargo.toml",
-                b"[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nlib = { path = \"../lib\" }\n",
-            ),
-            Entry::File(
-                "root/crates/app/src/main.rs",
-                b"fn main() { println!(\"{}\", lib::greet()); }\n",
-            ),
-            // JS workspace with a tsconfig path alias so the alias must resolve.
-            Entry::File(
-                "root/frontend/package.json",
-                b"{\"name\":\"frontend\",\"version\":\"0.0.0\"}\n",
-            ),
-            Entry::File(
-                "root/frontend/tsconfig.json",
-                b"{\"compilerOptions\":{\"baseUrl\":\".\",\"paths\":{\"@/*\":[\"src/*\"]}}}\n",
-            ),
-            Entry::File(
-                "root/frontend/src/utils.ts",
-                b"export function helper() { return 42; }\n",
-            ),
-            Entry::File(
-                "root/frontend/src/main.ts",
-                b"import { helper } from '@/utils';\nexport function run() { return helper(); }\n",
-            ),
-            Entry::File("root/.gitignore", b"node_modules/\ntarget/\n"),
-            // Noise the filter must drop.
-            Entry::File("root/README.md", b"# project\n"),
-            Entry::File("root/Cargo.lock", b"# generated\n"),
-            Entry::File("root/frontend/yarn.lock", b"# generated\n"),
-            Entry::File("root/assets/logo.png", b"\x89PNG..."),
-            Entry::File("root/vendor/jquery.min.js", b"/* min */\n"),
-            Entry::File("root/pkg/server_test.go", b"package pkg\n"),
-        ]);
-
-        // 1. Spin up an axum server that returns the tar.gz body the
-        //    way GitLab's `/repository/archive` endpoint does.
-        let archive_bytes = data.clone();
+        let archive_bytes = build_archive(entries);
         let app = Router::new().route(
             "/api/v4/internal/orbit/project/{project_id}/repository/archive",
             get(move || {
@@ -694,128 +662,42 @@ mod tests {
             axum::serve(listener, app).await.unwrap();
         });
 
-        // 2. Fetch from that endpoint with reqwest, stream the body
-        //    through the real `extract_tar_gz_from_reader` extraction
-        //    path. `SyncIoBridge` mirrors what `LocalRepositoryCache`
-        //    does in production (`cache.rs::store_archive`).
         let url = format!(
             "http://{}/api/v4/internal/orbit/project/42/repository/archive?ref=main",
             addr
         );
         let response = reqwest::get(&url).await.unwrap();
         assert!(response.status().is_success(), "fetch failed: {url}");
-        let stream = response.bytes_stream();
-        use futures::StreamExt;
-        let async_reader =
-            tokio_util::io::StreamReader::new(stream.map(|r| r.map_err(std::io::Error::other)));
-        let target_dir = dir.path().to_path_buf();
+        let async_reader = tokio_util::io::StreamReader::new(
+            response
+                .bytes_stream()
+                .map(|r| r.map_err(std::io::Error::other)),
+        );
+        let target = target.to_path_buf();
         let handle = tokio::runtime::Handle::current();
         tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
-            extract_tar_gz_from_reader(bridge, &target_dir).unwrap();
+            extract_tar_gz_from_reader(bridge, &target).unwrap();
         })
         .await
         .unwrap();
         server.abort();
+    }
 
-        // 2. Apply the filter !1110 will compose, by deleting files the
-        //    filter would have refused to write to disk.
-        let keep = |rel: &Path| -> bool {
-            let s = rel.to_string_lossy();
-            let parsable = detect_language_from_path(&s)
-                .map(|l| !l.exclude_extensions().iter().any(|e| s.ends_with(e)))
-                .unwrap_or(false);
-            parsable || is_required_by_indexer(rel)
-        };
-        let extracted = [
-            "Cargo.toml",
-            "crates/lib/Cargo.toml",
-            "crates/lib/src/lib.rs",
-            "crates/app/Cargo.toml",
-            "crates/app/src/main.rs",
-            "frontend/package.json",
-            "frontend/tsconfig.json",
-            "frontend/src/utils.ts",
-            "frontend/src/main.ts",
-            ".gitignore",
-            "README.md",
-            "Cargo.lock",
-            "frontend/yarn.lock",
-            "assets/logo.png",
-            "vendor/jquery.min.js",
-            "pkg/server_test.go",
-        ];
-        for rel in extracted {
-            let abs = dir.path().join(rel);
-            assert!(abs.exists(), "extraction missed: {rel}");
-            if !keep(Path::new(rel)) {
-                std::fs::remove_file(&abs).unwrap();
-            }
-        }
-        for required in [
-            "Cargo.toml",
-            "crates/lib/Cargo.toml",
-            "crates/app/Cargo.toml",
-            "frontend/package.json",
-            "frontend/tsconfig.json",
-            ".gitignore",
-            "crates/lib/src/lib.rs",
-            "crates/app/src/main.rs",
-            "frontend/src/utils.ts",
-            "frontend/src/main.ts",
-        ] {
-            assert!(
-                dir.path().join(required).exists(),
-                "filter dropped indexer input: {required}"
-            );
-        }
-        for noise in [
-            "README.md",
-            "Cargo.lock",
-            "frontend/yarn.lock",
-            "assets/logo.png",
-            "vendor/jquery.min.js",
-            "pkg/server_test.go",
-        ] {
-            assert!(
-                !dir.path().join(noise).exists(),
-                "filter kept noise: {noise}"
-            );
-        }
-
-        // 3. Run the real code-indexing pipeline against the filtered tree
-        //    and verify it produced graph content. Counting via a custom
-        //    converter: a Pipeline that finds no manifests would produce
-        //    zero defs because Rust falls back to standalone parsing and
-        //    JS bare-specifier resolution collapses.
-        struct CountingConverter {
-            defs: AtomicUsize,
-            edges: AtomicUsize,
-        }
-        impl GraphConverter for CountingConverter {
-            fn convert(
-                &self,
-                graph: code_graph::v2::linker::CodeGraph,
-            ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
-                self.defs.fetch_add(graph.defs.len(), Ordering::Relaxed);
-                self.edges
-                    .fetch_add(graph.graph.edge_count(), Ordering::Relaxed);
-                Ok(Vec::new())
-            }
-        }
-
-        let counter = Arc::new(CountingConverter {
-            defs: AtomicUsize::new(0),
-            edges: AtomicUsize::new(0),
+    /// Run the real code-indexing pipeline against `root`, returning
+    /// every emitted `CodeGraph`.
+    async fn run_pipeline(root: &Path) -> Vec<CodeGraph> {
+        let capturer = Arc::new(CapturingConverter {
+            graphs: Mutex::new(Vec::new()),
         });
-        let counter_for_pipeline = counter.clone();
-        let root = dir.path().to_path_buf();
+        let capturer_for_pipeline = capturer.clone();
+        let root = root.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
             let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
             Pipeline::run(
                 &root,
                 PipelineConfig::default(),
-                counter_for_pipeline as Arc<dyn GraphConverter>,
+                capturer_for_pipeline as Arc<dyn GraphConverter>,
                 sink,
             )
         })
@@ -826,15 +708,154 @@ mod tests {
             "pipeline errors: {:#?}",
             result.errors
         );
-        let defs = counter.defs.load(Ordering::Relaxed);
-        let edges = counter.edges.load(Ordering::Relaxed);
+        Arc::try_unwrap(capturer)
+            .ok()
+            .expect("capturer still has outstanding refs")
+            .graphs
+            .into_inner()
+            .unwrap()
+    }
+
+    /// Returns true iff any captured graph has a `Definition` node in
+    /// `file` whose name is `name`.
+    fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
+        graphs.iter().any(|g| {
+            g.graph.node_indices().any(|idx| {
+                if let GraphNode::Definition { file_path, id } = &g.graph[idx] {
+                    if !file_path.ends_with(file) {
+                        return false;
+                    }
+                    let def = &g.defs[id.0 as usize];
+                    g.str(def.name) == name
+                } else {
+                    false
+                }
+            })
+        })
+    }
+
+    /// Returns the number of edges of a given `EdgeKind` across every
+    /// captured graph.
+    fn edge_count(graphs: &[CodeGraph], kind: EdgeKind) -> usize {
+        graphs
+            .iter()
+            .map(|g| {
+                g.graph
+                    .raw_edges()
+                    .iter()
+                    .filter(|e| e.weight.relationship.edge_kind == kind)
+                    .count()
+            })
+            .sum()
+    }
+
+    /// Sanity check: extracted files all land on disk and the pipeline
+    /// produces a non-empty graph from a representative repo.
+    #[tokio::test]
+    async fn extracted_files_drive_pipeline() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File("root/Cargo.toml", b"[workspace]\nmembers = []\n"),
+            Entry::File("root/src/main.rs", b"fn main() {}\n"),
+            Entry::File("root/.gitignore", b"target/\n"),
+            Entry::File("root/README.md", b"# r\n"),
+        ];
+        extract_via_archive_endpoint(&entries, dir.path()).await;
+
+        for rel in ["Cargo.toml", "src/main.rs", ".gitignore", "README.md"] {
+            assert!(dir.path().join(rel).exists(), "missing: {rel}");
+        }
+
+        let graphs = run_pipeline(dir.path()).await;
         assert!(
-            defs > 0,
-            "pipeline produced zero defs against filtered tree (resolvers likely degraded)"
+            graphs.iter().any(|g| !g.defs.is_empty()),
+            "pipeline produced no defs"
+        );
+    }
+
+    /// Mirrors the cargo workspace YAML suites: cross-crate `lib::greet`
+    /// callable from `app::main` only resolves if both `Cargo.toml`s
+    /// survive the round-trip.
+    #[tokio::test]
+    async fn cargo_workspace_resolves_through_archive_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File(
+                "root/Cargo.toml",
+                b"[workspace]\nmembers = [\"crates/lib\", \"crates/app\"]\nresolver = \"2\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/Cargo.toml",
+                b"[package]\nname = \"lib\"\nversion = \"0.1.0\"\nedition = \"2021\"\n",
+            ),
+            Entry::File(
+                "root/crates/lib/src/lib.rs",
+                b"pub fn greet() -> &'static str { \"hi\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/Cargo.toml",
+                b"[package]\nname = \"app\"\nversion = \"0.1.0\"\nedition = \"2021\"\n\n[dependencies]\nlib = { path = \"../lib\" }\n",
+            ),
+            Entry::File(
+                "root/crates/app/src/main.rs",
+                b"fn main() { lib::greet(); }\n",
+            ),
+        ];
+        extract_via_archive_endpoint(&entries, dir.path()).await;
+
+        let graphs = run_pipeline(dir.path()).await;
+        assert!(
+            has_def(&graphs, "crates/lib/src/lib.rs", "greet"),
+            "Rust workspace resolver missed lib::greet"
         );
         assert!(
-            edges > 0,
-            "pipeline produced zero graph edges against filtered tree"
+            has_def(&graphs, "crates/app/src/main.rs", "main"),
+            "Rust workspace resolver missed app::main"
+        );
+        assert!(
+            edge_count(&graphs, EdgeKind::Calls) > 0,
+            "no Calls edges emitted; cross-crate resolution likely failed"
+        );
+    }
+
+    /// Mirrors the JS module-resolution YAML suites: a tsconfig
+    /// `paths` alias (`@/utils`) only resolves to `src/utils.ts` if
+    /// both `tsconfig.json` and `package.json` survive the round-trip.
+    #[tokio::test]
+    async fn js_tsconfig_alias_resolves_through_archive_endpoint() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File(
+                "root/package.json",
+                b"{\"name\":\"frontend\",\"version\":\"0.0.0\"}\n",
+            ),
+            Entry::File(
+                "root/tsconfig.json",
+                b"{\"compilerOptions\":{\"baseUrl\":\".\",\"paths\":{\"@/*\":[\"src/*\"]}}}\n",
+            ),
+            Entry::File(
+                "root/src/utils.ts",
+                b"export function helper() { return 42; }\n",
+            ),
+            Entry::File(
+                "root/src/main.ts",
+                b"import { helper } from '@/utils';\nexport function run() { return helper(); }\n",
+            ),
+        ];
+        extract_via_archive_endpoint(&entries, dir.path()).await;
+
+        let graphs = run_pipeline(dir.path()).await;
+        assert!(
+            has_def(&graphs, "src/utils.ts", "helper"),
+            "JS resolver missed utils::helper"
+        );
+        assert!(
+            has_def(&graphs, "src/main.ts", "run"),
+            "JS resolver missed main::run"
+        );
+        assert!(
+            edge_count(&graphs, EdgeKind::Imports) > 0,
+            "no Imports edges emitted; tsconfig alias likely failed to resolve"
         );
     }
 }

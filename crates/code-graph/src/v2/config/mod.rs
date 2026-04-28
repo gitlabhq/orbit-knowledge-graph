@@ -9,7 +9,7 @@ pub use registry::{
 };
 pub use resolver_files::{
     BUN_SIGNAL_FILES, INDEXER_REQUIRED_BASENAMES, WEBPACK_CONFIG_EXTENSIONS, WEBPACK_CONFIG_STEM,
-    is_required_by_indexer,
+    is_extractable, is_parsable, is_required_by_indexer, parsable_language,
 };
 
 /// Tag for custom pipeline variants. Used in test suites to select

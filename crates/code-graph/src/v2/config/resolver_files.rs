@@ -1,12 +1,19 @@
-//! Non-source files the indexer reads from disk.
+//! Predicates for what the indexer extracts and reads from disk.
 //!
-//! Resolver pipelines (generic or custom) load workspace manifests, ignore
-//! files, and build configs to map identifiers to files and to scope the
-//! directory walk. They are not parsed as source. Anything that filters
-//! files before they reach the pipeline must keep paths matched by
-//! [`is_required_by_indexer`] in addition to parsable source.
+//! Two predicates, layered:
+//!
+//! - [`is_required_by_indexer`] — non-source files the resolver pipelines
+//!   (generic or custom) load directly from disk: workspace manifests,
+//!   ignore files, build configs.
+//! - [`is_extractable`] — the union of "parsable source" and
+//!   `is_required_by_indexer`. This is the contract for any caller that
+//!   filters archive entries before they reach the pipeline (the server
+//!   indexer's archive extractor, the local CLI, anything in between).
 
 use std::path::Path;
+
+use super::lang::Language;
+use super::registry::detect_language_from_extension;
 
 /// Exact basenames the indexer reads. Matched at any directory depth.
 pub const INDEXER_REQUIRED_BASENAMES: &[&str] = &[
@@ -41,6 +48,34 @@ fn is_webpack_config_basename(basename: &str) -> bool {
         .strip_prefix(WEBPACK_CONFIG_STEM)
         .and_then(|rest| rest.strip_prefix('.'))
         .is_some_and(|ext| WEBPACK_CONFIG_EXTENSIONS.contains(&ext))
+}
+
+/// Returns `Some(Language)` when `rel_path` would be picked up by the
+/// parsing pipeline. Mirrors the registry lookup plus per-language
+/// `exclude_extensions` (e.g. `*.min.js`, `*_test.go`).
+pub fn parsable_language(rel_path: &Path) -> Option<Language> {
+    let s = rel_path.to_str()?;
+    let ext = rel_path.extension().and_then(|e| e.to_str())?;
+    let lang = detect_language_from_extension(ext)?;
+    if lang.exclude_extensions().iter().any(|e| s.ends_with(e)) {
+        return None;
+    }
+    Some(lang)
+}
+
+/// Returns `true` when `rel_path` is parsable source.
+pub fn is_parsable(rel_path: &Path) -> bool {
+    parsable_language(rel_path).is_some()
+}
+
+/// Returns `true` when `rel_path` should be extracted to disk for the
+/// indexer to read: parsable source plus the resolver-required
+/// manifests / ignore files / build configs.
+///
+/// Used by both the server indexer (archive extractor) and the local
+/// CLI walker so the two cannot disagree on what the indexer needs.
+pub fn is_extractable(rel_path: &Path) -> bool {
+    is_parsable(rel_path) || is_required_by_indexer(rel_path)
 }
 
 #[cfg(test)]
@@ -124,5 +159,64 @@ mod tests {
     fn paths_without_basename_do_not_panic() {
         assert!(!is_required_by_indexer(&p("")));
         assert!(!is_required_by_indexer(&p("/")));
+        assert!(!is_extractable(&p("")));
+    }
+
+    #[test]
+    fn is_parsable_recognizes_supported_extensions() {
+        for path in [
+            "src/main.rs",
+            "lib/foo.py",
+            "app/user.rb",
+            "pkg/server.go",
+            "src/index.ts",
+            "src/component.vue",
+        ] {
+            assert!(is_parsable(&p(path)), "missed: {path}");
+        }
+    }
+
+    #[test]
+    fn is_parsable_rejects_excluded_suffixes() {
+        assert!(!is_parsable(&p("vendor/jquery.min.js")));
+        assert!(!is_parsable(&p("pkg/server_test.go")));
+    }
+
+    #[test]
+    fn is_parsable_rejects_unsupported_extensions() {
+        for path in ["README.md", "image.png", "Cargo.lock", "Makefile"] {
+            assert!(!is_parsable(&p(path)), "wrongly kept: {path}");
+        }
+    }
+
+    #[test]
+    fn is_extractable_keeps_source_and_required_files() {
+        for path in [
+            "src/main.rs",
+            "frontend/src/index.ts",
+            "Cargo.toml",
+            "frontend/package.json",
+            "frontend/tsconfig.json",
+            ".gitignore",
+            "ee/webpack.config.js",
+        ] {
+            assert!(is_extractable(&p(path)), "missed: {path}");
+        }
+    }
+
+    #[test]
+    fn is_extractable_drops_pure_noise() {
+        for path in [
+            "README.md",
+            "Cargo.lock",
+            "frontend/yarn.lock",
+            "assets/logo.png",
+            "vendor/jquery.min.js",
+            "pkg/server_test.go",
+            "Makefile",
+            "LICENSE",
+        ] {
+            assert!(!is_extractable(&p(path)), "wrongly kept: {path}");
+        }
     }
 }
