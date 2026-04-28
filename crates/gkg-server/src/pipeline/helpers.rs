@@ -93,48 +93,57 @@ fn sanitize_error_message(error: &PipelineError) -> String {
     }
 }
 
-/// Classify ClickHouse execution errors into actionable messages.
+/// Classify ClickHouse execution errors into actionable diagnostic messages.
 ///
-/// Parses `Code: NNN` from the error string and returns a user-facing
-/// message with hints for how to refine the query. No internal details
-/// (table names, SQL, infrastructure) are exposed — only the limit type
-/// and generic suggestions.
+/// Parses `Code: NNN` from the error string. No internal details (table
+/// names, SQL, infrastructure) are exposed — only the failure class and
+/// generic suggestions for refining the query.
 fn classify_execution_error(msg: &str) -> String {
     let code = extract_ch_error_code(msg);
     match code {
         Some(241) => {
             // MEMORY_LIMIT_EXCEEDED
-            "Query exceeded memory limit. \
-             Hints: add filters to narrow the scan (e.g. project_id, state), \
-             reduce limit, or use node_ids instead of broad filters."
+            "Query used too much memory. This usually means the query is \
+             scanning too much data. Try: add a project_id filter, use \
+             node_ids to pin specific entities, or reduce max_hops/max_depth."
                 .to_string()
         }
         Some(159) | Some(160) => {
             // TIMEOUT_EXCEEDED / TOO_SLOW
-            "Query exceeded time limit. \
-             Hints: add filters to reduce the data scanned, \
-             reduce max_hops/max_depth, or specify rel_types."
+            "Query timed out. The query is likely scanning a large portion \
+             of the graph. Try: add selective filters (project_id, state), \
+             reduce max_hops/max_depth, specify rel_types, or use node_ids \
+             to pin high-cardinality entities like Definition or File."
                 .to_string()
         }
         Some(307) => {
-            // TOO_MANY_BYTES (max_bytes_to_read)
-            "Query exceeded data read limit. \
-             Hints: add filters to narrow the scan (e.g. project_id), \
-             use node_ids for selective endpoints, or reduce limit."
+            // TOO_MANY_BYTES
+            "Query read too much data. Try: add a project_id filter to \
+             scope the scan, use node_ids for selective endpoints, or \
+             narrow filters on high-cardinality entities."
                 .to_string()
         }
         Some(158) => {
-            // TOO_MANY_ROWS (max_rows_to_read)
-            "Query exceeded row read limit. \
-             Hints: add filters to narrow the scan, \
-             use node_ids instead of broad filters."
+            // TOO_MANY_ROWS
+            "Query scanned too many rows. Filters like name or path on \
+             entities like Definition or File may not be selective enough \
+             without project_id scoping. Try: add project_id, use node_ids, \
+             or pre-resolve broad filters with a separate lookup query."
                 .to_string()
         }
         Some(191) => {
-            // SET_SIZE_LIMIT_EXCEEDED (max_rows_in_set)
-            "Query exceeded IN-subquery size limit. \
-             Hints: add more specific filters to reduce the number of \
-             matching IDs, or use node_ids for direct ID selection."
+            // SET_SIZE_LIMIT_EXCEEDED
+            "Query matched too many IDs in a filter subquery. The filter \
+             is not selective enough. Try: add more specific filters, use \
+             node_ids for direct ID selection, or scope by project_id."
+                .to_string()
+        }
+        Some(53) => {
+            // TYPE_MISMATCH
+            "Query has a type mismatch in a filter or aggregation. Check \
+             that filter values match the column type (e.g. use integers \
+             for ID fields, strings for text fields, DateTime format for \
+             date columns)."
                 .to_string()
         }
         _ => "Query execution failed.".to_string(),
@@ -166,32 +175,49 @@ mod tests {
     }
 
     #[test]
-    fn classify_memory_limit() {
+    fn classify_memory() {
         let msg = "query error: bad response: Code: 241. DB::Exception: Memory limit";
-        assert!(classify_execution_error(msg).contains("memory limit"));
+        assert!(classify_execution_error(msg).contains("too much memory"), "got: {}", classify_execution_error(msg));
     }
 
     #[test]
     fn classify_timeout() {
         let msg = "Code: 159. DB::Exception: Timeout exceeded";
-        assert!(classify_execution_error(msg).contains("time limit"));
+        assert!(classify_execution_error(msg).contains("timed out"), "got: {}", classify_execution_error(msg));
     }
 
     #[test]
-    fn classify_bytes_to_read() {
+    fn classify_too_many_bytes() {
         let msg = "Code: 307. DB::Exception: Too many bytes to read";
-        assert!(classify_execution_error(msg).contains("data read limit"));
+        assert!(classify_execution_error(msg).contains("too much data"), "got: {}", classify_execution_error(msg));
     }
 
     #[test]
-    fn classify_rows_in_set() {
+    fn classify_too_many_rows() {
+        let msg = "Code: 158. DB::Exception: Too many rows";
+        assert!(classify_execution_error(msg).contains("too many rows"), "got: {}", classify_execution_error(msg));
+    }
+
+    #[test]
+    fn classify_set_size() {
         let msg = "Code: 191. DB::Exception: Set size limit exceeded";
-        assert!(classify_execution_error(msg).contains("IN-subquery size limit"));
+        assert!(classify_execution_error(msg).contains("too many IDs"), "got: {}", classify_execution_error(msg));
+    }
+
+    #[test]
+    fn classify_type_mismatch() {
+        let msg = "Code: 53. DB::Exception: Cannot convert String to DateTime64";
+        assert!(classify_execution_error(msg).contains("type mismatch"), "got: {}", classify_execution_error(msg));
     }
 
     #[test]
     fn classify_unknown_falls_back() {
         let msg = "Code: 999. DB::Exception: Something unexpected";
         assert_eq!(classify_execution_error(msg), "Query execution failed.");
+    }
+
+    #[test]
+    fn classify_no_code_falls_back() {
+        assert_eq!(classify_execution_error("connection refused"), "Query execution failed.");
     }
 }
