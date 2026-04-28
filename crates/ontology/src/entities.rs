@@ -82,7 +82,6 @@ pub struct EdgeTableStorage {
     pub projections: Vec<StorageProjection>,
     pub denormalized_columns: Vec<StorageColumn>,
     pub denormalized_indexes: Vec<StorageIndex>,
-    pub denormalized_projections: Vec<StorageProjection>,
 }
 
 /// A non-ontology auxiliary table definition (checkpoint, etc.).

@@ -320,19 +320,12 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
             .iter()
             .map(convert_index),
     );
-    let mut projections: Vec<ProjectionDef> = config
+    let projections: Vec<ProjectionDef> = config
         .storage
         .projections
         .iter()
         .map(convert_projection)
         .collect();
-    projections.extend(
-        config
-            .storage
-            .denormalized_projections
-            .iter()
-            .map(convert_projection),
-    );
 
     CreateTable {
         name: name.into(),

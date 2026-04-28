@@ -396,9 +396,7 @@
                   "primary_key": { "type": "array", "items": { "type": "string" } },
                   "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
                   "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
-                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
-                  "denormalized_columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
-                  "denormalized_projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
                 },
                 "additionalProperties": false
               }
@@ -407,10 +405,6 @@
             "additionalProperties": false
           },
           "minProperties": 1
-        },
-        "denorm_default_as": {
-          "type": "string",
-          "description": "Default column suffix for denormalization entries without an explicit 'as'. Entries inherit this value, producing columns like source_{default} / target_{default}."
         },
         "denormalization": {
           "type": "array",

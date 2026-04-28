@@ -82,7 +82,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
     let denormalization_entries = schema.settings.denormalization.clone();
-    let denorm_default_as = schema.settings.denorm_default_as.clone();
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
@@ -119,26 +118,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .into_iter()
                     .map(node::convert_storage_projection)
                     .collect(),
-                denormalized_columns: s
-                    .denormalized_columns
-                    .into_iter()
-                    .map(|col| crate::entities::StorageColumn {
-                        name: col.name,
-                        ch_type: col.ch_type,
-                        default: col.default,
-                        codec: col.codec,
-                    })
-                    .collect(),
-                denormalized_indexes: s
-                    .denormalized_indexes
-                    .into_iter()
-                    .map(node::convert_storage_index)
-                    .collect(),
-                denormalized_projections: s
-                    .denormalized_projections
-                    .into_iter()
-                    .map(node::convert_storage_projection)
-                    .collect(),
+                denormalized_columns: vec![],
+                denormalized_indexes: vec![],
             });
             let config = crate::EdgeTableConfig {
                 sort_key: cfg.sort_key,
@@ -324,7 +305,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         let tag_key = entry
             .column_alias
             .as_deref()
-            .or(denorm_default_as.as_deref())
             .unwrap_or(&entry.property)
             .to_string();
 
@@ -410,7 +390,6 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     for config in ontology.edge_table_configs.values_mut() {
         config.storage.denormalized_columns = auto_columns.clone();
         config.storage.denormalized_indexes = auto_indexes.clone();
-        config.storage.denormalized_projections = vec![];
     }
 
     // Resolve skip_security_filter_for_entities → physical table names.
