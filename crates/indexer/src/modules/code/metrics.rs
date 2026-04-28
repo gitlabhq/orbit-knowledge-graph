@@ -21,6 +21,7 @@ pub struct CodeMetrics {
     pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
     pub(super) files_skipped: Counter<u64>,
+    pub(super) file_faults: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -46,6 +47,7 @@ impl CodeMetrics {
             nodes_indexed: code::NODES_INDEXED.build_counter_u64(meter),
             errors: code::ERRORS.build_counter_u64(meter),
             files_skipped: code::FILES_SKIPPED.build_counter_u64(meter),
+            file_faults: code::FILE_FAULTS.build_counter_u64(meter),
         }
     }
 }
@@ -98,6 +100,11 @@ impl CodeMetrics {
     pub(super) fn record_file_skipped(&self, reason: &'static str) {
         self.files_skipped
             .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    }
+
+    pub(super) fn record_file_fault(&self, kind: &'static str) {
+        self.file_faults
+            .add(1, &[KeyValue::new(code::labels::KIND, kind)]);
     }
 }
 

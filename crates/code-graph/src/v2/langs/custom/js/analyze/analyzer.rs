@@ -735,7 +735,8 @@ impl JsAnalyzer {
         source: &str,
         file_path: &str,
         relative_path: &str,
-    ) -> Result<JsFileAnalysis, String> {
+    ) -> Result<JsFileAnalysis, crate::v2::error::AnalyzerError> {
+        use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
         // Single pass over lines: longest line + line count. Split on
         // both `\n` and `\r` so a file that uses classic Mac line
         // endings (CR-only) cannot bypass the minified heuristic by
@@ -754,10 +755,13 @@ impl JsAnalyzer {
                 current_line_len += 1;
             }
             if max_line_len.max(current_line_len) > Self::MAX_LINE_LENGTH {
-                return Err(format!(
-                    "Skipping {file_path}: line too long ({} bytes, max {})",
-                    max_line_len.max(current_line_len),
-                    Self::MAX_LINE_LENGTH
+                return Err(AnalyzerError::skip(
+                    FileSkip::LineTooLong,
+                    format!(
+                        "{file_path}: line too long ({} bytes, max {})",
+                        max_line_len.max(current_line_len),
+                        Self::MAX_LINE_LENGTH
+                    ),
                 ));
             }
         }
@@ -773,20 +777,28 @@ impl JsAnalyzer {
         let avg_line_len = source.len() / line_count;
         if avg_line_len > Self::MAX_AVG_LINE_LENGTH && source.len() > Self::MINIFIED_SIZE_THRESHOLD
         {
-            return Err(format!(
-                "Skipping {file_path}: likely minified (avg line {avg_line_len} bytes, {line_count} lines)"
+            return Err(AnalyzerError::skip(
+                FileSkip::Minified,
+                format!("{file_path}: avg line {avg_line_len} bytes, {line_count} lines"),
             ));
         }
 
-        let source_type = SourceType::from_path(file_path)
-            .map_err(|_| format!("Unknown JS source type: {file_path}"))?;
+        let source_type = SourceType::from_path(file_path).map_err(|_| {
+            AnalyzerError::fault(
+                FileFault::UnknownSourceType,
+                format!("unknown JS source type: {file_path}"),
+            )
+        })?;
         let allocator = Allocator::default();
         let parsed = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
             Parser::new(&allocator, source, source_type).parse()
         });
 
         if parsed.panicked {
-            return Err(format!("OXC parser panicked on {file_path}"));
+            return Err(AnalyzerError::fault(
+                FileFault::OxcPanic,
+                format!("OXC parser panicked on {file_path}"),
+            ));
         }
 
         let semantic_ret = stacker::maybe_grow(128 * 1024, 8 * 1024 * 1024, || {
@@ -799,9 +811,9 @@ impl JsAnalyzer {
         // assume the view is valid. Skip these files rather than
         // emitting misleading definitions based on partial state.
         if !semantic_ret.errors.is_empty() {
-            return Err(format!(
-                "OXC semantic errors on {file_path} ({} diagnostics)",
-                semantic_ret.errors.len()
+            return Err(AnalyzerError::fault(
+                FileFault::OxcSemantic,
+                format!("{file_path}: {} diagnostics", semantic_ret.errors.len()),
             ));
         }
         let semantic = semantic_ret.semantic;

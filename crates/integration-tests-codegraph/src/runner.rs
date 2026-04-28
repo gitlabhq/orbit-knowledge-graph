@@ -200,8 +200,8 @@ pub async fn run_yaml_suite(yaml: &str) {
                 config: PipelineConfig::default(),
                 tracer,
                 root_path: root.clone(),
-                graph_errors: std::sync::Mutex::new(Vec::new()),
-                files_skipped: std::sync::Mutex::new(Vec::new()),
+                skipped: std::sync::Mutex::new(Vec::new()),
+                faults: std::sync::Mutex::new(Vec::new()),
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();

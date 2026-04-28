@@ -95,8 +95,9 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
 | `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge) | Total graph nodes and edges indexed |
-| `gkg.indexer.code.errors` | Counter | count | `stage` (decode, repository_fetch, indexing, arrow_conversion, write, checkpoint) | Code indexing errors by pipeline stage. Excludes benign skips (see `files.skipped`) so the rate reflects real failures only. |
-| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, line_too_long, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
+| `gkg.indexer.code.errors` | Counter | count | `stage` (repository_fetch, checkpoint, thread_pool, sentinel, graph_node, arrow_conversion, sink_write, internal) | Task-level code indexing failures by pipeline stage. Increments only when a task ends with a fatal pipeline error. Per-file failures land in `file_faults` instead, so this rate is suitable for alerting. |
+| `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, oversize_combined, line_too_long, minified, not_utf8, non_regular_file, unsafe_path, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
+| `gkg.indexer.code.file_faults` | Counter | count | `kind` (file_read, invalid_utf8, syntax_error, oxc_panic, oxc_semantic, analyzer_panic, unknown_source_type, embedded_script_parse, rust_workspace_missing) | Per-file failures during code indexing, by kind. The task itself completes; individual files were excluded from the graph. |
 
 *Namespace deletion module metrics:*
 
