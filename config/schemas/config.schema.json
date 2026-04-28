@@ -1250,6 +1250,15 @@
           "format": "uint64",
           "minimum": 0
         },
+        "max_memory_usage": {
+          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Default 0\nmeans no limit (ClickHouse falls back to its server-level setting).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "query_cache_ttl": {
           "description": "ClickHouse `query_cache_ttl` in seconds.",
           "type": [

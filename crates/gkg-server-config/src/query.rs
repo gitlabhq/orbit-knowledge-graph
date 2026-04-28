@@ -24,19 +24,32 @@ fn escape_setting_str(s: &str) -> String {
 ///
 /// `None` means "not specified at this layer" -- the merge logic in
 /// [`QuerySettings::resolve`] fills in from the default.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default, JsonSchema)]
+/// Default max_execution_time: 30 seconds.
+const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
+/// Default max_memory_usage: 1 GiB per query.
+const DEFAULT_MAX_MEMORY_USAGE: u64 = 1_073_741_824;
+/// Default query_cache_ttl: 60 seconds.
+const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default = "default_max_execution_time", skip_serializing_if = "Option::is_none")]
     pub max_execution_time: Option<u64>,
+
+    /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
+    /// a single query can consume on the ClickHouse server. When exceeded,
+    /// ClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED.
+    #[serde(default = "default_max_memory_usage", skip_serializing_if = "Option::is_none")]
+    pub max_memory_usage: Option<u64>,
 
     /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
 
     /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(default = "default_query_cache_ttl", skip_serializing_if = "Option::is_none")]
     pub query_cache_ttl: Option<u32>,
 
     /// NATS KV cache for graph query results (webserver).
@@ -50,12 +63,36 @@ pub struct QueryConfig {
     pub graph_query_cache_ttl: Option<u32>,
 }
 
+fn default_max_execution_time() -> Option<u64> {
+    Some(DEFAULT_MAX_EXECUTION_TIME)
+}
+fn default_max_memory_usage() -> Option<u64> {
+    Some(DEFAULT_MAX_MEMORY_USAGE)
+}
+fn default_query_cache_ttl() -> Option<u32> {
+    Some(DEFAULT_QUERY_CACHE_TTL)
+}
+
+impl Default for QueryConfig {
+    fn default() -> Self {
+        Self {
+            max_execution_time: Some(DEFAULT_MAX_EXECUTION_TIME),
+            max_memory_usage: Some(DEFAULT_MAX_MEMORY_USAGE),
+            use_query_cache: None,
+            query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+}
+
 impl QueryConfig {
     /// Merge `overrides` on top of `self`. Fields set in `overrides`
     /// win; `None` fields fall through to `self`.
     pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {
         QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
+            max_memory_usage: overrides.max_memory_usage.or(self.max_memory_usage),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
             graph_query_cache_enabled: overrides
@@ -194,14 +231,21 @@ mod tests {
     fn to_clickhouse_settings_skips_none_and_formats_bools() -> Result<(), String> {
         let cfg = QueryConfig {
             max_execution_time: Some(30),
+            max_memory_usage: Some(1_073_741_824),
             use_query_cache: Some(true),
-            ..Default::default()
+            query_cache_ttl: None,
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 2);
+        assert_eq!(settings.len(), 3);
         assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
-        assert_eq!(settings[1], ("use_query_cache".into(), "1".into()));
+        assert_eq!(
+            settings[1],
+            ("max_memory_usage".into(), "1073741824".into())
+        );
+        assert_eq!(settings[2], ("use_query_cache".into(), "1".into()));
         Ok(())
     }
 
