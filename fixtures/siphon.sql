@@ -1091,3 +1091,121 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id)
 ORDER BY (traversal_path, id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild', index_granularity = 8192;
+
+-- Siphon source table for CI runners (mirrors db/click_house/migrate/main/20260216174855_create_siphon_ci_runners.rb
+-- plus 20260227143636_add_token_rotation_deadline_to_siphon_ci_runners.rb)
+CREATE TABLE IF NOT EXISTS siphon_ci_runners
+(
+    `id` Int64,
+    `creator_id` Nullable(Int64),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `contacted_at` Nullable(DateTime64(6, 'UTC')),
+    `token_expires_at` Nullable(DateTime64(6, 'UTC')),
+    `public_projects_minutes_cost_factor` Float64 DEFAULT 1.0,
+    `private_projects_minutes_cost_factor` Float64 DEFAULT 1.0,
+    `access_level` Int64 DEFAULT 0,
+    `maximum_timeout` Nullable(Int64),
+    `runner_type` Int16,
+    `registration_type` Int16 DEFAULT 0,
+    `creation_state` Int16 DEFAULT 0,
+    `active` Bool DEFAULT true,
+    `run_untagged` Bool DEFAULT true,
+    `locked` Bool DEFAULT false,
+    `name` Nullable(String),
+    `token_encrypted` String DEFAULT '',
+    `description` String DEFAULT '',
+    `maintainer_note` String DEFAULT '',
+    `allowed_plans` Array(String) DEFAULT [],
+    `allowed_plan_ids` Array(Int64) DEFAULT [],
+    `organization_id` Nullable(Int64),
+    `allowed_plan_name_uids` Array(Int16) DEFAULT [],
+    `token_rotation_deadline` DateTime64(6, 'UTC') DEFAULT toDateTime64('9999-12-31 23:59:59.999999', 6, 'UTC'),
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (id, runner_type)
+SETTINGS index_granularity = 2048;
+
+CREATE TABLE IF NOT EXISTS siphon_ci_runner_namespaces
+(
+    `id` Int64,
+    `runner_id` Int64,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
+
+CREATE TABLE IF NOT EXISTS siphon_ci_runner_projects
+(
+    `id` Int64,
+    `runner_id` Int64,
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `project_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id)
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source table for per-build metadata (interruptible, timeout policy, exit_code)
+-- mirrors db/click_house/migrate/main/<ts>_create_siphon_p_ci_builds_metadata.rb
+CREATE TABLE IF NOT EXISTS siphon_p_ci_builds_metadata
+(
+    `id` Int64,
+    `build_id` Int64,
+    `project_id` Int64,
+    `partition_id` Int64,
+    `timeout` Nullable(Int64),
+    `timeout_source` Int64 DEFAULT 1,
+    `interruptible` Nullable(Bool),
+    `has_exposed_artifacts` Nullable(Bool),
+    `environment_auto_stop_in` Nullable(String),
+    `expanded_environment_name` Nullable(String),
+    `debug_trace_enabled` Bool DEFAULT false,
+    `exit_code` Nullable(Int16),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, build_id, partition_id)
+ORDER BY (traversal_path, build_id, partition_id)
+SETTINGS index_granularity = 2048;
+
+-- Siphon source table for CI pipeline parent/child + bridge linkage
+-- (mirrors monolith migration db/click_house/migrate/main/<ts>_create_siphon_ci_sources_pipelines.rb)
+CREATE TABLE IF NOT EXISTS siphon_ci_sources_pipelines
+(
+    `id` Int64,
+    `project_id` Nullable(Int64),
+    `source_project_id` Nullable(Int64),
+    `source_job_id` Nullable(Int64),
+    `partition_id` Int64,
+    `source_partition_id` Int64,
+    `pipeline_id` Nullable(Int64),
+    `source_pipeline_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, id, partition_id)
+ORDER BY (traversal_path, id, partition_id)
+SETTINGS index_granularity = 2048;

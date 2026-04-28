@@ -1,8 +1,12 @@
 # config/ontology/edges/has_job.yaml
 
-description: Stage contains job relationship
+description: Pipeline or stage contains job relationship
 
 variants:
   - from_node: { type: Stage, id: id }
     to_node: { type: Job, id: id }
     description: "Stage contains job."
+
+  - from_node: { type: Pipeline, id: id }
+    to_node: { type: Job, id: id }
+    description: "Pipeline contains job (skips the Stage hop, matches the natural CI mental model)."

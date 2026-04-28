@@ -50,7 +50,9 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `project_id`, `state`, `diff_type`, `files_count`, `real_size`, `stored_externally` |
 | `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`, `generated`, `a_mode`, `b_mode` |
 | `Stage`               | Represents a CI stage.                                                                                  | `id`, `name`, `status`, `position`                                            |
-| `Job`                 | Represents a CI job.                                                                                    | `id`, `name`, `status`, `ref`, `allow_failure`                                |
+| `Job`                 | Represents a CI job (`Ci::Build` or `Ci::Bridge`).                                                      | `id`, `name`, `status`, `ref`, `allow_failure`, `type`, `runner_id`, `timeout`, `timeout_source`, `exit_code`, `scheduling_type`, `auto_canceled_by_id` |
+| `JobMetadata`         | Per-job runtime metadata sourced from `siphon_p_ci_builds_metadata`.                                    | `id`, `build_id`, `interruptible`, `timeout`, `timeout_source`, `exit_code`, `expanded_environment_name` |
+| `Runner`              | Represents a CI/CD runner (`Ci::Runner`). Global node, no `traversal_path` on the node table.            | `id`, `runner_type`, `name`, `active`, `locked`, `access_level`               |
 | `Finding`             | Represents a security finding.                                                                          | `id`, `uuid`, `name`, `severity`                                              |
 | `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence.                                                   | `id`, `uuid`, `report_type`, `severity`, `location`                           |
@@ -64,7 +66,7 @@ graph TD
     Group -- CONTAINS --> Project
     Group -- CONTAINS --> Group
     Project -- HAS_MERGE_REQUEST --> MergeRequest
-    Project -- HAS_PIPELINE --> Pipeline
+    Pipeline -- IN_PROJECT --> Project
     Project -- HAS_VULNERABILITY --> Vulnerability
     Branch -- IN_PROJECT --> Project
 
@@ -94,9 +96,8 @@ graph TD
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`        | `Group`, `Project` | A group contains a subgroup or project.                                                            |
 | `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
-| `HAS_PIPELINE`                      | `Project`      | `Pipeline`     | A project has a CI/CD pipeline.                                                                         |
 | `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `IN_PROJECT`                        | `Branch`, `WorkItem` | `Project` | An entity belongs to a project.                                                                     |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `IN_GROUP`                          | `WorkItem`     | `Group`        | A work item belongs to a group scope.                                                                   |
 | `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest` | A user authored an entity.                                                                |
 | `COMMENTS_ON`                       | `User`         | `MergeRequest`, `WorkItem` | A user commented on an entity (via a `Note`).                                            |
@@ -111,8 +112,17 @@ graph TD
 | `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
 | `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
 | `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
-| `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
+| `HAS_JOB`                           | `Stage`, `Pipeline` | `Job`     | A stage contains jobs (canonical Pipeline → Stage → Job traversal); also exposed directly as Pipeline → Job for the natural CI mental model. |
+| `HAS_METADATA`                      | `Job`          | `JobMetadata`  | Job has runtime metadata (interruptible, effective timeout, expanded environment) sourced from `siphon_p_ci_builds_metadata`. |
+| `IN_PIPELINE`                       | `Job`, `SecurityScan` | `Pipeline` | A job or security scan belongs to a pipeline (one-hop replacement for `Pipeline → Stage → Job`).   |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
+| `AUTO_CANCELED_BY`                  | `Pipeline`, `Job` | `Pipeline`, `Job` | Entity was auto-canceled when a newer entity of the same kind superseded it.                       |
+| `CHILD_OF`                          | `Pipeline`     | `Pipeline`     | A pipeline is a downstream child of a parent pipeline (sourced from `ci_sources_pipelines`).            |
+| `TRIGGERS_PIPELINE`                 | `Job`          | `Pipeline`     | A bridge job (`type='Ci::Bridge'`) triggered the downstream pipeline.                                   |
+| `TRIGGERED_BY_PIPELINE`             | `Job`          | `Pipeline`     | A job runs in a child pipeline whose parent is the upstream pipeline (sourced from `upstream_pipeline_id` on builds). |
+| `RUNS_ON`                           | `Job`          | `Runner`       | The runner that executed the job.                                                                       |
+| `RUNS_FOR_GROUP`                    | `Runner`       | `Group`        | A group runner is registered against a group.                                                           |
+| `RUNS_FOR_PROJECT`                  | `Runner`       | `Project`      | A project runner is registered against a project.                                                       |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
 | `HAS_LABEL`                         | `WorkItem`     | `Label`        | A work item has labels.                                                                                 |
 | `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |

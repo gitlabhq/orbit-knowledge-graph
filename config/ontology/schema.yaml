@@ -104,7 +104,7 @@ settings:
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
             group_by: [relationship_kind, source_kind, target_id, traversal_path]
   internal_column_prefix: "_gkg_"
-  skip_security_filter_for_entities: [User]
+  skip_security_filter_for_entities: [User, Runner]
   local_db:
     entities:
       - name: Directory
@@ -170,13 +170,15 @@ domains:
       MergeRequestDiff: nodes/code_review/merge_request_diff.yaml
       MergeRequestDiffFile: nodes/code_review/merge_request_diff_file.yaml
   ci:
-    description: "Entities related to CI/CD pipelines, stages, jobs, deployments, and environments."
+    description: "Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners."
     nodes:
       Pipeline: nodes/ci/pipeline.yaml
       Stage: nodes/ci/stage.yaml
       Job: nodes/ci/job.yaml
+      JobMetadata: nodes/ci/job_metadata.yaml
       Deployment: nodes/ci/deployment.yaml
       Environment: nodes/ci/environment.yaml
+      Runner: nodes/ci/runner.yaml
   security:
     description: "Entities related to security vulnerabilities and findings."
     nodes:
@@ -251,3 +253,11 @@ edges:
   HAS_LATEST_DIFF: edges/has_latest_diff.yaml
   UPDATED_BY: edges/updated_by.yaml
   LAST_EDITED_BY: edges/last_edited_by.yaml
+  AUTO_CANCELED_BY: edges/auto_canceled_by.yaml
+  TRIGGERED_BY_PIPELINE: edges/triggered_by_pipeline.yaml
+  RUNS_ON: edges/runs_on.yaml
+  RUNS_FOR_GROUP: edges/runs_for_group.yaml
+  RUNS_FOR_PROJECT: edges/runs_for_project.yaml
+  CHILD_OF: edges/child_of.yaml
+  TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
+  HAS_METADATA: edges/has_metadata.yaml
