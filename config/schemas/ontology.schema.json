@@ -723,6 +723,12 @@
           "type": "object",
           "description": "Maps raw column values to entity types (e.g., Namespace -> Group).",
           "additionalProperties": { "type": "string" }
+        },
+        "columns": {
+          "type": "array",
+          "description": "Source columns to carry from the join table for denormalization.",
+          "items": { "type": "string" },
+          "minItems": 1
         }
       },
       "required": ["id"],

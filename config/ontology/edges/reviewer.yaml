@@ -17,3 +17,4 @@ etl:
     to:
       id: merge_request_id
       type: MergeRequest
+      columns: [state_id]  # denorm: MR state

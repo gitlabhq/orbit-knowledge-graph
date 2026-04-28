@@ -14,6 +14,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
+      columns: [state_id]  # denorm: MR state
     to:
       id: issue_id
       type: WorkItem
+      columns: [state_id, work_item_type_id]  # denorm: WorkItem state + type

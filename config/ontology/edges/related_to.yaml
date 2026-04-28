@@ -24,6 +24,8 @@ etl:
     from:
       id: source_id
       type: WorkItem
+      columns: [state_id, work_item_type_id]  # denorm: WorkItem state + type
     to:
       id: target_id
       type: WorkItem
+      columns: [state_id, work_item_type_id]  # denorm: WorkItem state + type
