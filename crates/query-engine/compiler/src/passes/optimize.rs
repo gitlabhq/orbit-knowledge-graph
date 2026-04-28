@@ -415,7 +415,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                         "hasAllTokens",
                         vec![
                             Expr::col("EDGE", &col),
-                            Expr::func("array", tags.iter().map(|t| Expr::string(t)).collect()),
+                            Expr::func("array", tags.iter().map(Expr::string).collect()),
                         ],
                     )
                 }
@@ -648,7 +648,7 @@ fn build_neighbors_denorm_filters(
                             "hasAllTokens",
                             vec![
                                 Expr::col("EDGE", &col),
-                                Expr::func("array", tags.iter().map(|t| Expr::string(t)).collect()),
+                                Expr::func("array", tags.iter().map(Expr::string).collect()),
                             ],
                         )
                     }

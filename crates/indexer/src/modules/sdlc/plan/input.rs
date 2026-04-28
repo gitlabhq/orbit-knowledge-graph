@@ -498,10 +498,10 @@ fn resolve_standalone_edge(
     let has_joins = !joins.is_empty();
     let source = if has_joins {
         for col in &mut extract_columns {
-            if let ExtractColumn::Bare(name) = col {
-                if !name.contains('.') {
-                    *name = format!("_base.{name}");
-                }
+            if let ExtractColumn::Bare(name) = col
+                && !name.contains('.')
+            {
+                *name = format!("_base.{name}");
             }
         }
         ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
