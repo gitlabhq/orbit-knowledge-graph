@@ -12,7 +12,6 @@ pub struct CodeMetrics {
     pub(super) handler_duration: Histogram<f64>,
     pub(super) repository_fetch_duration: Histogram<f64>,
     pub(super) repository_resolution_strategy: Counter<u64>,
-    pub(super) repository_cleanup: Counter<u64>,
     pub(super) repository_empty: Counter<u64>,
     pub(super) repository_indexing_completed: Counter<u64>,
     pub(super) repository_source_size: Histogram<u64>,
@@ -39,7 +38,6 @@ impl CodeMetrics {
             repository_fetch_duration: code::REPOSITORY_FETCH_DURATION.build_histogram_f64(meter),
             repository_resolution_strategy: code::REPOSITORY_RESOLUTION_STRATEGY
                 .build_counter_u64(meter),
-            repository_cleanup: code::REPOSITORY_CLEANUP.build_counter_u64(meter),
             repository_empty: code::REPOSITORY_EMPTY.build_counter_u64(meter),
             repository_indexing_completed: code::REPOSITORY_INDEXING_COMPLETED
                 .build_counter_u64(meter),
@@ -62,10 +60,6 @@ impl CodeMetrics {
             .add(1, &[KeyValue::new(code::labels::STRATEGY, strategy)]);
     }
 
-    pub(super) fn record_cleanup(&self, outcome: &'static str) {
-        self.repository_cleanup
-            .add(1, &[KeyValue::new(code::labels::OUTCOME, outcome)]);
-    }
 
     pub(super) fn record_outcome(&self, outcome: &'static str) {
         self.events_processed

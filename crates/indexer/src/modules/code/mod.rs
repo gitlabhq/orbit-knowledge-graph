@@ -36,8 +36,8 @@ pub use siphon_code_indexing_task_dispatcher::SiphonCodeIndexingTaskDispatcher;
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
 pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
-    CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
-    RepositoryService, RepositoryServiceError,
+    CachingRepositoryService, RailsRepositoryService, RepositoryService, RepositoryServiceError,
+    cleanup_stale_temp_dirs,
 };
 pub use stale_data_cleaner::ClickHouseStaleDataCleaner;
 
@@ -69,13 +69,11 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-        LocalRepositoryCache::default_dir(),
+    let resolver = RepositoryResolver::new(
+        Arc::clone(&repository_service),
         code_indexing_task_config.pipeline.max_file_size_bytes,
         metrics.clone(),
-    ));
-
-    let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
+    );
 
     let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
         resolver,

@@ -74,7 +74,7 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
     ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
-        let repo_path = match self
+        let repo_guard = match self
             .resolver
             .resolve(
                 request.project_id,
@@ -83,9 +83,9 @@ impl CodeIndexingPipeline {
             )
             .await
         {
-            Ok(path) => {
+            Ok(guard) => {
                 self.metrics.record_resolution_strategy("full_download");
-                path
+                guard
             }
             Err(ResolveError::EmptyRepository { reason, detail }) => {
                 warn!(
@@ -127,35 +127,17 @@ impl CodeIndexingPipeline {
 
         let indexed_at = Utc::now();
         let commit_sha = request.commit_sha.as_deref().unwrap_or("");
-        let indexing_result = self
-            .run_indexing(
-                context,
-                request.project_id,
-                &request.branch,
-                commit_sha,
-                &request.traversal_path,
-                indexed_at,
-                &repo_path,
-            )
-            .await;
-
-        if let Err(error) = self
-            .resolver
-            .cleanup(request.project_id, &request.branch)
-            .await
-        {
-            self.metrics.record_cleanup("failure");
-            warn!(
-                project_id = request.project_id,
-                branch = %request.branch,
-                %error,
-                "failed to clean up downloaded repository from disk"
-            );
-        } else {
-            self.metrics.record_cleanup("success");
-        }
-
-        indexing_result?;
+        self.run_indexing(
+            context,
+            request.project_id,
+            &request.branch,
+            commit_sha,
+            &request.traversal_path,
+            indexed_at,
+            repo_guard.path(),
+        )
+        .await?;
+        // repo_guard drops here (or on error above), deleting the temp dir.
 
         self.set_checkpoint(
             &request.traversal_path,

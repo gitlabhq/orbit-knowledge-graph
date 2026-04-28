@@ -181,6 +181,8 @@ pub async fn run(
     config.schema.validate()?;
     config.engine.validate()?;
 
+    modules::code::cleanup_stale_temp_dirs().await;
+
     info!(modules = ?config.engine.modules, "indexer module selection");
 
     let graph_client = config.graph.build_client();

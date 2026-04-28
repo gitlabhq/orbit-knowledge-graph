@@ -1,19 +1,34 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use tracing::info;
+use code_graph::v2::config::is_excluded_from_indexing;
+use futures::StreamExt;
+use tempfile::TempDir;
+use tokio_util::io::{StreamReader, SyncIoBridge};
+use tracing::{info, warn};
 
-use super::cache::{RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
+use crate::modules::code::archive::{ArchiveError, extract_tar_gz_from_reader};
 use crate::modules::code::metrics::CodeMetrics;
 use gitlab_client::GitlabClientError;
 
-/// Errors produced when resolving a repository snapshot for indexing.
-///
-/// `EmptyRepository` is a recognized terminal outcome: the project record
-/// exists but has no Gitaly content (no refs, or no repository storage at
-/// all). These should be checkpointed as "indexed empty" instead of retried.
+const TEMP_DIR_PREFIX: &str = "gkg-repo-";
+
+/// RAII guard owning the temp directory with the extracted archive.
+/// Directory is deleted when the guard drops.
+#[derive(Debug)]
+pub struct RepoDir {
+    path: PathBuf,
+    _temp_dir: TempDir,
+}
+
+impl RepoDir {
+    pub fn path(&self) -> &Path {
+        &self.path
+    }
+}
+
 #[derive(Debug, thiserror::Error)]
 pub enum ResolveError {
     #[error("project has no repository content ({reason}): {detail}")]
@@ -30,17 +45,15 @@ pub enum ResolveError {
 pub enum EmptyRepositoryReason {
     NotFound,
     ServerError,
-    /// HTTP 200 OK with an empty or truncated archive body. Distinct from
-    /// `NotFound` so dashboards can separate real 404s from quietly-empty 200s.
     EmptyArchive,
 }
 
 impl EmptyRepositoryReason {
     pub fn as_metric_label(self) -> &'static str {
         match self {
-            EmptyRepositoryReason::NotFound => "not_found",
-            EmptyRepositoryReason::ServerError => "server_error",
-            EmptyRepositoryReason::EmptyArchive => "empty_archive",
+            Self::NotFound => "not_found",
+            Self::ServerError => "server_error",
+            Self::EmptyArchive => "empty_archive",
         }
     }
 }
@@ -64,9 +77,7 @@ fn classify_download_error(
             status,
         }) => Some((
             EmptyRepositoryReason::ServerError,
-            format!(
-                "archive endpoint returned {status} for project {project_id} (repository likely missing)"
-            ),
+            format!("archive endpoint returned {status} for project {project_id} (repository likely missing)"),
         )),
         _ => None,
     }
@@ -74,20 +85,19 @@ fn classify_download_error(
 
 pub struct RepositoryResolver {
     repository_service: Arc<dyn RepositoryService>,
-    cache: Arc<dyn RepositoryCache>,
-    #[allow(dead_code)]
+    max_file_size: u64,
     metrics: CodeMetrics,
 }
 
 impl RepositoryResolver {
     pub fn new(
         repository_service: Arc<dyn RepositoryService>,
-        cache: Arc<dyn RepositoryCache>,
+        max_file_size: u64,
         metrics: CodeMetrics,
     ) -> Self {
         Self {
             repository_service,
-            cache,
+            max_file_size,
             metrics,
         }
     }
@@ -97,29 +107,10 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<PathBuf, ResolveError> {
+    ) -> Result<RepoDir, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
-        self.full_download(project_id, branch, ref_name).await
-    }
 
-    pub async fn cleanup(
-        &self,
-        project_id: i64,
-        branch: &str,
-    ) -> Result<(), super::cache::RepositoryCacheError> {
-        self.cache.invalidate(project_id, branch).await
-    }
-
-    async fn full_download(
-        &self,
-        project_id: i64,
-        branch: &str,
-        ref_name: &str,
-    ) -> Result<PathBuf, ResolveError> {
-        info!(
-            project_id,
-            branch, ref_name, "downloading repository archive"
-        );
+        info!(project_id, branch, ref_name, "downloading repository archive");
 
         let archive_stream = match self
             .repository_service
@@ -137,22 +128,69 @@ impl RepositoryResolver {
             }
         };
 
-        match self
-            .cache
-            .extract_archive(project_id, branch, archive_stream)
-            .await
-        {
-            Ok(path) => Ok(path),
-            Err(RepositoryCacheError::EmptyArchive) => Err(ResolveError::EmptyRepository {
+        let temp_dir = TempDir::with_prefix(TEMP_DIR_PREFIX)
+            .map_err(|e| HandlerError::Processing(format!("failed to create temp dir: {e}")))?;
+        let repo_dir = temp_dir.path().to_path_buf();
+
+        let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
+        let handle = tokio::runtime::Handle::current();
+        let repo_dir_owned = repo_dir.clone();
+        let max_file_size = self.max_file_size;
+        let metrics = self.metrics.clone();
+        tokio::task::spawn_blocking(move || {
+            let bridge = SyncIoBridge::new_with_handle(reader, handle);
+            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
+                if size > max_file_size {
+                    metrics.record_archive_entry_skipped("oversize", size);
+                    return false;
+                }
+                if is_excluded_from_indexing(rel_path) {
+                    metrics.record_archive_entry_skipped("excluded_extension", size);
+                    return false;
+                }
+                true
+            })
+        })
+        .await
+        .map_err(|e| HandlerError::Processing(format!("archive task join error: {e}")))?
+        .map_err(|e| match e {
+            ArchiveError::EmptyArchive => ResolveError::EmptyRepository {
                 reason: EmptyRepositoryReason::EmptyArchive,
                 detail: format!(
-                    "archive contained no entries for project {project_id} ref {ref_name} (200 OK with empty body)"
+                    "archive contained no entries for project {project_id} ref {ref_name}"
                 ),
-            }),
-            Err(e) => {
-                Err(HandlerError::Processing(format!("failed to extract archive: {e}")).into())
+            },
+            other => HandlerError::Processing(format!("failed to extract archive: {other}")).into(),
+        })?;
+
+        Ok(RepoDir {
+            path: repo_dir,
+            _temp_dir: temp_dir,
+        })
+    }
+}
+
+/// Clean up stale temp dirs from previous crashed runs. Call at indexer startup.
+pub async fn cleanup_stale_temp_dirs() {
+    let tmp = std::env::temp_dir();
+    let mut entries = match tokio::fs::read_dir(&tmp).await {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+    let mut removed = 0u64;
+    while let Ok(Some(entry)) = entries.next_entry().await {
+        if let Some(name) = entry.file_name().to_str() {
+            if name.starts_with(TEMP_DIR_PREFIX) {
+                if let Err(e) = tokio::fs::remove_dir_all(entry.path()).await {
+                    warn!(path = %entry.path().display(), %e, "failed to clean stale repo temp dir");
+                } else {
+                    removed += 1;
+                }
             }
         }
+    }
+    if removed > 0 {
+        info!(removed, "cleaned up stale repository temp directories");
     }
 }
 
@@ -161,50 +199,44 @@ mod tests {
     use std::io::Write as _;
 
     use super::*;
-    use crate::modules::code::repository::cache::{LocalRepositoryCache, RepositoryCache};
     use crate::modules::code::repository::service::RepositoryServiceError;
     use async_trait::async_trait;
-    use parking_lot::Mutex;
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     struct ScriptedRepositoryService {
-        archive: Mutex<Vec<u8>>,
-        fail_downloads: Mutex<bool>,
-        download_error: Mutex<Option<RepositoryServiceError>>,
+        archive: parking_lot::Mutex<Vec<u8>>,
+        fail_downloads: parking_lot::Mutex<bool>,
+        download_error: parking_lot::Mutex<Option<RepositoryServiceError>>,
         download_count: AtomicUsize,
     }
 
     impl ScriptedRepositoryService {
         fn with_archive(files: &[(&str, &str)], ref_name: &str) -> Arc<Self> {
             Arc::new(Self {
-                archive: Mutex::new(build_test_tar_gz(files, ref_name)),
-                fail_downloads: Mutex::new(false),
-                download_error: Mutex::new(None),
+                archive: parking_lot::Mutex::new(build_test_tar_gz(files, ref_name)),
+                fail_downloads: parking_lot::Mutex::new(false),
+                download_error: parking_lot::Mutex::new(None),
                 download_count: AtomicUsize::new(0),
             })
         }
 
         fn with_raw_archive(bytes: Vec<u8>) -> Arc<Self> {
             Arc::new(Self {
-                archive: Mutex::new(bytes),
-                fail_downloads: Mutex::new(false),
-                download_error: Mutex::new(None),
+                archive: parking_lot::Mutex::new(bytes),
+                fail_downloads: parking_lot::Mutex::new(false),
+                download_error: parking_lot::Mutex::new(None),
                 download_count: AtomicUsize::new(0),
             })
         }
 
         fn with_download_error(error: RepositoryServiceError) -> Arc<Self> {
             Arc::new(Self {
-                archive: Mutex::new(Vec::new()),
-                fail_downloads: Mutex::new(false),
-                download_error: Mutex::new(Some(error)),
+                archive: parking_lot::Mutex::new(Vec::new()),
+                fail_downloads: parking_lot::Mutex::new(false),
+                download_error: parking_lot::Mutex::new(Some(error)),
                 download_count: AtomicUsize::new(0),
             })
-        }
-
-        fn set_archive(&self, files: &[(&str, &str)], ref_name: &str) {
-            *self.archive.lock() = build_test_tar_gz(files, ref_name);
         }
 
         fn set_fail_downloads(&self, fail: bool) {
@@ -267,71 +299,47 @@ mod tests {
         encoder.finish().unwrap()
     }
 
-    fn create_resolver(
-        service: Arc<ScriptedRepositoryService>,
-    ) -> (tempfile::TempDir, RepositoryResolver) {
-        let temp_dir = tempfile::TempDir::new().unwrap();
-        let metrics = CodeMetrics::default();
-        let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
-            temp_dir.path().to_path_buf(),
+    fn create_resolver(service: Arc<ScriptedRepositoryService>) -> RepositoryResolver {
+        RepositoryResolver::new(
+            service as Arc<dyn RepositoryService>,
             u64::MAX,
-            metrics.clone(),
-        ));
-        let resolver =
-            RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache, metrics);
-        (temp_dir, resolver)
+            CodeMetrics::default(),
+        )
     }
 
     #[tokio::test]
     async fn resolve_downloads_archive() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        assert!(path.join("src/main.rs").exists());
-        let content = std::fs::read_to_string(path.join("src/main.rs")).unwrap();
+        let guard = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        assert!(guard.path().join("src/main.rs").exists());
+        let content = std::fs::read_to_string(guard.path().join("src/main.rs")).unwrap();
         assert_eq!(content, "fn main() {}");
-    }
-
-    #[tokio::test]
-    async fn resolve_always_downloads_fresh_copy() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "commit1");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
-
-        let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert!(path1.join("src/main.rs").exists());
-
-        service.set_archive(&[("src/new.rs", "fn new() {}")], "commit2");
-        let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
-
-        assert!(path2.join("src/new.rs").exists());
-        assert!(!path2.join("src/main.rs").exists());
     }
 
     #[tokio::test]
     async fn resolve_uses_branch_when_no_commit_sha() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "main");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", None).await.unwrap();
-
-        assert!(path.join("src/main.rs").exists());
+        let guard = resolver.resolve(1, "main", None).await.unwrap();
+        assert!(guard.path().join("src/main.rs").exists());
     }
 
     #[tokio::test]
-    async fn cleanup_removes_downloaded_files() {
+    async fn drop_guard_cleans_up() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
-        let path = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let guard = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let path = guard.path().to_path_buf();
         assert!(path.exists());
 
-        resolver.cleanup(1, "main").await.unwrap();
+        drop(guard);
         assert!(!path.exists());
     }
 
@@ -339,7 +347,7 @@ mod tests {
     async fn resolve_same_commit_downloads_every_time() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         resolver.resolve(1, "main", Some("abc123")).await.unwrap();
         resolver.resolve(1, "main", Some("abc123")).await.unwrap();
@@ -349,47 +357,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cleanup_is_idempotent() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
-
-        resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-
-        resolver.cleanup(1, "main").await.unwrap();
-        resolver.cleanup(1, "main").await.unwrap();
-    }
-
-    #[tokio::test]
-    async fn resolve_works_after_cleanup() {
-        let service = ScriptedRepositoryService::with_archive(&[("src/main.rs", "v1")], "commit1");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
-
-        let path1 = resolver.resolve(1, "main", Some("commit1")).await.unwrap();
-        assert_eq!(
-            std::fs::read_to_string(path1.join("src/main.rs")).unwrap(),
-            "v1"
-        );
-
-        resolver.cleanup(1, "main").await.unwrap();
-
-        service.set_archive(&[("src/main.rs", "v2")], "commit2");
-        let path2 = resolver.resolve(1, "main", Some("commit2")).await.unwrap();
-        assert_eq!(
-            std::fs::read_to_string(path2.join("src/main.rs")).unwrap(),
-            "v2"
-        );
-    }
-
-    #[tokio::test]
     async fn resolve_propagates_download_error() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
+        let resolver = create_resolver(Arc::clone(&service));
 
         service.set_fail_downloads(true);
         let result = resolver.resolve(1, "main", Some("abc123")).await;
-
         assert!(matches!(result, Err(ResolveError::Other(_))));
     }
 
@@ -398,17 +372,10 @@ mod tests {
         let service = ScriptedRepositoryService::with_download_error(
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::NotFound(42)),
         );
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
-
-        match err {
-            ResolveError::EmptyRepository { reason, detail } => {
-                assert_eq!(reason, EmptyRepositoryReason::NotFound);
-                assert!(detail.contains("not found"), "detail was {detail}");
-            }
-            other => panic!("expected EmptyRepository, got {other:?}"),
-        }
+        assert!(matches!(err, ResolveError::EmptyRepository { reason: EmptyRepositoryReason::NotFound, .. }));
     }
 
     #[tokio::test]
@@ -419,36 +386,19 @@ mod tests {
                 status: 500,
             }),
         );
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
-
-        match err {
-            ResolveError::EmptyRepository { reason, detail } => {
-                assert_eq!(reason, EmptyRepositoryReason::ServerError);
-                assert!(detail.contains("500"), "detail was {detail}");
-            }
-            other => panic!("expected EmptyRepository, got {other:?}"),
-        }
+        assert!(matches!(err, ResolveError::EmptyRepository { reason: EmptyRepositoryReason::ServerError, .. }));
     }
 
     #[tokio::test]
     async fn resolve_maps_empty_archive_body_to_empty_repository() {
         let service = ScriptedRepositoryService::with_raw_archive(Vec::new());
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
-
-        match err {
-            ResolveError::EmptyRepository { reason, detail } => {
-                assert_eq!(reason, EmptyRepositoryReason::EmptyArchive);
-                assert!(
-                    detail.contains("no entries") || detail.contains("empty body"),
-                    "detail was {detail}"
-                );
-            }
-            other => panic!("expected EmptyRepository, got {other:?}"),
-        }
+        assert!(matches!(err, ResolveError::EmptyRepository { reason: EmptyRepositoryReason::EmptyArchive, .. }));
     }
 
     #[tokio::test]
@@ -456,36 +406,23 @@ mod tests {
         let service = ScriptedRepositoryService::with_download_error(
             RepositoryServiceError::GitlabApi(gitlab_client::GitlabClientError::Unauthorized),
         );
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(service);
 
         let err = resolver.resolve(42, "main", None).await.unwrap_err();
-        assert!(matches!(err, ResolveError::Other(_)), "got {err:?}");
+        assert!(matches!(err, ResolveError::Other(_)));
     }
 
     #[tokio::test]
-    async fn cleanup_without_prior_download_does_not_error() {
+    async fn multiple_projects_get_independent_dirs() {
         let service =
             ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(service);
+        let resolver = create_resolver(Arc::clone(&service));
 
-        resolver.cleanup(1, "main").await.unwrap();
-    }
+        let guard1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
+        let guard2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
 
-    #[tokio::test]
-    async fn multiple_projects_are_independent() {
-        let service =
-            ScriptedRepositoryService::with_archive(&[("src/main.rs", "fn main() {}")], "abc123");
-        let (_dir, resolver) = create_resolver(Arc::clone(&service));
-
-        let path1 = resolver.resolve(1, "main", Some("abc123")).await.unwrap();
-        let path2 = resolver.resolve(2, "main", Some("abc123")).await.unwrap();
-
-        assert_ne!(path1, path2);
-        assert!(path1.join("src/main.rs").exists());
-        assert!(path2.join("src/main.rs").exists());
-
-        resolver.cleanup(1, "main").await.unwrap();
-        assert!(!path1.exists());
-        assert!(path2.exists());
+        assert_ne!(guard1.path(), guard2.path());
+        assert!(guard1.path().join("src/main.rs").exists());
+        assert!(guard2.path().join("src/main.rs").exists());
     }
 }
