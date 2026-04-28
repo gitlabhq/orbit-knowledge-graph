@@ -341,6 +341,11 @@ storage:
     - {name: idx_discussion_locked, column: discussion_locked, type: "minmax", granularity: 1}
     - {name: idx_first_contribution, column: first_contribution, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_source_branch, column: source_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_target_branch, column: target_branch, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_state_id, order_by: [state, id]}

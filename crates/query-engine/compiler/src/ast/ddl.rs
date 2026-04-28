@@ -79,6 +79,9 @@ pub enum IndexType {
     MinMax,
     Set(u32),
     BloomFilter(f64),
+    /// ClickHouse 26.2+ full-text index with inverted posting lists.
+    /// Stores the raw parameter string (e.g. `tokenizer = splitByNonAlpha`).
+    Text(String),
 }
 
 /// A materialized projection over table data.
