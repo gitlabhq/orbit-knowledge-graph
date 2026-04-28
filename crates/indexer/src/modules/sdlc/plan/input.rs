@@ -70,7 +70,7 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub namespaced: bool,
     pub extract: ExtractPlan,
     /// Node properties projected onto the edge row (denormalized).
-    /// Standalone edges populate this via LEFT JOIN at extract time.
+    /// Empty for standalone edges (join table lacks node properties).
     pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
@@ -417,139 +417,11 @@ fn resolve_standalone_edge(
         );
     }
 
-    // Build denormalized column projections and LEFT JOINs for node properties.
-    // Group by (direction, node_kind) so each distinct entity type gets its own
-    // JOIN even for polymorphic edges (e.g. ASSIGNED targets both MR and WorkItem).
-    let endpoints: [(&str, DenormDirection); 2] = [
-        (&config.from.id_column, DenormDirection::Source),
-        (&config.to.id_column, DenormDirection::Target),
-    ];
-    let mut denormalized_columns = Vec::new();
-    let mut joins: Vec<String> = Vec::new();
-    let mut join_idx = 0usize;
-
-    for (fk_col, direction) in &endpoints {
-        // Collect unique node kinds for this direction.
-        let node_kinds: Vec<String> = ontology
-            .denormalized_properties()
-            .iter()
-            .filter(|dp| dp.relationship_kind == relationship_kind && dp.direction == *direction)
-            .map(|dp| dp.node_kind.clone())
-            .collect::<std::collections::BTreeSet<_>>()
-            .into_iter()
-            .collect();
-
-        for node_kind in &node_kinds {
-            let Some(node) = ontology.get_node(node_kind) else {
-                continue;
-            };
-            let Some(etl) = &node.etl else { continue };
-            let node_table = match etl {
-                EtlConfig::Table { source, .. } => source.as_str(),
-                EtlConfig::Query { from, .. } => from.as_str(),
-            };
-
-            let alias = format!("_d{join_idx}");
-            join_idx += 1;
-
-            let props: Vec<_> = ontology
-                .denormalized_properties()
-                .iter()
-                .filter(|dp| {
-                    dp.relationship_kind == relationship_kind
-                        && dp.direction == *direction
-                        && dp.node_kind == *node_kind
-                })
-                .collect();
-
-            // Build a deduplicating subquery that selects only the columns we
-            // need, ordered by the node's dedup key with latest-version-first
-            // so LIMIT 1 BY id picks the newest row.
-            let mut sub_cols: Vec<String> = vec!["id".to_string()];
-            for dp in &props {
-                let field = node.fields.iter().find(|f| f.name == dp.property_name);
-                let src_col = field
-                    .and_then(|f| f.column_name())
-                    .unwrap_or(&dp.property_name);
-                if !sub_cols.contains(&src_col.to_string()) {
-                    sub_cols.push(src_col.to_string());
-                }
-            }
-            let sub_select = sub_cols.join(", ");
-            let watermark_col = etl.watermark();
-            let deleted_col = etl.deleted();
-            joins.push(format!(
-                "LEFT JOIN (SELECT {sub_select} FROM {node_table} \
-                 WHERE {deleted_col} = false \
-                 ORDER BY id, {watermark_col} DESC \
-                 LIMIT 1 BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
-            ));
-
-            for dp in props {
-                let field = node.fields.iter().find(|f| f.name == dp.property_name);
-                let src_col = field
-                    .and_then(|f| f.column_name())
-                    .unwrap_or(&dp.property_name);
-                // Alias the qualified column so the MemTable gets a clean
-                // name without dots (ClickHouse would otherwise quote it
-                // as a single identifier like `"_d0.state_id"`).
-                let mem_col = format!("{alias}_{src_col}");
-                let select_expr = format!("{alias}.{src_col} AS {mem_col}");
-                extract_columns.push(ExtractColumn::Bare(select_expr));
-                denormalized_columns.push(DenormalizedColumnProjection {
-                    source_column: mem_col,
-                    edge_column: dp.edge_column.clone(),
-                    enum_mapping: dp.enum_values.clone(),
-                });
-            }
-        }
-    }
-
-    let source = if joins.is_empty() {
-        ExtractSource::Table(config.source.clone())
-    } else {
-        // Qualify base-table columns to avoid ambiguity with joined tables.
-        for col in &mut extract_columns {
-            if let ExtractColumn::Bare(name) = col {
-                if !name.contains('.') {
-                    *name = format!("_base.{name}");
-                }
-            }
-        }
-        ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
-    };
-
-    let has_joins = !joins.is_empty();
-
-    // Qualify order_by, watermark, deleted, and traversal_path_filter when
-    // JOINs are present to avoid ambiguous column references.
-    let order_by: Vec<String> = if has_joins {
-        config
-            .order_by
-            .iter()
-            .map(|c| format!("_base.{c}"))
-            .collect()
-    } else {
-        config.order_by.clone()
-    };
-    let watermark = if has_joins {
-        format!("_base.{}", config.watermark)
-    } else {
-        config.watermark.clone()
-    };
-    let deleted = if has_joins {
-        format!("_base.{}", config.deleted)
-    } else {
-        config.deleted.clone()
-    };
-    let traversal_path_filter = if has_joins && namespaced {
-        Some(format!(
-            "startsWith(_base.{}, {{traversal_path:String}})",
-            TRAVERSAL_PATH_COLUMN
-        ))
-    } else {
-        None
-    };
+    // Standalone edges don't populate denormalized columns. The join table
+    // lacks node properties, and adding LEFT JOINs to the datalake at extract
+    // time adds complexity for edges that are rarely filtered-aggregated.
+    // If standalone edge denormalization is needed later, extend the edge ETL
+    // to support `type: query` with an explicit FROM clause.
 
     StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
@@ -560,16 +432,16 @@ fn resolve_standalone_edge(
         target_kind,
         filters,
         namespaced,
-        denormalized_columns,
+        denormalized_columns: vec![],
         extract: ExtractPlan {
             destination_table: edge_table,
             columns: extract_columns,
-            source,
-            watermark,
-            deleted,
-            order_by,
+            source: ExtractSource::Table(config.source.clone()),
+            watermark: config.watermark.clone(),
+            deleted: config.deleted.clone(),
+            order_by: config.order_by.clone(),
             namespaced,
-            traversal_path_filter,
+            traversal_path_filter: None,
             additional_where: None,
         },
     }
