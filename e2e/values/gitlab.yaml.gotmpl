@@ -109,6 +109,12 @@ installCertmanager: false
 certmanager:
   install: false
 
+# Required by chart 9.11.2+ even when certmanager.install=false: the
+# certmanager-issuer subchart's configmap template asserts email is set
+# regardless of install gates, so a placeholder unblocks the helm install.
+certmanager-issuer:
+  email: e2e@gitlab-knowledge-graph.invalid
+
 nginx-ingress:
   enabled: false
 
