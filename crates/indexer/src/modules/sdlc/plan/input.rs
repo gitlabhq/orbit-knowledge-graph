@@ -418,59 +418,113 @@ fn resolve_standalone_edge(
     }
 
     // Build denormalized column projections and LEFT JOINs for node properties.
-    let endpoints: [(&str, &str, DenormDirection); 2] = [
-        (&config.from.id_column, "source", DenormDirection::Source),
-        (&config.to.id_column, "target", DenormDirection::Target),
+    // Group by (direction, node_kind) so each distinct entity type gets its own
+    // JOIN even for polymorphic edges (e.g. ASSIGNED targets both MR and WorkItem).
+    let endpoints: [(&str, DenormDirection); 2] = [
+        (&config.from.id_column, DenormDirection::Source),
+        (&config.to.id_column, DenormDirection::Target),
     ];
     let mut denormalized_columns = Vec::new();
     let mut joins: Vec<String> = Vec::new();
     let mut join_idx = 0usize;
 
-    for (fk_col, _dir_label, direction) in &endpoints {
-        let props: Vec<_> = ontology
+    for (fk_col, direction) in &endpoints {
+        // Collect unique node kinds for this direction.
+        let node_kinds: Vec<String> = ontology
             .denormalized_properties()
             .iter()
             .filter(|dp| dp.relationship_kind == relationship_kind && dp.direction == *direction)
+            .map(|dp| dp.node_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
             .collect();
-        if props.is_empty() {
-            continue;
-        }
-        // Resolve the node's datalake source table.
-        let node_kind = &props[0].node_kind;
-        let Some(node) = ontology.get_node(node_kind) else {
-            continue;
-        };
-        let Some(etl) = &node.etl else { continue };
-        let node_table = match etl {
-            EtlConfig::Table { source, .. } => source.as_str(),
-            EtlConfig::Query { from, .. } => from.as_str(),
-        };
 
-        let alias = format!("_d{join_idx}");
-        join_idx += 1;
-        joins.push(format!(
-            "LEFT JOIN {node_table} AS {alias} ON _base.{fk_col} = {alias}.id"
-        ));
+        for node_kind in &node_kinds {
+            let Some(node) = ontology.get_node(node_kind) else {
+                continue;
+            };
+            let Some(etl) = &node.etl else { continue };
+            let node_table = match etl {
+                EtlConfig::Table { source, .. } => source.as_str(),
+                EtlConfig::Query { from, .. } => from.as_str(),
+            };
 
-        for dp in props {
-            let field = node.fields.iter().find(|f| f.name == dp.property_name);
-            let src_col = field
-                .and_then(|f| f.column_name())
-                .unwrap_or(&dp.property_name);
-            let qualified = format!("{alias}.{src_col}");
-            extract_columns.push(ExtractColumn::Bare(qualified));
-            denormalized_columns.push(DenormalizedColumnProjection {
-                source_column: format!("{alias}.{src_col}"),
-                edge_column: dp.edge_column.clone(),
-                enum_mapping: dp.enum_values.clone(),
-            });
+            let alias = format!("_d{join_idx}");
+            join_idx += 1;
+            joins.push(format!(
+                "LEFT JOIN {node_table} AS {alias} ON _base.{fk_col} = {alias}.id"
+            ));
+
+            let props: Vec<_> = ontology
+                .denormalized_properties()
+                .iter()
+                .filter(|dp| {
+                    dp.relationship_kind == relationship_kind
+                        && dp.direction == *direction
+                        && dp.node_kind == *node_kind
+                })
+                .collect();
+
+            for dp in props {
+                let field = node.fields.iter().find(|f| f.name == dp.property_name);
+                let src_col = field
+                    .and_then(|f| f.column_name())
+                    .unwrap_or(&dp.property_name);
+                let qualified = format!("{alias}.{src_col}");
+                extract_columns.push(ExtractColumn::Bare(qualified));
+                denormalized_columns.push(DenormalizedColumnProjection {
+                    source_column: format!("{alias}.{src_col}"),
+                    edge_column: dp.edge_column.clone(),
+                    enum_mapping: dp.enum_values.clone(),
+                });
+            }
         }
     }
 
     let source = if joins.is_empty() {
         ExtractSource::Table(config.source.clone())
     } else {
+        // Qualify base-table columns to avoid ambiguity with joined tables.
+        for col in &mut extract_columns {
+            if let ExtractColumn::Bare(name) = col {
+                if !name.contains('.') {
+                    *name = format!("_base.{name}");
+                }
+            }
+        }
         ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
+    };
+
+    let has_joins = !joins.is_empty();
+
+    // Qualify order_by, watermark, deleted, and traversal_path_filter when
+    // JOINs are present to avoid ambiguous column references.
+    let order_by: Vec<String> = if has_joins {
+        config
+            .order_by
+            .iter()
+            .map(|c| format!("_base.{c}"))
+            .collect()
+    } else {
+        config.order_by.clone()
+    };
+    let watermark = if has_joins {
+        format!("_base.{}", config.watermark)
+    } else {
+        config.watermark.clone()
+    };
+    let deleted = if has_joins {
+        format!("_base.{}", config.deleted)
+    } else {
+        config.deleted.clone()
+    };
+    let traversal_path_filter = if has_joins && namespaced {
+        Some(format!(
+            "startsWith(_base.{}, {{traversal_path:String}})",
+            TRAVERSAL_PATH_COLUMN
+        ))
+    } else {
+        None
     };
 
     StandaloneEdgePlan {
@@ -487,11 +541,11 @@ fn resolve_standalone_edge(
             destination_table: edge_table,
             columns: extract_columns,
             source,
-            watermark: config.watermark.clone(),
-            deleted: config.deleted.clone(),
-            order_by: config.order_by.clone(),
+            watermark,
+            deleted,
+            order_by,
             namespaced,
-            traversal_path_filter: None,
+            traversal_path_filter,
             additional_where: None,
         },
     }
