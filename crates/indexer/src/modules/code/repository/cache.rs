@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
+use code_graph::v2::config::is_parsable;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -40,19 +41,28 @@ const REPOSITORY_DIR: &str = "repository";
 
 pub struct LocalRepositoryCache {
     base_dir: PathBuf,
+    /// Upper bound applied to each archive entry before extraction. Files
+    /// larger than this — and files the parser would never accept — are
+    /// dropped while still in the tar stream so they never touch disk.
+    max_file_size: u64,
 }
 
 impl Default for LocalRepositoryCache {
     fn default() -> Self {
-        Self {
-            base_dir: std::env::temp_dir().join(CACHE_DIR_NAME),
-        }
+        Self::new(Self::default_dir(), u64::MAX)
     }
 }
 
 impl LocalRepositoryCache {
-    pub fn new(base_dir: PathBuf) -> Self {
-        Self { base_dir }
+    pub fn new(base_dir: PathBuf, max_file_size: u64) -> Self {
+        Self {
+            base_dir,
+            max_file_size,
+        }
+    }
+
+    pub fn default_dir() -> PathBuf {
+        std::env::temp_dir().join(CACHE_DIR_NAME)
     }
 
     fn branch_dir(&self, project_id: i64, branch: &str) -> PathBuf {
@@ -91,9 +101,12 @@ impl RepositoryCache for LocalRepositoryCache {
         let reader = StreamReader::new(archive_stream.map(|r| r.map_err(std::io::Error::other)));
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
+        let max_file_size = self.max_file_size;
         tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
-            extract_tar_gz_from_reader(bridge, &repo_dir_owned)
+            extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
+                size <= max_file_size && is_parsable(rel_path)
+            })
         })
         .await
         .map_err(|e| RepositoryCacheError::Archive(format!("task join error: {e}")))?
@@ -126,8 +139,12 @@ mod tests {
     use tempfile::TempDir;
 
     fn create_cache() -> (TempDir, LocalRepositoryCache) {
+        create_cache_with_size(u64::MAX)
+    }
+
+    fn create_cache_with_size(max_file_size: u64) -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
-        let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf());
+        let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf(), max_file_size);
         (temp_dir, cache)
     }
 
@@ -329,5 +346,66 @@ mod tests {
 
         assert!(safe_path.starts_with(dir.path().join("42")));
         assert!(!safe_path.to_string_lossy().contains(".."));
+    }
+
+    #[tokio::test]
+    async fn extract_archive_skips_non_parsable_files() {
+        let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[
+            ("project-abc/src/main.rs", b"fn main() {}"),
+            ("project-abc/assets/logo.png", b"\x89PNG\r\n\x1a\nfake"),
+            ("project-abc/Cargo.lock", b"# generated lockfile"),
+            ("project-abc/README.md", b"# Title"),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(path.join("src/main.rs").exists());
+        assert!(!path.join("assets/logo.png").exists());
+        assert!(!path.join("Cargo.lock").exists());
+        assert!(!path.join("README.md").exists());
+    }
+
+    #[tokio::test]
+    async fn extract_archive_skips_files_above_max_size() {
+        let (_dir, cache) = create_cache_with_size(64);
+        let archive = build_tar_gz(&[
+            ("project-abc/small.rs", b"fn s() {}"),
+            ("project-abc/big.rs", &vec![b'x'; 4096][..]),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(path.join("small.rs").exists());
+        assert!(
+            !path.join("big.rs").exists(),
+            "files larger than max_file_size must not be written to disk"
+        );
+    }
+
+    #[tokio::test]
+    async fn extract_archive_skips_excluded_suffixes() {
+        let (_dir, cache) = create_cache();
+        let archive = build_tar_gz(&[
+            ("project-abc/src/app.js", b"console.log(1)"),
+            ("project-abc/vendor/jquery.min.js", b"!function(){}"),
+        ]);
+
+        let path = cache
+            .extract_archive(7, "main", archive_stream(archive))
+            .await
+            .unwrap();
+
+        assert!(path.join("src/app.js").exists());
+        assert!(
+            !path.join("vendor/jquery.min.js").exists(),
+            "*.min.js suffix must be filtered before extraction"
+        );
     }
 }

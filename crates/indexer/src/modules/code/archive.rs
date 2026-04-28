@@ -3,7 +3,7 @@ use std::io::Read;
 use std::path::{Path, PathBuf};
 
 use flate2::read::GzDecoder;
-use tracing::warn;
+use tracing::{trace, warn};
 
 #[derive(Debug, thiserror::Error)]
 pub enum ArchiveError {
@@ -42,19 +42,43 @@ fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
-    let decoder = GzDecoder::new(data);
-    unpack_tar(decoder, target_dir)
+    extract_tar_gz_from_reader(data, target_dir, accept_all_filter)
 }
 
-pub fn extract_tar_gz_from_reader<R: Read>(
+#[cfg(test)]
+fn accept_all_filter(_path: &Path, _size: u64) -> bool {
+    true
+}
+
+/// Extract a gzip-compressed tar stream into `target_dir`, consulting `filter`
+/// before each regular-file entry to decide whether the body should be written
+/// to disk.
+///
+/// `filter` is invoked with the entry path relative to the archive root (after
+/// the Gitaly `<slug>-<ref>/` prefix is stripped) and the size declared in the
+/// tar header. Returning `false` skips the entry without consuming its body
+/// from the input stream — the tar crate seeks past the data automatically on
+/// the next iteration.
+///
+/// Symlinks and directories bypass the filter: symlinks cost negligible disk
+/// and may legitimately point at parsable files, and directories are created
+/// lazily during file extraction anyway.
+pub fn extract_tar_gz_from_reader<R: Read, F>(
     reader: R,
     target_dir: &Path,
-) -> Result<(), ArchiveError> {
+    filter: F,
+) -> Result<(), ArchiveError>
+where
+    F: Fn(&Path, u64) -> bool,
+{
     let decoder = GzDecoder::new(reader);
-    unpack_tar(decoder, target_dir)
+    unpack_tar(decoder, target_dir, filter)
 }
 
-fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError> {
+fn unpack_tar<R: Read, F>(reader: R, target_dir: &Path, filter: F) -> Result<(), ArchiveError>
+where
+    F: Fn(&Path, u64) -> bool,
+{
     std::fs::create_dir_all(target_dir)?;
 
     let mut archive = tar::Archive::new(reader);
@@ -142,6 +166,22 @@ fn unpack_tar<R: Read>(reader: R, target_dir: &Path) -> Result<(), ArchiveError>
                 .unwrap_or_default();
             deferred_symlinks.push((dest, link_target));
             continue;
+        }
+
+        // Drop entries the caller doesn't want on disk before they are
+        // unpacked. Applied to regular files only — directories are still
+        // created (file unpacking handles that lazily) and symlinks were
+        // already deferred above.
+        if entry_type == tar::EntryType::Regular {
+            let declared_size = entry.header().size().unwrap_or(0);
+            if !filter(&relative_path, declared_size) {
+                trace!(
+                    path = %relative_path.display(),
+                    size = declared_size,
+                    "skipping archive entry filtered out before extraction"
+                );
+                continue;
+            }
         }
 
         let dest_canonical = if dest.exists() {
@@ -578,6 +618,63 @@ mod tests {
             std::io::ErrorKind::UnexpectedEof,
             "mid-stream truncation must surface as UnexpectedEof"
         );
+    }
+
+    #[test]
+    fn filter_skips_unwanted_files_before_extraction() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/src/main.rs", b"fn main() {}"),
+            Entry::File("project-main/assets/logo.png", b"\x89PNG\r\n\x1a\nbinary"),
+            Entry::File("project-main/Cargo.lock", b"# lockfile"),
+        ]);
+
+        // Accept only `.rs` files.
+        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
+            path.extension().and_then(|e| e.to_str()) == Some("rs")
+        })
+        .unwrap();
+
+        assert!(dir.path().join("src/main.rs").exists());
+        assert!(!dir.path().join("assets/logo.png").exists());
+        assert!(!dir.path().join("Cargo.lock").exists());
+    }
+
+    #[test]
+    fn filter_receives_size_from_tar_header() {
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/small.rs", b"fn s() {}"),
+            Entry::File("project-main/big.rs", &vec![b'x'; 4096]),
+        ]);
+
+        // Reject anything bigger than 100 bytes.
+        extract_tar_gz_from_reader(&data[..], dir.path(), |_path, size| size <= 100).unwrap();
+
+        assert!(dir.path().join("small.rs").exists());
+        assert!(
+            !dir.path().join("big.rs").exists(),
+            "oversize file must be skipped before unpack"
+        );
+    }
+
+    #[test]
+    fn filter_does_not_apply_to_symlinks() {
+        // Symlinks should still be created regardless of the filter so a
+        // valid symlink to a parsable file can resolve after extraction.
+        let dir = tempfile::tempdir().unwrap();
+        let data = build_archive(&[
+            Entry::File("project-main/src/lib.rs", b"real"),
+            Entry::Symlink("project-main/bin/run", "../src/lib.rs"),
+        ]);
+
+        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
+            path.extension().and_then(|e| e.to_str()) == Some("rs")
+        })
+        .unwrap();
+
+        assert!(dir.path().join("src/lib.rs").exists());
+        assert!(dir.path().join("bin/run").exists());
     }
 
     #[test]

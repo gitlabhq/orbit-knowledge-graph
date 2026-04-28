@@ -69,7 +69,10 @@ pub fn register_handlers(
     );
     let metrics = CodeMetrics::new();
 
-    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::default());
+    let cache: Arc<dyn repository::RepositoryCache> = Arc::new(LocalRepositoryCache::new(
+        LocalRepositoryCache::default_dir(),
+        code_indexing_task_config.pipeline.max_file_size_bytes,
+    ));
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 
