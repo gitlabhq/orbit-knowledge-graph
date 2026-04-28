@@ -14,8 +14,9 @@ use crate::common::{
 use gkg_server::pipeline::HydrationStage;
 use gkg_server::redaction::QueryResult;
 use integration_testkit::load_seed;
-use integration_testkit::visitor::{NodeExt, ResponseView};
+use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
 use query_engine::compiler::compile;
+use query_engine::compiler::{SecurityContext, TraversalPath};
 use query_engine::formatters::{GraphFormatter, ResultFormatter};
 use query_engine::pipeline::{NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap};
 use query_engine::shared::RedactionOutput;
@@ -44,9 +45,24 @@ fn allow_all() -> MockRedactionService {
 }
 
 async fn query(ctx: &TestContext, json: &str) -> ResponseView {
+    query_with_security(ctx, json, test_security_context()).await
+}
+
+/// SecurityContext with SecurityManager access (level 25), needed for
+/// Vulnerability queries where `required_role: security_manager` blocks
+/// the default Reporter-level context.
+fn security_manager_context() -> SecurityContext {
+    SecurityContext::new_with_roles(1, vec![TraversalPath::new("1/", 25)])
+        .expect("valid security context")
+}
+
+async fn query_with_security(
+    ctx: &TestContext,
+    json: &str,
+    security_ctx: SecurityContext,
+) -> ResponseView {
     let svc = allow_all();
     let ontology = Arc::new(load_ontology());
-    let security_ctx = test_security_context();
     let client = Arc::new(ctx.create_client());
     let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
@@ -132,6 +148,10 @@ async fn count_opened_mrs_in_project(ctx: &TestContext) {
     )
     .await;
     resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// Count failed pipelines in project 20. Expected: 2 (Pipeline 400 + 402).
@@ -151,6 +171,10 @@ async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     )
     .await;
     resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
+    resp.skip_requirement(Requirement::Filter {
+        field: "status".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// Traversal: find opened MRs authored by user 1. Expected: 2 (MR 100 + 101).
@@ -168,14 +192,17 @@ async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
     }"#,
     )
     .await;
-    // User node + 2 MR nodes = 3 total, but User has node_ids so always 1.
-    // MRs are the filtered target, so count them by checking total minus the pinned user.
-    assert!(resp.node_count() >= 2, "expected at least 2 MR nodes");
+    resp.assert_node_count(3);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("opened")
+    });
+    resp.assert_edge_exists("User", 1, "MergeRequest", 100, "AUTHORED");
 }
 
 /// Multi-filter: detected + critical vulnerabilities in project 20. Expected: 1 (vuln 200).
 async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
-    let resp = query(
+    let resp = query_with_security(
         ctx,
         r#"{
         "query_type": "aggregation",
@@ -190,9 +217,17 @@ async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
         "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
+        security_manager_context(),
     )
     .await;
     resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(1));
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "severity".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// WorkItem type filter: opened issues in group 10. Expected: 1 (WI 300).
@@ -216,11 +251,18 @@ async fn work_item_type_filter(ctx: &TestContext) {
     )
     .await;
     resp.assert_node("Group", 10, |n| n.prop_i64("n") == Some(1));
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.skip_requirement(Requirement::Filter {
+        field: "work_item_type".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// Single severity filter: critical vulnerabilities in project 20. Expected: 2 (vuln 200 + 202).
 async fn single_severity_filter(ctx: &TestContext) {
-    let resp = query(
+    let resp = query_with_security(
         ctx,
         r#"{
         "query_type": "aggregation",
@@ -232,9 +274,14 @@ async fn single_severity_filter(ctx: &TestContext) {
         "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
+        security_manager_context(),
     )
     .await;
     resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
+    resp.skip_requirement(Requirement::Filter {
+        field: "severity".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// Merged MR count in project 20. Expected: 1 (MR 102).
@@ -254,6 +301,10 @@ async fn merged_mr_count_is_one(ctx: &TestContext) {
     )
     .await;
     resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(1));
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.skip_requirement(Requirement::NodeIds);
 }
 
 /// No-match filter returns zero results. No MR with state='draft' exists.
@@ -272,5 +323,5 @@ async fn no_match_returns_zero(ctx: &TestContext) {
     }"#,
     )
     .await;
-    assert_eq!(resp.node_count(), 0);
+    resp.assert_empty_aggregation();
 }
