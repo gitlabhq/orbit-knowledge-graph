@@ -95,6 +95,10 @@ pub enum ProjectionDef {
         select: Vec<String>,
         group_by: Vec<String>,
     },
+    /// Lightweight granule-pruning index using only row offsets.
+    /// Emits: `SELECT _part_offset ORDER BY col`.
+    /// Enables multi-predicate granule intersection on 25.11+.
+    PartOffsetIndex { name: String, column: String },
 }
 
 /// Table engine with arguments.

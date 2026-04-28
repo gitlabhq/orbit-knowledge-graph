@@ -82,6 +82,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
     let denormalization_entries = schema.settings.denormalization.clone();
+    let denorm_default_as = schema.settings.denorm_default_as.clone();
 
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
@@ -331,7 +332,11 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                             crate::entities::DenormDirection::Source => "source",
                             crate::entities::DenormDirection::Target => "target",
                         },
-                        entry.column_alias.as_deref().unwrap_or(&entry.property)
+                        entry
+                            .column_alias
+                            .as_deref()
+                            .or(denorm_default_as.as_deref())
+                            .unwrap_or(&entry.property)
                     );
                     denorm_columns.insert(edge_column.clone());
 
@@ -369,8 +374,20 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
         })
         .collect();
 
+    // Auto-generate _part_offset projections for granule-level pruning on
+    // denormalized columns. These enable multi-predicate granule intersection
+    // on ClickHouse 25.11+.
+    let auto_projections: Vec<crate::entities::StorageProjection> = auto_columns
+        .iter()
+        .map(|col| crate::entities::StorageProjection::PartOffsetIndex {
+            name: format!("idx_{}", col.name),
+            column: col.name.clone(),
+        })
+        .collect();
+
     for config in ontology.edge_table_configs.values_mut() {
         config.storage.denormalized_columns = auto_columns.clone();
+        config.storage.denormalized_projections = auto_projections.clone();
     }
 
     // Resolve skip_security_filter_for_entities → physical table names.

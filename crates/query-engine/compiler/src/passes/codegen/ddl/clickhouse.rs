@@ -175,6 +175,9 @@ fn emit_projection(proj: &ProjectionDef) -> String {
             };
             format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
         }
+        ProjectionDef::PartOffsetIndex { name, column } => {
+            format!("    PROJECTION {name} (SELECT _part_offset ORDER BY {column})")
+        }
         ProjectionDef::Aggregate {
             name,
             select,

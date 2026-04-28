@@ -70,6 +70,13 @@ pub enum StorageProjection {
         select: Vec<String>,
         group_by: Vec<String>,
     },
+    /// Lightweight granule-pruning index: `SELECT _part_offset ORDER BY col`.
+    /// Uses minimal storage (just row offsets) while enabling WHERE col = X
+    /// to skip non-matching granules via projection intersection.
+    PartOffsetIndex {
+        name: String,
+        column: String,
+    },
 }
 
 /// Storage config for edge tables (in schema.yaml).

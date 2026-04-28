@@ -826,7 +826,15 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
     PROJECTION agg_counts_by_target (
       SELECT relationship_kind, source_kind, target_id, traversal_path, count()
       GROUP BY relationship_kind, source_kind, target_id, traversal_path
-    )
+    ),
+    PROJECTION idx_source_severity (SELECT _part_offset ORDER BY source_severity),
+    PROJECTION idx_source_state (SELECT _part_offset ORDER BY source_state),
+    PROJECTION idx_source_status (SELECT _part_offset ORDER BY source_status),
+    PROJECTION idx_source_wi_type (SELECT _part_offset ORDER BY source_wi_type),
+    PROJECTION idx_target_severity (SELECT _part_offset ORDER BY target_severity),
+    PROJECTION idx_target_state (SELECT _part_offset ORDER BY target_state),
+    PROJECTION idx_target_status (SELECT _part_offset ORDER BY target_status),
+    PROJECTION idx_target_wi_type (SELECT _part_offset ORDER BY target_wi_type)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
@@ -865,7 +873,15 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     PROJECTION node_edge_counts (
       SELECT traversal_path, source_kind, target_kind, relationship_kind, uniq(source_id), uniq(target_id), uniq(source_id, target_id)
       GROUP BY traversal_path, source_kind, target_kind, relationship_kind
-    )
+    ),
+    PROJECTION idx_source_severity (SELECT _part_offset ORDER BY source_severity),
+    PROJECTION idx_source_state (SELECT _part_offset ORDER BY source_state),
+    PROJECTION idx_source_status (SELECT _part_offset ORDER BY source_status),
+    PROJECTION idx_source_wi_type (SELECT _part_offset ORDER BY source_wi_type),
+    PROJECTION idx_target_severity (SELECT _part_offset ORDER BY target_severity),
+    PROJECTION idx_target_state (SELECT _part_offset ORDER BY target_state),
+    PROJECTION idx_target_status (SELECT _part_offset ORDER BY target_status),
+    PROJECTION idx_target_wi_type (SELECT _part_offset ORDER BY target_wi_type)
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)

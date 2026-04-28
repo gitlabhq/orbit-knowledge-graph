@@ -53,6 +53,10 @@ pub(super) struct SettingsYaml {
     pub default_edge_table: String,
     pub default_entity_sort_key: Vec<String>,
     pub edge_tables: BTreeMap<String, EdgeTableYaml>,
+    /// Default `as` value for denormalization entries that don't specify one.
+    /// When set, all entries without an explicit `as` use this column suffix.
+    #[serde(default)]
+    pub denorm_default_as: Option<String>,
     #[serde(default)]
     pub denormalization: Vec<DenormalizationEntryYaml>,
     pub internal_column_prefix: String,

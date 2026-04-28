@@ -230,6 +230,10 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
             name: name.clone(),
             order_by: order_by.clone(),
         },
+        StorageProjection::PartOffsetIndex { name, column } => ProjectionDef::PartOffsetIndex {
+            name: name.clone(),
+            column: column.clone(),
+        },
         StorageProjection::Aggregate {
             name,
             select,

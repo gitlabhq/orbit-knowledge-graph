@@ -408,6 +408,10 @@
           },
           "minProperties": 1
         },
+        "denorm_default_as": {
+          "type": "string",
+          "description": "Default column suffix for denormalization entries without an explicit 'as'. Entries inherit this value, producing columns like source_{default} / target_{default}."
+        },
         "denormalization": {
           "type": "array",
           "description": "Node properties to denormalize onto all edge tables. The loader auto-derives which edges need each property based on edge variants.",
