@@ -33,7 +33,10 @@ const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
 #[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
-    #[serde(default = "default_max_execution_time", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_max_execution_time",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_execution_time: Option<u64>,
 
     /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
@@ -63,7 +66,10 @@ pub struct QueryConfig {
     pub use_query_cache: Option<bool>,
 
     /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(default = "default_query_cache_ttl", skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_query_cache_ttl",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub query_cache_ttl: Option<u32>,
 
     /// NATS KV cache for graph query results (webserver).

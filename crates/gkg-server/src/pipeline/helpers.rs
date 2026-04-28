@@ -177,37 +177,61 @@ mod tests {
     #[test]
     fn classify_memory() {
         let msg = "query error: bad response: Code: 241. DB::Exception: Memory limit";
-        assert!(classify_execution_error(msg).contains("too much memory"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("too much memory"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
     fn classify_timeout() {
         let msg = "Code: 159. DB::Exception: Timeout exceeded";
-        assert!(classify_execution_error(msg).contains("timed out"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("timed out"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
     fn classify_too_many_bytes() {
         let msg = "Code: 307. DB::Exception: Too many bytes to read";
-        assert!(classify_execution_error(msg).contains("too much data"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("too much data"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
     fn classify_too_many_rows() {
         let msg = "Code: 158. DB::Exception: Too many rows";
-        assert!(classify_execution_error(msg).contains("too many rows"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("too many rows"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
     fn classify_set_size() {
         let msg = "Code: 191. DB::Exception: Set size limit exceeded";
-        assert!(classify_execution_error(msg).contains("too many IDs"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("too many IDs"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
     fn classify_type_mismatch() {
         let msg = "Code: 53. DB::Exception: Cannot convert String to DateTime64";
-        assert!(classify_execution_error(msg).contains("type mismatch"), "got: {}", classify_execution_error(msg));
+        assert!(
+            classify_execution_error(msg).contains("type mismatch"),
+            "got: {}",
+            classify_execution_error(msg)
+        );
     }
 
     #[test]
@@ -218,6 +242,9 @@ mod tests {
 
     #[test]
     fn classify_no_code_falls_back() {
-        assert_eq!(classify_execution_error("connection refused"), "Query execution failed.");
+        assert_eq!(
+            classify_execution_error("connection refused"),
+            "Query execution failed."
+        );
     }
 }
