@@ -92,41 +92,13 @@ pub struct PipelineContext {
     pub config: PipelineConfig,
     pub tracer: crate::v2::trace::Tracer,
     pub root_path: String,
-    /// Typed errors collected during pipeline execution.
-    /// Thread-safe — languages push errors from their CPU threads.
-    pub graph_errors: std::sync::Mutex<Vec<crate::v2::error::CodeGraphError>>,
-    /// Benign per-file skips (oversize, line-too-long, watchdog timeout).
-    /// Tracked separately from `graph_errors` so policy outcomes do not
-    /// inflate the `gkg.indexer.code.errors` counter.
-    pub files_skipped: std::sync::Mutex<Vec<SkippedFile>>,
-}
-
-/// A benign per-file skip recorded by a language pipeline. The `reason`
-/// becomes the `reason` label on `gkg.indexer.code.files.skipped`.
-#[derive(Debug, Clone)]
-pub struct SkippedFile {
-    pub path: String,
-    pub reason: &'static str,
-}
-
-/// Classify a per-file analyzer error message into a benign-skip reason.
-/// `None` means the message is a genuine parse failure and should keep
-/// flowing through `record_error`.
-///
-/// Contract sources for the matched substrings:
-/// - `crates/code-graph/src/v2/langs/custom/js/extract.rs` produces
-///   `"refusing oversize file: ..."` when a file exceeds `MAX_FILE_BYTES`.
-/// - `crates/code-graph/src/v2/langs/custom/js/analyze/analyzer.rs` produces
-///   `"Skipping ...: line too long (...)"` when a line exceeds
-///   `MAX_LINE_LENGTH`.
-pub fn classify_skip_message(message: &str) -> Option<&'static str> {
-    if message.starts_with("refusing oversize file") {
-        Some("oversize")
-    } else if message.contains("line too long") {
-        Some("line_too_long")
-    } else {
-        None
-    }
+    /// Per-file benign skips. Surface under
+    /// `gkg.indexer.code.files.skipped{reason}`.
+    pub skipped: std::sync::Mutex<Vec<crate::v2::error::SkippedFile>>,
+    /// Per-file failures. Surface under
+    /// `gkg.indexer.code.file_faults{kind}` and contribute to
+    /// `files.processed{outcome="errored"}`.
+    pub faults: std::sync::Mutex<Vec<crate::v2::error::FaultedFile>>,
 }
 
 impl PipelineContext {
@@ -135,21 +107,32 @@ impl PipelineContext {
         self.config.cancel.is_cancelled()
     }
 
-    /// Record a typed pipeline error.
-    pub fn record_error(&self, error: crate::v2::error::CodeGraphError) {
-        if let Ok(mut errors) = self.graph_errors.lock() {
-            errors.push(error);
+    pub fn record_skip(
+        &self,
+        path: impl Into<String>,
+        kind: crate::v2::error::FileSkip,
+        detail: impl Into<String>,
+    ) {
+        if let Ok(mut skipped) = self.skipped.lock() {
+            skipped.push(crate::v2::error::SkippedFile {
+                path: path.into(),
+                kind,
+                detail: detail.into(),
+            });
         }
     }
 
-    /// Record a benign per-file skip. Policy outcomes (oversize, line
-    /// caps, per-file watchdog) flow here instead of `record_error` so
-    /// they do not inflate the error counter.
-    pub fn record_file_skipped(&self, path: impl Into<String>, reason: &'static str) {
-        if let Ok(mut skipped) = self.files_skipped.lock() {
-            skipped.push(SkippedFile {
+    pub fn record_fault(
+        &self,
+        path: impl Into<String>,
+        kind: crate::v2::error::FileFault,
+        detail: impl Into<String>,
+    ) {
+        if let Ok(mut faults) = self.faults.lock() {
+            faults.push(crate::v2::error::FaultedFile {
                 path: path.into(),
-                reason,
+                kind,
+                detail: detail.into(),
             });
         }
     }
@@ -231,21 +214,25 @@ impl BatchTx<'_> {
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
             Err(error) => {
-                self.errors.lock().unwrap().push(PipelineError::fatal(
-                    "<conversion>",
-                    error.to_string(),
-                    "arrow_conversion",
-                ));
+                self.errors.lock().unwrap().push(
+                    crate::v2::error::CodeGraphError::ArrowConversion {
+                        message: error.to_string(),
+                    }
+                    .into(),
+                );
                 return;
             }
         };
         for (table, batch) in batches {
-            if self.tx.send((table, batch)).is_err() {
-                self.errors.lock().unwrap().push(PipelineError::fatal(
-                    "<batch-channel>",
-                    "batch channel closed before writer accepted graph output",
-                    "write",
-                ));
+            if self.tx.send((table.clone(), batch)).is_err() {
+                self.errors.lock().unwrap().push(
+                    crate::v2::error::CodeGraphError::SinkWrite {
+                        table,
+                        message: "batch channel closed before writer accepted graph output"
+                            .to_string(),
+                    }
+                    .into(),
+                );
                 return;
             }
         }
@@ -253,12 +240,14 @@ impl BatchTx<'_> {
 
     /// Send a raw pre-built batch (for custom pipelines that bypass CodeGraph).
     pub fn send_raw(&self, table: String, batch: RecordBatch) {
-        if self.tx.send((table, batch)).is_err() {
-            self.errors.lock().unwrap().push(PipelineError::fatal(
-                "<batch-channel>",
-                "batch channel closed before writer accepted raw output",
-                "write",
-            ));
+        if self.tx.send((table.clone(), batch)).is_err() {
+            self.errors.lock().unwrap().push(
+                crate::v2::error::CodeGraphError::SinkWrite {
+                    table,
+                    message: "batch channel closed before writer accepted raw output".to_string(),
+                }
+                .into(),
+            );
         }
     }
 }
@@ -312,15 +301,10 @@ impl Default for PipelineConfig {
 
 pub struct PipelineResult {
     pub stats: PipelineStats,
+    /// Task-level errors. Fatal entries route to `code_errors_total{stage}`.
     pub errors: Vec<PipelineError>,
-    /// Typed errors from file read/parse failures, graph conversion, etc.
-    /// Each carries a `.stage()` label for metrics.
-    pub graph_errors: Vec<crate::v2::error::CodeGraphError>,
-    /// Benign skips emitted by language pipelines (oversize files,
-    /// line-too-long, per-file watchdog). Routed to
-    /// `gkg.indexer.code.files.skipped` instead of `errors`.
-    pub files_skipped: Vec<SkippedFile>,
-    /// The pipeline context, including the tracer with accumulated events.
+    pub skipped: Vec<crate::v2::error::SkippedFile>,
+    pub faults: Vec<crate::v2::error::FaultedFile>,
     pub ctx: Arc<PipelineContext>,
 }
 
@@ -362,6 +346,17 @@ impl PipelineError {
             file_path: file_path.into(),
             error: error.into(),
             stage,
+            fatal: true,
+        }
+    }
+}
+
+impl From<crate::v2::error::CodeGraphError> for PipelineError {
+    fn from(err: crate::v2::error::CodeGraphError) -> Self {
+        Self {
+            file_path: err.scope().to_string(),
+            error: err.to_string(),
+            stage: err.stage(),
             fatal: true,
         }
     }
@@ -429,8 +424,8 @@ impl Pipeline {
             config,
             tracer,
             root_path: root_str,
-            graph_errors: std::sync::Mutex::new(Vec::new()),
-            files_skipped: std::sync::Mutex::new(Vec::new()),
+            skipped: std::sync::Mutex::new(Vec::new()),
+            faults: std::sync::Mutex::new(Vec::new()),
         });
 
         // 2. Process languages with bounded concurrency. At most
@@ -478,11 +473,13 @@ impl Pipeline {
                 s.spawn(move || {
                     for (table, batch) in rx {
                         if let Err(e) = sink.write_batch(&table, &batch) {
-                            all_errors.lock().unwrap().push(PipelineError::fatal(
-                                format!("<writer:{language}>"),
-                                e.to_string(),
-                                "write",
-                            ));
+                            all_errors.lock().unwrap().push(
+                                crate::v2::error::CodeGraphError::SinkWrite {
+                                    table: table.clone(),
+                                    message: e.to_string(),
+                                }
+                                .into(),
+                            );
                         }
                     }
                 });
@@ -506,12 +503,13 @@ impl Pipeline {
                     let pool = match pool_builder.build() {
                         Ok(pool) => pool,
                         Err(e) => {
-                            tracing::error!(
-                                %language,
-                                error = %e,
-                                "failed to create rayon pool, skipping language"
+                            all_errors.lock().unwrap().push(
+                                crate::v2::error::CodeGraphError::ThreadPoolCreation {
+                                    language: language.to_string(),
+                                    source: e,
+                                }
+                                .into(),
                             );
-                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
                             sem_tx.send(()).ok();
                             return;
                         }
@@ -543,12 +541,21 @@ impl Pipeline {
                     drop(pool);
 
                     match result.unwrap_or_else(|payload| {
-                        let message = panic_payload_message(&payload);
-                        Some(Err(vec![PipelineError::fatal(
-                            format!("<language:{language}>"),
-                            format!("language worker panicked: {message}"),
-                            "panic",
-                        )]))
+                        // If the panic payload is already a typed CodeGraphError
+                        // (e.g. an UnexpectedNodeType from the linker), surface
+                        // it directly so its `stage` reaches the dashboard
+                        // instead of collapsing into `internal`.
+                        let err = match payload.downcast::<crate::v2::error::CodeGraphError>() {
+                            Ok(typed) => *typed,
+                            Err(payload) => crate::v2::error::CodeGraphError::Internal {
+                                context: format!("language_panic:{language}"),
+                                message: format!(
+                                    "language worker panicked: {}",
+                                    panic_payload_message(&payload)
+                                ),
+                            },
+                        };
+                        Some(Err(vec![err.into()]))
                     }) {
                         Some(Ok(())) => {
                             tracing::info!(
@@ -564,7 +571,17 @@ impl Pipeline {
                                 error_count = errors.len(),
                                 "language processing failed"
                             );
-                            files_skipped.fetch_add(file_count, Ordering::Relaxed);
+                            // After the typed-outcome refactor the
+                            // language pipelines return `Ok(())` even
+                            // when every file was skipped or faulted —
+                            // so this arm only fires for task-level
+                            // failures recovered from the `catch_unwind`
+                            // above (rayon panic, linker invariant
+                            // violation, etc.). Files that hadn't been
+                            // processed yet are silently dropped from
+                            // counts; the failure itself surfaces via
+                            // `code_errors_total{stage}` so on-call can
+                            // see what bailed out.
                             if let Ok(mut errs) = all_errors.lock() {
                                 errs.extend(errors);
                             }
@@ -585,14 +602,13 @@ impl Pipeline {
             }
         }); // all threads join here
 
-        let graph_errors = ctx
-            .graph_errors
+        let skipped = ctx
+            .skipped
             .lock()
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
-
-        let skipped_files = ctx
-            .files_skipped
+        let faults = ctx
+            .faults
             .lock()
             .map(|mut e| std::mem::take(&mut *e))
             .unwrap_or_default();
@@ -609,8 +625,8 @@ impl Pipeline {
                 edges_count: edges_count.into_inner(),
             },
             errors: all_errors.into_inner().unwrap_or_default(),
-            graph_errors,
-            files_skipped: skipped_files,
+            skipped,
+            faults,
             ctx,
         }
     }
@@ -729,11 +745,11 @@ where
         // Extracts defs, imports, AND refs+SSA in a single pass.
         // Source bytes are read and dropped per-file — no bulk storage.
         use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
-        use crate::v2::error::CodeGraphError;
+        use crate::v2::error::{FaultedFile, FileFault};
 
         enum ParseOutcome {
             Ok(ParsedFile),
-            Err(CodeGraphError),
+            Err(FaultedFile),
         }
 
         struct ParsedFile {
@@ -757,9 +773,10 @@ where
                     Err(e) => {
                         tracing::debug!(path, error = %e, "failed to read file");
                         pb.inc(1);
-                        return Some(ParseOutcome::Err(CodeGraphError::FileRead {
+                        return Some(ParseOutcome::Err(FaultedFile {
                             path: path.to_string(),
-                            source: e,
+                            kind: FileFault::FileRead,
+                            detail: e.to_string(),
                         }));
                     }
                 };
@@ -769,9 +786,18 @@ where
                     Err(e) => {
                         tracing::debug!(path, error = %e, "failed to parse file");
                         pb.inc(1);
-                        return Some(ParseOutcome::Err(CodeGraphError::ParseFailed {
+                        // Exhaustive match on the typed `ParseFullError`
+                        // — adding a new variant breaks the build until
+                        // it gets a `FileFault` mapping here.
+                        let (kind, detail) = match e {
+                            crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err) => {
+                                (FileFault::InvalidUtf8, err.to_string())
+                            }
+                        };
+                        return Some(ParseOutcome::Err(FaultedFile {
                             path: path.to_string(),
-                            message: e.error.clone(),
+                            kind,
+                            detail,
                         }));
                     }
                 };
@@ -793,26 +819,23 @@ where
             })
             .collect();
 
-        // Separate successes from errors. Errors are collected for
-        // reporting — their stage labels feed the ERRORS metric.
-        let mut parse_errors: Vec<CodeGraphError> = Vec::new();
+        let mut parsed_faults: Vec<FaultedFile> = Vec::new();
         let parsed: Vec<Option<ParsedFile>> = parse_outcomes
             .into_iter()
             .map(|outcome| match outcome {
                 Some(ParseOutcome::Ok(file)) => Some(file),
                 Some(ParseOutcome::Err(e)) => {
-                    parse_errors.push(e);
+                    parsed_faults.push(e);
                     None
                 }
                 None => None,
             })
             .collect();
 
-        // Push parse errors to the shared context for metrics.
-        if !parse_errors.is_empty()
-            && let Ok(mut errs) = ctx.graph_errors.lock()
+        if !parsed_faults.is_empty()
+            && let Ok(mut faults) = ctx.faults.lock()
         {
-            errs.extend(parse_errors);
+            faults.extend(parsed_faults);
         }
 
         // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
@@ -988,11 +1011,11 @@ where
                     crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
                     _ => "unknown",
                 };
-                // Per-file watchdog timeouts are policy outcomes, not
-                // failures of the indexer. Route them to the
-                // `files.skipped{reason="timeout_sentinel"}` counter
-                // instead of inflating `errors_total`.
-                ctx.record_file_skipped(path.to_string(), "timeout_sentinel");
+                ctx.record_skip(
+                    path.to_string(),
+                    crate::v2::error::FileSkip::TimeoutSentinel,
+                    "per-file watchdog killed analysis",
+                );
             }
             for (src, tgt, edge) in edges {
                 graph.graph.add_edge(src, tgt, edge);
@@ -1132,8 +1155,8 @@ mod tests {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
-            graph_errors: std::sync::Mutex::new(Vec::new()),
-            files_skipped: std::sync::Mutex::new(Vec::new()),
+            skipped: std::sync::Mutex::new(Vec::new()),
+            faults: std::sync::Mutex::new(Vec::new()),
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();
@@ -1371,39 +1394,29 @@ namespace MyApp {
     }
 
     #[test]
-    fn classify_skip_message_recognises_known_reasons() {
-        assert_eq!(
-            classify_skip_message(
-                "refusing oversize file: /tmp/big.json (4808847 bytes, max 2097152)"
-            ),
-            Some("oversize"),
-        );
-        assert_eq!(
-            classify_skip_message("Skipping bundle.js: line too long (5001 bytes, max 5000)"),
-            Some("line_too_long"),
-        );
-        assert_eq!(classify_skip_message("unexpected token at 1:1"), None);
-    }
-
-    #[test]
-    fn record_file_skipped_collects_in_pipeline_result() {
-        // Direct unit test of the watchdog rerouting path: simulating
-        // the call site that replaced `ctx.record_error(Internal{
-        // sentinel_timeout })` proves that a skipped file ends up on
-        // `PipelineResult.files_skipped` rather than `graph_errors`.
+    fn record_skip_and_fault_route_to_distinct_collections() {
         let ctx = Arc::new(PipelineContext {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
-            graph_errors: std::sync::Mutex::new(Vec::new()),
-            files_skipped: std::sync::Mutex::new(Vec::new()),
+            skipped: std::sync::Mutex::new(Vec::new()),
+            faults: std::sync::Mutex::new(Vec::new()),
         });
-        ctx.record_file_skipped("src/slow.rs".to_string(), "timeout_sentinel");
+        ctx.record_skip(
+            "src/slow.rs",
+            crate::v2::error::FileSkip::TimeoutSentinel,
+            "killed",
+        );
+        ctx.record_fault("src/bad.js", crate::v2::error::FileFault::OxcPanic, "boom");
 
-        let skipped = ctx.files_skipped.lock().unwrap().clone();
+        let skipped = ctx.skipped.lock().unwrap().clone();
         assert_eq!(skipped.len(), 1);
-        assert_eq!(skipped[0].reason, "timeout_sentinel");
+        assert_eq!(skipped[0].kind, crate::v2::error::FileSkip::TimeoutSentinel);
         assert_eq!(skipped[0].path, "src/slow.rs");
-        assert!(ctx.graph_errors.lock().unwrap().is_empty());
+
+        let faults = ctx.faults.lock().unwrap().clone();
+        assert_eq!(faults.len(), 1);
+        assert_eq!(faults[0].kind, crate::v2::error::FileFault::OxcPanic);
+        assert_eq!(faults[0].path, "src/bad.js");
     }
 }

@@ -85,8 +85,8 @@ struct IndexGraphStats {
 
 struct IndexRunResult {
     total_processing_time: Duration,
-    skipped_files: Vec<code_graph::v2::pipeline::SkippedFile>,
-    errored_files: Vec<code_graph::v2::pipeline::PipelineError>,
+    skipped_files: Vec<code_graph::v2::SkippedFile>,
+    faulted_files: Vec<code_graph::v2::FaultedFile>,
     graph_stats: IndexGraphStats,
     database_path: Option<String>,
 }
@@ -105,12 +105,16 @@ struct DetailedStats {
 struct SkippedFile {
     path: String,
     reason: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    detail: String,
 }
 
 #[derive(Serialize)]
 struct ErroredFile {
     path: String,
-    error: String,
+    kind: String,
+    #[serde(skip_serializing_if = "String::is_empty")]
+    detail: String,
 }
 
 #[derive(Parser)]
@@ -710,10 +714,14 @@ async fn index_repo(
         Some(git),
     )?;
 
+    for err in &v2_result.errors {
+        tracing::warn!(stage = err.stage, error = %err.error, "task-level pipeline error");
+    }
+
     Ok(IndexRunResult {
         total_processing_time: start_time.elapsed(),
-        skipped_files: v2_result.files_skipped,
-        errored_files: v2_result.errors,
+        skipped_files: v2_result.skipped,
+        faulted_files: v2_result.faults,
         graph_stats: IndexGraphStats {
             directories: 0,
             files: v2_result.stats.files_parsed,
@@ -748,15 +756,17 @@ fn build_index_output(
             .iter()
             .map(|s| SkippedFile {
                 path: s.path.clone(),
-                reason: s.reason.to_string(),
+                reason: s.kind.as_metric_label().to_string(),
+                detail: s.detail.clone(),
             })
             .collect(),
         errored_files: result
-            .errored_files
+            .faulted_files
             .iter()
-            .map(|e| ErroredFile {
-                path: e.file_path.clone(),
-                error: e.error.clone(),
+            .map(|f| ErroredFile {
+                path: f.path.clone(),
+                kind: f.kind.as_metric_label().to_string(),
+                detail: f.detail.clone(),
             })
             .collect(),
         relationship_types: stats.relationship_types.clone(),
@@ -770,7 +780,7 @@ fn build_index_output(
         graph,
         processing: ProcessingStats {
             skipped_files: result.skipped_files.len(),
-            errored_files: result.errored_files.len(),
+            errored_files: result.faulted_files.len(),
         },
         database_path: result.database_path.clone(),
         detailed,

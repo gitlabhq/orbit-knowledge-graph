@@ -108,7 +108,10 @@ pub const NODES_INDEXED: MetricSpec = MetricSpec::counter(
 
 pub const ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.errors",
-    "Total code indexing errors by pipeline stage.",
+    "Task-level code indexing failures by pipeline stage. Increments only \
+     when a code indexing task ends with a fatal pipeline error (sink write, \
+     thread pool, sentinel spawn, internal panic). Per-file failures land in \
+     `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
     None,
     &[labels::STAGE],
     DOMAIN,
@@ -117,11 +120,22 @@ pub const ERRORS: MetricSpec = MetricSpec::counter(
 pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.files.skipped",
     "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
-     Not an error. Reasons: `oversize` (file exceeds the per-language byte ceiling), \
-     `line_too_long` (a single line exceeds the per-language character ceiling), \
-     `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
+     Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, \
+     `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, `timeout_sentinel`.",
     None,
     &[labels::REASON],
+    DOMAIN,
+);
+
+pub const FILE_FAULTS: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.file_faults",
+    "Per-file failures during code indexing, by kind. The task itself \
+     completes successfully; individual files were excluded from the graph. \
+     Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, \
+     `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, \
+     `embedded_script_parse`, `rust_workspace_missing`.",
+    None,
+    &[labels::KIND],
     DOMAIN,
 );
 
@@ -139,4 +153,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &NODES_INDEXED,
     &ERRORS,
     &FILES_SKIPPED,
+    &FILE_FAULTS,
 ];

@@ -631,10 +631,10 @@ impl CodeGraph {
 
     pub fn def(&self, idx: NodeIndex) -> &GraphDef {
         self.try_def(idx).unwrap_or_else(|| {
-            panic!(
-                "Expected Definition at {:?}, got {:?}",
-                idx, self.graph[idx]
-            )
+            std::panic::panic_any(crate::v2::error::CodeGraphError::UnexpectedNodeType {
+                expected: "Definition",
+                got: format!("{:?} at {idx:?}", self.graph[idx]),
+            })
         })
     }
 
@@ -646,8 +646,12 @@ impl CodeGraph {
     }
 
     pub fn import(&self, idx: NodeIndex) -> &GraphImport {
-        self.try_import(idx)
-            .unwrap_or_else(|| panic!("Expected Import at {:?}, got {:?}", idx, self.graph[idx]))
+        self.try_import(idx).unwrap_or_else(|| {
+            std::panic::panic_any(crate::v2::error::CodeGraphError::UnexpectedNodeType {
+                expected: "Import",
+                got: format!("{:?} at {idx:?}", self.graph[idx]),
+            })
+        })
     }
 
     /// Returns the definition name as `&str`.
@@ -1365,5 +1369,43 @@ mod tests {
 
         assert_eq!(import_ids.len(), 2);
         assert_ne!(import_ids[0], import_ids[1]);
+    }
+
+    #[test]
+    fn def_on_import_panics_with_typed_unexpected_node_type() {
+        use crate::v2::error::CodeGraphError;
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        let import = CanonicalImport {
+            import_type: "NamedImport",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: "std::fs".to_string(),
+            name: Some("read".to_string()),
+            alias: None,
+            scope_fqn: None,
+            range: Range::new(Position::new(0, 0), Position::new(0, 10), (0, 10)),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let (_, _, import_nodes) =
+            cg.add_file("/repo/x.rs", "rs", Language::Python, 1, &[], &[import]);
+        let import_idx = import_nodes[0];
+
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = cg.def(import_idx);
+        }))
+        .expect_err("def() on Import index must panic");
+
+        let typed = payload
+            .downcast::<CodeGraphError>()
+            .expect("panic payload should be a CodeGraphError");
+        assert!(matches!(
+            *typed,
+            CodeGraphError::UnexpectedNodeType {
+                expected: "Definition",
+                ..
+            }
+        ));
+        assert_eq!(typed.stage(), "graph_node");
     }
 }
