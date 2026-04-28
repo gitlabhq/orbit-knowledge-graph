@@ -8,12 +8,12 @@ variants:
     description: "Runner serves jobs for this group."
 
 etl:
-  scope: namespaced
-  source: siphon_ci_runner_namespaces
-  order_by: [traversal_path, id]
-  from:
-    id: runner_id
-    type: Runner
-  to:
-    id: namespace_id
-    type: Group
+  - scope: namespaced
+    source: siphon_ci_runner_namespaces
+    order_by: [traversal_path, id]
+    from:
+      id: runner_id
+      type: Runner
+    to:
+      id: namespace_id
+      type: Group

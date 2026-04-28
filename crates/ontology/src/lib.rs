@@ -109,7 +109,7 @@ pub struct Ontology {
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
-    pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
+    pub(crate) edge_etl_configs: BTreeMap<String, Vec<EdgeSourceEtlConfig>>,
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
     pub(crate) skip_security_filter_for_tables: Vec<String>,
@@ -851,11 +851,13 @@ impl Ontology {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
-    /// Get ETL config for an edge by relationship kind.
+    /// Get ETL configs for an edge by relationship kind.
     ///
     /// Returns `Some` only for edges sourced from join tables.
-    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&EdgeSourceEtlConfig> {
-        self.edge_etl_configs.get(relationship_kind)
+    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[EdgeSourceEtlConfig]> {
+        self.edge_etl_configs
+            .get(relationship_kind)
+            .map(|v| v.as_slice())
     }
 
     /// Check if an edge has ETL config (i.e., is sourced from a join table).
@@ -863,9 +865,11 @@ impl Ontology {
         self.edge_etl_configs.contains_key(relationship_kind)
     }
 
-    /// Iterator over all edge ETL configs (relationship_kind, config).
+    /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
-        self.edge_etl_configs.iter().map(|(k, v)| (k.as_str(), v))
+        self.edge_etl_configs
+            .iter()
+            .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
 
     // --- Query validation helpers ---

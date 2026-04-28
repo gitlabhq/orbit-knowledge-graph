@@ -131,7 +131,6 @@ pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "LAST_EDITED_BY", "User", "MergeRequest", "1/100/", 1)
         .await;
     assert_edges_have_traversal_path(ctx, "AUTHORED", "User", "MergeRequest", "1/100/", 2).await;
-    assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
     assert_edges_have_traversal_path(ctx, "MERGED", "User", "MergeRequest", "1/100/", 1).await;
     assert_edges_have_traversal_path(
         ctx,
@@ -292,4 +291,36 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
+}
+
+pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    ctx.execute(
+        "INSERT INTO merge_requests
+            (id, iid, title, description, source_branch, target_branch, state_id, merge_status,
+             draft, squash, target_project_id, author_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 101, 'Add auth', 'Auth feature', 'feat-auth', 'main', 1, 'can_be_merged',
+             false, false, 1000, 1, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_label_links
+            (id, label_id, target_id, target_type, created_at, updated_at,
+             namespace_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 5, 10, 'MergeRequest', '2024-01-15 10:00:00', '2024-01-15 10:00:00', 100, '1/100/', '2024-01-20 12:00:00'),
+            (2, 6, 10, 'MergeRequest', '2024-01-15 10:00:00', '2024-01-15 10:00:00', 100, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "HAS_LABEL", "MergeRequest", "Label", "1/100/", 2).await;
 }

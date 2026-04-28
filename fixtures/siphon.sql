@@ -1209,3 +1209,41 @@ ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
 PRIMARY KEY (traversal_path, id, partition_id)
 ORDER BY (traversal_path, id, partition_id)
 SETTINGS index_granularity = 2048;
+
+-- Siphon source table for issue assignees (join table)
+CREATE TABLE IF NOT EXISTS siphon_issue_assignees
+(
+    `user_id` Int64,
+    `issue_id` Int64,
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, issue_id, user_id)
+ORDER BY (traversal_path, issue_id, user_id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
+
+-- Siphon source table for label links (polymorphic join table)
+CREATE TABLE IF NOT EXISTS siphon_label_links
+(
+    `id` Int64,
+    `label_id` Int64,
+    `target_id` Int64,
+    `target_type` LowCardinality(String),
+    `created_at` DateTime64(6, 'UTC'),
+    `updated_at` DateTime64(6, 'UTC'),
+    `namespace_id` Int64,
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT FALSE,
+    PROJECTION pg_pkey_ordered (
+        SELECT *
+        ORDER BY id
+    )
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, target_id, id)
+ORDER BY (traversal_path, target_id, id)
+SETTINGS deduplicate_merge_projection_mode = 'rebuild';
