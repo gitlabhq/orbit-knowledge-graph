@@ -194,3 +194,5 @@ storage:
     - {name: idx_is_admin, column: is_admin, type: "minmax", granularity: 1}
     - {name: idx_is_auditor, column: is_auditor, type: "minmax", granularity: 1}
     - {name: idx_is_external, column: is_external, type: "minmax", granularity: 1}
+    - {name: idx_username, column: username, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_name, column: name, type: "bloom_filter(0.01)", granularity: 1}
