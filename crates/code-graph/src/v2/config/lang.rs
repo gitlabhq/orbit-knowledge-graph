@@ -95,7 +95,7 @@ define_languages! {
             "gql",
             "json"
         ],
-        exclude: ["min.js"],
+        exclude: [".min.js"],
         separator: "::",
         names: ["javascript", "js"],
     },

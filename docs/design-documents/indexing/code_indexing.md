@@ -188,6 +188,10 @@ Example NATS KV:
 
 After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
+The extractor uses the same parsability predicate as the parser (`code_graph::v2::config::is_parsable`) before unpacking each tar entry. Entries the parser would never accept — files whose extension no language claims, paths matching a per-language exclude suffix such as `*.min.js` or `*_test.go`, and entries whose declared size exceeds the configured per-file ceiling — are dropped from the tar stream so they never touch disk. Symlinks, hardlinks, and directories bypass the filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
+
+The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
+
 #### Transform (call graph construction)
 
 ##### Parser architecture
@@ -217,8 +221,8 @@ For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` 
 
 The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
 
-1. **Directory walking** discovers files, respecting `.gitignore` rules and skipping `.git` directories and nested repositories.
-2. **Extension filtering** keeps only files with supported language extensions.
+1. **Directory walking** discovers files. Because non-parsable entries were already dropped at archive-extraction time, the walker mostly sees source files only.
+2. **Extension filtering** runs the same `is_parsable` predicate as the extractor as a defence-in-depth check, then groups files by language.
 3. **Async file reads** load file contents with bounded IO concurrency.
 4. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
 5. **Analysis** groups parsed results by language and builds the graph.

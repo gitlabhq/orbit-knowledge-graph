@@ -338,8 +338,9 @@ mod tests {
             );
 
             let temp_dir = tempfile::TempDir::new().expect("failed to create temp dir");
-            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> =
-                Arc::new(LocalRepositoryCache::new(temp_dir.path().to_path_buf()));
+            let cache: Arc<dyn crate::modules::code::repository::RepositoryCache> = Arc::new(
+                LocalRepositoryCache::new(temp_dir.path().to_path_buf(), u64::MAX, metrics.clone()),
+            );
             let resolver =
                 RepositoryResolver::new(Arc::clone(&repo_service), cache, metrics.clone());
 

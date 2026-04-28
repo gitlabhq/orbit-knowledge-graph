@@ -297,6 +297,29 @@
       "domain": "indexer.etl"
     },
     {
+      "otel_name": "gkg.indexer.code.archive.bytes.skipped",
+      "prom_name": "gkg_indexer_code_archive_bytes_skipped_bytes_total",
+      "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.entries.skipped",
+      "prom_name": "gkg_indexer_code_archive_entries_skipped_total",
+      "description": "Tar archive entries dropped before extraction so they never touch disk. Reasons: `excluded_extension` (basename matches the binary-asset / media / archive denylist in `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the configured per-file ceiling).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.errors",
       "prom_name": "gkg_indexer_code_errors_total",
       "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
