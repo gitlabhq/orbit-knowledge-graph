@@ -1255,8 +1255,8 @@ SETTINGS index_granularity = 2048;
 -- (noteable_id / noteable_type) within a namespace (traversal_path).
 -- These are the source tables for the MERGED, CLOSED, and REOPENED lifecycle
 -- edge ETL plans.  The per-action split is necessary because the standalone
--- edge ETL does not support WHERE-clause filtering; each view pre-filters to
--- a single action value so the edge plan can reference it directly.
+-- edge ETL does not support WHERE-clause filtering, so each view pre-filters
+-- to a single action value and the edge plan can reference it directly.
 CREATE VIEW IF NOT EXISTS siphon_system_note_merged AS
 SELECT
     snm.id                        AS id,
