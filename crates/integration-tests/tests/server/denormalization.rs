@@ -131,50 +131,51 @@ async fn denormalization_correctness() {
     );
 }
 
-/// Count opened MRs in project 20. Expected: 2 (MR 100 + 101).
+/// Opened MRs in project 20. Expected: MR 100 + 101 (both opened).
+/// Traversal so we can verify actual filtered nodes, not just a count.
 async fn count_opened_mrs_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "opened"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
     )
     .await;
-    resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
-    resp.skip_requirement(Requirement::Filter {
-        field: "state".into(),
+    resp.assert_node_count(3); // 2 MRs + 1 Project
+    resp.assert_node_ids("Project", &[20]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("opened")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("MergeRequest", 100, "Project", 20, "IN_PROJECT");
 }
 
-/// Count failed pipelines in project 20. Expected: 2 (Pipeline 400 + 402).
+/// Failed pipelines in project 20. Expected: Pipeline 400 + 402.
 async fn count_failed_pipelines_in_project(ctx: &TestContext) {
     let resp = query(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
-            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "eq", "value": "failed"}}},
+            {"id": "pipe", "entity": "Pipeline", "filters": {"status": {"op": "eq", "value": "failed"}}, "columns": ["status"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "pipe", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
     )
     .await;
-    resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
-    resp.skip_requirement(Requirement::Filter {
-        field: "status".into(),
+    resp.assert_node_count(3); // 2 Pipelines + 1 Project
+    resp.assert_node_ids("Project", &[20]);
+    resp.assert_filter("Pipeline", "status", |n| {
+        n.prop_str("status") == Some("failed")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("Pipeline", 400, "Project", 20, "IN_PROJECT");
 }
 
 /// Traversal: find opened MRs authored by user 1. Expected: 2 (MR 100 + 101).
@@ -200,111 +201,111 @@ async fn traversal_opened_mrs_authored_by_user(ctx: &TestContext) {
     resp.assert_edge_exists("User", 1, "MergeRequest", 100, "AUTHORED");
 }
 
-/// Multi-filter: detected + critical vulnerabilities in project 20. Expected: 1 (vuln 200).
+/// Multi-filter: detected + critical vulnerabilities in project 20. Expected: vuln 200 only.
 async fn multi_filter_vuln_state_and_severity(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
             {"id": "v", "entity": "Vulnerability", "filters": {
                 "state": {"op": "eq", "value": "detected"},
                 "severity": {"op": "eq", "value": "critical"}
-            }},
+            }, "columns": ["state", "severity"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
         security_manager_context(),
     )
     .await;
-    resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(1));
-    resp.skip_requirement(Requirement::Filter {
-        field: "state".into(),
+    resp.assert_node_count(2); // 1 Vulnerability + 1 Project
+    resp.assert_node_ids("Project", &[20]);
+    resp.assert_filter("Vulnerability", "state", |n| {
+        n.prop_str("state") == Some("detected")
     });
-    resp.skip_requirement(Requirement::Filter {
-        field: "severity".into(),
+    resp.assert_filter("Vulnerability", "severity", |n| {
+        n.prop_str("severity") == Some("critical")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("Vulnerability", 200, "Project", 20, "IN_PROJECT");
 }
 
-/// WorkItem type filter: opened issues in group 10. Expected: 1 (WI 300).
+/// WorkItem type filter: opened issues in group 10. Expected: WI 300 only.
 /// WI 301 is closed, WI 302 is epic (not issue).
 async fn work_item_type_filter(ctx: &TestContext) {
     let resp = query(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
             {"id": "wi", "entity": "WorkItem", "filters": {
                 "state": {"op": "eq", "value": "opened"},
                 "work_item_type": {"op": "eq", "value": "issue"}
-            }},
+            }, "columns": ["state", "work_item_type"]},
             {"id": "g", "entity": "Group", "node_ids": [10]}
         ],
         "relationships": [{"type": "IN_GROUP", "from": "wi", "to": "g"}],
-        "aggregations": [{"function": "count", "target": "wi", "group_by": "g", "alias": "n"}],
         "limit": 10
     }"#,
     )
     .await;
-    resp.assert_node("Group", 10, |n| n.prop_i64("n") == Some(1));
-    resp.skip_requirement(Requirement::Filter {
-        field: "state".into(),
+    resp.assert_node_count(2); // 1 WorkItem + 1 Group
+    resp.assert_node_ids("Group", &[10]);
+    resp.assert_filter("WorkItem", "state", |n| {
+        n.prop_str("state") == Some("opened")
     });
-    resp.skip_requirement(Requirement::Filter {
-        field: "work_item_type".into(),
+    resp.assert_filter("WorkItem", "work_item_type", |n| {
+        n.prop_str("work_item_type") == Some("issue")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("WorkItem", 300, "Group", 10, "IN_GROUP");
 }
 
-/// Single severity filter: critical vulnerabilities in project 20. Expected: 2 (vuln 200 + 202).
+/// Critical vulnerabilities in project 20. Expected: vuln 200 + 202.
 async fn single_severity_filter(ctx: &TestContext) {
     let resp = query_with_security(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
-            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "eq", "value": "critical"}}},
+            {"id": "v", "entity": "Vulnerability", "filters": {"severity": {"op": "eq", "value": "critical"}}, "columns": ["severity"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
         security_manager_context(),
     )
     .await;
-    resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(2));
-    resp.skip_requirement(Requirement::Filter {
-        field: "severity".into(),
+    resp.assert_node_count(3); // 2 Vulnerabilities + 1 Project
+    resp.assert_node_ids("Project", &[20]);
+    resp.assert_filter("Vulnerability", "severity", |n| {
+        n.prop_str("severity") == Some("critical")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("Vulnerability", 200, "Project", 20, "IN_PROJECT");
 }
 
-/// Merged MR count in project 20. Expected: 1 (MR 102).
+/// Merged MRs in project 20. Expected: MR 102 only.
 async fn merged_mr_count_is_one(ctx: &TestContext) {
     let resp = query(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "merged"}}},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "merged"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
     )
     .await;
-    resp.assert_node("Project", 20, |n| n.prop_i64("n") == Some(1));
-    resp.skip_requirement(Requirement::Filter {
-        field: "state".into(),
+    resp.assert_node_count(2); // 1 MR + 1 Project
+    resp.assert_node_ids("Project", &[20]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
     });
-    resp.skip_requirement(Requirement::NodeIds);
+    resp.assert_edge_exists("MergeRequest", 102, "Project", 20, "IN_PROJECT");
 }
 
 /// No-match filter returns zero results. No MR with state='draft' exists.
@@ -312,16 +313,23 @@ async fn no_match_returns_zero(ctx: &TestContext) {
     let resp = query(
         ctx,
         r#"{
-        "query_type": "aggregation",
+        "query_type": "traversal",
         "nodes": [
-            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "draft"}}},
+            {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "eq", "value": "draft"}}, "columns": ["state"]},
             {"id": "p", "entity": "Project", "node_ids": [20]}
         ],
         "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
-        "aggregations": [{"function": "count", "target": "mr", "group_by": "p", "alias": "n"}],
         "limit": 10
     }"#,
     )
     .await;
-    resp.assert_empty_aggregation();
+    // No MR with state='draft' → only the pinned Project node, no MRs.
+    resp.assert_node_count(0);
+    resp.skip_requirement(Requirement::NodeIds);
+    resp.skip_requirement(Requirement::Filter {
+        field: "state".into(),
+    });
+    resp.skip_requirement(Requirement::Relationship {
+        edge_type: "IN_PROJECT".into(),
+    });
 }
