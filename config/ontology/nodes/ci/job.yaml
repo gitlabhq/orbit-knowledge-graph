@@ -169,6 +169,56 @@ properties:
     nullable: true
     description: "Timestamp when the job was queued for execution."
 
+  type:
+    type: string
+    source: type
+    nullable: false
+    description: "Job class discriminator: Ci::Build for normal jobs, Ci::Bridge for downstream-pipeline trigger jobs."
+
+  runner_id:
+    type: int64
+    source: runner_id
+    nullable: true
+    description: "Runner that executed the job."
+
+  timeout:
+    type: int64
+    source: timeout
+    nullable: true
+    description: "Effective timeout in seconds applied to this job."
+
+  timeout_source:
+    type: enum
+    source: timeout_source
+    nullable: true
+    description: "Origin of the effective timeout: project, runner, or job."
+    values:
+      1: unknown_timeout_source
+      2: project_timeout_source
+      3: runner_timeout_source
+      4: job_timeout_source
+
+  exit_code:
+    type: int64
+    source: exit_code
+    nullable: true
+    description: "Process exit code reported by the runner, if the job ran to completion."
+
+  scheduling_type:
+    type: enum
+    source: scheduling_type
+    nullable: true
+    description: "Whether the job is stage-scheduled or DAG-scheduled."
+    values:
+      0: stage
+      1: dag
+
+  auto_canceled_by_id:
+    type: int64
+    source: auto_canceled_by_id
+    nullable: true
+    description: "Job that auto-canceled this one when its pipeline was superseded."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -194,6 +244,21 @@ etl:
       to: User
       as: TRIGGERED
       direction: incoming
+    commit_id:
+      - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+      - { to: Pipeline, as: HAS_JOB, direction: incoming }
+    runner_id:
+      to: Runner
+      as: RUNS_ON
+      direction: outgoing
+    upstream_pipeline_id:
+      to: Pipeline
+      as: TRIGGERED_BY_PIPELINE
+      direction: outgoing
+    auto_canceled_by_id:
+      to: Job
+      as: AUTO_CANCELED_BY
+      direction: outgoing
 
 storage:
   primary_key: [traversal_path, id]
@@ -213,6 +278,13 @@ storage:
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: queued_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: runner_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: scheduling_type, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}

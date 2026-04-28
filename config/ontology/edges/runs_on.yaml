@@ -1,0 +1,8 @@
+# config/ontology/edges/runs_on.yaml
+
+description: Job executed on a runner
+
+variants:
+  - from_node: { type: Job, id: id }
+    to_node: { type: Runner, id: id }
+    description: "Job ran on this runner."

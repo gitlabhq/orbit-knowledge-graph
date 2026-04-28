@@ -1,0 +1,12 @@
+# config/ontology/edges/auto_canceled_by.yaml
+
+description: Entity was auto-canceled by a newer entity of the same kind
+
+variants:
+  - from_node: { type: Pipeline, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Pipeline was auto-canceled by a newer pipeline."
+
+  - from_node: { type: Job, id: id }
+    to_node: { type: Job, id: id }
+    description: "Job was auto-canceled when its pipeline was superseded."

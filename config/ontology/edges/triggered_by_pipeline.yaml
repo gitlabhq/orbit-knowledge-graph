@@ -1,0 +1,8 @@
+# config/ontology/edges/triggered_by_pipeline.yaml
+
+description: Job was triggered by an upstream pipeline (child pipeline relationship from the job side)
+
+variants:
+  - from_node: { type: Job, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Job runs in a child pipeline whose parent is the upstream pipeline."
