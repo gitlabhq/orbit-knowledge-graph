@@ -597,7 +597,7 @@ impl<'a> SsaEngine<'a> {
             return;
         }
         if depth >= Self::MAX_SCC_DEPTH {
-            tracing::error!(
+            tracing::warn!(
                 depth,
                 phis = phi_ids.len(),
                 "SCC phi elimination hit max recursion depth"

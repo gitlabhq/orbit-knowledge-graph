@@ -25,6 +25,7 @@ local SEL = o.GKG_IDX_SEL;
 local codeCompleted = o.metric('gkg_indexer_code_repository_indexing_completed_total');
 local codeEmpty = o.metric('gkg_indexer_code_repository_empty_total');
 local codeErrors = o.metric('gkg_indexer_code_errors_total');
+local codeFileFaults = o.metric('gkg_indexer_code_file_faults_total');
 local codeIndexDur = o.metric('gkg_indexer_code_indexing_duration_seconds');
 local codeFetchDur = o.metric('gkg_indexer_code_repository_fetch_duration_seconds');
 
@@ -177,9 +178,15 @@ local reliability = [
   o.row('Reliability'),
   o.counterIncreaseBars(
     codeErrors,
-    'Code: errors by pipeline stage (1h windows)',
-    'Code indexing error counts in rolling 1h windows, stacked by stage. Falls back to a flat zero line during error-free windows so the panel never goes to "No data".',
+    'Code: task-level errors by pipeline stage (1h windows)',
+    'Task-level code indexing failures in rolling 1h windows, stacked by stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel, internal panic). Per-file failures are charted in `Code: per-file faults by kind` below.',
     DS, SEL, by=['stage'], unit='short', w=12, range='1h', or_zero=true,
+  ),
+  o.counterIncreaseBars(
+    codeFileFaults,
+    'Code: per-file faults by kind (1h windows)',
+    'Per-file failures during code indexing, stacked by kind. The task itself completes; individual files were excluded from the graph. Compare against the task-level errors panel above.',
+    DS, SEL, by=['kind'], unit='short', w=12, range='1h', or_zero=true,
   ),
   o.ratioPanel(
     'SDLC: error rate by entity (1h window)',

@@ -11,6 +11,8 @@ use oxc_linter::loader::{JavaScriptSource, PartialLoader};
 
 pub(in crate::v2::langs::custom::js) use vue::extract_vue_options_api;
 
+use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
+
 use super::constants::is_sfc_extension;
 
 pub fn has_embedded_scripts(extension: &str) -> bool {
@@ -18,14 +20,17 @@ pub fn has_embedded_scripts(extension: &str) -> bool {
 }
 
 /// Split a Single-File Component (Vue/Svelte/Astro) into its embedded
-/// `<script>` blocks. Returns an error message describing the parse
-/// failure rather than silently dropping the file.
+/// `<script>` blocks.
 pub fn extract_scripts<'a>(
     source: &'a str,
     extension: &str,
-) -> Result<Vec<JavaScriptSource<'a>>, String> {
-    PartialLoader::parse(extension, source)
-        .ok_or_else(|| format!("failed to parse embedded scripts for .{extension} file"))
+) -> Result<Vec<JavaScriptSource<'a>>, AnalyzerError> {
+    PartialLoader::parse(extension, source).ok_or_else(|| {
+        AnalyzerError::fault(
+            FileFault::EmbeddedScriptParse,
+            format!("failed to parse embedded scripts for .{extension} file"),
+        )
+    })
 }
 
 /// Source text derived from an SFC's `<script>` blocks, flattened into
@@ -50,7 +55,7 @@ pub struct CombinedScripts {
 /// `<script setup>`). Block scopes flatten into one module, which
 /// is fine for def / import / call extraction — Vue's runtime
 /// scoping rules are not what we model.
-pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts, String> {
+pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts, AnalyzerError> {
     let blocks = extract_scripts(source, extension)?;
     let mut combined = String::new();
     let mut is_typescript = false;
@@ -69,9 +74,12 @@ pub fn combine_scripts(source: &str, extension: &str) -> Result<CombinedScripts,
         if combined.len().saturating_add(block.source_text.len()) as u64
             > super::extract::MAX_FILE_BYTES
         {
-            return Err(format!(
-                "combined script blocks exceed per-file cap ({} bytes)",
-                super::extract::MAX_FILE_BYTES
+            return Err(AnalyzerError::skip(
+                FileSkip::OversizeCombined,
+                format!(
+                    "combined script blocks exceed per-file cap ({} bytes)",
+                    super::extract::MAX_FILE_BYTES
+                ),
             ));
         }
         combined.push_str(block.source_text);

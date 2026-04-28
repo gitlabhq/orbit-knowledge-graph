@@ -41,11 +41,13 @@ pub(super) use triomphe::Arc;
 
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
-use crate::v2::error::CodeGraphError;
+use crate::v2::error::{AnalyzerError, FileFault};
 use crate::v2::linker::CodeGraph;
 
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
+
+type RustFileError = (String, AnalyzerError);
 
 mod local_flow;
 mod manifest;
@@ -109,7 +111,7 @@ struct EdgeCollectionResult {
 
 struct RustParseOutput {
     parsed: Vec<ParsedRustFile>,
-    errors: Vec<PipelineError>,
+    errors: Vec<RustFileError>,
 }
 
 impl LanguagePipeline for RustPipeline {
@@ -127,7 +129,7 @@ impl LanguagePipeline for RustPipeline {
         })) {
             Ok(Ok(catalog)) => Some(catalog),
             Ok(Err(err)) => {
-                tracing::warn!(
+                tracing::debug!(
                     error = %err,
                     "rust v2 workspace load failed; falling back to standalone parsing"
                 );
@@ -142,15 +144,17 @@ impl LanguagePipeline for RustPipeline {
                 None
             }
         };
-        let output = parse_rust_files(files, root_path, workspaces.as_ref())?;
-        for error in &output.errors {
-            tracing::warn!(path = %error.file_path, error = %error.error, "rust: skipped file");
-            match crate::v2::pipeline::classify_skip_message(&error.error) {
-                Some(reason) => ctx.record_file_skipped(error.file_path.clone(), reason),
-                None => ctx.record_error(CodeGraphError::ParseFailed {
-                    path: error.file_path.clone(),
-                    message: error.error.clone(),
-                }),
+        let output = parse_rust_files(files, root_path, workspaces.as_ref());
+        for (path, error) in &output.errors {
+            match error {
+                AnalyzerError::Skip { kind, detail } => {
+                    tracing::warn!(path, kind = %kind, %detail, "rust: skipped file");
+                    ctx.record_skip(path.clone(), *kind, detail.clone());
+                }
+                AnalyzerError::Fault { kind, detail } => {
+                    tracing::warn!(path, kind = %kind, %detail, "rust: faulted file");
+                    ctx.record_fault(path.clone(), *kind, detail.clone());
+                }
             }
         }
         let parsed = output.parsed;
@@ -189,7 +193,7 @@ fn parse_rust_files(
     files: &[FileInput],
     root_path: &str,
     workspaces: Option<&WorkspaceCatalog>,
-) -> Result<RustParseOutput, Vec<PipelineError>> {
+) -> RustParseOutput {
     if let Some(workspaces) = workspaces {
         return parse_rust_files_with_workspaces(files, root_path, workspaces);
     }
@@ -201,7 +205,7 @@ fn parse_rust_files_with_workspaces(
     files: &[FileInput],
     root_path: &str,
     workspaces: &WorkspaceCatalog,
-) -> Result<RustParseOutput, Vec<PipelineError>> {
+) -> RustParseOutput {
     let mut parsed = Vec::with_capacity(files.len());
     let mut errors = Vec::new();
     let mut files_by_workspace = vec![Vec::new(); workspaces.workspaces().len()];
@@ -259,17 +263,10 @@ fn parse_rust_files_with_workspaces(
         }
     }
 
-    if parsed.is_empty() && !errors.is_empty() {
-        Err(errors)
-    } else {
-        Ok(RustParseOutput { parsed, errors })
-    }
+    RustParseOutput { parsed, errors }
 }
 
-fn parse_rust_files_standalone(
-    files: &[FileInput],
-    root_path: &str,
-) -> Result<RustParseOutput, Vec<PipelineError>> {
+fn parse_rust_files_standalone(files: &[FileInput], root_path: &str) -> RustParseOutput {
     let results = files
         .par_iter()
         .map(|file_path| {
@@ -289,23 +286,22 @@ fn parse_rust_files_standalone(
         }
     }
 
-    if parsed.is_empty() && !errors.is_empty() {
-        Err(errors)
-    } else {
-        Ok(RustParseOutput { parsed, errors })
-    }
+    RustParseOutput { parsed, errors }
 }
 
 fn catch_rust_file_panic(
     file_path: &str,
-    f: impl FnOnce() -> Result<ParsedRustFile, PipelineError>,
-) -> Result<ParsedRustFile, PipelineError> {
+    f: impl FnOnce() -> Result<ParsedRustFile, RustFileError>,
+) -> Result<ParsedRustFile, RustFileError> {
     std::panic::catch_unwind(std::panic::AssertUnwindSafe(f)).unwrap_or_else(|payload| {
-        Err(PipelineError::parse(
-            file_path,
-            format!(
-                "panic during rust analysis: {}",
-                rust_panic_message(&payload)
+        Err((
+            file_path.to_string(),
+            AnalyzerError::fault(
+                FileFault::AnalyzerPanic,
+                format!(
+                    "panic during rust analysis: {}",
+                    rust_panic_message(&payload)
+                ),
             ),
         ))
     })
@@ -325,7 +321,7 @@ fn parse_workspace_file(
     file_path: &str,
     root_path: &str,
     workspace: &WorkspaceIndex,
-) -> Result<ParsedRustFile, PipelineError> {
+) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let relative_path = relative_path(root_path, &abs_path);
 
@@ -363,17 +359,29 @@ fn parse_workspace_file(
 fn parse_rust_file_standalone(
     file_path: &str,
     root_path: &str,
-) -> Result<ParsedRustFile, PipelineError> {
+) -> Result<ParsedRustFile, RustFileError> {
     let abs_path = to_absolute_path(root_path, file_path);
     let relative_path = relative_path(root_path, &abs_path);
-    let source = std::fs::read_to_string(&abs_path)
-        .map_err(|err| PipelineError::parse(file_path, format!("Read error: {err}")))?;
+    let source = std::fs::read_to_string(&abs_path).map_err(|err| {
+        let kind = if err.kind() == std::io::ErrorKind::InvalidData {
+            FileFault::InvalidUtf8
+        } else {
+            FileFault::FileRead
+        };
+        (
+            file_path.to_string(),
+            AnalyzerError::fault(kind, err.to_string()),
+        )
+    })?;
     let file_module_parts = fallback_file_module_parts(&relative_path);
     let workspace = standalone_workspace(&relative_path, source, Path::new(root_path));
     let Some(&file_id) = workspace.file_ids_by_relative_path.get(&relative_path) else {
-        return Err(PipelineError::parse(
-            file_path,
-            "standalone rust-analyzer workspace did not materialize file",
+        return Err((
+            file_path.to_string(),
+            AnalyzerError::fault(
+                FileFault::RustWorkspaceMissing,
+                "standalone rust-analyzer workspace did not materialize file",
+            ),
         ));
     };
     let sema = Semantics::new(&workspace.db);
@@ -1085,19 +1093,25 @@ mod tests {
     }
 
     #[test]
-    fn catch_rust_file_panic_converts_to_parse_error() {
-        let err = match super::catch_rust_file_panic("src/lib.rs", || {
+    fn catch_rust_file_panic_converts_to_analyzer_panic_fault() {
+        use crate::v2::error::{AnalyzerError, FileFault};
+        let (path, err) = match super::catch_rust_file_panic("src/lib.rs", || {
             panic!("analysis exploded");
             #[allow(unreachable_code)]
             super::parse_rust_file_standalone("src/lib.rs", "/tmp")
         }) {
-            Ok(_) => panic!("panic should be converted to a parse error"),
-            Err(err) => err,
+            Ok(_) => panic!("panic should be converted to a fault"),
+            Err(pair) => pair,
         };
 
-        assert_eq!(err.file_path, "src/lib.rs");
-        assert!(err.error.contains("panic during rust analysis"));
-        assert!(err.error.contains("analysis exploded"));
+        assert_eq!(path, "src/lib.rs");
+        assert!(matches!(
+            err,
+            AnalyzerError::Fault {
+                kind: FileFault::AnalyzerPanic,
+                ref detail,
+            } if detail.contains("analysis exploded")
+        ));
     }
 
     #[test]
