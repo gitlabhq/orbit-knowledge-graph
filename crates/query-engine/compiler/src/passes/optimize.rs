@@ -380,28 +380,47 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         };
 
         let mut all_rewritable = true;
-        let mut edge_filters: Vec<Expr> = Vec::new();
+        // Collect tag values per edge column for hasAllTokens batching.
+        let mut tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
             if let Some((edge_column, tag_key)) = input.compiler.denormalized_columns.get(&key) {
-                // Only eq filters can be expressed as hasToken on the array column.
                 if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
                     all_rewritable = false;
                     break;
                 }
                 let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                let tag_value = format!("{tag_key}:{val}");
-                // Use placeholder "EDGE" — replaced with actual alias at injection site
-                edge_filters.push(Expr::func(
-                    "hasToken",
-                    vec![Expr::col("EDGE", edge_column), Expr::string(tag_value)],
-                ));
+                tags_per_column
+                    .entry(edge_column.clone())
+                    .or_default()
+                    .push(format!("{tag_key}:{val}"));
             } else {
                 all_rewritable = false;
                 break;
             }
         }
+
+        // Build filter expressions: hasToken for single tag, hasAllTokens for multiple.
+        let edge_filters: Vec<Expr> = tags_per_column
+            .into_iter()
+            .map(|(col, tags)| {
+                if tags.len() == 1 {
+                    Expr::func(
+                        "hasToken",
+                        vec![Expr::col("EDGE", &col), Expr::string(&tags[0])],
+                    )
+                } else {
+                    Expr::func(
+                        "hasAllTokens",
+                        vec![
+                            Expr::col("EDGE", &col),
+                            Expr::func("array", tags.iter().map(|t| Expr::string(t)).collect()),
+                        ],
+                    )
+                }
+            })
+            .collect();
 
         if !all_rewritable {
             continue;
@@ -579,8 +598,8 @@ fn build_neighbors_denorm_filters(
         let node = input.nodes.iter().find(|n| n.id == alias)?;
         let entity = node.entity.as_ref()?;
 
-        let mut out_filters = Vec::new();
-        let mut in_filters = Vec::new();
+        let mut out_tags_per_col: HashMap<String, Vec<String>> = HashMap::new();
+        let mut in_tags_per_col: HashMap<String, Vec<String>> = HashMap::new();
         let mut all_ok = true;
 
         for (prop_name, filter) in &node.filters {
@@ -595,14 +614,14 @@ fn build_neighbors_denorm_filters(
                         break;
                     }
                     let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                    out_filters.push(Expr::func(
-                        "hasToken",
-                        vec![Expr::col("EDGE", sc), Expr::string(format!("{sk}:{val}"))],
-                    ));
-                    in_filters.push(Expr::func(
-                        "hasToken",
-                        vec![Expr::col("EDGE", tc), Expr::string(format!("{tk}:{val}"))],
-                    ));
+                    out_tags_per_col
+                        .entry(sc.clone())
+                        .or_default()
+                        .push(format!("{sk}:{val}"));
+                    in_tags_per_col
+                        .entry(tc.clone())
+                        .or_default()
+                        .push(format!("{tk}:{val}"));
                 }
                 _ => {
                     all_ok = false;
@@ -614,8 +633,31 @@ fn build_neighbors_denorm_filters(
         if !all_ok {
             return None;
         }
-        outgoing.insert(cte_name.clone(), out_filters);
-        incoming.insert(cte_name.clone(), in_filters);
+
+        let build_exprs = |tags_per_col: HashMap<String, Vec<String>>| -> Vec<Expr> {
+            tags_per_col
+                .into_iter()
+                .map(|(col, tags)| {
+                    if tags.len() == 1 {
+                        Expr::func(
+                            "hasToken",
+                            vec![Expr::col("EDGE", &col), Expr::string(&tags[0])],
+                        )
+                    } else {
+                        Expr::func(
+                            "hasAllTokens",
+                            vec![
+                                Expr::col("EDGE", &col),
+                                Expr::func("array", tags.iter().map(|t| Expr::string(t)).collect()),
+                            ],
+                        )
+                    }
+                })
+                .collect()
+        };
+
+        outgoing.insert(cte_name.clone(), build_exprs(out_tags_per_col));
+        incoming.insert(cte_name.clone(), build_exprs(in_tags_per_col));
     }
 
     Some((outgoing, incoming))
