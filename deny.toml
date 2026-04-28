@@ -31,6 +31,10 @@ ignore = [
     # breaking change. Pulled in transitively from tantivy 0.24.2 -> lance / lance-index.
     # Remove when tantivy bumps lru (check: cargo tree -i lru@0.12.5)
     "RUSTSEC-2026-0002",
+    # astral-tokio-tar 0.6.0 symlink/PAX vulnerabilities — fix needs testcontainers >= 0.28
+    # Remove when testcontainers bumps astral-tokio-tar (check: cargo tree -i astral-tokio-tar)
+    "RUSTSEC-2026-0112",
+    "RUSTSEC-2026-0113",
 ]
 
 [licenses]

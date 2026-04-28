@@ -6,6 +6,10 @@ ignore = [
     # Transitive dev dependencies from testcontainers - no safe upgrade available
     "RUSTSEC-2025-0134", # rustls-pemfile unmaintained
     "RUSTSEC-2025-0111", # tokio-tar vulnerability (dev-only)
+    # astral-tokio-tar 0.6.0 symlink/PAX vulnerabilities — fix needs testcontainers >= 0.28
+    # Remove when testcontainers bumps astral-tokio-tar (check: cargo tree -i astral-tokio-tar)
+    "RUSTSEC-2026-0112",
+    "RUSTSEC-2026-0113",
     # jsonwebtoken pulls in rsa crate, but we ONLY use HS256 (HMAC). See #17.
     "RUSTSEC-2023-0071",
     # rustls-webpki 0.102.8 - transitive dep from async-nats, no patch for 0.102.x
