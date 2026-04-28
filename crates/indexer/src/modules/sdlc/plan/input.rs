@@ -501,22 +501,20 @@ fn resolve_standalone_edge(
             if let ExtractColumn::Bare(name) = col
                 && !name.contains('.')
             {
-                *name = format!("_base.{name}");
+                // Alias base-table columns back to their unqualified name so
+                // the DataFusion output column matches sort key expectations.
+                let qualified = format!("_base.{name} AS {name}");
+                *name = qualified;
             }
         }
         ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
     } else {
         ExtractSource::Table(config.source.clone())
     };
-    let order_by = if has_joins {
-        config
-            .order_by
-            .iter()
-            .map(|c| format!("_base.{c}"))
-            .collect()
-    } else {
-        config.order_by.clone()
-    };
+    // Don't qualify order_by -- the lowering handles SQL ORDER BY separately.
+    // The order_by field is also used for batch sort key validation where
+    // column names must match the DataFusion output (unqualified).
+    let order_by = config.order_by.clone();
     let watermark = if has_joins {
         format!("_base.{}", config.watermark)
     } else {
