@@ -134,11 +134,6 @@ etl:
       to: Group
       as: IN_GROUP
       direction: outgoing
-    assignees:
-      to: User
-      as: ASSIGNED
-      direction: incoming
-      array: true
     project_id:
       to: Project
       as: IN_PROJECT
@@ -147,11 +142,6 @@ etl:
       to: User
       as: CLOSED
       direction: incoming
-    label_ids:
-      to: Label
-      as: HAS_LABEL
-      direction: outgoing
-      array_field: label_id
 
 storage:
   primary_key: [traversal_path, id]

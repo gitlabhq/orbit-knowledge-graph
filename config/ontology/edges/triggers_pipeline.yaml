@@ -8,12 +8,12 @@ variants:
     description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
 
 etl:
-  scope: namespaced
-  source: siphon_ci_sources_pipelines
-  order_by: [traversal_path, id, partition_id]
-  from:
-    id: source_job_id
-    type: Job
-  to:
-    id: pipeline_id
-    type: Pipeline
+  - scope: namespaced
+    source: siphon_ci_sources_pipelines
+    order_by: [traversal_path, id, partition_id]
+    from:
+      id: source_job_id
+      type: Job
+    to:
+      id: pipeline_id
+      type: Pipeline

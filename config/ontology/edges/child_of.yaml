@@ -8,12 +8,12 @@ variants:
     description: "Pipeline is a downstream child of the source pipeline."
 
 etl:
-  scope: namespaced
-  source: siphon_ci_sources_pipelines
-  order_by: [traversal_path, id, partition_id]
-  from:
-    id: pipeline_id
-    type: Pipeline
-  to:
-    id: source_pipeline_id
-    type: Pipeline
+  - scope: namespaced
+    source: siphon_ci_sources_pipelines
+    order_by: [traversal_path, id, partition_id]
+    from:
+      id: pipeline_id
+      type: Pipeline
+    to:
+      id: source_pipeline_id
+      type: Pipeline
