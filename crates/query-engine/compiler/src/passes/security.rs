@@ -145,6 +145,16 @@ impl PathTrie {
             .split('/')
             .filter(|s| !s.is_empty())
             .collect();
+        // Empty paths are impossible: SecurityContext::validate_traversal_path
+        // enforces ^(\d+/)+$. Guard here to prevent the root node from being
+        // marked terminal, which would emit "" and match everything.
+        debug_assert!(
+            !segments.is_empty(),
+            "PathTrie::insert called with empty path"
+        );
+        if segments.is_empty() {
+            return;
+        }
         let mut node = self;
         for seg in segments {
             node = node.children.entry(seg.to_string()).or_default();
@@ -621,6 +631,54 @@ mod tests {
         paths.extend(refs);
         let t = PathTrie::from_paths(&paths);
         assert_eq!(t.to_minimal_prefixes(), vec!["1/10/"]);
+    }
+
+    #[test]
+    #[should_panic(expected = "empty path")]
+    fn path_trie_empty_path_panics_in_debug() {
+        // Empty paths are impossible (SecurityContext validates ^(\d+/)+$).
+        // The debug_assert catches misuse during development.
+        PathTrie::from_paths(&[""]);
+    }
+
+    #[test]
+    fn trie_collapse_after_role_filtering() {
+        // Simulate paths_at_least merging paths from different role buckets.
+        // User has:
+        //   - Reporter on 1/100/ and 1/100/200/ (parent + child)
+        //   - Developer on 1/100/200/ and 1/300/
+        //
+        // For a Reporter-floor entity, paths_at_least returns all four paths
+        // (both Reporter and Developer qualify). The trie should collapse
+        // 1/100/ + 1/100/200/ → 1/100/ (subsumption), keeping 1/300/.
+        use crate::types::TraversalPath;
+        let ctx = SecurityContext::new_with_roles(
+            1,
+            vec![
+                TraversalPath::new(String::from("1/100/"), 20),     // Reporter
+                TraversalPath::new(String::from("1/100/200/"), 20), // Reporter
+                TraversalPath::new(String::from("1/100/200/"), 30), // Developer
+                TraversalPath::new(String::from("1/300/"), 30),     // Developer
+            ],
+        )
+        .unwrap();
+
+        // Reporter-floor entity (level 20): all paths qualify
+        let eligible = ctx.paths_at_least(20);
+        assert_eq!(eligible.len(), 4);
+
+        // Trie collapses 1/100/ + 1/100/200/ → 1/100/
+        let collapsed = PathTrie::from_paths(&eligible).to_minimal_prefixes();
+        assert_eq!(collapsed, vec!["1/100/", "1/300/"]);
+
+        // build_path_filter produces the correct SQL shape
+        let filter = build_path_filter("t", &eligible);
+        let sql = format!("{filter:?}");
+        // LCP is "1/" wrapping two startsWith arms
+        assert!(
+            sql.contains("startsWith"),
+            "should produce startsWith predicates: {sql}"
+        );
     }
 
     // ─────────────────────────────────────────────────────────────────────────
