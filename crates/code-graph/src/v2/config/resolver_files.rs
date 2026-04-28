@@ -4,29 +4,51 @@
 //!
 //! - [`is_required_by_indexer`] — non-source files the resolver pipelines
 //!   (generic or custom) load directly from disk: workspace manifests,
-//!   ignore files, build configs.
+//!   ignore files, build configs. Backed by a [`globset::GlobSet`] over
+//!   [`INDEXER_REQUIRED_GLOBS`], compiled once.
 //! - [`is_extractable`] — the union of "parsable source" and
 //!   `is_required_by_indexer`. This is the contract for any caller that
 //!   filters archive entries before they reach the pipeline (the server
 //!   indexer's archive extractor, the local CLI, anything in between).
 
 use std::path::Path;
+use std::sync::LazyLock;
+
+use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::lang::Language;
 use super::registry::detect_language_from_extension;
 
-/// Exact basenames the indexer reads. Matched at any directory depth.
-pub const INDEXER_REQUIRED_BASENAMES: &[&str] = &[
+/// Glob patterns matched against the basename of each path, at any
+/// directory depth.
+///
+/// `tsconfig.*.json` / `jsconfig.*.json` cover the monorepo convention
+/// where the root config `extends` a sibling like `tsconfig.base.json`,
+/// `tsconfig.app.json`, etc. The resolver follows the chain via
+/// `extends` and reads each one.
+pub const INDEXER_REQUIRED_GLOBS: &[&str] = &[
     "Cargo.toml",
     "package.json",
+    "rust-analyzer.toml",
     "tsconfig.json",
+    "tsconfig.*.json",
     "jsconfig.json",
+    "jsconfig.*.json",
+    "webpack.config.{js,cjs,mjs,ts}",
     "bun.lock",
     "bun.lockb",
     "bunfig.toml",
     ".gitignore",
     ".ignore",
 ];
+
+static INDEXER_REQUIRED_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
+    let mut builder = GlobSetBuilder::new();
+    for pat in INDEXER_REQUIRED_GLOBS {
+        builder.add(Glob::new(pat).expect("static indexer-required glob"));
+    }
+    builder.build().expect("static indexer-required globset")
+});
 
 pub const WEBPACK_CONFIG_STEM: &str = "webpack.config";
 pub const WEBPACK_CONFIG_EXTENSIONS: &[&str] = &["js", "cjs", "mjs", "ts"];
@@ -35,19 +57,14 @@ pub const WEBPACK_CONFIG_EXTENSIONS: &[&str] = &["js", "cjs", "mjs", "ts"];
 pub const BUN_SIGNAL_FILES: &[&str] = &["bun.lock", "bun.lockb", "bunfig.toml"];
 
 /// Returns `true` when `rel_path` is a non-source file the indexer reads
-/// directly from disk. Match is on basename only.
+/// directly from disk. Match is on basename only — globs in
+/// [`INDEXER_REQUIRED_GLOBS`] are evaluated against the file name, so
+/// directory depth never matters.
 pub fn is_required_by_indexer(rel_path: &Path) -> bool {
-    let Some(name) = rel_path.file_name().and_then(|n| n.to_str()) else {
+    let Some(name) = rel_path.file_name() else {
         return false;
     };
-    INDEXER_REQUIRED_BASENAMES.contains(&name) || is_webpack_config_basename(name)
-}
-
-fn is_webpack_config_basename(basename: &str) -> bool {
-    basename
-        .strip_prefix(WEBPACK_CONFIG_STEM)
-        .and_then(|rest| rest.strip_prefix('.'))
-        .is_some_and(|ext| WEBPACK_CONFIG_EXTENSIONS.contains(&ext))
+    INDEXER_REQUIRED_GLOBSET.is_match(name)
 }
 
 /// Returns `Some(Language)` when `rel_path` would be picked up by the
@@ -97,6 +114,27 @@ mod tests {
             "tsconfig.json",
             "packages/ui/tsconfig.json",
             "jsconfig.json",
+            "rust-analyzer.toml",
+            ".cargo/rust-analyzer.toml",
+        ] {
+            assert!(is_required_by_indexer(&p(path)), "missed: {path}");
+        }
+    }
+
+    #[test]
+    fn extended_tsconfig_files_match() {
+        // Monorepo convention: tsconfig.json `extends` tsconfig.base.json
+        // / tsconfig.app.json / etc. The resolver follows the chain via
+        // `extends` and reads each file. All variants must survive.
+        for path in [
+            "tsconfig.base.json",
+            "tsconfig.app.json",
+            "tsconfig.lib.json",
+            "tsconfig.spec.json",
+            "tsconfig.build.json",
+            "tsconfig.eslint.json",
+            "packages/ui/tsconfig.base.json",
+            "jsconfig.base.json",
         ] {
             assert!(is_required_by_indexer(&p(path)), "missed: {path}");
         }
@@ -150,6 +188,11 @@ mod tests {
             "webpack.config",
             "webpack.configurator.js",
             "webpack.config.json",
+            // tsconfig glob must not over-match.
+            "tsconfig",
+            "tsconfigfoo.json",
+            "jstsconfig.json",
+            "tsconfig.toml",
         ] {
             assert!(!is_required_by_indexer(&p(path)), "wrongly kept: {path}");
         }
