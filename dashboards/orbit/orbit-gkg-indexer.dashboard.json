@@ -3643,6 +3643,108 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "Bps"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 181
+               },
+               "id": 75,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (reason) (rate(gkg_indexer_code_archive_bytes_skipped_bytes_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{reason}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_archive_bytes_skipped_bytes_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Tar archive entries dropped before extraction so they never touch disk. Reasons: `excluded_extension` (basename matches the binary-asset / media / archive denylist in `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the configured per-file ceiling).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 181
+               },
+               "id": 76,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (reason) (rate(gkg_indexer_code_archive_entries_skipped_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{reason}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_indexer_code_archive_entries_skipped_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
                "fieldConfig": {
                   "defaults": {
@@ -3658,10 +3760,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 181
                },
-               "id": 75,
+               "id": 77,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3709,10 +3811,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 181
+                  "x": 0,
+                  "y": 189
                },
-               "id": 76,
+               "id": 78,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3760,10 +3862,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 181
+                  "x": 8,
+                  "y": 189
                },
-               "id": 77,
+               "id": 79,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3811,10 +3913,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 189
                },
-               "id": 78,
+               "id": 80,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3862,10 +3964,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 189
+                  "x": 0,
+                  "y": 197
                },
-               "id": 79,
+               "id": 81,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3913,10 +4015,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 189
+                  "x": 8,
+                  "y": 197
                },
-               "id": 80,
+               "id": 82,
                "options": {
                   "legend": {
                      "calcs": [
@@ -3982,10 +4084,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 197
                },
-               "id": 81,
+               "id": 83,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4033,10 +4135,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 197
+                  "x": 0,
+                  "y": 205
                },
-               "id": 82,
+               "id": 84,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4102,10 +4204,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 197
+                  "x": 8,
+                  "y": 205
                },
-               "id": 83,
+               "id": 85,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4153,10 +4255,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 205
                },
-               "id": 84,
+               "id": 86,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4204,10 +4306,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 205
+                  "x": 0,
+                  "y": 213
                },
-               "id": 85,
+               "id": 87,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4255,10 +4357,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 205
+                  "x": 8,
+                  "y": 213
                },
-               "id": 86,
+               "id": 88,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4306,10 +4408,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 213
                },
-               "id": 87,
+               "id": 89,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4375,10 +4477,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 213
+                  "x": 0,
+                  "y": 221
                },
-               "id": 88,
+               "id": 90,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4426,10 +4528,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 213
+                  "x": 8,
+                  "y": 221
                },
-               "id": 89,
+               "id": 91,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4477,10 +4579,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 16,
                   "y": 221
                },
-               "id": 90,
+               "id": 92,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4528,10 +4630,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
-                  "y": 221
+                  "x": 0,
+                  "y": 229
                },
-               "id": 91,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4597,10 +4699,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 221
+                  "x": 8,
+                  "y": 229
                },
-               "id": 92,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4638,9 +4740,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 229
+            "y": 237
          },
-         "id": 93,
+         "id": 95,
          "panels": [
             {
                "datasource": {
@@ -4663,9 +4765,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 230
+                  "y": 238
                },
-               "id": 94,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4714,9 +4816,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 230
+                  "y": 238
                },
-               "id": 95,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4783,9 +4885,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 230
+                  "y": 238
                },
-               "id": 96,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4834,9 +4936,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 238
+                  "y": 246
                },
-               "id": 97,
+               "id": 99,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4903,9 +5005,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 238
+                  "y": 246
                },
-               "id": 98,
+               "id": 100,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4954,9 +5056,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 238
+                  "y": 246
                },
-               "id": 99,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5023,9 +5125,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 246
+                  "y": 254
                },
-               "id": 100,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5074,9 +5176,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 246
+                  "y": 254
                },
-               "id": 101,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5125,9 +5227,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 246
+                  "y": 254
                },
-               "id": 102,
+               "id": 104,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5176,9 +5278,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 254
+                  "y": 262
                },
-               "id": 103,
+               "id": 105,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5245,9 +5347,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 254
+                  "y": 262
                },
-               "id": 104,
+               "id": 106,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5296,9 +5398,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 254
+                  "y": 262
                },
-               "id": 105,
+               "id": 107,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5336,9 +5438,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 262
+            "y": 270
          },
-         "id": 106,
+         "id": 108,
          "panels": [
             {
                "datasource": {
@@ -5361,9 +5463,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 263
+                  "y": 271
                },
-               "id": 107,
+               "id": 109,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5430,9 +5532,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 263
+                  "y": 271
                },
-               "id": 108,
+               "id": 110,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5481,9 +5583,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 263
+                  "y": 271
                },
-               "id": 109,
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5521,9 +5623,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 271
+            "y": 279
          },
-         "id": 110,
+         "id": 112,
          "panels": [
             {
                "datasource": {
@@ -5546,9 +5648,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 272
+                  "y": 280
                },
-               "id": 111,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5615,9 +5717,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 272
+                  "y": 280
                },
-               "id": 112,
+               "id": 114,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5666,9 +5768,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 272
+                  "y": 280
                },
-               "id": 113,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5717,9 +5819,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 280
+                  "y": 288
                },
-               "id": 114,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5786,9 +5888,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 280
+                  "y": 288
                },
-               "id": 115,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5837,9 +5939,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 280
+                  "y": 288
                },
-               "id": 116,
+               "id": 118,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5888,9 +5990,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 288
+                  "y": 296
                },
-               "id": 117,
+               "id": 119,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5939,9 +6041,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 288
+                  "y": 296
                },
-               "id": 118,
+               "id": 120,
                "options": {
                   "legend": {
                      "calcs": [

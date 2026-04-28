@@ -271,15 +271,14 @@ mod tests {
         service: Arc<ScriptedRepositoryService>,
     ) -> (tempfile::TempDir, RepositoryResolver) {
         let temp_dir = tempfile::TempDir::new().unwrap();
+        let metrics = CodeMetrics::default();
         let cache: Arc<dyn RepositoryCache> = Arc::new(LocalRepositoryCache::new(
             temp_dir.path().to_path_buf(),
             u64::MAX,
+            metrics.clone(),
         ));
-        let resolver = RepositoryResolver::new(
-            service as Arc<dyn RepositoryService>,
-            cache,
-            CodeMetrics::default(),
-        );
+        let resolver =
+            RepositoryResolver::new(service as Arc<dyn RepositoryService>, cache, metrics);
         (temp_dir, resolver)
     }
 

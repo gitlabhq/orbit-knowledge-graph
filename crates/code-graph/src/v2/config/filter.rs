@@ -77,6 +77,17 @@ mod tests {
     }
 
     #[test]
+    fn min_js_suffix_does_not_match_unrelated_filenames() {
+        // The `.min.js` exclude must require a literal dot before `min.js`,
+        // otherwise common identifiers ending in those characters get
+        // dropped by accident.
+        assert!(is_parsable(&p("src/admin.js")));
+        assert!(is_parsable(&p("src/gemini.js")));
+        assert!(is_parsable(&p("src/vitamin.js")));
+        assert!(is_parsable(&p("src/examine.js")));
+    }
+
+    #[test]
     fn parsable_language_returns_correct_language() {
         assert_eq!(parsable_language(&p("a.rs")), Some(Language::Rust));
         assert_eq!(parsable_language(&p("a.py")), Some(Language::Python));

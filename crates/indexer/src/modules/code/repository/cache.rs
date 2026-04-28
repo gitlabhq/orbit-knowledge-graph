@@ -8,6 +8,7 @@ use tokio_util::io::{StreamReader, SyncIoBridge};
 
 use super::service::ByteStream;
 use crate::modules::code::archive::{ArchiveError, extract_tar_gz_from_reader};
+use crate::modules::code::metrics::CodeMetrics;
 
 #[derive(Debug, thiserror::Error)]
 pub enum RepositoryCacheError {
@@ -45,19 +46,15 @@ pub struct LocalRepositoryCache {
     /// larger than this — and files the parser would never accept — are
     /// dropped while still in the tar stream so they never touch disk.
     max_file_size: u64,
-}
-
-impl Default for LocalRepositoryCache {
-    fn default() -> Self {
-        Self::new(Self::default_dir(), u64::MAX)
-    }
+    metrics: CodeMetrics,
 }
 
 impl LocalRepositoryCache {
-    pub fn new(base_dir: PathBuf, max_file_size: u64) -> Self {
+    pub fn new(base_dir: PathBuf, max_file_size: u64, metrics: CodeMetrics) -> Self {
         Self {
             base_dir,
             max_file_size,
+            metrics,
         }
     }
 
@@ -102,10 +99,19 @@ impl RepositoryCache for LocalRepositoryCache {
         let handle = tokio::runtime::Handle::current();
         let repo_dir_owned = repo_dir.clone();
         let max_file_size = self.max_file_size;
+        let metrics = self.metrics.clone();
         tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
             extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
-                size <= max_file_size && is_parsable(rel_path)
+                if size > max_file_size {
+                    metrics.record_archive_entry_skipped("oversize", size);
+                    return false;
+                }
+                if !is_parsable(rel_path) {
+                    metrics.record_archive_entry_skipped("non_parsable", size);
+                    return false;
+                }
+                true
             })
         })
         .await
@@ -144,7 +150,11 @@ mod tests {
 
     fn create_cache_with_size(max_file_size: u64) -> (TempDir, LocalRepositoryCache) {
         let temp_dir = TempDir::new().unwrap();
-        let cache = LocalRepositoryCache::new(temp_dir.path().to_path_buf(), max_file_size);
+        let cache = LocalRepositoryCache::new(
+            temp_dir.path().to_path_buf(),
+            max_file_size,
+            CodeMetrics::default(),
+        );
         (temp_dir, cache)
     }
 
