@@ -537,6 +537,8 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_internal internal TYPE minmax GRANULARITY 1,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_note note TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_discussion_id discussion_id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -812,6 +814,8 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
