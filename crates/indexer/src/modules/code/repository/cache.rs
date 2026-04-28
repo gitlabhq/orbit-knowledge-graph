@@ -1,7 +1,7 @@
 use std::path::PathBuf;
 
 use async_trait::async_trait;
-use code_graph::v2::config::is_parsable;
+use code_graph::v2::config::is_excluded_from_indexing;
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -104,8 +104,8 @@ impl RepositoryCache for LocalRepositoryCache {
                     metrics.record_archive_entry_skipped("oversize", size);
                     return false;
                 }
-                if !is_parsable(rel_path) {
-                    metrics.record_archive_entry_skipped("non_parsable", size);
+                if is_excluded_from_indexing(rel_path) {
+                    metrics.record_archive_entry_skipped("excluded_extension", size);
                     return false;
                 }
                 true
@@ -356,12 +356,28 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn extract_archive_skips_non_parsable_files() {
+    async fn extract_archive_drops_excluded_extensions_and_keeps_resolver_inputs() {
         let (_dir, cache) = create_cache();
         let archive = build_tar_gz(&[
+            // Source.
             ("project-abc/src/main.rs", b"fn main() {}"),
+            // Excluded extensions: dropped at extraction.
             ("project-abc/assets/logo.png", b"\x89PNG\r\n\x1a\nfake"),
-            ("project-abc/Cargo.lock", b"# generated lockfile"),
+            ("project-abc/static/banner.gif", b"GIF89a"),
+            ("project-abc/fonts/Inter.woff2", b""),
+            ("project-abc/dist/build.zip", b"PK"),
+            // Resolver inputs: must survive even though they aren't
+            // parsable source. Inclusion filters historically dropped
+            // these and silently broke cross-crate / cross-module
+            // resolution.
+            (
+                "project-abc/Cargo.toml",
+                b"[workspace]\nmembers = [\"src/foo\"]\n",
+            ),
+            ("project-abc/Cargo.lock", b"# generated"),
+            ("project-abc/package.json", b"{}\n"),
+            ("project-abc/tsconfig.json", b"{\"compilerOptions\":{}}\n"),
+            ("project-abc/.gitignore", b"target/\n"),
             ("project-abc/README.md", b"# Title"),
         ]);
 
@@ -370,10 +386,22 @@ mod tests {
             .await
             .unwrap();
 
+        // Source kept.
         assert!(path.join("src/main.rs").exists());
+        // Excluded extensions dropped.
         assert!(!path.join("assets/logo.png").exists());
-        assert!(!path.join("Cargo.lock").exists());
-        assert!(!path.join("README.md").exists());
+        assert!(!path.join("static/banner.gif").exists());
+        assert!(!path.join("fonts/Inter.woff2").exists());
+        assert!(!path.join("dist/build.zip").exists());
+        // Resolver inputs preserved.
+        assert!(path.join("Cargo.toml").exists());
+        assert!(path.join("Cargo.lock").exists());
+        assert!(path.join("package.json").exists());
+        assert!(path.join("tsconfig.json").exists());
+        assert!(path.join(".gitignore").exists());
+        // Anything outside the denylist passes through, even if the
+        // parser will ignore it later.
+        assert!(path.join("README.md").exists());
     }
 
     #[tokio::test]
@@ -393,26 +421,6 @@ mod tests {
         assert!(
             !path.join("big.rs").exists(),
             "files larger than max_file_size must not be written to disk"
-        );
-    }
-
-    #[tokio::test]
-    async fn extract_archive_skips_excluded_suffixes() {
-        let (_dir, cache) = create_cache();
-        let archive = build_tar_gz(&[
-            ("project-abc/src/app.js", b"console.log(1)"),
-            ("project-abc/vendor/jquery.min.js", b"!function(){}"),
-        ]);
-
-        let path = cache
-            .extract_archive(7, "main", archive_stream(archive))
-            .await
-            .unwrap();
-
-        assert!(path.join("src/app.js").exists());
-        assert!(
-            !path.join("vendor/jquery.min.js").exists(),
-            "*.min.js suffix must be filtered before extraction"
         );
     }
 }

@@ -1,8 +1,24 @@
 //! Path-based predicates for deciding whether a file is worth feeding to the
-//! pipeline. Used both by `walk_and_group` after extraction and by the
-//! archive extractor before bytes touch disk so the two stages stay in sync.
+//! pipeline.
+//!
+//! Two use sites:
+//!
+//! - [`parsable_language`] / [`is_parsable`] — used by `walk_and_group`
+//!   after extraction to decide which language to dispatch a file to.
+//! - [`is_excluded_from_indexing`] — used by the archive extractor
+//!   before bytes touch disk. Exclusion-based by design: we drop only
+//!   files we are confident the indexer never needs (binary assets,
+//!   media, fonts, archives, compiled artifacts), and let everything
+//!   else through. The blast radius of a miss in the denylist is "we
+//!   extract a few extra bytes," not "we break a resolver." Inclusion
+//!   filters here historically broke resolvers that load
+//!   `Cargo.toml` / `package.json` / `tsconfig.json` / `.gitignore`
+//!   from disk after extraction.
 
 use std::path::Path;
+use std::sync::LazyLock;
+
+use globset::{Glob, GlobSet, GlobSetBuilder};
 
 use super::lang::Language;
 use super::registry::detect_language_from_extension;
@@ -30,6 +46,58 @@ pub fn parsable_language(rel_path: &Path) -> Option<Language> {
 /// Returns `true` when `rel_path` would be picked up by the parsing pipeline.
 pub fn is_parsable(rel_path: &Path) -> bool {
     parsable_language(rel_path).is_some()
+}
+
+/// Glob patterns the archive extractor refuses to write to disk.
+///
+/// Curated denylist of obvious binary blobs and rendered output where
+/// no current or near-term resolver could plausibly want the bytes.
+/// **Source files, manifests, lockfiles, dotfiles, and unknown
+/// extensions are intentionally NOT here** — letting them through
+/// preserves resolver inputs (`Cargo.toml`, `package.json`,
+/// `tsconfig.json`, `.gitignore`, etc.) without an inclusion list that
+/// has to be kept in sync with every new resolver.
+///
+/// Patterns are case-insensitive (`*.PNG` is dropped just like `*.png`)
+/// and matched against the basename of each archive entry.
+pub const EXCLUDED_INDEXING_GLOBS: &[&str] = &[
+    // Raster + vector images.
+    "*.{png,jpg,jpeg,gif,bmp,ico,webp,avif,tiff,tif,svg}",
+    // Fonts.
+    "*.{ttf,otf,woff,woff2,eot}",
+    // Audio / video.
+    "*.{mp3,mp4,mov,webm,ogg,wav,flac,m4a,m4v,avi,mkv,opus}",
+    // Archives.
+    "*.{zip,tar,gz,tgz,bz2,xz,7z,rar,lz4,zst}",
+    // Compiled artifacts.
+    "*.{exe,dll,so,dylib,class,jar,war,pyc,pyo,o,a,lib}",
+    // Documents.
+    "*.{pdf,doc,docx,xls,xlsx,ppt,pptx,odt,ods,odp}",
+    // Datastores / disk images.
+    "*.{db,sqlite,sqlite3,iso,dmg,bin,dat}",
+];
+
+static EXCLUDED_INDEXING_GLOBSET: LazyLock<GlobSet> = LazyLock::new(|| {
+    let mut builder = GlobSetBuilder::new();
+    for pat in EXCLUDED_INDEXING_GLOBS {
+        builder.add(Glob::new(pat).expect("static excluded-indexing glob"));
+    }
+    builder.build().expect("static excluded-indexing globset")
+});
+
+/// Returns `true` when the archive extractor should refuse to write
+/// `rel_path` to disk. Match is case-insensitive and on basename only.
+///
+/// This is exclusion-based: a `false` here just means the extractor
+/// keeps the file. Resolver inputs (manifests, `.gitignore`, etc.)
+/// fall in the `false` bucket because they are not in the denylist,
+/// without needing to be enumerated upfront.
+pub fn is_excluded_from_indexing(rel_path: &Path) -> bool {
+    let Some(name) = rel_path.file_name() else {
+        return false;
+    };
+    let lowered = name.to_string_lossy().to_lowercase();
+    EXCLUDED_INDEXING_GLOBSET.is_match(&lowered)
 }
 
 #[cfg(test)]
@@ -82,6 +150,71 @@ mod tests {
         assert!(is_parsable(&p("src/gemini.js")));
         assert!(is_parsable(&p("src/vitamin.js")));
         assert!(is_parsable(&p("src/examine.js")));
+    }
+
+    #[test]
+    fn excluded_extensions_are_dropped() {
+        for path in [
+            "assets/logo.png",
+            "icons/star.svg",
+            "img/photo.JPG",
+            "fonts/Inter.woff2",
+            "audio/track.mp3",
+            "video/intro.mp4",
+            "dist/bundle.zip",
+            "build/lib.so",
+            "out/app.exe",
+            "vendor/cache.tar.gz",
+            "docs/spec.pdf",
+            "data/seed.sqlite",
+        ] {
+            assert!(
+                is_excluded_from_indexing(&p(path)),
+                "should be excluded: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn resolver_inputs_and_source_pass_through_exclusion() {
+        // The denylist must NOT touch any of these — that's the whole
+        // point of going exclusion-based instead of inclusion-based.
+        for path in [
+            "src/main.rs",
+            "frontend/src/index.ts",
+            "Cargo.toml",
+            "Cargo.lock",
+            "package.json",
+            "tsconfig.json",
+            "tsconfig.base.json",
+            "frontend/yarn.lock",
+            "config/webpack.config.js",
+            ".gitignore",
+            "frontend/.gitignore",
+            ".ignore",
+            "rust-analyzer.toml",
+            "README.md",
+            "Makefile",
+            "LICENSE",
+        ] {
+            assert!(
+                !is_excluded_from_indexing(&p(path)),
+                "should NOT be excluded: {path}"
+            );
+        }
+    }
+
+    #[test]
+    fn excluded_extensions_match_case_insensitively() {
+        assert!(is_excluded_from_indexing(&p("LOGO.PNG")));
+        assert!(is_excluded_from_indexing(&p("Image.JpEg")));
+        assert!(is_excluded_from_indexing(&p("BUNDLE.ZIP")));
+    }
+
+    #[test]
+    fn excluded_extensions_match_at_any_depth() {
+        assert!(is_excluded_from_indexing(&p("a/b/c/d/icon.png")));
+        assert!(is_excluded_from_indexing(&p("static/fonts/x/Inter.ttf")));
     }
 
     #[test]
