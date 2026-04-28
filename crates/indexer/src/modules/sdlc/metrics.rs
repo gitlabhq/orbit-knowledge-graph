@@ -47,10 +47,16 @@ impl SdlcMetrics {
         );
     }
 
-    pub(super) fn record_pipeline_completion(&self, entity: &str, duration: f64, rows: u64) {
+    pub(super) fn record_pipeline_completion(&self, entity: &str, duration: f64) {
         let labels = [KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())];
         self.pipeline_duration.record(duration, &labels);
-        self.pipeline_rows_processed.add(rows, &labels);
+    }
+
+    pub(super) fn record_batch_rows(&self, entity: &str, rows: u64) {
+        self.pipeline_rows_processed.add(
+            rows,
+            &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
+        );
     }
 
     pub(super) fn record_datalake_query(&self, entity: &str, duration: f64, bytes: u64) {
