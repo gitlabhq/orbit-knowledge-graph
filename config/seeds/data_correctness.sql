@@ -144,11 +144,15 @@ INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) V
     (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/'),
     (1010, 'Deep Project', 'public-group/deep-a/deep-project', 'public', '1/100/200/1010/');
 
-INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
-    (2000, 1, 'Add feature A', 'opened', 'feature-a', 'main', '1/100/1000/'),
-    (2001, 2, 'Fix bug B', 'opened', 'fix-b', 'main', '1/100/1000/'),
-    (2002, 3, 'Refactor C', 'merged', 'refactor-c', 'main', '1/101/1001/'),
-    (2003, 4, 'Update D', 'closed', 'update-d', 'main', '1/102/1004/');
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, merged_at, traversal_path) VALUES
+    (2000, 1, 'Add feature A', 'opened',  'feature-a',  'main', NULL,                          '1/100/1000/'),
+    (2001, 2, 'Fix bug B',     'opened',  'fix-b',      'main', NULL,                          '1/100/1000/'),
+    (2002, 3, 'Refactor C',    'merged',  'refactor-c', 'main', toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC'), '1/101/1001/'),
+    (2003, 4, 'Update D',      'closed',  'update-d',   'main', NULL,                          '1/102/1004/'),
+    -- Two extra merged MRs let the data-correctness test pin a specific
+    -- result for `merged_at >= 2024-06-01` (2004 + 2005, deterministic order).
+    (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), '1/100/1000/'),
+    (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), '1/100/1000/');
 
 INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, traversal_path) VALUES
     (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', '1/100/1000/'),

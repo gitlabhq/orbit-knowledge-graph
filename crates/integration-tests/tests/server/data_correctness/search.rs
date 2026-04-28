@@ -489,3 +489,124 @@ pub(super) async fn search_combined_filter_node_ids_order_by(ctx: &TestContext) 
     resp.assert_filter("User", "state", |n| n.prop_str("state") == Some("active"));
     resp.assert_node_absent("User", 5);
 }
+
+/// Regression: a DateTime64 filter literal must bind as the typed CH param,
+/// otherwise CH rejects the implicit String cast with TYPE_MISMATCH (Code 53).
+pub(super) async fn search_filter_gte_on_datetime_returns_matching_rows(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": {"op": "gte", "value": "2024-06-01T00:00:00Z"}
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2005, 2004]);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some_and(|s| s >= "2024-06-01")
+    });
+    resp.assert_node_absent("MergeRequest", 2002);
+}
+
+pub(super) async fn search_filter_lte_on_datetime_returns_matching_rows(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": {"op": "lte", "value": "2024-07-01T00:00:00Z"}
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(2);
+    resp.assert_node_order("MergeRequest", &[2004, 2002]);
+    resp.assert_node_absent("MergeRequest", 2005);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some_and(|s| s <= "2024-07-01")
+    });
+}
+
+// 2004 is seeded at 2024-06-10 09:00:00, so strict `lt 2024-06-10` (parsed as
+// midnight) excludes it: only 2002 (2024-03-15) qualifies.
+pub(super) async fn search_filter_lt_on_datetime_excludes_same_day_after_midnight(
+    ctx: &TestContext,
+) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "state": {"op": "eq", "value": "merged"},
+                         "merged_at": {"op": "lt", "value": "2024-06-10T00:00:00Z"}
+                     }},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(1);
+    resp.assert_node_order("MergeRequest", &[2002]);
+    resp.assert_node_absent("MergeRequest", 2004);
+    resp.assert_node_absent("MergeRequest", 2005);
+    resp.assert_filter("MergeRequest", "state", |n| {
+        n.prop_str("state") == Some("merged")
+    });
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some_and(|s| s < "2024-06-10")
+    });
+}
+
+pub(super) async fn search_filter_is_not_null_on_datetime_returns_merged_rows(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest",
+                     "id_range": {"start": 1, "end": 10000},
+                     "columns": ["title", "state", "merged_at"],
+                     "filters": {
+                         "merged_at": {"op": "is_not_null"}
+                     }},
+            "order_by": {"node": "mr", "property": "merged_at", "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(3);
+    resp.assert_node_order("MergeRequest", &[2005, 2004, 2002]);
+    resp.assert_filter("MergeRequest", "merged_at", |n| {
+        n.prop_str("merged_at").is_some()
+    });
+}

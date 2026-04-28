@@ -2802,6 +2802,7 @@ mod tests {
                         crate::input::InputFilter {
                             op: None,
                             value: Some(serde_json::json!("merged")),
+                            ..Default::default()
                         },
                     )]
                     .into(),

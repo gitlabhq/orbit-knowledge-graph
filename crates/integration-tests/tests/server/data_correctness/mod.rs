@@ -44,6 +44,10 @@ async fn data_correctness() {
         search::search_limit_truncates_results,
         search::search_filter_no_match_returns_empty,
         search::search_combined_filter_node_ids_order_by,
+        search::search_filter_gte_on_datetime_returns_matching_rows,
+        search::search_filter_lte_on_datetime_returns_matching_rows,
+        search::search_filter_lt_on_datetime_excludes_same_day_after_midnight,
+        search::search_filter_is_not_null_on_datetime_returns_merged_rows,
         // traversal
         traversal::traversal_user_group_returns_correct_pairs_and_edges,
         traversal::traversal_three_hop_returns_all_user_group_project_paths,

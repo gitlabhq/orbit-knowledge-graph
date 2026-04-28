@@ -400,10 +400,13 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// Populated by the validate pass; lets the lowerer bind temporal columns
+    /// with their typed CH param.
+    pub data_type: Option<ontology::DataType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -438,11 +441,13 @@ fn parse_filter(value: Value) -> InputFilter {
         return InputFilter {
             op: Some(op),
             value: obj.get("value").cloned(),
+            ..Default::default()
         };
     }
     InputFilter {
         op: None,
         value: Some(value),
+        ..Default::default()
     }
 }
 
