@@ -60,7 +60,10 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
                 fold_filters_into_aggregates(q, input);
                 prune_unreferenced_node_joins(q, input);
             }
-            if input.query_type == QueryType::Traversal {
+            if matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            ) {
                 apply_traversal_hop_frontiers(q, input);
             }
             if input.query_type == QueryType::PathFinding {
@@ -622,13 +625,6 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         // chain CTEs through relationships so every edge AND node table scan
         // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
         // the cascade CTE itself would scan as many edge rows as the main query.
-        //
-        // NOTE: this only runs for Aggregation (Traversal returns early above).
-        // Traversal's `cascade_node_filter_ctes` handles single-hop cascades
-        // but not multi-hop. Extending it to use `build_multihop_cascade_for_node`
-        // would cover multi-rel + multi-hop traversals (e.g. Project[pinned]
-        // --CONTAINS(max_hops:2)--> File --DEFINES--> Definition), but that
-        // combination is rare enough to defer until profiling shows a need.
         if !has_explicit_selectivity {
             continue;
         }
@@ -1382,16 +1378,31 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 continue; // already cascaded
             }
 
-            let cte_query = match build_cascade_for_node(
-                input,
-                target_id,
-                edge_select_col,
-                edge_filter_col,
-                &source_cte,
-                &rel.types,
-            ) {
-                Some(q) => q,
-                None => continue,
+            let cte_query = if rel.max_hops > 1 {
+                match build_multihop_cascade_for_node(
+                    input,
+                    target_id,
+                    edge_select_col,
+                    edge_filter_col,
+                    &source_cte,
+                    &rel.types,
+                    rel.max_hops,
+                ) {
+                    Some(q) => q,
+                    None => continue,
+                }
+            } else {
+                match build_cascade_for_node(
+                    input,
+                    target_id,
+                    edge_select_col,
+                    edge_filter_col,
+                    &source_cte,
+                    &rel.types,
+                ) {
+                    Some(q) => q,
+                    None => continue,
+                }
             };
             q.ctes.push(Cte::new(&cascade_name, cte_query));
 
@@ -1503,7 +1514,10 @@ fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
 /// - Arm depth=2: `e2.{start_col} IN (SELECT id FROM _thop{i}_1)`
 /// - Arm depth=3: `e3.{start_col} IN (SELECT id FROM _thop{i}_2)`
 fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
-    if input.query_type != QueryType::Traversal {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
         return;
     }
 
