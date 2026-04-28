@@ -1,3 +1,6 @@
+# E2E test driver: pins ai-review-bot to feat/anthropic-api-key for validation.
+# See: https://gitlab.com/gitlab-org/orbit/experiments/ai-review-bot/-/merge_requests/12
+# This file change will be reverted when the bot MR merges.
 variables:
   CANONICAL_PROJECT_ID: "77960826"
   SECURITY_PROJECT_ID: "80999258"
@@ -45,7 +48,8 @@ include:
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
-  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
+    ref: 'feat/anthropic-api-key'
+  - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@feat/anthropic-api-key
     inputs:
       automatic: manual
       labels_enabled: "false"
