@@ -302,7 +302,7 @@ fn lower_edge_select(
     }
 
     for (col_name, tag_exprs) in tag_groups {
-        let array_expr = format!("arrayFilter(x -> x != '', array({}))", tag_exprs.join(", "));
+        let array_expr = format!("array({})", tag_exprs.join(", "));
         cols.push(SelectExpr::new(Expr::raw(array_expr), &col_name));
     }
 

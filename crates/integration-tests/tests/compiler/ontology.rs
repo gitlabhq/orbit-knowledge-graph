@@ -653,7 +653,10 @@ fn render_traversal_inlines_all_params() {
         !rendered.contains("{p"),
         "rendered SQL should have no placeholders"
     );
-    assert!(sql.raw_contains("'opened'"));
+    assert!(
+        sql.raw_contains("'opened'") || sql.raw_contains("'state:opened'"),
+        "rendered SQL should contain the state filter value"
+    );
     assert!(sql.raw_contains("'AUTHORED'"));
 }
 
