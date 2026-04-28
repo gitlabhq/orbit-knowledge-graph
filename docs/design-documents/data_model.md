@@ -88,6 +88,9 @@ graph TD
     User -- MERGED --> MergeRequest
     User -- REVIEWER --> MergeRequest
     User -- CLOSED --> WorkItem
+    User -- CLOSED --> MergeRequest
+    User -- REOPENED --> WorkItem
+    User -- REOPENED --> MergeRequest
 ```
 
 ### Implemented Relationship Types
@@ -105,8 +108,9 @@ graph TD
 | `TARGETS`                           | `MergeRequest` | `Branch`       | A merge request targets a specific branch.                                                              |
 | `CLOSES`                            | `MergeRequest` | `WorkItem`     | A merge request closes a work item.                                                                     |
 | `TRIGGERED`                         | `Pipeline`     | `MergeRequest`, `Branch` | A pipeline was triggered for a merge request or a branch push.                                  |
-| `CLOSED`                            | `User`         | `WorkItem`     | A user closed a work item.                                                                              |
-| `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request.                                                                          |
+| `CLOSED`                            | `User`         | `WorkItem`, `MergeRequest` | A user closed a work item or merge request. Sourced from the `closed_by_id`/`metric_latest_closed_by_id` FK columns on the node tables, and supplemented by `system_note_metadata` entries with `action = 'closed'` (see Stage 1 lifecycle edges, kg#499). |
+| `MERGED`                            | `User`         | `MergeRequest` | A user merged a merge request. Sourced from `merge_user_id` FK on the MergeRequest node and from `system_note_metadata` entries with `action = 'merged'` (see Stage 1 lifecycle edges, kg#499). |
+| `REOPENED`                          | `User`         | `WorkItem`, `MergeRequest` | A user reopened a work item or merge request. Sourced from `system_note_metadata` entries with `action = 'reopened'` via the `siphon_system_note_metadata` Siphon table (requires Analytics team to enable replication; see kg#499). |
 | `APPROVED`                          | `User`         | `MergeRequest` | A user approved a merge request.                                                                        |
 | `REVIEWER`                          | `User`         | `MergeRequest` | A user is a reviewer of a merge request.                                                                |
 | `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |

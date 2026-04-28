@@ -10,5 +10,9 @@
     "conventional-changelog-conventionalcommits": "9.3.1",
     "semantic-release": "25.0.3",
     "semantic-release-slack-bot": "4.0.2"
+  },
+  "dependencies": {
+    "@commitlint/cli": "^20.5.2",
+    "@commitlint/config-conventional": "^20.5.0"
   }
 }

@@ -1225,6 +1225,80 @@ PRIMARY KEY (traversal_path, issue_id, user_id)
 ORDER BY (traversal_path, issue_id, user_id)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild';
 
+-- Siphon source table for system note metadata (action discriminator for system notes)
+-- Mirrors monolith: db/structure.sql `system_note_metadata` table.
+-- Not yet replicated in production Siphon config — requires Analytics team coordination
+-- (see https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/499).
+-- Added here so GKG can reference it once replication is enabled.
+CREATE TABLE IF NOT EXISTS siphon_system_note_metadata
+(
+    `id` Int64,
+    `note_id` Int64,
+    `action` LowCardinality(String),
+    `commit_count` Nullable(Int32),
+    `created_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `updated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `namespace_id` Nullable(Int64),
+    `traversal_path` String DEFAULT '0/',
+    `_siphon_replicated_at` DateTime64(6, 'UTC') DEFAULT now(),
+    `_siphon_deleted` Bool DEFAULT false,
+    INDEX idx_action (action) TYPE set(16) GRANULARITY 2
+)
+ENGINE = ReplacingMergeTree(_siphon_replicated_at, _siphon_deleted)
+PRIMARY KEY (traversal_path, note_id)
+ORDER BY (traversal_path, note_id, id)
+SETTINGS index_granularity = 2048;
+
+-- Denormalized views joining system note metadata with its parent note,
+-- one per lifecycle action.  Each view exposes:
+-- who (author_id) performed the action on which entity
+-- (noteable_id / noteable_type) within a namespace (traversal_path).
+-- These are the source tables for the MERGED, CLOSED, and REOPENED lifecycle
+-- edge ETL plans.  The per-action split is necessary because the standalone
+-- edge ETL does not support WHERE-clause filtering; each view pre-filters to
+-- a single action value so the edge plan can reference it directly.
+CREATE VIEW IF NOT EXISTS siphon_system_note_merged AS
+SELECT
+    snm.id                        AS id,
+    snm.note_id                   AS note_id,
+    sn.author_id                  AS author_id,
+    sn.noteable_id                AS noteable_id,
+    sn.noteable_type              AS noteable_type,
+    snm.traversal_path            AS traversal_path,
+    snm._siphon_replicated_at     AS _siphon_replicated_at,
+    snm._siphon_deleted           AS _siphon_deleted
+FROM siphon_system_note_metadata snm
+INNER JOIN siphon_notes sn USING (note_id)
+WHERE snm.action = 'merged';
+
+CREATE VIEW IF NOT EXISTS siphon_system_note_closed AS
+SELECT
+    snm.id                        AS id,
+    snm.note_id                   AS note_id,
+    sn.author_id                  AS author_id,
+    sn.noteable_id                AS noteable_id,
+    sn.noteable_type              AS noteable_type,
+    snm.traversal_path            AS traversal_path,
+    snm._siphon_replicated_at     AS _siphon_replicated_at,
+    snm._siphon_deleted           AS _siphon_deleted
+FROM siphon_system_note_metadata snm
+INNER JOIN siphon_notes sn USING (note_id)
+WHERE snm.action = 'closed';
+
+CREATE VIEW IF NOT EXISTS siphon_system_note_reopened AS
+SELECT
+    snm.id                        AS id,
+    snm.note_id                   AS note_id,
+    sn.author_id                  AS author_id,
+    sn.noteable_id                AS noteable_id,
+    sn.noteable_type              AS noteable_type,
+    snm.traversal_path            AS traversal_path,
+    snm._siphon_replicated_at     AS _siphon_replicated_at,
+    snm._siphon_deleted           AS _siphon_deleted
+FROM siphon_system_note_metadata snm
+INNER JOIN siphon_notes sn USING (note_id)
+WHERE snm.action = 'reopened';
+
 -- Siphon source table for label links (polymorphic join table)
 CREATE TABLE IF NOT EXISTS siphon_label_links
 (

@@ -1,17 +1,19 @@
-description: User who closed a work item or merge request
+# config/ontology/edges/reopened.yaml
+
+description: User who reopened a work item or merge request
 
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
-    description: "User closed a work item."
+    description: "User reopened a work item."
 
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    description: "User closed a merge request."
+    description: "User reopened a merge request."
 
 etl:
   - scope: namespaced
-    source: siphon_system_note_closed
+    source: siphon_system_note_reopened
     order_by: [traversal_path, noteable_id, id]
     from:
       id: author_id

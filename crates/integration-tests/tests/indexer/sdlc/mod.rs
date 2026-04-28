@@ -61,6 +61,7 @@ async fn namespace_indexing() {
         merge_request_diffs::processes_merge_request_diff_files_with_edges,
         notes::processes_notes_with_edges,
         notes::filters_out_system_notes,
+        notes::materialises_lifecycle_edges_from_system_notes,
         work_items::processes_work_items_with_edges,
         work_items::processes_work_item_single_value_edges,
         work_items::processes_standalone_assigned_edges,

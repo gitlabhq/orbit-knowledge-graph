@@ -3,8 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, handler_context,
-    namespace_envelope, namespace_handler,
+    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
+    handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_notes_with_edges(ctx: &TestContext) {
@@ -107,4 +107,101 @@ pub async fn filters_out_system_notes(ctx: &TestContext) {
         ))
         .await;
     assert_eq!(has_note_edges[0].num_rows(), 2);
+}
+
+/// System notes with `merged`, `closed`, or `reopened` actions produce lifecycle
+/// edges (MERGED, CLOSED, REOPENED) without generating Note nodes or HAS_NOTE edges.
+/// Source: `siphon_system_note_metadata` joined to `siphon_notes` via note_id.
+pub async fn materialises_lifecycle_edges_from_system_notes(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    // Three system notes, one per lifecycle action, each on a different noteable.
+    // Note IDs: 10=merged (MR 500), 11=closed (MR 501), 12=reopened (Issue 600).
+    // Author IDs: user 1 merged, user 2 closed, user 3 reopened.
+    ctx.execute(
+        "INSERT INTO siphon_notes
+            (id, note, noteable_type, noteable_id, author_id, system, internal,
+             traversal_path, created_at, updated_at, _siphon_replicated_at)
+        VALUES
+        (10, 'merged',          'MergeRequest', 500, 1, true, false, '1/100/', '2024-01-15', '2024-01-15', '2024-01-20 12:00:00'),
+        (11, 'closed',          'MergeRequest', 501, 2, true, false, '1/100/', '2024-01-16', '2024-01-16', '2024-01-20 12:00:00'),
+        (12, 'closed',          'Issue',        600, 3, true, false, '1/100/', '2024-01-17', '2024-01-17', '2024-01-20 12:00:00'),
+        (13, 'reopened',        'MergeRequest', 501, 2, true, false, '1/100/', '2024-01-18', '2024-01-18', '2024-01-20 12:00:00'),
+        (14, 'reopened',        'Issue',        600, 3, true, false, '1/100/', '2024-01-19', '2024-01-19', '2024-01-20 12:00:00'),
+        (15, 'mentioned in !999', 'MergeRequest', 500, 1, true, false, '1/100/', '2024-01-20', '2024-01-20', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_system_note_metadata
+            (id, note_id, action, traversal_path, _siphon_replicated_at)
+        VALUES
+        (1, 10, 'merged',   '1/100/', '2024-01-20 12:00:00'),
+        (2, 11, 'closed',   '1/100/', '2024-01-20 12:00:00'),
+        (3, 12, 'closed',   '1/100/', '2024-01-20 12:00:00'),
+        (4, 13, 'reopened', '1/100/', '2024-01-20 12:00:00'),
+        (5, 14, 'reopened', '1/100/', '2024-01-20 12:00:00'),
+        (6, 15, 'cross_reference', '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    // System notes never produce Note nodes.
+    assert_node_count(ctx, "gl_note", 0).await;
+
+    // MERGED: user 1 → MergeRequest 500
+    assert_edges_have_traversal_path(ctx, "MERGED", "User", "MergeRequest", "1/100/", 1).await;
+
+    // CLOSED: user 2 → MergeRequest 501, user 3 → WorkItem 600 (Issue→WorkItem)
+    let closed_edges = ctx
+        .query(&format!(
+            "SELECT target_kind FROM {} FINAL \
+             WHERE relationship_kind = 'CLOSED' \
+             ORDER BY target_id",
+            t("gl_edge")
+        ))
+        .await;
+    assert_eq!(
+        closed_edges[0].num_rows(),
+        2,
+        "expect 2 CLOSED edges (MR + WorkItem)"
+    );
+    let target_kind =
+        ArrowUtils::get_column_by_name::<StringArray>(&closed_edges[0], "target_kind")
+            .expect("target_kind column");
+    assert_eq!(target_kind.value(0), "MergeRequest");
+    assert_eq!(
+        target_kind.value(1),
+        "WorkItem",
+        "Issue collapses to WorkItem"
+    );
+
+    // REOPENED: user 2 → MergeRequest 501, user 3 → WorkItem 600
+    let reopened_edges = ctx
+        .query(&format!(
+            "SELECT target_kind FROM {} FINAL \
+             WHERE relationship_kind = 'REOPENED' \
+             ORDER BY target_id",
+            t("gl_edge")
+        ))
+        .await;
+    assert_eq!(
+        reopened_edges[0].num_rows(),
+        2,
+        "expect 2 REOPENED edges (MR + WorkItem)"
+    );
+    let reopened_target_kind =
+        ArrowUtils::get_column_by_name::<StringArray>(&reopened_edges[0], "target_kind")
+            .expect("target_kind column");
+    assert_eq!(reopened_target_kind.value(0), "MergeRequest");
+    assert_eq!(
+        reopened_target_kind.value(1),
+        "WorkItem",
+        "Issue collapses to WorkItem"
+    );
 }

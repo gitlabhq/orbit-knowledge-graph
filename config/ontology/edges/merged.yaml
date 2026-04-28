@@ -4,3 +4,14 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     description: "User merged a merge request."
+
+etl:
+  - scope: namespaced
+    source: siphon_system_note_merged
+    order_by: [traversal_path, noteable_id, id]
+    from:
+      id: author_id
+      type: User
+    to:
+      id: noteable_id
+      type: MergeRequest
