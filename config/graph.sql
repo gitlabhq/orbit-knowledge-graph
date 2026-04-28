@@ -44,7 +44,7 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -71,7 +71,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
@@ -103,7 +103,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     INDEX idx_status status TYPE set(8) GRANULARITY 2,
     INDEX idx_archived archived TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_ref ref TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
@@ -125,8 +125,8 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_path path TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -159,9 +159,9 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     _deleted Bool DEFAULT false,
     INDEX idx_state state TYPE set(4) GRANULARITY 2,
     INDEX idx_tier tier TYPE set(8) GRANULARITY 2,
-    INDEX idx_environment_type environment_type TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_environment_type environment_type TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_tier_state (SELECT * ORDER BY (tier, state, id)),
     PROJECTION tp_count (
@@ -185,8 +185,8 @@ CREATE TABLE IF NOT EXISTS gl_file (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_path path TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -231,8 +231,8 @@ CREATE TABLE IF NOT EXISTS gl_group (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_full_path full_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -260,7 +260,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_identifier_name identifier_name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_identifier_name identifier_name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
@@ -301,8 +301,8 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_allow_failure allow_failure TYPE minmax GRANULARITY 1,
     INDEX idx_retried retried TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_ref ref TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
@@ -349,7 +349,7 @@ CREATE TABLE IF NOT EXISTS gl_label (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_title title TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -404,9 +404,9 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_discussion_locked discussion_locked TYPE minmax GRANULARITY 1,
     INDEX idx_first_contribution first_contribution TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_title title TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_source_branch source_branch TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_target_branch target_branch TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_source_branch source_branch TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_target_branch target_branch TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_merge_status merge_status TYPE set(8) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_state_id (SELECT * ORDER BY (state, id)),
@@ -493,7 +493,7 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_title title TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_state state TYPE set(4) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
@@ -560,7 +560,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_tag tag TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_source source TYPE set(20) GRANULARITY 2,
-    INDEX idx_ref ref TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
@@ -587,8 +587,8 @@ CREATE TABLE IF NOT EXISTS gl_project (
     _deleted Bool DEFAULT false,
     INDEX idx_archived archived TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_full_path full_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -615,7 +615,7 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     _deleted Bool DEFAULT false,
     INDEX idx_runner_type runner_type TYPE set(4) GRANULARITY 2,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_runner_type (SELECT * ORDER BY (runner_type, id))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
@@ -654,7 +654,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
@@ -692,8 +692,8 @@ CREATE TABLE IF NOT EXISTS gl_user (
     INDEX idx_is_admin is_admin TYPE minmax GRANULARITY 1,
     INDEX idx_is_auditor is_auditor TYPE minmax GRANULARITY 1,
     INDEX idx_is_external is_external TYPE minmax GRANULARITY 1,
-    INDEX idx_username username TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_name name TYPE bloom_filter(0.01) GRANULARITY 1
+    INDEX idx_username username TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
+    INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
@@ -722,7 +722,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_resolved_on_default_branch resolved_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_present_on_default_branch present_on_default_branch TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_title title TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -822,7 +822,7 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_work_item_type work_item_type TYPE set(10) GRANULARITY 2,
     INDEX idx_confidential confidential TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    INDEX idx_title title TYPE bloom_filter(0.01) GRANULARITY 1,
+    INDEX idx_title title TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)

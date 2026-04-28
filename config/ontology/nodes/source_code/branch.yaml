@@ -58,7 +58,7 @@ storage:
     - {name: is_default, type: "Bool", default: "true"}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_name, column: name, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
