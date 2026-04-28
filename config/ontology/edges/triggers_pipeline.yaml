@@ -1,0 +1,19 @@
+# config/ontology/edges/triggers_pipeline.yaml
+
+description: Bridge job triggered a downstream pipeline
+
+variants:
+  - from_node: { type: Job, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Bridge job (type='Ci::Bridge') triggered the downstream pipeline."
+
+etl:
+  scope: namespaced
+  source: siphon_ci_sources_pipelines
+  order_by: [traversal_path, id, partition_id]
+  from:
+    id: source_job_id
+    type: Job
+  to:
+    id: pipeline_id
+    type: Pipeline

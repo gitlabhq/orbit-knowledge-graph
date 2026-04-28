@@ -127,6 +127,12 @@ pub struct CompilerMetadata {
     /// Populated by normalize from ontology denormalized properties.
     /// Example: ("Pipeline", "status", "source") → "source_status"
     pub denormalized_columns: HashMap<(String, String, String), String>,
+    /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
+    /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
+    /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
+    /// The hop frontier optimizer uses this to decide whether a CTE is safe
+    /// to forward-chain from.
+    pub lowerer_nf_ctes: HashSet<String>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -139,6 +145,7 @@ impl Default for CompilerMetadata {
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
             denormalized_columns: HashMap::new(),
+            lowerer_nf_ctes: HashSet::new(),
         }
     }
 }
@@ -398,10 +405,13 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// Populated by the validate pass; lets the lowerer bind temporal columns
+    /// with their typed CH param.
+    pub data_type: Option<ontology::DataType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -436,11 +446,13 @@ fn parse_filter(value: Value) -> InputFilter {
         return InputFilter {
             op: Some(op),
             value: obj.get("value").cloned(),
+            ..Default::default()
         };
     }
     InputFilter {
         op: None,
         value: Some(value),
+        ..Default::default()
     }
 }
 
