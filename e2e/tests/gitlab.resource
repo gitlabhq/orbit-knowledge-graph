@@ -157,3 +157,83 @@ Create Note On Issue
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects/${project_id}/issues/${issue_iid}/notes
     ...    headers=${headers}    json=${body}    expected_status=201
     RETURN    ${resp.json()}
+
+Root Auth Headers
+    [Documentation]    Headers carrying the deploy-time root PAT. Required for admin-only
+    ...                operations like creating users or issuing PATs for arbitrary users.
+    RETURN    ${{{"PRIVATE-TOKEN": "${GITLAB_ROOT_PAT}", "Content-Type": "application/json"}}}
+
+Create User
+    [Documentation]    Create a non-admin user. Requires root PAT. Returns the parsed user dict.
+    [Arguments]    ${username}    ${name}=${username}    ${email}=${username}@example.com
+    ...    ${password}=Password1234!
+    ${headers}=    Root Auth Headers
+    ${body}=    Create Dictionary    username=${username}    name=${name}    email=${email}
+    ...    password=${password}    skip_confirmation=true
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/users
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Create Subgroup
+    [Documentation]    Create a child group under ${parent_id}. Returns the parsed group dict.
+    [Arguments]    ${parent_id}    ${name}    ${path}=${name}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    name=${name}    path=${path}    parent_id=${parent_id}
+    ...    visibility=public
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/groups
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Add Group Member
+    [Documentation]    Add ${user_id} to ${group_id} at the given built-in ${access_level}
+    ...                (10 Guest, 15 Planner, 20 Reporter, 25 Security Manager, 30 Developer,
+    ...                40 Maintainer, 50 Owner). Returns the parsed member dict.
+    [Arguments]    ${group_id}    ${user_id}    ${access_level}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    user_id=${user_id}    access_level=${access_level}
+    ${resp}=    POST    ${GITLAB_URL}/api/v4/groups/${group_id}/members
+    ...    headers=${headers}    json=${body}    expected_status=201
+    RETURN    ${resp.json()}
+
+Create Vulnerability
+    [Documentation]    Create a manually-reported Vulnerability via the GraphQL `vulnerabilityCreate`
+    ...                mutation. Requires Ultimate license (e2e/scripts/activate-license.sh) and
+    ...                Maintainer+ on the project; the e2e-bot is admin so this works on any project.
+    ...                `report_type` is always `generic` for manually-created vulns; `created_at` is
+    ...                stamped by the server (only `detected_at` is settable). Returns a dict with
+    ...                numeric id (parsed from gid://gitlab/Vulnerability/N), title, severity, state,
+    ...                report_type, and createdAt.
+    [Arguments]    ${project_id}    ${title}    ${severity}=critical    ${state}=DETECTED
+    ...    ${description}=role scoped authz fixture
+    ${headers}=    GitLab Auth Headers
+    ${project_gid}=    Set Variable    gid://gitlab/Project/${project_id}
+    ${scanner}=    Create Dictionary    id=role-scoped-authz-e2e
+    ...    name=role-scoped-authz-e2e    vendor=GitLab
+    ${identifier}=    Create Dictionary    name=CWE-89    url=https://cwe.mitre.org/data/definitions/89.html
+    ...    externalType=cwe    externalId=CWE-89
+    ${identifiers}=    Create List    ${identifier}
+    ${input}=    Create Dictionary    project=${project_gid}    name=${title}    description=${description}
+    ...    severity=${severity}    state=${state}    scanner=${scanner}    identifiers=${identifiers}
+    ${query}=    Catenate    SEPARATOR=
+    ...    mutation($input: VulnerabilityCreateInput!) {
+    ...    \ \ vulnerabilityCreate(input: $input) {
+    ...    \ \ \ \ vulnerability { id title severity state reportType createdAt }
+    ...    \ \ \ \ errors
+    ...    \ \ }
+    ...    \ }
+    ${variables}=    Create Dictionary    input=${input}
+    ${body}=    Create Dictionary    query=${query}    variables=${variables}
+    ${resp}=    POST    ${GITLAB_URL}/api/graphql
+    ...    headers=${headers}    json=${body}    expected_status=200
+    ${payload}=    Set Variable    ${resp.json()}
+    Should Not Contain    ${payload}    errors
+    ...    GraphQL transport error: ${payload}
+    ${data}=    Set Variable    ${payload["data"]["vulnerabilityCreate"]}
+    Should Be Empty    ${data["errors"]}
+    ...    vulnerabilityCreate returned errors: ${data["errors"]}
+    ${vuln}=    Set Variable    ${data["vulnerability"]}
+    ${numeric_id}=    Evaluate    int($vuln["id"].rsplit("/", 1)[-1])
+    ${result}=    Create Dictionary    id=${numeric_id}    title=${vuln["title"]}
+    ...    severity=${vuln["severity"]}    state=${vuln["state"]}
+    ...    report_type=${vuln["reportType"]}    createdAt=${vuln["createdAt"]}
+    RETURN    ${result}
