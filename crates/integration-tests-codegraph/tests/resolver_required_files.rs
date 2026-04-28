@@ -1,36 +1,16 @@
-//! Locks in the contract between the upstream archive-extraction filter
-//! and the JS / Rust custom resolver pipelines.
-//!
-//! Bohdan's MR 1110 (`bohdanp/skip-non-parsable-during-archive-extract`)
-//! makes the indexer drop archive entries that aren't parsable source
-//! files. The resolvers, however, also need a handful of manifest /
-//! ignore / config files on disk: `Cargo.toml`, `package.json`,
-//! `tsconfig.json`, `.gitignore`, etc. Dropping those silently degrades
-//! resolution to standalone-file mode and lets the walker descend into
-//! `node_modules` / `target`.
-//!
-//! These tests exercise the contract end-to-end:
-//!
-//! 1. `resolver_aware_filter_preserves_workspace_inputs` — given a path
-//!    list shaped like a real repo, applying
-//!    `is_parsable || is_required_for_resolvers` preserves every
-//!    manifest the resolvers need, and drops obvious noise.
-//! 2. `pipeline_runs_against_filter_simulated_tree` — mimics the
-//!    upstream filter on a tmpdir tree and runs `Pipeline::run` against
-//!    the survivors. The pipeline must produce a graph (no errors,
-//!    non-zero output) that includes cross-file resolution edges only
-//!    achievable when the manifests survived.
+//! Locks in the contract between any upstream extraction filter and the
+//! indexer pipeline: paths matched by `is_required_by_indexer` must
+//! survive whatever filter the caller applies, otherwise resolver
+//! pipelines (generic or custom) silently degrade.
 
 use std::path::Path;
 use std::sync::Arc;
 
-use code_graph::v2::config::{detect_language_from_path, is_required_for_resolvers};
+use code_graph::v2::config::{detect_language_from_path, is_required_by_indexer};
 use code_graph::v2::{BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError};
 
-/// Stand-in for `is_parsable` from Bohdan's branch. We can't import his
-/// helper directly (it's not on `main` yet); this mirrors the same logic
-/// (extension lookup + per-language exclude-suffix scan) so the test
-/// would still apply if his filter changed shape.
+/// Stand-in for `is_parsable` from !1110. Mirrors the same logic so the
+/// test is independent of that branch's exact shape.
 fn is_parsable_simulated(rel_path: &Path) -> bool {
     let path_str = rel_path.to_string_lossy();
     let Some(lang) = detect_language_from_path(&path_str) else {
@@ -42,18 +22,14 @@ fn is_parsable_simulated(rel_path: &Path) -> bool {
         .any(|excl| path_str.ends_with(excl))
 }
 
-/// Combined filter: what the upstream extractor must keep.
 fn keep(rel_path: &Path) -> bool {
-    is_parsable_simulated(rel_path) || is_required_for_resolvers(rel_path)
+    is_parsable_simulated(rel_path) || is_required_by_indexer(rel_path)
 }
 
 #[test]
-fn resolver_aware_filter_preserves_workspace_inputs() {
-    // Path list shaped like an extracted gitlab/gitlab-style repo:
-    // a Rust workspace, a JS monorepo with TS aliases, ignore files,
-    // and a pile of non-source noise that has no business on disk.
+fn filter_preserves_indexer_inputs() {
     let archive_entries = [
-        // --- Source files (parsable) ---
+        // Source
         "src/main.rs",
         "crates/foo/src/lib.rs",
         "crates/foo/src/bin/foo.rs",
@@ -63,7 +39,7 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         "frontend/queries/user.graphql",
         "tests/integration_test.rs",
         "scripts/build.py",
-        // --- Manifests / configs the resolvers need ---
+        // Indexer-required
         "Cargo.toml",
         "crates/foo/Cargo.toml",
         "crates/bar/Cargo.toml",
@@ -78,7 +54,7 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         ".gitignore",
         "frontend/.gitignore",
         ".ignore",
-        // --- Noise that should be filtered out ---
+        // Noise
         "README.md",
         "CHANGELOG.md",
         "docs/architecture.md",
@@ -101,7 +77,6 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         .copied()
         .collect();
 
-    // ---- Manifest contract: every resolver input survives. ----
     let must_survive = [
         "Cargo.toml",
         "crates/foo/Cargo.toml",
@@ -117,16 +92,6 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         ".gitignore",
         "frontend/.gitignore",
         ".ignore",
-    ];
-    for path in must_survive {
-        assert!(
-            survived.contains(&path),
-            "resolver-required path was filtered out: {path}\nsurvivors: {survived:#?}"
-        );
-    }
-
-    // ---- Source contract: every parsable source file survives. ----
-    let must_parse = [
         "src/main.rs",
         "crates/foo/src/lib.rs",
         "crates/foo/src/bin/foo.rs",
@@ -137,14 +102,13 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         "tests/integration_test.rs",
         "scripts/build.py",
     ];
-    for path in must_parse {
+    for path in must_survive {
         assert!(
             survived.contains(&path),
-            "parsable source was filtered out: {path}"
+            "filtered out: {path}\nsurvivors: {survived:#?}"
         );
     }
 
-    // ---- Noise contract: pure noise is dropped. ----
     let must_drop = [
         "README.md",
         "CHANGELOG.md",
@@ -154,15 +118,15 @@ fn resolver_aware_filter_preserves_workspace_inputs() {
         "assets/icon.svg",
         "Cargo.lock",
         "frontend/yarn.lock",
-        "vendor/jquery.min.js", // excluded by .min.js suffix
-        "pkg/server_test.go",   // excluded by _test.go suffix
+        "vendor/jquery.min.js",
+        "pkg/server_test.go",
         "Makefile",
         "LICENSE",
         ".env",
         ".dockerignore",
     ];
     for path in must_drop {
-        assert!(!survived.contains(&path), "noise was kept on disk: {path}");
+        assert!(!survived.contains(&path), "noise survived: {path}");
     }
 }
 
@@ -173,34 +137,16 @@ impl GraphConverter for PassthroughConverter {
         &self,
         _graph: code_graph::v2::linker::CodeGraph,
     ) -> Result<Vec<(String, arrow::record_batch::RecordBatch)>, SinkError> {
-        // We don't need the arrow rows themselves — only that
-        // conversion is reachable, which means the graph was built.
         Ok(Vec::new())
     }
 }
 
 #[test]
 fn pipeline_runs_against_filter_simulated_tree() {
-    // Two-stage simulation:
-    //   1. Write a representative repo (Rust + JS workspace) into a tmpdir.
-    //   2. Walk the tree and delete every file the upstream filter would
-    //      reject. The result is what the indexer would see post-MR-1110.
-    //   3. Run the pipeline against the filtered tree.
-    //
-    // The pipeline must complete without errors and produce some graph
-    // output. If the resolvers' inputs (Cargo.toml, package.json,
-    // tsconfig.json, .gitignore) had been dropped, JS resolution and
-    // Rust workspace catalog would silently degrade and we'd produce a
-    // smaller graph — but the most direct guard is that the filter
-    // *itself* keeps the manifests. We verify the survivor set after
-    // simulating the filter, and then we run the pipeline as a final
-    // smoke check that the resulting tree is well-formed.
     let tmp = tempfile::tempdir().expect("tmpdir");
     let root = tmp.path();
 
-    // Fixture: tiny but exercises both resolvers.
     let fixtures: &[(&str, &str)] = &[
-        // Rust workspace
         (
             "Cargo.toml",
             "[workspace]\nmembers = [\"crates/lib\", \"crates/app\"]\nresolver = \"2\"\n",
@@ -221,7 +167,6 @@ fn pipeline_runs_against_filter_simulated_tree() {
             "crates/app/src/main.rs",
             "fn main() { println!(\"{}\", lib::greet()); }\n",
         ),
-        // JS workspace
         (
             "frontend/package.json",
             "{\"name\":\"frontend\",\"version\":\"0.0.0\"}\n",
@@ -238,9 +183,7 @@ fn pipeline_runs_against_filter_simulated_tree() {
             "frontend/src/main.ts",
             "import { helper } from '@/utils';\nexport function run() { return helper(); }\n",
         ),
-        // Walker inputs
         (".gitignore", "node_modules/\ntarget/\n"),
-        // Noise that the upstream filter must drop
         ("README.md", "# project\n"),
         ("Cargo.lock", "# generated\n"),
         ("frontend/yarn.lock", "# generated\n"),
@@ -257,9 +200,6 @@ fn pipeline_runs_against_filter_simulated_tree() {
         std::fs::write(&path, contents).unwrap();
     }
 
-    // Apply the simulated upstream filter: delete anything the filter
-    // would have refused to extract.
-    let mut deleted = Vec::new();
     let mut survived = Vec::new();
     for entry in walkdir::WalkDir::new(root)
         .into_iter()
@@ -268,16 +208,14 @@ fn pipeline_runs_against_filter_simulated_tree() {
         if !entry.file_type().is_file() {
             continue;
         }
-        let rel = entry.path().strip_prefix(root).unwrap();
-        if keep(rel) {
-            survived.push(rel.to_path_buf());
+        let rel = entry.path().strip_prefix(root).unwrap().to_path_buf();
+        if keep(&rel) {
+            survived.push(rel);
         } else {
             std::fs::remove_file(entry.path()).unwrap();
-            deleted.push(rel.to_path_buf());
         }
     }
 
-    // The filter must have kept every manifest the resolvers need.
     let survived_strs: Vec<String> = survived
         .iter()
         .map(|p| p.to_string_lossy().into_owned())
@@ -292,11 +230,9 @@ fn pipeline_runs_against_filter_simulated_tree() {
     ] {
         assert!(
             survived_strs.iter().any(|p| p == required),
-            "resolver input was deleted: {required}\nsurvivors: {survived_strs:#?}\ndeleted: {deleted:#?}"
+            "deleted: {required}\nsurvivors: {survived_strs:#?}"
         );
     }
-
-    // The filter must have dropped the noise.
     for noise in [
         "Cargo.lock",
         "frontend/yarn.lock",
@@ -311,18 +247,13 @@ fn pipeline_runs_against_filter_simulated_tree() {
         );
     }
 
-    // Run the pipeline on what's left and assert it does not error.
-    // We can't easily assert specific edge counts here without
-    // reproducing the full graph extraction harness — that's covered
-    // by the YAML suites. The contract under test is: the manifests
-    // are still on disk and the pipeline does not blow up.
     let config = PipelineConfig::default();
     let converter: Arc<dyn GraphConverter> = Arc::new(PassthroughConverter);
     let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
     let result = Pipeline::run(root, config, converter, sink);
     assert!(
         result.errors.is_empty(),
-        "pipeline errors after filter: {:#?}",
+        "pipeline errors: {:#?}",
         result.errors
     );
 }

@@ -32,10 +32,8 @@ pub const EVAL_EXTENSIONS: &[&str] = &[
     "js", "jsx", "cjs", "mjs", "ts", "tsx", "mts", "cts", "json", "graphql", "gql", "vue",
 ];
 
-// Sourced from `v2::config::resolver_files` so the upstream extraction
-// filter (which decides what survives onto disk) and the in-pipeline
-// discovery here (which decides what to evaluate) cannot drift. Adding
-// a filename or extension only there propagates here automatically.
+// Sourced from v2::config so the upstream extractor and in-pipeline
+// discovery share one definition.
 pub use crate::v2::config::{BUN_SIGNAL_FILES, WEBPACK_CONFIG_EXTENSIONS, WEBPACK_CONFIG_STEM};
 
 /// True iff `relative_path` looks like a webpack config, based on its

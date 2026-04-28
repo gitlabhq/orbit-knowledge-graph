@@ -8,8 +8,8 @@ pub use registry::{
     supported_extensions,
 };
 pub use resolver_files::{
-    BUN_SIGNAL_FILES, RESOLVER_REQUIRED_BASENAMES, WEBPACK_CONFIG_EXTENSIONS, WEBPACK_CONFIG_STEM,
-    is_required_for_resolvers,
+    BUN_SIGNAL_FILES, INDEXER_REQUIRED_BASENAMES, WEBPACK_CONFIG_EXTENSIONS, WEBPACK_CONFIG_STEM,
+    is_required_by_indexer,
 };
 
 /// Tag for custom pipeline variants. Used in test suites to select
