@@ -315,6 +315,7 @@ Supports default settings and per-query-type overrides (e.g. `aggregation`, `tra
 query:
   default:
     max_execution_time: 30
+    max_memory_usage: 1073741824
     use_query_cache: false
     query_cache_ttl: 60
   aggregation:
@@ -324,6 +325,10 @@ query:
 | Config path | Default | Description |
 |-------------|---------|-------------|
 | `query.default.max_execution_time` | `30` | ClickHouse `max_execution_time` in seconds |
+| `query.default.max_memory_usage` | unset | ClickHouse `max_memory_usage` in bytes |
+| `query.default.max_bytes_to_read` | unset | ClickHouse `max_bytes_to_read` in bytes |
+| `query.default.max_rows_to_read` | unset | ClickHouse `max_rows_to_read` |
+| `query.default.max_rows_in_set` | unset | ClickHouse `max_rows_in_set` (IN subquery cap) |
 | `query.default.use_query_cache` | `false` | Enable ClickHouse query cache |
 | `query.default.query_cache_ttl` | `60` | Query cache TTL in seconds |
 

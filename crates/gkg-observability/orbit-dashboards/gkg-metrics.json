@@ -299,7 +299,7 @@
     {
       "otel_name": "gkg.indexer.code.errors",
       "prom_name": "gkg_indexer_code_errors_total",
-      "description": "Total code indexing errors by pipeline stage.",
+      "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
       "kind": "counter",
       "labels": [
         "stage"
@@ -319,6 +319,17 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.file_faults",
+      "prom_name": "gkg_indexer_code_file_faults_total",
+      "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`.",
+      "kind": "counter",
+      "labels": [
+        "kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.files.processed",
       "prom_name": "gkg_indexer_code_files_processed_total",
       "description": "Total files seen by the code-graph indexer.",
@@ -332,7 +343,7 @@
     {
       "otel_name": "gkg.indexer.code.files.skipped",
       "prom_name": "gkg_indexer_code_files_skipped_total",
-      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize` (file exceeds the per-language byte ceiling), `line_too_long` (a single line exceeds the per-language character ceiling), `timeout_sentinel` (per-file watchdog killed the file before resolution finished).",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, `timeout_sentinel`.",
       "kind": "counter",
       "labels": [
         "reason"

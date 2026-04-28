@@ -205,7 +205,10 @@
     "query": {
       "$ref": "#/$defs/QuerySettings",
       "default": {
-        "default": {}
+        "default": {
+          "max_execution_time": 30,
+          "query_cache_ttl": 60
+        }
       }
     },
     "schedule": {
@@ -1220,7 +1223,6 @@
       "additionalProperties": false
     },
     "QueryConfig": {
-      "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default.",
       "type": "object",
       "properties": {
         "graph_query_cache_enabled": {
@@ -1241,8 +1243,45 @@
           "minimum": 0,
           "writeOnly": true
         },
+        "max_bytes_to_read": {
+          "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Unset by default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "max_execution_time": {
           "description": "ClickHouse `max_execution_time` in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        },
+        "max_memory_usage": {
+          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by\ndefault (ClickHouse uses its server-level setting).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_rows_in_set": {
+          "description": "ClickHouse `max_rows_in_set`. Limits the size of hash tables built\nfor IN (subquery) clauses. Unset by default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_rows_to_read": {
+          "description": "ClickHouse `max_rows_to_read`. Limits the total number of rows\nread from tables during query execution. Unset by default.",
           "type": [
             "integer",
             "null"
@@ -1257,6 +1296,7 @@
             "null"
           ],
           "format": "uint32",
+          "default": 60,
           "minimum": 0
         },
         "use_query_cache": {
@@ -1275,7 +1315,10 @@
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig",
-          "default": {}
+          "default": {
+            "max_execution_time": 30,
+            "query_cache_ttl": 60
+          }
         }
       },
       "additionalProperties": {

@@ -161,12 +161,19 @@ fn parse_codec(s: &str) -> Codec {
 }
 
 fn parse_index_type(s: &str) -> IndexType {
-    let s = s.to_lowercase();
-    match s.as_str() {
+    let lower = s.to_lowercase();
+    match lower.as_str() {
         "minmax" => IndexType::MinMax,
-        _ if s.starts_with("set(") => IndexType::Set(s[4..s.len() - 1].parse().unwrap_or(10)),
-        _ if s.starts_with("bloom_filter(") => {
-            IndexType::BloomFilter(s[13..s.len() - 1].parse().unwrap_or(0.01))
+        _ if lower.starts_with("set(") => {
+            IndexType::Set(lower[4..lower.len() - 1].parse().unwrap_or(10))
+        }
+        _ if lower.starts_with("bloom_filter(") => {
+            IndexType::BloomFilter(lower[13..lower.len() - 1].parse().unwrap_or(0.01))
+        }
+        _ if lower.starts_with("text(") => {
+            // Preserve original casing for tokenizer/preprocessor params.
+            let inner = &s[5..s.len() - 1];
+            IndexType::Text(inner.to_string())
         }
         _ => IndexType::MinMax,
     }

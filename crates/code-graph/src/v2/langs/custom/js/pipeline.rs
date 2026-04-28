@@ -2,7 +2,7 @@ use std::path::Path;
 
 use std::sync::Arc;
 
-use crate::v2::error::CodeGraphError;
+use crate::v2::error::AnalyzerError;
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
 use rustc_hash::FxHashMap;
 
@@ -25,8 +25,25 @@ impl LanguagePipeline for JsPipeline {
         }
 
         let (analyzed_files, errors) = analyze_files(files, root_path);
+
+        // Route per-file outcomes to the typed collections regardless of
+        // whether at least one file analyzed; the orchestrator no longer
+        // double-counts skipped/errored at the language boundary.
+        for (path, error) in &errors {
+            match error {
+                AnalyzerError::Skip { kind, detail } => {
+                    tracing::warn!(path, kind = %kind, %detail, "js: skipped file");
+                    ctx.record_skip(path.clone(), *kind, detail.clone());
+                }
+                AnalyzerError::Fault { kind, detail } => {
+                    tracing::warn!(path, kind = %kind, %detail, "js: faulted file");
+                    ctx.record_fault(path.clone(), *kind, detail.clone());
+                }
+            }
+        }
+
         if analyzed_files.is_empty() {
-            return Err(errors);
+            return Ok(());
         }
 
         let mut builder = JsModuleGraphBuilder::new(root_path.to_string());
@@ -59,18 +76,6 @@ impl LanguagePipeline for JsPipeline {
 
         btx.send_graph(graph);
 
-        if !errors.is_empty() {
-            for error in &errors {
-                tracing::warn!(path = %error.file_path, error = %error.error, "js: skipped file");
-                match crate::v2::pipeline::classify_skip_message(&error.error) {
-                    Some(reason) => ctx.record_file_skipped(error.file_path.clone(), reason),
-                    None => ctx.record_error(CodeGraphError::ParseFailed {
-                        path: error.file_path.clone(),
-                        message: error.error.clone(),
-                    }),
-                }
-            }
-        }
         Ok(())
     }
 }
@@ -100,8 +105,8 @@ mod tests {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: root.to_string_lossy().into_owned(),
-            graph_errors: Mutex::new(Vec::new()),
-            files_skipped: Mutex::new(Vec::new()),
+            skipped: Mutex::new(Vec::new()),
+            faults: Mutex::new(Vec::new()),
         })
     }
 
@@ -120,58 +125,44 @@ mod tests {
     }
 
     #[test]
-    fn oversize_js_file_records_skip_not_error() {
+    fn oversize_js_file_records_skip_not_fault() {
+        use crate::v2::error::FileSkip;
         let tmp = tempfile::tempdir().expect("temp dir");
         let root = tmp.path();
-        // A legitimate JS file so the analyzer finishes producing a graph.
         std::fs::write(root.join("ok.js"), "export const x = 1;\n").unwrap();
-        // An oversize JS file (> MAX_FILE_BYTES). `analyze_files` rejects
-        // it inside `safe_repo_join` with "refusing oversize file: ...".
         let big = vec![b'a'; (MAX_FILE_BYTES + 16) as usize];
         std::fs::write(root.join("big.js"), &big).unwrap();
 
         let ctx = make_ctx(root);
         run_js(&ctx, &["ok.js".to_string(), "big.js".to_string()]);
 
-        let skipped = ctx.files_skipped.lock().unwrap().clone();
-        let errors = ctx.graph_errors.lock().unwrap();
+        let skipped = ctx.skipped.lock().unwrap().clone();
+        let faults = ctx.faults.lock().unwrap().clone();
         assert!(
-            skipped.iter().any(|s| s.reason == "oversize"),
-            "expected an oversize skip, got skipped={skipped:?} errors={:?}",
-            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+            skipped.iter().any(|s| s.kind == FileSkip::Oversize),
+            "expected an oversize skip, got skipped={skipped:?} faults={faults:?}",
         );
-        assert!(
-            errors.is_empty(),
-            "oversize must not increment errors; got {:?}",
-            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-        );
+        assert!(faults.is_empty(), "oversize must not record a fault");
     }
 
     #[test]
-    fn line_too_long_js_file_records_skip_not_error() {
+    fn line_too_long_js_file_records_skip_not_fault() {
+        use crate::v2::error::FileSkip;
         let tmp = tempfile::tempdir().expect("temp dir");
         let root = tmp.path();
         std::fs::write(root.join("ok.js"), "export const x = 1;\n").unwrap();
-        // A single line longer than MAX_LINE_LENGTH (5_000). The
-        // analyzer's eager line-length check raises
-        // "Skipping ...: line too long (...)".
         let long_line: String = "x".repeat(5_500);
         std::fs::write(root.join("long.js"), format!("const a = '{long_line}';\n")).unwrap();
 
         let ctx = make_ctx(root);
         run_js(&ctx, &["ok.js".to_string(), "long.js".to_string()]);
 
-        let skipped = ctx.files_skipped.lock().unwrap().clone();
-        let errors = ctx.graph_errors.lock().unwrap();
+        let skipped = ctx.skipped.lock().unwrap().clone();
+        let faults = ctx.faults.lock().unwrap().clone();
         assert!(
-            skipped.iter().any(|s| s.reason == "line_too_long"),
-            "expected a line_too_long skip, got skipped={skipped:?} errors={:?}",
-            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
+            skipped.iter().any(|s| s.kind == FileSkip::LineTooLong),
+            "expected a line_too_long skip, got skipped={skipped:?} faults={faults:?}",
         );
-        assert!(
-            errors.is_empty(),
-            "line_too_long must not increment errors; got {:?}",
-            errors.iter().map(|e| e.to_string()).collect::<Vec<_>>(),
-        );
+        assert!(faults.is_empty(), "line_too_long must not record a fault");
     }
 }

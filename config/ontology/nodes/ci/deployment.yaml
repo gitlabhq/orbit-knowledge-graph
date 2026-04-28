@@ -156,6 +156,7 @@ storage:
     - {name: idx_status, column: status, type: "set(8)", granularity: 2}
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}

@@ -24,19 +24,52 @@ fn escape_setting_str(s: &str) -> String {
 ///
 /// `None` means "not specified at this layer" -- the merge logic in
 /// [`QuerySettings::resolve`] fills in from the default.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, Default, JsonSchema)]
+/// Default max_execution_time: 30 seconds.
+const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
+/// Default query_cache_ttl: 60 seconds.
+const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
+
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_max_execution_time",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub max_execution_time: Option<u64>,
+
+    /// ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM
+    /// a single query can consume on the ClickHouse server. When exceeded,
+    /// ClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by
+    /// default (ClickHouse uses its server-level setting).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_memory_usage: Option<u64>,
+
+    /// ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data
+    /// read from tables. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_bytes_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_to_read`. Limits the total number of rows
+    /// read from tables during query execution. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_to_read: Option<u64>,
+
+    /// ClickHouse `max_rows_in_set`. Limits the size of hash tables built
+    /// for IN (subquery) clauses. Unset by default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_rows_in_set: Option<u64>,
 
     /// ClickHouse `use_query_cache`. Enabled for cursor pagination.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub use_query_cache: Option<bool>,
 
     /// ClickHouse `query_cache_ttl` in seconds.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default = "default_query_cache_ttl",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub query_cache_ttl: Option<u32>,
 
     /// NATS KV cache for graph query results (webserver).
@@ -50,12 +83,54 @@ pub struct QueryConfig {
     pub graph_query_cache_ttl: Option<u32>,
 }
 
+fn default_max_execution_time() -> Option<u64> {
+    Some(DEFAULT_MAX_EXECUTION_TIME)
+}
+fn default_query_cache_ttl() -> Option<u32> {
+    Some(DEFAULT_QUERY_CACHE_TTL)
+}
+
+impl Default for QueryConfig {
+    fn default() -> Self {
+        Self {
+            max_execution_time: Some(DEFAULT_MAX_EXECUTION_TIME),
+            max_memory_usage: None,
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
+            use_query_cache: None,
+            query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+}
+
 impl QueryConfig {
+    /// All-`None` config for tests that don't want any SETTINGS emitted.
+    pub fn empty() -> Self {
+        Self {
+            max_execution_time: None,
+            max_memory_usage: None,
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
+            use_query_cache: None,
+            query_cache_ttl: None,
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+
     /// Merge `overrides` on top of `self`. Fields set in `overrides`
     /// win; `None` fields fall through to `self`.
     pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {
         QueryConfig {
             max_execution_time: overrides.max_execution_time.or(self.max_execution_time),
+            max_memory_usage: overrides.max_memory_usage.or(self.max_memory_usage),
+            max_bytes_to_read: overrides.max_bytes_to_read.or(self.max_bytes_to_read),
+            max_rows_to_read: overrides.max_rows_to_read.or(self.max_rows_to_read),
+            max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
             graph_query_cache_enabled: overrides
@@ -199,9 +274,10 @@ mod tests {
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 2);
+        assert_eq!(settings.len(), 3);
         assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
-        assert_eq!(settings[1], ("use_query_cache".into(), "1".into()));
+        assert_eq!(settings[1], ("query_cache_ttl".into(), "60".into()));
+        assert_eq!(settings[2], ("use_query_cache".into(), "1".into()));
         Ok(())
     }
 
