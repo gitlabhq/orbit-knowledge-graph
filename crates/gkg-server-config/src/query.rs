@@ -107,6 +107,21 @@ impl Default for QueryConfig {
 }
 
 impl QueryConfig {
+    /// All-`None` config for tests that don't want any SETTINGS emitted.
+    pub fn empty() -> Self {
+        Self {
+            max_execution_time: None,
+            max_memory_usage: None,
+            max_bytes_to_read: None,
+            max_rows_to_read: None,
+            max_rows_in_set: None,
+            use_query_cache: None,
+            query_cache_ttl: None,
+            graph_query_cache_enabled: None,
+            graph_query_cache_ttl: None,
+        }
+    }
+
     /// Merge `overrides` on top of `self`. Fields set in `overrides`
     /// win; `None` fields fall through to `self`.
     pub fn merge(&self, overrides: &QueryConfig) -> QueryConfig {

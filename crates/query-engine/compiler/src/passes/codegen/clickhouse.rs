@@ -381,7 +381,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -419,7 +419,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -453,7 +453,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -485,7 +485,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -519,7 +519,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -577,7 +577,7 @@ mod tests {
         let r = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(
@@ -616,7 +616,7 @@ mod tests {
         let r = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(
@@ -638,7 +638,7 @@ mod tests {
             ..Default::default()
         };
 
-        let result = codegen(&Node::Query(Box::new(q)), ctx, QueryConfig::default()).unwrap();
+        let result = codegen(&Node::Query(Box::new(q)), ctx, QueryConfig::empty()).unwrap();
         assert_eq!(result.result_context.len(), 1);
         assert_eq!(result.result_context.get("u").unwrap().entity_type, "User");
     }
@@ -663,7 +663,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -691,7 +691,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(result.sql.contains("HAVING"));
@@ -719,7 +719,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(outer)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(result.sql.contains("(SELECT"));
@@ -757,7 +757,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(outer)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(result.sql.contains("INNER JOIN (SELECT"));
@@ -793,7 +793,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(result.sql.contains("WITH RECURSIVE"));
@@ -817,7 +817,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         // Outer LIMIT must apply to the whole union, not just the last branch.
@@ -855,7 +855,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(result.sql.contains("UNION ALL"));
@@ -876,7 +876,7 @@ mod tests {
         let result = codegen(
             &Node::Insert(Box::new(ins)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -922,7 +922,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert_eq!(
@@ -977,7 +977,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE kind = {p0:String} AND state = {p1:String}".into(),
             params,
             result_context: empty_ctx(),
-            query_config: QueryConfig::default(),
+            query_config: QueryConfig::empty(),
             dialect: SqlDialect::ClickHouse,
         };
 
@@ -1009,7 +1009,7 @@ mod tests {
             sql: "SELECT * FROM t WHERE x IN {p0:Array(String)} AND y IN {p1:Array(Int64)}".into(),
             params,
             result_context: empty_ctx(),
-            query_config: QueryConfig::default(),
+            query_config: QueryConfig::empty(),
             dialect: SqlDialect::ClickHouse,
         };
 
@@ -1032,10 +1032,9 @@ mod tests {
         };
 
         let cfg = QueryConfig {
-            max_execution_time: None,
             use_query_cache: Some(true),
             query_cache_ttl: Some(60),
-            ..Default::default()
+            ..QueryConfig::empty()
         };
         let result = codegen(&Node::Query(Box::new(q)), empty_ctx(), cfg).unwrap();
         assert!(
@@ -1065,7 +1064,7 @@ mod tests {
         let result = codegen(
             &Node::Query(Box::new(q)),
             empty_ctx(),
-            QueryConfig::default(),
+            QueryConfig::empty(),
         )
         .unwrap();
         assert!(
@@ -1081,7 +1080,7 @@ mod tests {
             sql: "SELECT {p0:String} AND {p1:Int64}".into(),
             params: HashMap::new(),
             result_context: empty_ctx(),
-            query_config: QueryConfig::default(),
+            query_config: QueryConfig::empty(),
             dialect: SqlDialect::ClickHouse,
         };
 
