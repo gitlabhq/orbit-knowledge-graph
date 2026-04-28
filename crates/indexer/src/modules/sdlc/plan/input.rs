@@ -490,10 +490,14 @@ fn resolve_standalone_edge(
                 let src_col = field
                     .and_then(|f| f.column_name())
                     .unwrap_or(&dp.property_name);
-                let qualified = format!("{alias}.{src_col}");
-                extract_columns.push(ExtractColumn::Bare(qualified));
+                // Alias the qualified column so the MemTable gets a clean
+                // name without dots (ClickHouse would otherwise quote it
+                // as a single identifier like `"_d0.state_id"`).
+                let mem_col = format!("{alias}_{src_col}");
+                let select_expr = format!("{alias}.{src_col} AS {mem_col}");
+                extract_columns.push(ExtractColumn::Bare(select_expr));
                 denormalized_columns.push(DenormalizedColumnProjection {
-                    source_column: format!("{alias}.{src_col}"),
+                    source_column: mem_col,
                     edge_column: dp.edge_column.clone(),
                     enum_mapping: dp.enum_values.clone(),
                 });
