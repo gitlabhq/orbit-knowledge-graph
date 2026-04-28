@@ -92,12 +92,26 @@ pub async fn processes_work_item_single_value_edges(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "CLOSED", "User", "WorkItem", "1/100/", 1).await;
 }
 
-pub async fn processes_work_item_multi_target_edges(ctx: &TestContext) {
+pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
     ctx.execute(
         "INSERT INTO work_items
             (id, iid, title, author_id, state_id, work_item_type_id, confidential,
-             namespace_id, assignees, label_ids, traversal_path, _siphon_replicated_at)
-        VALUES (1, 1, 'Test issue', 1, 1, 1, false, 100, [10, 20, 30], [(5, '2024-01-20 12:00:00'), (6, '2024-01-20 12:00:00')], '1/100/', '2024-01-20 12:00:00')",
+             namespace_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 1, 'Fix login bug', 1, 1, 1, false, 100, '1/100/', '2024-01-20 12:00:00'),
+            (2, 2, 'Add feature Y', 2, 1, 5, false, 100, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_issue_assignees
+            (user_id, issue_id, namespace_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (10, 1, 100, '1/100/', '2024-01-20 12:00:00'),
+            (20, 1, 100, '1/100/', '2024-01-20 12:00:00'),
+            (10, 2, 100, '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -108,7 +122,39 @@ pub async fn processes_work_item_multi_target_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "WorkItem", "1/100/", 3).await;
-    assert_edges_have_traversal_path(ctx, "HAS_LABEL", "WorkItem", "Label", "1/100/", 2).await;
+}
+
+pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {
+    create_namespace(ctx, 100, None, 0, "1/100/").await;
+
+    ctx.execute(
+        "INSERT INTO work_items
+            (id, iid, title, author_id, state_id, work_item_type_id, confidential,
+             namespace_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 1, 'Fix login bug', 1, 1, 1, false, 100, '1/100/', '2024-01-20 12:00:00'),
+            (2, 2, 'Add feature Y', 2, 1, 5, false, 100, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    ctx.execute(
+        "INSERT INTO siphon_label_links
+            (id, label_id, target_id, target_type, created_at, updated_at,
+             namespace_id, traversal_path, _siphon_replicated_at)
+        VALUES
+            (1, 5, 1, 'Issue', '2024-01-15 10:00:00', '2024-01-15 10:00:00', 100, '1/100/', '2024-01-20 12:00:00'),
+            (2, 6, 1, 'Issue', '2024-01-15 10:00:00', '2024-01-15 10:00:00', 100, '1/100/', '2024-01-20 12:00:00'),
+            (3, 7, 2, 'Issue', '2024-01-15 10:00:00', '2024-01-15 10:00:00', 100, '1/100/', '2024-01-20 12:00:00')",
+    )
+    .await;
+
+    namespace_handler(ctx)
+        .await
+        .handle(handler_context(ctx), namespace_envelope(1, 100))
+        .await
+        .unwrap();
+
+    assert_edges_have_traversal_path(ctx, "HAS_LABEL", "WorkItem", "Label", "1/100/", 3).await;
 }
 
 pub async fn processes_work_item_parent_links(ctx: &TestContext) {

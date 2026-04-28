@@ -8,12 +8,12 @@ variants:
     description: "Merge request was included in deployment."
 
 etl:
-  scope: namespaced
-  source: siphon_deployment_merge_requests
-  order_by: [traversal_path, deployment_id, merge_request_id]
-  from:
-    id: merge_request_id
-    type: MergeRequest
-  to:
-    id: deployment_id
-    type: Deployment
+  - scope: namespaced
+    source: siphon_deployment_merge_requests
+    order_by: [traversal_path, deployment_id, merge_request_id]
+    from:
+      id: merge_request_id
+      type: MergeRequest
+    to:
+      id: deployment_id
+      type: Deployment

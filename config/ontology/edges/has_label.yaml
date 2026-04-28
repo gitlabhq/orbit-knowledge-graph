@@ -10,3 +10,16 @@ variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Label, id: id }
     description: "Merge request has label."
+
+etl:
+  - scope: namespaced
+    source: siphon_label_links
+    order_by: [traversal_path, target_id, id]
+    from:
+      id: target_id
+      type_column: target_type
+      type_mapping:
+        Issue: WorkItem
+    to:
+      id: label_id
+      type: Label

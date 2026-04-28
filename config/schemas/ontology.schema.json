@@ -763,7 +763,11 @@
           "items": { "$ref": "#/definitions/edgeVariant" },
           "minItems": 1
         },
-        "etl": { "$ref": "#/definitions/edgeEtlConfig" }
+        "etl": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/edgeEtlConfig" },
+          "minItems": 1
+        }
       },
       "required": ["description", "variants"],
       "additionalProperties": false
