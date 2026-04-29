@@ -7,7 +7,10 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType, TextIndexMeta};
+use crate::input::{
+    ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, RelationshipVariant,
+    TextIndexMeta,
+};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
@@ -77,6 +80,14 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 name.to_string(),
                 ontology.edge_table_for_relationship(name).to_string(),
             )
+        })
+        .collect();
+    input.compiler.relationship_variants = ontology
+        .edges()
+        .map(|edge| RelationshipVariant {
+            relationship_kind: edge.relationship_kind.clone(),
+            source_kind: edge.source_kind.clone(),
+            target_kind: edge.target_kind.clone(),
         })
         .collect();
 
@@ -184,7 +195,86 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
+    infer_wildcard_relationship_kinds(&mut input);
     Ok(input)
+}
+
+fn is_wildcard(types: &[String]) -> bool {
+    types.is_empty() || (types.len() == 1 && types[0] == "*")
+}
+
+fn infer_wildcard_relationship_kinds(input: &mut Input) {
+    let entity_for: HashMap<String, String> = input
+        .nodes
+        .iter()
+        .filter_map(|n| {
+            n.entity
+                .as_ref()
+                .map(|entity| (n.id.clone(), entity.clone()))
+        })
+        .collect();
+
+    for rel in &mut input.relationships {
+        if !is_wildcard(&rel.types) {
+            continue;
+        }
+        let Some(from_entity) = entity_for.get(&rel.from) else {
+            continue;
+        };
+        let Some(to_entity) = entity_for.get(&rel.to) else {
+            continue;
+        };
+
+        let mut inferred = match rel.direction {
+            Direction::Outgoing => input
+                .compiler
+                .relationship_kinds_between(from_entity, to_entity),
+            Direction::Incoming => input
+                .compiler
+                .relationship_kinds_between(to_entity, from_entity),
+            Direction::Both => {
+                let mut kinds = input
+                    .compiler
+                    .relationship_kinds_between(from_entity, to_entity);
+                kinds.extend(
+                    input
+                        .compiler
+                        .relationship_kinds_between(to_entity, from_entity),
+                );
+                kinds.sort();
+                kinds.dedup();
+                kinds
+            }
+        };
+        if !inferred.is_empty() {
+            rel.types = std::mem::take(&mut inferred);
+        }
+    }
+
+    let Some(neighbors) = input.neighbors.as_mut() else {
+        return;
+    };
+    if !is_wildcard(&neighbors.rel_types) {
+        return;
+    }
+    let Some(center_entity) = entity_for.get(&neighbors.node) else {
+        return;
+    };
+
+    let mut inferred = match neighbors.direction {
+        Direction::Outgoing => input.compiler.relationship_kinds_for_source(center_entity),
+        Direction::Incoming => input.compiler.relationship_kinds_for_target(center_entity),
+        Direction::Both => {
+            let mut kinds = input.compiler.relationship_kinds_for_source(center_entity);
+            kinds.extend(input.compiler.relationship_kinds_for_target(center_entity));
+            kinds.sort();
+            kinds.dedup();
+            kinds
+        }
+    };
+    if !inferred.is_empty() {
+        neighbors.rel_types = std::mem::take(&mut inferred);
+    }
 }
 
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {

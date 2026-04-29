@@ -53,6 +53,7 @@ async fn data_correctness() {
         traversal::traversal_three_hop_returns_all_user_group_project_paths,
         traversal::traversal_user_authored_mr_returns_correct_edges,
         traversal::traversal_user_approved_mr_returns_correct_edges,
+        traversal::traversal_wildcard_user_to_mr_infers_relationship_kinds,
         traversal::traversal_redaction_removes_unauthorized_data,
         traversal::traversal_with_order_by,
         traversal::traversal_variable_length_reaches_depth_2,
@@ -69,6 +70,7 @@ async fn data_correctness() {
         traversal::traversal_order_by_with_node_ids_filter,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
+        aggregation::aggregation_wildcard_user_to_mr_counts_inferred_edges,
         aggregation::aggregation_count_group_contains_projects,
         aggregation::aggregation_sort_orders_by_aggregate_value,
         aggregation::aggregation_sum_produces_correct_totals,
@@ -90,6 +92,8 @@ async fn data_correctness() {
         aggregation::aggregation_no_group_by_preserves_relationship_kind,
         // path finding
         path_finding::path_finding_returns_valid_complete_paths,
+        path_finding::path_finding_filtered_start_endpoint_reaches_project,
+        path_finding::path_finding_wildcard_keeps_intermediate_hops_unconstrained,
         path_finding::path_finding_multiple_destinations_returns_distinct_paths,
         path_finding::path_finding_consecutive_edges_connect,
         path_finding::path_finding_max_depth_too_shallow_returns_empty,

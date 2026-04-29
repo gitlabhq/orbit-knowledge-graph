@@ -30,6 +30,34 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
     });
 }
 
+pub(super) async fn aggregation_wildcard_user_to_mr_counts_inferred_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_edge_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("User", 1, |n| {
+        n.prop_str("username") == Some("alice") && n.prop_i64("mr_edge_count") == Some(3)
+    });
+    resp.assert_node("User", 2, |n| {
+        n.prop_str("username") == Some("bob") && n.prop_i64("mr_edge_count") == Some(2)
+    });
+    resp.assert_node("User", 3, |n| {
+        n.prop_str("username") == Some("charlie") && n.prop_i64("mr_edge_count") == Some(2)
+    });
+}
+
 pub(super) async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
     let resp = run_query(
         ctx,
