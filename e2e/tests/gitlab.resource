@@ -207,17 +207,24 @@ Create Vulnerability
     ...                dict with numeric id (parsed from gid://gitlab/Vulnerability/N),
     ...                title, severity, state, report_type, and createdAt (sourced from
     ...                detectedAt).
-    [Arguments]    ${project_id}    ${title}    ${severity}=critical    ${state}=DETECTED
+    [Arguments]    ${project_id}    ${title}    ${severity}=CRITICAL    ${state}=DETECTED
     ...    ${description}=role scoped authz fixture
     ${headers}=    GitLab Auth Headers
     ${project_gid}=    Set Variable    gid://gitlab/Project/${project_id}
+    # VulnerabilityScannerInputType: id+name+url+version required; vendor is an
+    # object {name: String}, not a bare string.
+    ${vendor}=    Create Dictionary    name=GitLab
     ${scanner}=    Create Dictionary    id=role-scoped-authz-e2e
-    ...    name=role-scoped-authz-e2e    vendor=GitLab
+    ...    name=role-scoped-authz-e2e    url=https://gitlab.com    version=1.0.0
+    ...    vendor=${vendor}
     ${identifier}=    Create Dictionary    name=CWE-89    url=https://cwe.mitre.org/data/definitions/89.html
     ...    externalType=cwe    externalId=CWE-89
     ${identifiers}=    Create List    ${identifier}
+    # severity must be the uppercase enum value (CRITICAL/HIGH/...) per
+    # VulnerabilitySeverity GraphQL enum.
+    ${severity_upper}=    Convert To Upper Case    ${severity}
     ${input}=    Create Dictionary    project=${project_gid}    name=${title}    description=${description}
-    ...    severity=${severity}    state=${state}    scanner=${scanner}    identifiers=${identifiers}
+    ...    severity=${severity_upper}    state=${state}    scanner=${scanner}    identifiers=${identifiers}
     ${query}=    Catenate    SEPARATOR=
     ...    mutation($input: VulnerabilityCreateInput!) {
     ...    \ \ vulnerabilityCreate(input: $input) {
