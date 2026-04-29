@@ -407,6 +407,20 @@
           },
           "minProperties": 1
         },
+        "denormalization": {
+          "type": "array",
+          "description": "Node properties to denormalize onto all edge tables. The loader auto-derives which edges need each property based on edge variants.",
+          "items": {
+            "type": "object",
+            "required": ["node", "property"],
+            "properties": {
+              "node": { "type": "string", "description": "Entity type (e.g. Pipeline)." },
+              "property": { "type": "string", "description": "Property name on the node (e.g. status)." },
+              "as": { "type": "string", "description": "Edge column suffix. Defaults to property name. Full column is {direction}_{as}." }
+            },
+            "additionalProperties": false
+          }
+        },
         "internal_column_prefix": {
           "type": "string",
           "pattern": "^_[a-z_]+$",
@@ -704,6 +718,12 @@
           "type": "object",
           "description": "Maps raw column values to entity types (e.g., Namespace -> Group).",
           "additionalProperties": { "type": "string" }
+        },
+        "enrich": {
+          "type": "array",
+          "description": "Columns to enrich from this endpoint's node datalake table via LEFT JOIN. Makes node properties available for denormalization onto edge rows.",
+          "items": { "type": "string" },
+          "minItems": 1
         }
       },
       "required": ["id"],

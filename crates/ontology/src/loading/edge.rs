@@ -56,6 +56,9 @@ struct EdgeEndpointYaml {
     type_column: Option<String>,
     #[serde(default)]
     type_mapping: BTreeMap<String, String>,
+    /// Columns to enrich from this endpoint's node datalake table.
+    #[serde(default)]
+    enrich: Vec<String>,
 }
 
 impl EdgeYaml {
@@ -134,5 +137,6 @@ fn convert_endpoint(
     Ok(EdgeEndpoint {
         id_column: ep.id,
         node_type,
+        enrich: ep.enrich,
     })
 }
