@@ -436,6 +436,12 @@ pub enum FilterOp {
     EndsWith,
     IsNull,
     IsNotNull,
+    /// Token-boundary match via `hasToken()`. Requires a text index on the column.
+    TokenMatch,
+    /// All tokens present via `hasAllTokens()`. Requires a text index on the column.
+    AllTokens,
+    /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
+    AnyTokens,
 }
 
 fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>

@@ -1979,6 +1979,9 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::EndsWith) => Expr::func("endsWith", vec![col, val()]),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+        Some(FilterOp::TokenMatch) => Expr::func("hasToken", vec![col, val()]),
+        Some(FilterOp::AllTokens) => Expr::func("hasAllTokens", vec![col, val()]),
+        Some(FilterOp::AnyTokens) => Expr::func("hasAnyTokens", vec![col, val()]),
     }
 }
 

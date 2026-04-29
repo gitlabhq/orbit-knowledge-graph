@@ -391,7 +391,7 @@
         "op": {
           "type": "string",
           "description": "Filter operator. is_null and is_not_null do not require a value; all others do.",
-          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null"]
+          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
         },
         "value": {
           "description": "Filter value. Required for all operators except is_null and is_not_null. Type depends on operator: array for 'in', string for contains/starts_with/ends_with, FilterValue for comparison operators."
@@ -419,6 +419,10 @@
         },
         {
           "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
+          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["token_match", "all_tokens", "any_tokens"] } } },
           "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
         }
       ]

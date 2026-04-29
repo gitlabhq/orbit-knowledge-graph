@@ -423,6 +423,11 @@ impl<'a> Validator<'a> {
             FilterOp::Contains | FilterOp::StartsWith | FilterOp::EndsWith
         );
 
+        let is_token_op = matches!(
+            op,
+            FilterOp::TokenMatch | FilterOp::AllTokens | FilterOp::AnyTokens
+        );
+
         // Reject LIKE operators on fields marked like_allowed: false.
         if is_like_op
             && !self
@@ -435,17 +440,30 @@ impl<'a> Validator<'a> {
             )));
         }
 
+        // Token operators require a text index on the column.
+        if is_token_op
+            && self
+                .ontology
+                .text_index_tokenizer(entity, prop)
+                .is_none()
+        {
+            return Err(QueryError::Validation(format!(
+                "filter on \"{prop}\" for {entity}: \
+                 token operators (token_match/all_tokens/any_tokens) require a text index on the field"
+            )));
+        }
+
         let Some(value) = filter.value.as_ref() else {
             return Ok(());
         };
 
-        // Enforce minimum pattern length for LIKE filters.
-        if is_like_op {
+        // Enforce minimum pattern length for LIKE and token filters.
+        if is_like_op || is_token_op {
             let len = value.as_str().map_or(0, |s| s.chars().count());
             if len < Self::MIN_LIKE_PATTERN_LEN {
                 return Err(QueryError::Validation(format!(
                     "filter on \"{prop}\" for {entity}: \
-                     LIKE pattern must be at least {} characters, got {len}",
+                     search pattern must be at least {} characters, got {len}",
                     Self::MIN_LIKE_PATTERN_LEN
                 )));
             }
@@ -2114,7 +2132,7 @@ mod tests {
         let err = validator.check_references(&input).unwrap_err();
         assert!(
             err.to_string()
-                .contains("LIKE pattern must be at least 3 characters"),
+                .contains("search pattern must be at least 3 characters"),
             "expected min length error, got: {err}"
         );
     }
