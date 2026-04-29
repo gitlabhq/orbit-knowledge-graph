@@ -56,8 +56,8 @@ use clickhouse::ClickHouseDestination;
 use engine::EngineBuilder;
 use gitlab_client::GitlabClient;
 use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfiguration, GitlabClientConfiguration, NatsConfiguration,
-    ScheduleConfig, SchemaConfig,
+    ClickHouseConfiguration, EngineConfigError, EngineConfiguration, GitlabClientConfiguration,
+    IndexerModule, NatsConfiguration, ScheduleConfig, SchemaConfig,
 };
 use handler::{HandlerInitError, HandlerRegistry};
 use health::{HealthState, run_health_server};
@@ -142,6 +142,9 @@ pub enum IndexerError {
 
     #[error("Invalid configuration: {0}")]
     InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
+
+    #[error("Invalid engine configuration: {0}")]
+    InvalidEngineConfig(#[from] EngineConfigError),
 }
 
 #[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
@@ -176,6 +179,9 @@ pub async fn run(
     shutdown: CancellationToken,
 ) -> Result<(), IndexerError> {
     config.schema.validate()?;
+    config.engine.validate()?;
+
+    info!(modules = ?config.engine.modules, "indexer module selection");
 
     let graph_client = config.graph.build_client();
     info!(url = %config.graph.url, "initializing schema version table");
@@ -190,6 +196,10 @@ pub async fn run(
         .await?;
     broker
         .ensure_kv_bucket_exists(INDEXING_PROGRESS_BUCKET, KvBucketConfig::default())
+        .await?;
+
+    broker
+        .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
     // Run the migration orchestrator before the engine starts consuming messages.
@@ -216,14 +226,29 @@ pub async fn run(
 
     let registry = Arc::new(HandlerRegistry::default());
 
-    info!("initializing SDLC handlers");
-    modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+    if config.engine.is_module_enabled(IndexerModule::Sdlc) {
+        info!("initializing SDLC handlers");
+        modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+    } else {
+        info!("SDLC handlers disabled by engine.modules");
+    }
 
-    info!("initializing Code handlers");
-    modules::code::register_handlers(&registry, config, &ontology)?;
+    if config.engine.is_module_enabled(IndexerModule::Code) {
+        info!("initializing Code handlers");
+        modules::code::register_handlers(&registry, config, &ontology)?;
+    } else {
+        info!("Code handlers disabled by engine.modules");
+    }
 
-    info!("initializing Namespace Deletion handler");
-    modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+    if config
+        .engine
+        .is_module_enabled(IndexerModule::NamespaceDeletion)
+    {
+        info!("initializing Namespace Deletion handler");
+        modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+    } else {
+        info!("Namespace Deletion handler disabled by engine.modules");
+    }
 
     info!(
         subscriptions = registry.subscriptions().len(),

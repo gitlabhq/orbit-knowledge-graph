@@ -34,7 +34,7 @@ impl QueryEntry {
 /// q1:
 ///   desc: List active users
 ///   query: |
-///     {"query_type": "search", ...}
+///     {"query_type": "traversal", ...}
 /// ```
 pub fn load_queries(path: &Path) -> Result<HashMap<String, QueryEntry>> {
     use anyhow::Context;
@@ -279,9 +279,9 @@ mod tests {
     fn test_query_entry_parse() {
         let entry = QueryEntry {
             desc: "test query".into(),
-            query: r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#.into(),
+            query: r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#.into(),
         };
         let value = entry.parse_query().unwrap();
-        assert_eq!(value["query_type"], "search");
+        assert_eq!(value["query_type"], "traversal");
     }
 }

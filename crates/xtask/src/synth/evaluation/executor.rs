@@ -275,7 +275,10 @@ impl QueryExecutor {
         security_ctx: &SecurityContext,
     ) -> Result<(serde_json::Value, SamplingInfo)> {
         // Get the first traversal path from the security context
-        let traversal_path = security_ctx.traversal_paths.first().cloned();
+        let traversal_path: Option<String> = security_ctx
+            .traversal_paths
+            .first()
+            .map(|tp| tp.path.clone());
 
         let mut sampling_info = SamplingInfo {
             traversal_path: traversal_path.clone(),

@@ -39,7 +39,7 @@ use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
 use crate::destination::Destination;
-use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry};
+use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
 use crate::metrics::EngineMetrics;
@@ -180,7 +180,9 @@ impl Engine {
 
         self.validate_concurrency_groups(configuration)?;
 
-        self.broker.ensure_streams(&subscriptions).await?;
+        self.broker
+            .ensure_unmanaged_streams_exist(&subscriptions)
+            .await?;
 
         let runtime = Arc::new(EngineRuntime {
             worker_pool: WorkerPool::new(configuration, self.metrics.clone()),
@@ -271,6 +273,7 @@ enum HandlersOutcome {
     Success,
     Failed { retry_delay: Option<Duration> },
     Exhausted { error: String },
+    Dropped { error: String },
 }
 
 struct EngineRuntime {
@@ -342,6 +345,13 @@ async fn process_message(
             }
             "nack"
         }
+        HandlersOutcome::Dropped { error } => {
+            warn!(%message_id, %error, "permanent failure, message dropped");
+            if let Err(term_error) = message.term_ack().await {
+                warn!(%term_error, %message_id, "failed to term-ack dropped message");
+            }
+            "term"
+        }
         HandlersOutcome::Exhausted { error } => {
             if subscription.dead_letter_on_exhaustion {
                 match message.to_dlq(&broker, &subscription, &error).await {
@@ -398,6 +408,27 @@ async fn run_handlers(
             runtime
                 .metrics
                 .record_handler_error(handler.name(), error.error_kind());
+
+            if error.is_permanent() {
+                let action = match &error {
+                    HandlerError::Permanent { action, .. } => *action,
+                    HandlerError::Deserialization(_) => PermanentAction::DeadLetter,
+                    _ => unreachable!("is_permanent() returned true"),
+                };
+                warn!(
+                    handler = handler.name(),
+                    subject = %envelope.subject,
+                    message_id = %envelope.id.0,
+                    attempt = envelope.attempt,
+                    %error,
+                    "permanent failure, skipping retries"
+                );
+                let error = error.to_string();
+                return match action {
+                    PermanentAction::DeadLetter => HandlersOutcome::Exhausted { error },
+                    PermanentAction::Drop => HandlersOutcome::Dropped { error },
+                };
+            }
 
             let max_attempts = handler_config.max_attempts;
 

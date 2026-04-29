@@ -52,7 +52,7 @@ enum EtlYaml {
         #[serde(default)]
         order_by: Option<Vec<String>>,
         #[serde(default)]
-        edges: BTreeMap<String, EdgeMappingYaml>,
+        edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
     #[serde(rename = "query")]
     Query {
@@ -70,8 +70,24 @@ enum EtlYaml {
         #[serde(default)]
         traversal_path_filter: Option<String>,
         #[serde(default)]
-        edges: BTreeMap<String, EdgeMappingYaml>,
+        edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(untagged)]
+enum EdgeMappingYamlEntry {
+    Single(EdgeMappingYaml),
+    Multi(Vec<EdgeMappingYaml>),
+}
+
+impl EdgeMappingYamlEntry {
+    fn into_vec(self) -> Vec<EdgeMappingYaml> {
+        match self {
+            EdgeMappingYamlEntry::Single(m) => vec![m],
+            EdgeMappingYamlEntry::Multi(v) => v,
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -140,6 +156,8 @@ struct NodeStorageYaml {
     indexes: Vec<StorageIndexYaml>,
     #[serde(default)]
     projections: Vec<StorageProjectionYaml>,
+    #[serde(default)]
+    settings: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -338,59 +356,76 @@ impl NodeYaml {
 }
 
 fn convert_edge_mappings(
-    raw: BTreeMap<String, EdgeMappingYaml>,
-) -> Result<BTreeMap<String, EdgeMapping>, OntologyError> {
+    raw: BTreeMap<String, EdgeMappingYamlEntry>,
+) -> Result<BTreeMap<String, Vec<EdgeMapping>>, OntologyError> {
     raw.into_iter()
-        .map(|(column, mapping)| {
-            let target = match (mapping.target_literal, mapping.target_column) {
-                (Some(lit), None) => {
-                    if !mapping.type_mapping.is_empty() {
-                        return Err(OntologyError::Validation(format!(
-                            "edge '{}': 'type_mapping' requires 'to_column'",
-                            column
-                        )));
-                    }
-                    EdgeTarget::Literal(lit)
-                }
-                (None, Some(col)) => EdgeTarget::Column {
-                    column: col,
-                    type_mapping: mapping.type_mapping,
-                },
-                (Some(_), Some(_)) => {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}': use 'to' or 'to_column', not both",
-                        column
-                    )));
-                }
-                (None, None) => {
-                    return Err(OntologyError::Validation(format!(
-                        "edge '{}': requires 'to' or 'to_column'",
-                        column
-                    )));
-                }
-            };
-            let multi_value_options = [
-                mapping.delimiter.is_some(),
-                mapping.array_field.is_some(),
-                mapping.array,
-            ];
-            if multi_value_options.iter().filter(|&&v| v).count() > 1 {
+        .map(|(column, entry)| {
+            let mappings = entry.into_vec();
+            if mappings.is_empty() {
                 return Err(OntologyError::Validation(format!(
-                    "edge '{}': use only one of 'delimiter', 'array_field', or 'array'",
+                    "edge '{}': mapping list cannot be empty",
                     column
                 )));
             }
-            Ok((
-                column,
-                EdgeMapping {
+            let mut converted = Vec::with_capacity(mappings.len());
+            let mut seen_kinds: std::collections::HashSet<(String, EdgeDirection)> =
+                std::collections::HashSet::new();
+            for mapping in mappings {
+                let target = match (mapping.target_literal, mapping.target_column) {
+                    (Some(lit), None) => {
+                        if !mapping.type_mapping.is_empty() {
+                            return Err(OntologyError::Validation(format!(
+                                "edge '{}': 'type_mapping' requires 'to_column'",
+                                column
+                            )));
+                        }
+                        EdgeTarget::Literal(lit)
+                    }
+                    (None, Some(col)) => EdgeTarget::Column {
+                        column: col,
+                        type_mapping: mapping.type_mapping,
+                    },
+                    (Some(_), Some(_)) => {
+                        return Err(OntologyError::Validation(format!(
+                            "edge '{}': use 'to' or 'to_column', not both",
+                            column
+                        )));
+                    }
+                    (None, None) => {
+                        return Err(OntologyError::Validation(format!(
+                            "edge '{}': requires 'to' or 'to_column'",
+                            column
+                        )));
+                    }
+                };
+                let multi_value_options = [
+                    mapping.delimiter.is_some(),
+                    mapping.array_field.is_some(),
+                    mapping.array,
+                ];
+                if multi_value_options.iter().filter(|&&v| v).count() > 1 {
+                    return Err(OntologyError::Validation(format!(
+                        "edge '{}': use only one of 'delimiter', 'array_field', or 'array'",
+                        column
+                    )));
+                }
+                let key = (mapping.relationship_kind.clone(), mapping.direction);
+                if !seen_kinds.insert(key) {
+                    return Err(OntologyError::Validation(format!(
+                        "edge '{}': duplicate (relationship_kind={}, direction={:?})",
+                        column, mapping.relationship_kind, mapping.direction
+                    )));
+                }
+                converted.push(EdgeMapping {
                     target,
                     relationship_kind: mapping.relationship_kind,
                     direction: mapping.direction,
                     delimiter: mapping.delimiter,
                     array_field: mapping.array_field,
                     array: mapping.array,
-                },
-            ))
+                });
+            }
+            Ok((column, converted))
         })
         .collect()
 }
@@ -462,6 +497,7 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
             .into_iter()
             .map(convert_storage_projection)
             .collect(),
+        settings: yaml.settings,
     }
 }
 
@@ -621,6 +657,157 @@ mod tests {
             result.is_ok(),
             "should accept valid depends_on: {:?}",
             result.err()
+        );
+    }
+
+    fn parse_etl_yaml(yaml: &str) -> Result<EtlConfig, OntologyError> {
+        let node = parse_test_node(yaml)?;
+        Ok(node.etl.expect("etl block expected"))
+    }
+
+    const FK_NODE_HEADER: &str = r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: source_table
+              edges:
+        "#;
+
+    #[test]
+    fn fk_edges_accept_single_mapping() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: source_table
+              edges:
+                project_id:
+                  to: Project
+                  as: IN_PROJECT
+                  direction: outgoing
+            "#,
+        )
+        .expect("single mapping should parse");
+
+        let mappings = etl.edges().get("project_id").expect("project_id present");
+        assert_eq!(mappings.len(), 1);
+        assert_eq!(mappings[0].relationship_kind, "IN_PROJECT");
+        assert_eq!(mappings[0].direction, EdgeDirection::Outgoing);
+    }
+
+    #[test]
+    fn fk_edges_accept_multiple_mappings_per_column() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: source_table
+              edges:
+                pipeline_id:
+                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+                  - { to: Pipeline, as: HAS_JOB, direction: incoming }
+            "#,
+        )
+        .expect("array form should parse");
+
+        let mappings = etl.edges().get("pipeline_id").expect("pipeline_id present");
+        assert_eq!(mappings.len(), 2);
+        assert_eq!(mappings[0].relationship_kind, "IN_PIPELINE");
+        assert_eq!(mappings[0].direction, EdgeDirection::Outgoing);
+        assert_eq!(mappings[1].relationship_kind, "HAS_JOB");
+        assert_eq!(mappings[1].direction, EdgeDirection::Incoming);
+    }
+
+    #[test]
+    fn fk_edges_reject_duplicate_emission_on_same_column() {
+        let _ = FK_NODE_HEADER;
+        let result = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: source_table
+              edges:
+                pipeline_id:
+                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+            "#,
+        );
+        let err = result
+            .expect_err("duplicate emission should error")
+            .to_string();
+        assert!(err.contains("duplicate"), "got: {err}");
+        assert!(err.contains("IN_PIPELINE"), "got: {err}");
+    }
+
+    #[test]
+    fn fk_edges_flatten_via_edge_mappings_iter() {
+        let etl = parse_etl_yaml(
+            r#"
+            node_type: entity
+            domain: test
+            destination_table: gl_test
+            properties:
+              id:
+                type: int64
+                source: id
+            etl:
+              type: table
+              scope: namespaced
+              source: source_table
+              edges:
+                pipeline_id:
+                  - { to: Pipeline, as: IN_PIPELINE, direction: outgoing }
+                  - { to: Pipeline, as: HAS_JOB, direction: incoming }
+                project_id:
+                  to: Project
+                  as: IN_PROJECT
+                  direction: outgoing
+            "#,
+        )
+        .expect("mixed forms should parse");
+
+        let flattened: Vec<(&str, &str)> = etl
+            .edge_mappings()
+            .map(|(col, m)| (col.as_str(), m.relationship_kind.as_str()))
+            .collect();
+        assert_eq!(
+            flattened,
+            vec![
+                ("pipeline_id", "IN_PIPELINE"),
+                ("pipeline_id", "HAS_JOB"),
+                ("project_id", "IN_PROJECT"),
+            ]
         );
     }
 }

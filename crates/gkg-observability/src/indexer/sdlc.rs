@@ -2,7 +2,7 @@
 //! datalake query and transform latency.
 
 use crate::MetricSpec;
-use crate::buckets::LATENCY;
+use crate::buckets::{LATENCY, LATENCY_SLOW};
 
 pub mod labels {
     pub const ENTITY: &str = "entity";
@@ -17,7 +17,7 @@ pub const PIPELINE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end duration of a single entity or edge pipeline run.",
     Some("s"),
     &[labels::ENTITY],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -42,7 +42,7 @@ pub const HANDLER_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of a full handler invocation across all its pipelines.",
     Some("s"),
     &[labels::HANDLER],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 

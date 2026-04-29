@@ -14,6 +14,8 @@ repositories:
     url: https://nats-io.github.io/k8s/helm/charts
   - name: siphon
     url: https://gitlab.com/api/v4/projects/76780115/packages/helm/stable
+  - name: bitnami
+    url: https://charts.bitnami.com/bitnami
 
 releases:
   # --- Phase: bootstrap (namespaces + secrets) ---
@@ -53,6 +55,37 @@ releases:
     values:
       - values/clickhouse.yaml.gotmpl
 
+  # GitLab chart v9.11.1+ (heading toward v10.0) removed bundled PG/Redis/MinIO
+  # subcharts. We deploy bitnami's PG and Redis charts standalone in the same
+  # gitlab namespace; fullnameOverride keeps service FQDNs identical so siphon
+  # and pg-cdc-setup don't need updates. MinIO is skipped — the e2e suite
+  # doesn't exercise object storage.
+  - name: postgresql
+    namespace: e2e-{{ $sha }}-gitlab
+    createNamespace: true
+    chart: bitnami/postgresql
+    version: {{ $v.postgresql.chart }}
+    labels:
+      phase: infra
+      component: postgresql
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
+    values:
+      - values/postgresql.yaml.gotmpl
+
+  - name: redis
+    namespace: e2e-{{ $sha }}-gitlab
+    createNamespace: true
+    chart: bitnami/redis
+    version: {{ $v.redis.chart }}
+    labels:
+      phase: infra
+      component: redis
+    needs:
+      - e2e-{{ $sha }}-gkg/bootstrap
+    values:
+      - values/redis.yaml.gotmpl
+
   - name: gitlab
     namespace: e2e-{{ $sha }}-gitlab
     createNamespace: true
@@ -63,6 +96,8 @@ releases:
       component: gitlab
     needs:
       - e2e-{{ $sha }}-gkg/bootstrap
+      - e2e-{{ $sha }}-gitlab/postgresql
+      - e2e-{{ $sha }}-gitlab/redis
     timeout: 1200
     values:
       - values/gitlab.yaml.gotmpl
@@ -76,6 +111,7 @@ releases:
       component: pg-cdc-setup
     needs:
       - e2e-{{ $sha }}-gitlab/gitlab
+      - e2e-{{ $sha }}-gitlab/postgresql
     timeout: 120
     values:
       - values/pg-cdc-setup.yaml.gotmpl

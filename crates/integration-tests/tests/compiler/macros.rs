@@ -73,7 +73,7 @@ fn from_json_sets_json_only() {
 #[test]
 fn from_input_sets_input_only() {
     let input: Input = serde_json::from_str(
-        r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
+        r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "node_ids": [1]}, "limit": 10}"#,
     )
     .unwrap();
     let state = QueryState::from_input(input);
@@ -169,7 +169,7 @@ fn seal_json_drops_json_field() {
 #[test]
 fn seal_input_drops_input_field() {
     let input: Input = serde_json::from_str(
-        r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
+        r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "node_ids": [1]}, "limit": 10}"#,
     )
     .unwrap();
     let mut state = QueryState::from_input(input);
@@ -189,7 +189,7 @@ fn seal_node_drops_node_field() {
 fn seal_does_not_affect_other_fields() {
     let mut state = QueryState::from_json("keep me");
     let input: Input = serde_json::from_str(
-        r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
+        r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "node_ids": [1]}, "limit": 10}"#,
     )
     .unwrap();
     state.set_input(input);

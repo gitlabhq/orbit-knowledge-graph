@@ -10,3 +10,23 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
     description: "User is assigned to work item."
+
+etl:
+  - scope: namespaced
+    source: siphon_merge_request_assignees
+    order_by: [traversal_path, merge_request_id, id]
+    from:
+      id: user_id
+      type: User
+    to:
+      id: merge_request_id
+      type: MergeRequest
+  - scope: namespaced
+    source: siphon_issue_assignees
+    order_by: [traversal_path, issue_id, user_id]
+    from:
+      id: user_id
+      type: User
+    to:
+      id: issue_id
+      type: WorkItem

@@ -10,8 +10,4 @@ variants:
 
   - from_node: { type: Definition, id: id }
     to_node: { type: Definition, id: id }
-    description: "Definition contains or calls another definition (inheritance, composition, method calls)."
-
-  - from_node: { type: Definition, id: id }
-    to_node: { type: ImportedSymbol, id: id }
-    description: "Definition exports or is source of an imported symbol."
+    description: "Outer definition lexically contains a nested definition (e.g. a class contains its methods, a module contains its classes). Inheritance is modeled as EXTENDS and call sites as CALLS."

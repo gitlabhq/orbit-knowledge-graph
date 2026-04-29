@@ -134,11 +134,6 @@ etl:
       to: Group
       as: IN_GROUP
       direction: outgoing
-    assignees:
-      to: User
-      as: ASSIGNED
-      direction: incoming
-      array: true
     project_id:
       to: Project
       as: IN_PROJECT
@@ -147,14 +142,11 @@ etl:
       to: User
       as: CLOSED
       direction: incoming
-    label_ids:
-      to: Label
-      as: HAS_LABEL
-      direction: outgoing
-      array_field: label_id
 
 storage:
   primary_key: [traversal_path, id]
+  settings:
+    add_minmax_index_for_temporal_columns: "1"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
@@ -175,6 +167,8 @@ storage:
     - {name: idx_work_item_type, column: work_item_type, type: "set(10)", granularity: 2}
     - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

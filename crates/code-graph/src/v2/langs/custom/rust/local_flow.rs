@@ -633,8 +633,7 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
         expr: &ast::Expr,
         index: &mut LocalFlowIndex,
     ) -> SsaValue<'arena> {
-        if stacker::remaining_stack().unwrap_or(usize::MAX)
-            < crate::legacy::parser::MINIMUM_STACK_REMAINING
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
             return SsaValue::Opaque;
         }

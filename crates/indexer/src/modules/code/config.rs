@@ -1,13 +1,10 @@
 //! Constants for the code indexing module.
 
 use std::collections::HashMap;
-use std::time::Duration;
 
 use ontology::{Ontology, OntologyError};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
-
-pub const CODE_LOCK_TTL: Duration = Duration::from_secs(60);
 
 pub mod subjects {
     pub const CODE_INDEXING_TASKS: &str = "p_knowledge_graph_code_indexing_tasks";

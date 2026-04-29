@@ -31,6 +31,11 @@ pub struct QueryOptions {
     /// `All` returns every column; `Default` returns the entity's `default_columns`.
     #[serde(default)]
     pub dynamic_columns: DynamicColumnMode,
+    /// When true, includes compiled ClickHouse SQL in the response metadata.
+    /// Only honored for authorized users (instance admins and direct GitLab
+    /// org members with Reporter+ access).
+    #[serde(default)]
+    pub include_debug_sql: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -49,6 +54,25 @@ pub struct EntityAuthConfig {
     /// owns this resource, used to resolve the auth ID from edge columns for
     /// dynamic (path/neighbor) nodes.
     pub owner_entity: Option<String>,
+    /// Minimum GitLab role required on a traversal path for rows of this entity
+    /// to survive the security pass. Stored as an access-level integer so the
+    /// compiler can compare against per-path roles carried by `SecurityContext`
+    /// without pulling the ontology crate into `types.rs`.
+    pub required_access_level: u32,
+}
+
+impl Default for EntityAuthConfig {
+    fn default() -> Self {
+        Self {
+            resource_type: String::new(),
+            ability: String::new(),
+            auth_id_column: ontology::constants::DEFAULT_PRIMARY_KEY.to_string(),
+            owner_entity: None,
+            // Reporter mirrors the pre-fix access gate and is the right
+            // default for tests that do not care about role scoping.
+            required_access_level: crate::types::DEFAULT_PATH_ACCESS_LEVEL,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -79,6 +103,14 @@ pub struct Input {
     pub compiler: CompilerMetadata,
 }
 
+/// Text index metadata for a column, used by the optimizer to rewrite
+/// LIKE patterns to ClickHouse text-index-aware functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextIndexMeta {
+    /// The tokenizer strategy, e.g. `"splitByNonAlpha"`, `"splitByString(['/'])"`.
+    pub tokenizer: String,
+}
+
 /// Metadata accumulated across compiler passes.
 ///
 /// Written by normalize/lowering, read by downstream passes (deduplicate,
@@ -99,6 +131,19 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
+    /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
+    /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
+    /// The hop frontier optimizer uses this to decide whether a CTE is safe
+    /// to forward-chain from.
+    pub lowerer_nf_ctes: HashSet<String>,
+    /// Maps (table_name, column_name) → text index metadata. Populated by
+    /// normalize from the ontology's `StorageIndex` entries. Used by the
+    /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
+    pub text_indexes: HashMap<(String, String), TextIndexMeta>,
+    /// Physical table columns from the ontology. Used by lowering to emit
+    /// internal predicates only when a table is known to carry that column.
+    pub table_columns: HashMap<String, HashSet<String>>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -110,11 +155,20 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            lowerer_nf_ctes: HashSet::new(),
+            text_indexes: HashMap::new(),
+            table_columns: HashMap::new(),
         }
     }
 }
 
 impl CompilerMetadata {
+    pub fn table_has_column(&self, table: &str, column: &str) -> bool {
+        self.table_columns
+            .get(table)
+            .is_some_and(|columns| columns.contains(column))
+    }
+
     /// Resolve the edge table(s) for a relationship's type list.
     ///
     /// Returns a deduplicated list of physical tables that need to be scanned.
@@ -138,6 +192,16 @@ impl CompilerMetadata {
             seen.insert(table.to_string());
         }
         seen.into_iter().collect()
+    }
+}
+
+impl Input {
+    /// Whether this query has the "search shape": a single-node table scan
+    /// with no relationships (traversal with 1 node + 0 relationships).
+    pub fn is_search(&self) -> bool {
+        self.query_type == QueryType::Traversal
+            && self.nodes.len() == 1
+            && self.relationships.is_empty()
     }
 }
 
@@ -221,7 +285,6 @@ pub enum QueryType {
     Traversal,
     Aggregation,
     PathFinding,
-    Search,
     Neighbors,
     /// Internal-only: consolidated hydration for multiple entity types.
     /// Generates a UNION ALL of search-like arms, one per node. Skips
@@ -360,10 +423,13 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,
+    /// Populated by the validate pass; lets the lowerer bind temporal columns
+    /// with their typed CH param.
+    pub data_type: Option<ontology::DataType>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -380,6 +446,12 @@ pub enum FilterOp {
     EndsWith,
     IsNull,
     IsNotNull,
+    /// Token-boundary match via `hasToken()`. Requires a text index on the column.
+    TokenMatch,
+    /// All tokens present via `hasAllTokens()`. Requires a text index on the column.
+    AllTokens,
+    /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
+    AnyTokens,
 }
 
 fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>
@@ -398,11 +470,13 @@ fn parse_filter(value: Value) -> InputFilter {
         return InputFilter {
             op: Some(op),
             value: obj.get("value").cloned(),
+            ..Default::default()
         };
     }
     InputFilter {
         op: None,
         value: Some(value),
+        ..Default::default()
     }
 }
 
@@ -544,6 +618,10 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
+    #[serde(skip)]
+    pub forward_first_hop_rel_types: Vec<String>,
+    #[serde(skip)]
+    pub backward_first_hop_rel_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
@@ -712,25 +790,26 @@ mod tests {
     }
 
     #[test]
-    fn search_with_single_node() {
+    fn traversal_with_single_node() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "filters": {"username": "admin"}}
         }"#,
         )
         .unwrap();
 
-        assert_eq!(input.query_type, QueryType::Search);
+        assert_eq!(input.query_type, QueryType::Traversal);
         assert_eq!(input.nodes.len(), 1);
         assert_eq!(input.nodes[0].id, "u");
+        assert!(input.is_search());
     }
 
     #[test]
     fn columns_wildcard() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": "*"}
         }"#,
         )
@@ -743,7 +822,7 @@ mod tests {
     fn columns_list() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username", "email", "created_at"]}
         }"#,
         )
@@ -763,7 +842,7 @@ mod tests {
     fn columns_not_specified() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User"}
         }"#,
         )
@@ -813,7 +892,7 @@ mod tests {
     #[test]
     fn options_default_when_omitted() {
         let input =
-            parse_input(r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}}"#)
+            parse_input(r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}}"#)
                 .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
@@ -853,7 +932,7 @@ mod tests {
     fn options_empty_object_uses_defaults() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User"},
             "options": {}
         }"#,
@@ -861,13 +940,42 @@ mod tests {
         .unwrap();
 
         assert_eq!(input.options.dynamic_columns, DynamicColumnMode::Default);
+        assert!(!input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_include_debug_sql_true() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"include_debug_sql": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_include_debug_sql_defaults_false() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"dynamic_columns": "*"}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(!input.options.include_debug_sql);
     }
 
     #[test]
     fn node_ids_accepts_integers_and_strings() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -884,7 +992,7 @@ mod tests {
     fn id_range_accepts_integers_and_strings() {
         let input = parse_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",

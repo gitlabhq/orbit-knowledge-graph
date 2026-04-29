@@ -403,6 +403,30 @@ pub struct ScheduledTasksConfiguration {
 
 // ── Top-level engine config ──────────────────────────────────────────
 
+/// Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.
+///
+/// An indexer process registers handlers only for the modules listed in
+/// [`EngineConfiguration::modules`], letting operators run multiple specialised
+/// indexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the
+/// same binary.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
+#[serde(rename_all = "snake_case")]
+pub enum IndexerModule {
+    /// SDLC handlers: `global-handler` and `namespace-handler`.
+    Sdlc,
+    /// Code indexing handler: clones repositories, runs tree-sitter, writes the code graph.
+    Code,
+    /// Namespace deletion handler.
+    NamespaceDeletion,
+}
+
+impl IndexerModule {
+    /// Full set of modules. Used as the default so existing deployments stay universal.
+    pub fn all() -> Vec<IndexerModule> {
+        vec![Self::Sdlc, Self::Code, Self::NamespaceDeletion]
+    }
+}
+
 /// ETL engine configuration.
 ///
 /// # Defaults
@@ -410,6 +434,7 @@ pub struct ScheduledTasksConfiguration {
 /// - `max_concurrent_workers`: 16
 /// - `concurrency_groups`: empty
 /// - `handlers`: defaults for all handlers
+/// - `modules`: all variants of [`IndexerModule`] (universal indexer)
 #[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct EngineConfiguration {
@@ -429,6 +454,12 @@ pub struct EngineConfiguration {
     /// Datalake retry tuning shared by all SDLC pipelines.
     #[serde(default)]
     pub datalake_retry: DatalakeRetryConfig,
+
+    /// Modules whose handlers this indexer process should register. Defaults to all
+    /// modules for backward compatibility (universal indexer). Set to a subset to
+    /// run a specialised pool, e.g. `[code]` for a code-only Deployment.
+    #[serde(default = "IndexerModule::all")]
+    pub modules: Vec<IndexerModule>,
 }
 
 impl Default for EngineConfiguration {
@@ -438,6 +469,7 @@ impl Default for EngineConfiguration {
             concurrency_groups: HashMap::new(),
             handlers: HandlersConfiguration::default(),
             datalake_retry: DatalakeRetryConfig::default(),
+            modules: IndexerModule::all(),
         }
     }
 }
@@ -446,6 +478,28 @@ impl EngineConfiguration {
     fn default_max_concurrent_workers() -> usize {
         16
     }
+
+    /// Returns whether `module` is enabled in this configuration.
+    pub fn is_module_enabled(&self, module: IndexerModule) -> bool {
+        self.modules.contains(&module)
+    }
+
+    /// Validates engine-level invariants that cannot be expressed in the type system.
+    pub fn validate(&self) -> Result<(), EngineConfigError> {
+        if self.modules.is_empty() {
+            return Err(EngineConfigError::NoModulesEnabled);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum EngineConfigError {
+    #[error(
+        "engine.modules must list at least one module; \
+         leave it unset to register all modules (universal indexer)"
+    )]
+    NoModulesEnabled,
 }
 
 /// Top-level schedule configuration.
@@ -454,4 +508,62 @@ impl EngineConfiguration {
 pub struct ScheduleConfig {
     #[serde(default)]
     pub tasks: ScheduledTasksConfiguration,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn default_modules_are_universal() {
+        let cfg = EngineConfiguration::default();
+        assert_eq!(cfg.modules, IndexerModule::all());
+        assert!(cfg.is_module_enabled(IndexerModule::Sdlc));
+        assert!(cfg.is_module_enabled(IndexerModule::Code));
+        assert!(cfg.is_module_enabled(IndexerModule::NamespaceDeletion));
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn empty_modules_fails_validation() {
+        let cfg = EngineConfiguration {
+            modules: vec![],
+            ..EngineConfiguration::default()
+        };
+        assert!(matches!(
+            cfg.validate(),
+            Err(EngineConfigError::NoModulesEnabled)
+        ));
+    }
+
+    #[test]
+    fn module_subset_only_enables_listed() {
+        let cfg = EngineConfiguration {
+            modules: vec![IndexerModule::Code],
+            ..EngineConfiguration::default()
+        };
+        assert!(cfg.is_module_enabled(IndexerModule::Code));
+        assert!(!cfg.is_module_enabled(IndexerModule::Sdlc));
+        assert!(!cfg.is_module_enabled(IndexerModule::NamespaceDeletion));
+        assert!(cfg.validate().is_ok());
+    }
+
+    #[test]
+    fn modules_deserialize_from_yaml() {
+        let yaml = r#"
+modules: [sdlc, namespace_deletion]
+"#;
+        let cfg: EngineConfiguration = serde_yaml::from_str(yaml).expect("valid yaml");
+        assert_eq!(
+            cfg.modules,
+            vec![IndexerModule::Sdlc, IndexerModule::NamespaceDeletion]
+        );
+    }
+
+    #[test]
+    fn omitted_modules_field_uses_default() {
+        let yaml = "max_concurrent_workers: 8\n";
+        let cfg: EngineConfiguration = serde_yaml::from_str(yaml).expect("valid yaml");
+        assert_eq!(cfg.modules, IndexerModule::all());
+    }
 }

@@ -141,8 +141,11 @@ etl:
     file.relative_order AS relative_order
   from: >-
     siphon_merge_request_diff_files file
-    INNER JOIN siphon_merge_request_diffs diff
-    ON file.merge_request_diff_id = diff.id
+    INNER JOIN (
+      SELECT id, merge_request_id, project_id
+      FROM siphon_merge_request_diffs
+      WHERE startsWith(traversal_path, {traversal_path:String})
+    ) diff ON file.merge_request_diff_id = diff.id
   traversal_path_filter: "startsWith(file.traversal_path, {traversal_path:String})"
   watermark: file._siphon_replicated_at
   deleted: file._siphon_deleted
@@ -178,6 +181,8 @@ storage:
     - {name: idx_deleted_file, column: deleted_file, type: "minmax", granularity: 1}
     - {name: idx_binary, column: binary, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_new_path, column: new_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_old_path, column: old_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

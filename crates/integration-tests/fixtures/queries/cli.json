@@ -1,18 +1,20 @@
 {
   "files": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {
       "id": "f",
       "entity": "File",
+      "filters": {"name": {"op": "is_not_null"}},
       "columns": ["id", "name", "path", "branch", "commit_sha", "content"]
     },
     "limit": 50
   },
   "files_simple": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {
       "id": "f",
       "entity": "File",
+      "filters": {"name": {"op": "is_not_null"}},
       "columns": ["id", "name", "path"]
     },
     "limit": 50
@@ -20,7 +22,7 @@
   "traversal": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "f", "entity": "File", "columns": ["id", "name"]},
+      {"id": "f", "entity": "File", "filters": {"name": {"op": "is_not_null"}}, "columns": ["id", "name"]},
       {"id": "d", "entity": "Definition", "columns": ["id", "name"]}
     ],
     "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],

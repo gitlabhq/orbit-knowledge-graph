@@ -152,11 +152,13 @@ Execute a Knowledge Graph query.
 ```json
 {
   "query": {
-    "search": {
-      "entity_type": "merge_request",
-      "filters": { "state": "merged" },
-      "limit": 10
-    }
+    "query_type": "traversal",
+    "node": {
+      "id": "mr",
+      "entity": "MergeRequest",
+      "filters": { "state": "merged" }
+    },
+    "limit": 10
   },
   "query_type": "json",
   "format": "raw"
@@ -170,7 +172,7 @@ Execute a Knowledge Graph query.
   "result": [
     { "_id": "123", "_type": "MergeRequest", "title": "Fix bug", "state": "merged" }
   ],
-  "query_type": "search",
+  "query_type": "traversal",
   "raw_query_strings": ["SELECT ... FROM merge_requests WHERE ..."],
   "row_count": 10
 }
@@ -181,7 +183,7 @@ Execute a Knowledge Graph query.
 ```json
 {
   "result": "@goon{v:1,org:123}\nnodes:\n  MergeRequest[10]{id,iid,title,state,author_id}:\n    501,42,\"Fix auth bug\",merged,1\n    ...",
-  "query_type": "search",
+  "query_type": "traversal",
   "raw_query_strings": ["SELECT ..."],
   "row_count": 10
 }
@@ -329,7 +331,7 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
   "tools": [
     {
       "name": "query_graph",
-      "description": "Execute graph queries (search, traversal, neighbors, path finding, aggregation)\n\nSchema:\ndomains: [{name: \"core\", nodes: [\"User\", \"Project\", ...]}, ...]\n...",
+      "description": "Execute graph queries (traversal, neighbors, path finding, aggregation)\n\nSchema:\ndomains: [{name: \"core\", nodes: [\"User\", \"Project\", ...]}, ...]\n...",
       "parameters_json_schema": { "type": "object", "properties": { "query": {} } },
       "endpoint": "POST /api/v4/orbit/query"
     },
@@ -353,8 +355,8 @@ The `query_graph` tool description includes the full TOON-format schema (~15KB) 
 
 ```shell
 # Query execution
-glab orbit query '{"search":{"entity_type":"merge_request","limit":5}}' --format=human
-glab orbit query '{"search":{"entity_type":"merge_request","limit":5}}' --format=llm
+glab orbit query '{"query_type":"traversal","node":{"id":"mr","entity":"MergeRequest"},"limit":5}' --format=human
+glab orbit query '{"query_type":"traversal","node":{"id":"mr","entity":"MergeRequest"},"limit":5}' --format=llm
 
 # Schema
 glab orbit schema                                   # full schema (compact)

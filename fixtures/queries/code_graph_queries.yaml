@@ -1,0 +1,67 @@
+# Code-graph query fixtures (CALLS, EXTENDS, DEFINES, IMPORTS).
+#
+# Each entry has a stable key, a human-readable description, and the raw
+# GKG query DSL as inline JSON.
+
+q1:
+  desc: Definition-to-definition call edges
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "caller", "entity": "Definition"},
+        {"id": "callee", "entity": "Definition"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "caller", "to": "callee"}
+      ],
+      "limit": 30
+    }
+
+q2:
+  desc: Calls into an imported symbol
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "caller", "entity": "Definition"},
+        {"id": "sym", "entity": "ImportedSymbol"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "caller", "to": "sym"}
+      ],
+      "limit": 30
+    }
+
+q3:
+  desc: Class inheritance chain
+  query: |
+    {
+      "query_type": "traversal",
+      "nodes": [
+        {"id": "child", "entity": "Definition", "filters": {"definition_type": "Class"}},
+        {"id": "parent", "entity": "Definition"}
+      ],
+      "relationships": [
+        {"type": "EXTENDS", "from": "child", "to": "parent"}
+      ],
+      "limit": 30
+    }
+
+q4:
+  desc: Count callers of a definition (aggregation)
+  query: |
+    {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "caller", "entity": "Definition"},
+        {"id": "callee", "entity": "Definition", "node_ids": "$sample"}
+      ],
+      "relationships": [
+        {"type": "CALLS", "from": "caller", "to": "callee"}
+      ],
+      "aggregations": [
+        {"function": "count", "target": "caller", "alias": "caller_count"}
+      ],
+      "limit": 1
+    }

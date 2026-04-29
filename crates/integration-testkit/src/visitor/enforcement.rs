@@ -113,7 +113,7 @@ impl QueryRequirements for Input {
                 reqs.insert(Requirement::Neighbors);
                 reqs.insert(Requirement::NodeCount);
             }
-            QueryType::Traversal | QueryType::Search => {
+            QueryType::Traversal => {
                 reqs.insert(Requirement::NodeCount);
             }
             QueryType::Hydration => {}
@@ -176,6 +176,22 @@ impl AssertionTracker {
         }
     }
 
+    /// Mark every `Requirement::Filter { .. }` in the required set as
+    /// satisfied. Used by empty-result assertions where filter checks
+    /// are vacuously true.
+    pub(super) fn satisfy_all_filters(&self) {
+        let filters: Vec<Requirement> = self
+            .required
+            .iter()
+            .filter(|r| matches!(r, Requirement::Filter { .. }))
+            .cloned()
+            .collect();
+        let mut satisfied = self.satisfied.borrow_mut();
+        for f in filters {
+            satisfied.insert(f);
+        }
+    }
+
     fn unsatisfied(&self) -> HashSet<Requirement> {
         self.required
             .difference(&self.satisfied.borrow())
@@ -222,7 +238,7 @@ mod tests {
     #[test]
     fn requirements_from_search_with_order_by() {
         let input = parse_test_input(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User"},
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let reqs = input.requirements();
@@ -234,7 +250,7 @@ mod tests {
     #[test]
     fn requirements_from_search_with_filter() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
                 "limit": 10}"#,
         );
@@ -249,7 +265,7 @@ mod tests {
     #[test]
     fn requirements_from_search_with_multiple_filters() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User",
                          "filters": {"state": "active", "user_type": "human"}},
                 "limit": 10}"#,
@@ -268,7 +284,7 @@ mod tests {
     #[test]
     fn requirements_from_search_with_node_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
                 "limit": 10}"#,
         );
@@ -313,7 +329,7 @@ mod tests {
     #[test]
     fn requirements_from_plain_search_has_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
                 "limit": 10}"#,
         );
@@ -431,7 +447,7 @@ mod tests {
     #[test]
     fn for_query_plain_search_requires_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
         view.assert_node_count(2);
@@ -440,7 +456,7 @@ mod tests {
     #[test]
     fn for_query_order_satisfied_by_assert_node_order() {
         let input = parse_test_input(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User"},
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -451,7 +467,7 @@ mod tests {
     #[test]
     fn for_query_filter_satisfied_by_assert_filter() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"username": "alice"}},
                 "limit": 10}"#,
         );
@@ -463,7 +479,7 @@ mod tests {
     #[test]
     fn for_query_multi_filter_requires_all_fields() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User",
                          "filters": {"username": "alice", "state": "active"}},
                 "limit": 10}"#,
@@ -480,7 +496,7 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_multi_filter_panics_on_partial_satisfaction() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User",
                          "filters": {"username": "alice", "state": "active"}},
                 "limit": 10}"#,
@@ -493,7 +509,7 @@ mod tests {
     #[test]
     fn for_query_node_ids_satisfied_by_node_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
                 "limit": 10}"#,
         );
@@ -668,7 +684,7 @@ mod tests {
     #[test]
     fn requirements_from_cursor() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
                 "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
@@ -682,7 +698,7 @@ mod tests {
     #[test]
     fn for_query_cursor_satisfied_by_assert_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
                 "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
@@ -694,7 +710,7 @@ mod tests {
     #[test]
     fn for_query_node_ids_satisfied_by_assert_node_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
                 "limit": 10}"#,
         );
@@ -733,7 +749,7 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_node_ids_not_satisfied_by_assert_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
                 "limit": 10}"#,
         );
@@ -748,7 +764,7 @@ mod tests {
     #[should_panic(expected = "NodeCount")]
     fn for_query_panics_on_unsatisfied_node_count() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
                 "limit": 10}"#,
         );
@@ -760,7 +776,7 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_order() {
         let input = parse_test_input(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User"},
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());
@@ -771,7 +787,7 @@ mod tests {
     #[should_panic(expected = "Filter on 'state'")]
     fn for_query_panics_on_unsatisfied_filter_shows_field() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "filters": {"state": "active"}},
                 "limit": 10}"#,
         );
@@ -824,7 +840,7 @@ mod tests {
     #[should_panic(expected = "Cursor")]
     fn for_query_panics_on_unsatisfied_cursor() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User"},
                 "cursor": {"offset": 0, "page_size": 5},
                 "limit": 10}"#,
@@ -873,7 +889,7 @@ mod tests {
     #[should_panic(expected = "unsatisfied assertion requirements")]
     fn for_query_panics_on_unsatisfied_node_ids() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2]},
                 "limit": 10}"#,
         );
@@ -884,7 +900,7 @@ mod tests {
     #[test]
     fn for_query_combined_features_requires_all() {
         let input = parse_test_input(
-            r#"{"query_type": "search",
+            r#"{"query_type": "traversal",
                 "node": {"id": "u", "entity": "User", "node_ids": [1, 2],
                          "filters": {"username": {"op": "in", "value": ["alice", "bob"]}}},
                 "order_by": {"node": "u", "property": "id"},
@@ -904,7 +920,7 @@ mod tests {
     #[test]
     fn skip_requirement_prevents_panic() {
         let input = parse_test_input(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User"},
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User"},
                 "order_by": {"node": "u", "property": "id"}, "limit": 10}"#,
         );
         let view = ResponseView::for_query(&input, sample_search_response());

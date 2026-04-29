@@ -125,14 +125,8 @@ repos:
 
 scenarios:
   hyperfine:
-    - id: index
-      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
-      warmup: 1
-      min_runs: 3
-      max_runs: 3
-
     - id: v2
-      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats --v2
+      command_per_repo: ./target/release/orbit index ${REPOS_DIR}/${REPO_NAME} --threads 4 --stats
       warmup: 1
       min_runs: 3
       max_runs: 3

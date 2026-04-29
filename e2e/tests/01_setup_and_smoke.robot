@@ -25,7 +25,7 @@ Orbit Is Healthy
 User Data Is Available Via Orbit Query
     [Documentation]    Verify the full pipeline: PG → Siphon → ClickHouse → GKG indexer → Orbit API.
     [Tags]    smoke
-    Wait For Entity Population    User    minimum=1    timeout=120s
+    Wait For Node Indexed    User    ${E2E_BOT_USER_ID}    ${E2E_BOT_USERNAME}    label_field=username
 
 Shared Namespace Is Enabled And Indexed
     [Documentation]    Provision the namespace reused by downstream suites; verify it indexes end-to-end.

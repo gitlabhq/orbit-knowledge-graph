@@ -2,7 +2,7 @@
 //! per-stage errors).
 
 use crate::MetricSpec;
-use crate::buckets::{LATENCY, MEMORY_BYTES};
+use crate::buckets::{LATENCY_SLOW, MEMORY_BYTES};
 
 pub mod labels {
     pub const OUTCOME: &str = "outcome";
@@ -27,7 +27,7 @@ pub const HANDLER_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "End-to-end duration of processing a single push event.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -36,7 +36,7 @@ pub const REPOSITORY_FETCH_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of downloading a repository archive from Gitaly.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -86,7 +86,7 @@ pub const INDEXING_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "Duration of code-graph parsing and analysis.",
     Some("s"),
     &[],
-    LATENCY,
+    LATENCY_SLOW,
     DOMAIN,
 );
 
@@ -108,9 +108,56 @@ pub const NODES_INDEXED: MetricSpec = MetricSpec::counter(
 
 pub const ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.indexer.code.errors",
-    "Total code indexing errors by pipeline stage.",
+    "Task-level code indexing failures by pipeline stage. Increments only \
+     when a code indexing task ends with a fatal pipeline error (sink write, \
+     thread pool, sentinel spawn, internal panic). Per-file failures land in \
+     `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
     None,
     &[labels::STAGE],
+    DOMAIN,
+);
+
+pub const FILES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.files.skipped",
+    "Source files skipped by the code-graph indexer for policy or watchdog reasons. \
+     Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, \
+     `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, `timeout_sentinel`.",
+    None,
+    &[labels::REASON],
+    DOMAIN,
+);
+
+pub const FILE_FAULTS: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.file_faults",
+    "Per-file failures during code indexing, by kind. The task itself \
+     completes successfully; individual files were excluded from the graph. \
+     Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, \
+     `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, \
+     `embedded_script_parse`, `rust_workspace_missing`.",
+    None,
+    &[labels::KIND],
+    DOMAIN,
+);
+
+pub const ARCHIVE_ENTRIES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.entries.skipped",
+    "Tar archive entries dropped before extraction so they never touch disk. \
+     Reasons: `excluded_extension` (basename matches the binary-asset / \
+     media / archive denylist in `code-graph::v2::config::filter::\
+     EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the \
+     configured per-file ceiling).",
+    None,
+    &[labels::REASON],
+    DOMAIN,
+);
+
+pub const ARCHIVE_BYTES_SKIPPED: MetricSpec = MetricSpec::counter(
+    "gkg.indexer.code.archive.bytes.skipped",
+    "Total bytes that the archive extractor refused to write to disk, \
+     summed from the tar header sizes of skipped entries. Same `reason` \
+     labels as `gkg.indexer.code.archive.entries.skipped`.",
+    Some("By"),
+    &[labels::REASON],
     DOMAIN,
 );
 
@@ -127,4 +174,8 @@ pub const CATALOG: &[&MetricSpec] = &[
     &FILES_PROCESSED,
     &NODES_INDEXED,
     &ERRORS,
+    &FILES_SKIPPED,
+    &FILE_FAULTS,
+    &ARCHIVE_ENTRIES_SKIPPED,
+    &ARCHIVE_BYTES_SKIPPED,
 ];

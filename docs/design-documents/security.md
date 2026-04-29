@@ -10,14 +10,15 @@ The Knowledge Graph allows querying across an entire GitLab namespace. To preven
 
 All access to the Knowledge Graph is proxied through GitLab Rails, which acts as the primary authentication and authorization gateway. This ensures no user or agent can bypass the existing GitLab permission model. As part of the broader Auth Architecture program, these controls will evolve to integrate with future GitLab auth services. Until we have a finalized auth service, Rails remains the enforcement point and source of truth.
 
-## Initial Access Model: Reporter+ at Group Level
+## Access Model: Reporter+ Scope with Per-Entity Role Floors
 
-For the initial release, the Knowledge Graph enforces a simplified permission model to ensure security while enabling rapid delivery:
+The Knowledge Graph starts from a group-level Reporter+ scope and tightens that scope per entity when the ontology requires a higher role:
 
-- **Group-level Reporter+ access required**: Users must have at least Reporter role on a group to query any data within that group's hierarchy.
+- **Group-level Reporter+ access required**: Users must have at least Reporter role on a group for that group's traversal path to be eligible at all.
+- **Per-entity role floors**: Entities can declare `redaction.required_role`; security entities use `security_manager`, so Reporter-only paths are dropped for those aliases before SQL is emitted.
 - **Hierarchical access**: The GitLab permission model is hierarchical. If you have Reporter+ access to a group, you automatically have access to all subgroups and projects beneath it in the namespace tree. The Knowledge Graph honors this hierarchy.
 - **No sparse permissions in V1**: The first iteration does not support individual project-level access or item-level permissions (e.g., access to a single project without group access). This simplification aligns with the existing GitLab Analytics products, which require the same Reporter+ group-level access.
-- **Incremental filtering still applies**: Even with Reporter+ access, the system still filters results based on traversal IDs and performs final redaction checks to handle edge cases like confidential issues and runtime checks (like SAML/IP).
+- **Incremental filtering still applies**: Even with an eligible traversal path, the system still filters by per-path role and performs final redaction checks to handle edge cases like confidential issues and runtime checks (like SAML/IP).
 
 ### Request Flow
 
@@ -34,12 +35,12 @@ sequenceDiagram
     Client->>+Workhorse: 1. POST /api/v4/orbit/query
     Workhorse->>+Rails: 2. Proxy to Puma
     Rails->>+AuthZ: 3. Check: User has Reporter+ on group(s)?
-    AuthZ-->>-Rails: Yes + Get user's accessible traversal IDs
-    Note over Rails: Trie-optimized: [[100], [200, 300], ...]
+    AuthZ-->>-Rails: Yes + Get user's accessible traversal IDs with access levels
+    Note over Rails: Trie-optimized: [{path: "1/100/", access_level: 20}, ...]
     Rails-->>-Workhorse: 4. SendData header (JWT, GKG address, query)
 
-    Workhorse->>+GKG: 5. gRPC ExecuteQuery (bidi stream)<br/>with JWT + traversal_ids
-    Note over GKG: 6. Layer 1: Inject organization_id filter<br/>Layer 2: Inject traversal_ids prefix filters
+    Workhorse->>+GKG: 5. gRPC ExecuteQuery (bidi stream)<br/>with JWT + role-tagged traversal paths
+    Note over GKG: 6. Layer 1: Validate organization_id<br/>Layer 2: Inject per-entity traversal_path filters
     GKG->>GKG: 7. Execute filtered SQL query on ClickHouse
 
     GKG-->>Workhorse: 8. RedactionRequired (resource IDs)
@@ -75,7 +76,7 @@ This layer is primarily intended for .com customers to ensure that they can only
 - Unit tests verify that queries without traversal path filters are rejected by `CheckPass`.
 - Integration tests verify cross-namespace isolation within an organization and cross-organization isolation with multi-org seed data.
 
-**The `gl_user` table exception**: The User entity is global (not namespace-scoped) and has no `traversal_path` column. It is listed in `skip_security_filter_for_entities` in the ontology. Users can only appear in query results through edge table joins, and edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through user joins.
+**Global table exceptions**: Two entities are global (not namespace-scoped) and have no `traversal_path` column on their node tables: `User` (`gl_user`) and `Runner` (`gl_runner`). Both are listed in `skip_security_filter_for_entities` in the ontology and rely on Rails-side redaction (`Authz::RedactionService` with `read_user` and `read_runner` abilities respectively). They can only appear in query results through edge table joins, and the edge tables always carry the `traversal_path` filter, preventing cross-tenant leakage through global-node joins.
 
 ```plantuml
 @startuml
@@ -132,10 +133,10 @@ For example:
 
 During indexing, we enrich every entity (Issue, MR, Pipeline, etc.) with the `traversal_ids` of its parent project or group. When a user initiates a query:
 
-1. **Rails computes accessible groups**: Rails queries the user's group memberships with Reporter+ role: `user.groups.where('members.access_level >= ?', Gitlab::Access::REPORTER)`.
-2. **Optimize with trie structure**: Rails converts these groups into their `traversal_ids` arrays and optimizes them using a trie structure to avoid redundancy. For example, if a user has access to `[100]`, we don't need to also include `[100, 200]` since it's already covered.
-3. **Pass to GKG**: This minimal set of traversal ID prefixes is passed to the Knowledge Graph service (in the JWT payload, with JWT+MTLS for enhanced security).
-4. **Inject filters**: The query engine generates ClickHouse SQL with prefix matching predicates: `WHERE arrayExists(prefix -> startsWith(traversal_ids, prefix), allowed_prefixes)`.
+1. **Rails computes accessible groups**: Rails queries the user's Reporter+ group memberships and group-share access, returning each traversal path with the highest effective access level on that path.
+2. **Optimize with trie structure**: Rails buckets paths by role, compacts each bucket using a trie structure, and keeps the highest role if compacted buckets overlap.
+3. **Pass to GKG**: This minimal set of `{path, access_level}` traversal prefixes is passed to the Knowledge Graph service (in the JWT payload, with JWT+MTLS for enhanced security).
+4. **Inject filters**: The query engine generates ClickHouse SQL with prefix matching predicates over `traversal_path`, dropping any path whose `access_level` is below the target entity's `required_role`.
 
 **Code Review Requirements**:
 
@@ -375,10 +376,19 @@ The Knowledge Graph service connects to ClickHouse with restricted privileges:
 
 ## Handling Aggregations
 
-For aggregation queries (counts, averages, etc.), the Reporter+ group-level access model provides the necessary security boundary. Since aggregations do not return individual resource details, the final redaction layer is not applicable. Instead:
+Aggregation queries (counts, averages, ...) do not return individual resource rows, so Layer 3 (Rails redaction) cannot be applied after the fact. Earlier versions of the query engine therefore relied entirely on Layer 2 (traversal path filtering at the Reporter floor), which left an oracle: a Reporter user aggregating `count(Vulnerability) group_by Project` could observe vulnerability details through filter-driven counts even though they did not hold `read_vulnerability` on the target entity.
 
-- **Pre-filtering Only**: Aggregation queries rely on Layers 1 and 2 (organization_id and traversal_id filtering) to ensure users can only aggregate over data they have group-level access to.
-- **No Item-Level Redaction**: We do not perform post-aggregation filtering, as this would be ineffective (e.g., you cannot "redact" a count after it's been computed).
-- **Query Shape Restrictions**: The query planner may restrict certain aggregation patterns to prevent information leakage through timing attacks or result patterns.
+To close this, each ontology entity now declares a `required_role` in its redaction block (`config/ontology/nodes/**`). Rails publishes traversal paths tagged with the user's highest access level on the leaf group (`{path, access_level}` tuples in the JWT), and the compiler's `SecurityPass` drops any path whose tag falls below an entity's `required_role` before emitting the `startsWith(traversal_path, ...)` predicate for that entity's alias. If no path qualifies, the alias compiles to `Bool(false)` and the aggregation sees zero rows for that entity.
 
-This approach aligns with the existing GitLab Analytics products, which use the same Reporter+ group-level access model for aggregations.
+Controls:
+
+- **Per-entity role floor**: `redaction.required_role` defaults to `reporter`. Security-domain entities (Vulnerability, Finding, VulnerabilityScanner, VulnerabilityIdentifier, VulnerabilityOccurrence, SecurityScan) declare `security_manager`, matching the minimum GitLab role designed for security team members.
+- **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause so the security pass has an alias to filter. Without this the compiler would elide the scan and defeat the gate.
+- **Pre-filtering stays in place**: Layers 1 and 2 (organization_id and traversal_id filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
+- **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere, so misconfigured callers surface instead of silently returning empty results.
+
+**Code Review Requirements**:
+
+- Ontology entries declaring `required_role` above Reporter must be justified against `config/authz/roles/` in the monolith so the gate tracks real ability requirements.
+- Compiler unit tests cover per-alias role filtering, empty-path-set compilation to `Bool(false)`, and schema-version-prefix resolution.
+- Integration tests exercise the attack patterns (Reporter-only aggregations, filter-oracle variants, search on protected entities) and confirm zero rows come back.

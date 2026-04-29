@@ -7,12 +7,12 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType};
+use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Build the entity auth map for every entity type in the ontology that has a
 /// redaction config. This is the single source of truth consumed by both the
@@ -48,6 +48,7 @@ pub fn build_entity_auth(ontology: &Ontology) -> HashMap<String, EntityAuthConfi
                         ability: r.ability.clone(),
                         auth_id_column: r.id_column.clone(),
                         owner_entity,
+                        required_access_level: r.required_role.as_access_level(),
                     },
                 )
             })
@@ -78,6 +79,44 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             )
         })
         .collect();
+    input.compiler.table_columns.clear();
+    for node in ontology.nodes() {
+        input.compiler.table_columns.insert(
+            node.destination_table.clone(),
+            node.storage
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<HashSet<_>>(),
+        );
+    }
+    for table in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table) {
+            input.compiler.table_columns.insert(
+                table.to_string(),
+                config
+                    .storage
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<HashSet<_>>(),
+            );
+        }
+    }
+
+    // Populate text index metadata from the ontology's StorageIndex entries.
+    for node_entity in ontology.nodes() {
+        for idx in &node_entity.storage.indexes {
+            if let Some(tokenizer) = ontology.text_index_tokenizer(&node_entity.name, &idx.column) {
+                input.compiler.text_indexes.insert(
+                    (node_entity.destination_table.clone(), idx.column.clone()),
+                    TextIndexMeta {
+                        tokenizer: tokenizer.to_string(),
+                    },
+                );
+            }
+        }
+    }
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
@@ -169,7 +208,75 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
+    infer_wildcard_relationship_kinds(&mut input, ontology);
     Ok(input)
+}
+
+fn is_wildcard(types: &[String]) -> bool {
+    types.is_empty() || (types.len() == 1 && types[0] == "*")
+}
+
+fn infer_wildcard_relationship_kinds(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
+        .collect();
+    let infer = |direction, outgoing, incoming| match direction {
+        Direction::Outgoing => ontology.relationship_kinds_matching([outgoing]),
+        Direction::Incoming => ontology.relationship_kinds_matching([incoming]),
+        Direction::Both => ontology.relationship_kinds_matching([outgoing, incoming]),
+    };
+
+    for rel in &mut input.relationships {
+        let Some((from_entity, to_entity)) = entity_for
+            .get(rel.from.as_str())
+            .copied()
+            .zip(entity_for.get(rel.to.as_str()).copied())
+        else {
+            continue;
+        };
+        specialize_wildcard(
+            &mut rel.types,
+            infer(
+                rel.direction,
+                (Some(from_entity), Some(to_entity)),
+                (Some(to_entity), Some(from_entity)),
+            ),
+        );
+    }
+
+    if let Some(neighbors) = input.neighbors.as_mut()
+        && let Some(center_entity) = entity_for.get(neighbors.node.as_str()).copied()
+    {
+        specialize_wildcard(
+            &mut neighbors.rel_types,
+            infer(
+                neighbors.direction,
+                (Some(center_entity), None),
+                (None, Some(center_entity)),
+            ),
+        );
+    }
+
+    if let Some(path) = input.path.as_mut()
+        && is_wildcard(&path.rel_types)
+    {
+        if let Some(start_entity) = entity_for.get(path.from.as_str()).copied() {
+            path.forward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(Some(start_entity), None)]);
+        }
+        if let Some(end_entity) = entity_for.get(path.to.as_str()).copied() {
+            path.backward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(None, Some(end_entity))]);
+        }
+    }
+}
+
+fn specialize_wildcard(types: &mut Vec<String>, inferred: Vec<String>) {
+    if is_wildcard(types) && !inferred.is_empty() {
+        *types = inferred;
+    }
 }
 
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
@@ -206,7 +313,7 @@ mod tests {
     fn enum_coercion_all_variants() {
         // Single int → string
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 1}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -215,7 +322,7 @@ mod tests {
 
         // Array of ints → array of strings
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 2, 3, 4]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -224,7 +331,7 @@ mod tests {
 
         // Mixed valid/invalid ints in array - unknown values pass through
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "in", "value": [1, 999, 3]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -233,7 +340,7 @@ mod tests {
 
         // String values pass through unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -242,7 +349,7 @@ mod tests {
 
         // Unknown int passes through
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": 999}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("state").unwrap().value,
@@ -251,7 +358,7 @@ mod tests {
 
         // Null filter value (is_null op) unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"state": {"op": "is_null"}}}}"#,
         );
         assert_eq!(r.nodes[0].filters.get("state").unwrap().value, None);
     }
@@ -331,7 +438,7 @@ mod tests {
     fn edge_cases() {
         // Unknown field on known entity - unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"nonexistent_field": 42}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("nonexistent_field").unwrap().value,
@@ -340,13 +447,13 @@ mod tests {
 
         // Non-enum int field not coerced (User.id is int, not enum)
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "u", "entity": "User", "filters": {"id": 1}}}"#,
         );
         assert_eq!(r.nodes[0].filters.get("id").unwrap().value, Some(json!(1)));
 
         // Boolean field unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"squash": true}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("squash").unwrap().value,
@@ -355,7 +462,7 @@ mod tests {
 
         // String array on non-enum field unchanged
         let r = normalize_query(
-            r#"{"query_type": "search", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "mr", "entity": "MergeRequest", "filters": {"source_branch": {"op": "in", "value": ["main", "develop"]}}}}"#,
         );
         assert_eq!(
             r.nodes[0].filters.get("source_branch").unwrap().value,
@@ -364,7 +471,7 @@ mod tests {
 
         // Unknown entity rejected
         let input = parse_input(
-            r#"{"query_type": "search", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
+            r#"{"query_type": "traversal", "node": {"id": "x", "entity": "UnknownEntity", "filters": {"foo": 123}}}"#,
         ).unwrap();
         let ontology = Ontology::load_embedded().unwrap();
         let err = normalize(input, &ontology).unwrap_err();

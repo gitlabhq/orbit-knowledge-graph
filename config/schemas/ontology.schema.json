@@ -220,8 +220,17 @@
             },
             "edges": {
               "type": "object",
-              "description": "Edge generation config keyed by source column name.",
-              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges (for example an outgoing FK plus its inverse).",
+              "additionalProperties": {
+                "oneOf": [
+                  { "$ref": "#/definitions/edgeMappingDefinition" },
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
+                    "minItems": 1
+                  }
+                ]
+              }
             }
           },
           "required": ["type", "scope", "source"],
@@ -264,8 +273,17 @@
             },
             "edges": {
               "type": "object",
-              "description": "Edge generation config keyed by source column name.",
-              "additionalProperties": { "$ref": "#/definitions/edgeMappingDefinition" }
+              "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges.",
+              "additionalProperties": {
+                "oneOf": [
+                  { "$ref": "#/definitions/edgeMappingDefinition" },
+                  {
+                    "type": "array",
+                    "items": { "$ref": "#/definitions/edgeMappingDefinition" },
+                    "minItems": 1
+                  }
+                ]
+              }
             }
           },
           "required": ["type", "scope", "select", "from"],
@@ -290,6 +308,11 @@
         "ability": {
           "type": "string",
           "description": "Rails ability to check (e.g., 'read_project'). If not specified, uses the default ability for the resource type."
+        },
+        "required_role": {
+          "type": "string",
+          "enum": ["guest", "reporter", "security_manager", "developer", "maintainer", "owner"],
+          "description": "Minimum GitLab role a user must hold on a traversal path for this entity's rows to be visible. Applied by the compiler security pass: traversal paths where the user holds a lower role are dropped from the startsWith() predicate for this entity's table, closing the aggregation-query bypass where target nodes (e.g. Vulnerability) were never redacted. Defaults to 'reporter' for entities that do not opt in."
         }
       },
       "required": ["resource_type"],
@@ -373,7 +396,8 @@
                   "primary_key": { "type": "array", "items": { "type": "string" } },
                   "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
                   "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
-                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
+                  "settings": { "$ref": "#/definitions/tableSettings" }
                 },
                 "additionalProperties": false
               }
@@ -740,7 +764,11 @@
           "items": { "$ref": "#/definitions/edgeVariant" },
           "minItems": 1
         },
-        "etl": { "$ref": "#/definitions/edgeEtlConfig" }
+        "etl": {
+          "type": "array",
+          "items": { "$ref": "#/definitions/edgeEtlConfig" },
+          "minItems": 1
+        }
       },
       "required": ["description", "variants"],
       "additionalProperties": false
@@ -774,9 +802,24 @@
           "type": "array",
           "description": "Materialized projections.",
           "items": { "$ref": "#/definitions/storageProjection" }
+        },
+        "settings": {
+          "$ref": "#/definitions/tableSettings"
         }
       },
       "additionalProperties": false
+    },
+
+    "tableSettings": {
+      "type": "object",
+      "description": "ClickHouse MergeTree table settings emitted in the CREATE TABLE SETTINGS clause.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.'() -]+$"
+      }
     },
 
     "storageColumn": {
@@ -827,8 +870,8 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\))$",
-          "description": "Index type. Must be minmax, set(N), or bloom_filter(N.NN)."
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\))$",
+          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), or text(tokenizer = ...)."
         },
         "granularity": { "type": "integer", "minimum": 1, "default": 1 }
       },

@@ -1,8 +1,4 @@
 use arrow::record_batch::RecordBatch;
-use code_graph::legacy::linker::analysis::types::{
-    DefinitionNode, DirectoryNode, FileNode, GraphData, ImportedSymbolNode, ResolvedEdge,
-    RowContext,
-};
 use gkg_utils::arrow::{AsRecordBatch, ColumnSpec, ColumnType};
 use ontology::{DataType as OntDataType, Ontology};
 
@@ -45,58 +41,6 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
             nullable: false,
         })
         .collect()
-}
-
-pub fn convert_graph_data(
-    graph_data: &GraphData,
-    project_id: i64,
-    branch: &str,
-    commit_sha: &str,
-    ontology: &Ontology,
-) -> Result<LocalGraphData> {
-    let ctx = RowContext {
-        project_id,
-        branch,
-        commit_sha,
-    };
-    let mut tables = Vec::new();
-
-    for entity_name in ontology.local_entity_names() {
-        let dest_table = ontology
-            .get_node(entity_name)
-            .expect("local entity must exist in nodes")
-            .destination_table
-            .clone();
-
-        let specs = entity_specs(ontology, entity_name);
-        let batch = match entity_name {
-            "Directory" => {
-                DirectoryNode::to_record_batch(&graph_data.directory_nodes, &specs, &ctx)?
-            }
-            "File" => FileNode::to_record_batch(&graph_data.file_nodes, &specs, &ctx)?,
-            "Definition" => {
-                DefinitionNode::to_record_batch(&graph_data.definition_nodes, &specs, &ctx)?
-            }
-            "ImportedSymbol" => ImportedSymbolNode::to_record_batch(
-                &graph_data.imported_symbol_nodes,
-                &specs,
-                &ctx,
-            )?,
-            other => panic!("no converter registered for local entity '{other}'"),
-        };
-
-        tables.push((dest_table, batch));
-    }
-
-    let edge_table = ontology
-        .local_edge_table_name()
-        .expect("local_db.edge_table.name must be configured")
-        .to_string();
-    let resolved = graph_data.resolve_edges();
-    let edge_batch = ResolvedEdge::to_record_batch(&resolved, &edge_specs(ontology), &ctx)?;
-    tables.push((edge_table, edge_batch));
-
-    Ok(LocalGraphData { tables })
 }
 
 /// Convert a v2 `CodeGraph` into `LocalGraphData` ready for DuckDB insert.
@@ -278,130 +222,19 @@ mod tests {
             .expect("failed to load ontology")
     }
 
-    fn find_table<'a>(data: &'a LocalGraphData, name: &str) -> Option<&'a RecordBatch> {
-        data.tables.iter().find(|(t, _)| t == name).map(|(_, b)| b)
-    }
-
     #[test]
-    fn empty_graph_produces_zero_row_batches() {
-        let graph = GraphData {
-            directory_nodes: vec![],
-            file_nodes: vec![],
-            definition_nodes: vec![],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
-
-        let result = convert_graph_data(&graph, 1, "main", "abc123def", &test_ontology()).unwrap();
-        for (table, batch) in &result.tables {
-            assert_eq!(batch.num_rows(), 0, "{table} should have 0 rows");
-        }
-    }
-
-    #[test]
-    fn tables_match_ontology_entities_plus_edges() {
+    fn entity_specs_returns_columns_for_all_local_entities() {
         let ont = test_ontology();
-        let graph = GraphData {
-            directory_nodes: vec![],
-            file_nodes: vec![],
-            definition_nodes: vec![],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
-
-        let result = convert_graph_data(&graph, 1, "main", "abc123def", &ont).unwrap();
-        let table_names: Vec<&str> = result.tables.iter().map(|(t, _)| t.as_str()).collect();
-
         for entity_name in ont.local_entity_names() {
-            let dest = &ont.get_node(entity_name).unwrap().destination_table;
-            assert!(
-                table_names.contains(&dest.as_str()),
-                "missing table for {entity_name}: {dest}"
-            );
+            let specs = entity_specs(&ont, entity_name);
+            assert!(!specs.is_empty(), "no specs for {entity_name}");
         }
-        assert!(table_names.contains(&ont.local_edge_table_name().unwrap()));
     }
 
     #[test]
-    fn directory_schema_matches_ontology() {
+    fn edge_specs_returns_columns() {
         let ont = test_ontology();
-        let graph = GraphData {
-            directory_nodes: vec![DirectoryNode {
-                id: Some(42),
-                path: "src".into(),
-                absolute_path: "/repo/src".into(),
-                repository_name: "repo".into(),
-                name: "src".into(),
-            }],
-            file_nodes: vec![],
-            definition_nodes: vec![],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
-
-        let result = convert_graph_data(&graph, 100, "main", "abc123def", &ont).unwrap();
-        let batch = find_table(&result, "gl_directory").expect("gl_directory table");
-        assert_eq!(batch.num_rows(), 1);
-
-        let schema = batch.schema();
-        let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert!(col_names.contains(&"id"));
-        assert!(col_names.contains(&"project_id"));
-        assert!(col_names.contains(&"branch"));
-        assert!(col_names.contains(&"path"));
-        assert!(col_names.contains(&"name"));
-        assert!(!col_names.contains(&"traversal_path"));
-        assert!(col_names.contains(&"commit_sha"));
-    }
-
-    #[test]
-    fn file_schema_matches_ontology() {
-        let ont = test_ontology();
-        let graph = GraphData {
-            directory_nodes: vec![],
-            file_nodes: vec![FileNode {
-                id: Some(10),
-                path: "src/lib.rs".into(),
-                absolute_path: "/repo/src/lib.rs".into(),
-                language: "Rust".into(),
-                repository_name: "repo".into(),
-                extension: "rs".into(),
-                name: "lib.rs".into(),
-            }],
-            definition_nodes: vec![],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
-
-        let result = convert_graph_data(&graph, 100, "main", "abc123def", &ont).unwrap();
-        let batch = find_table(&result, "gl_file").expect("gl_file table");
-        assert_eq!(batch.num_rows(), 1);
-
-        let schema = batch.schema();
-        let col_names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
-        assert!(col_names.contains(&"path"));
-        assert!(col_names.contains(&"extension"));
-        assert!(col_names.contains(&"language"));
-    }
-
-    #[test]
-    fn nodes_without_ids_are_skipped() {
-        let graph = GraphData {
-            directory_nodes: vec![DirectoryNode {
-                id: None,
-                path: "src".into(),
-                absolute_path: "/repo/src".into(),
-                repository_name: "repo".into(),
-                name: "src".into(),
-            }],
-            file_nodes: vec![],
-            definition_nodes: vec![],
-            imported_symbol_nodes: vec![],
-            relationships: vec![],
-        };
-
-        let result = convert_graph_data(&graph, 1, "main", "abc123def", &test_ontology()).unwrap();
-        let batch = find_table(&result, "gl_directory").expect("gl_directory table");
-        assert_eq!(batch.num_rows(), 0);
+        let specs = edge_specs(&ont);
+        assert!(!specs.is_empty());
     }
 }

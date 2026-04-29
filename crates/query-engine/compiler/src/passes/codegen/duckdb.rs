@@ -170,9 +170,14 @@ impl Context {
     fn emit_expr(&mut self, e: &Expr) -> String {
         match e {
             Expr::Column { table, column } => format!("{table}.{column}"),
+            Expr::Identifier(name) => name.clone(),
             Expr::Literal(v) => self.emit_literal(v),
             Expr::Param { data_type, value } => self.emit_param(*data_type, value),
             Expr::FuncCall { name, args } => self.emit_func_call(name, args),
+            Expr::Lambda { param, body } => {
+                let body = self.emit_expr(body);
+                format!("{param} -> {body}")
+            }
             Expr::BinaryOp { op, left, right } => {
                 let l = self.emit_expr(left);
                 let r = self.emit_expr(right);

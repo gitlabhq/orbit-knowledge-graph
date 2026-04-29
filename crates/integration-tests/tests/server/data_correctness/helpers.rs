@@ -19,8 +19,8 @@ pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 
 pub(super) use crate::common::{
-    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, load_ontology,
-    run_redaction, test_security_context,
+    GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
+    load_ontology, run_redaction, test_security_context,
 };
 pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::redaction::QueryResult;
@@ -128,12 +128,12 @@ pub(super) async fn run_query_with_security(
 
 pub(super) fn allow_all() -> MockRedactionService {
     let mut svc = MockRedactionService::new();
-    svc.allow("user", &[1, 2, 3, 4, 5, 6]);
+    svc.allow("user", &[1, 2, 3, 4, 5, 6, 7]);
     svc.allow("group", &[100, 101, 102, 200, 300, 900]);
-    svc.allow("project", &[1000, 1001, 1002, 1003, 1004, 9000]);
-    svc.allow("merge_request", &[2000, 2001, 2002, 2003, 9100]);
+    svc.allow("project", &[1000, 1001, 1002, 1003, 1004, 1010, 9000]);
+    svc.allow("merge_request", &[2000, 2001, 2002, 2003, 2004, 2005, 9100]);
     svc.allow("note", &[3000, 3001, 3002, 3003]);
-    svc.allow("work_item", &[4000, 4001, 4002, 4003]);
+    svc.allow("work_item", &[4000, 4001, 4002, 4003, 4010]);
     svc.allow("milestone", &[6000, 6001]);
     svc.allow("label", &[7000, 7001, 7002]);
     svc

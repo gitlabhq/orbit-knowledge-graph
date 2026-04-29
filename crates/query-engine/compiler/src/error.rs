@@ -59,6 +59,7 @@ impl QueryError {
                 | Self::Validation(_)
                 | Self::ReferenceError(_)
                 | Self::PaginationError(_)
+                | Self::AllowlistRejected(_)
                 | Self::DepthExceeded(_)
                 | Self::LimitExceeded(_)
         )
@@ -86,7 +87,7 @@ mod tests {
             (QueryError::PaginationError("bad".into()), true),
             (QueryError::DepthExceeded("bad".into()), true),
             (QueryError::LimitExceeded("bad".into()), true),
-            (QueryError::AllowlistRejected("bad".into()), false),
+            (QueryError::AllowlistRejected("bad".into()), true),
             (QueryError::Lowering("bad".into()), false),
             (QueryError::Enforcement("bad".into()), false),
             (QueryError::Codegen("bad".into()), false),

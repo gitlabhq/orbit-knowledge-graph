@@ -13,8 +13,8 @@ fn parse_duckdb(json: &str) -> ParsedSql {
 fn search_uses_positional_params() {
     let result = compile_local(
         r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"],
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"],
                  "filters": {"username": "alice"}},
         "limit": 10
     }"#,
@@ -37,8 +37,8 @@ fn search_uses_positional_params() {
 fn no_clickhouse_functions_leak() {
     let sql = parse_duckdb(
         r#"{
-        "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "query_type": "traversal",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -52,8 +52,8 @@ fn no_clickhouse_functions_leak() {
 fn no_security_filter() {
     let sql = parse_duckdb(
         r#"{
-        "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "query_type": "traversal",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#,
     );
@@ -67,7 +67,7 @@ fn traversal() {
         r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "n", "entity": "Note", "columns": ["confidential"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -86,7 +86,7 @@ fn aggregation() {
         r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User"},
+            {"id": "u", "entity": "User", "node_ids": [1]},
             {"id": "n", "entity": "Note"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -138,7 +138,7 @@ fn neighbors() {
 fn node_ids_expand_params() {
     let sql = parse_duckdb(
         r#"{
-        "query_type": "search",
+        "query_type": "traversal",
         "node": {"id": "u", "entity": "User", "node_ids": [1, 2, 3]},
         "limit": 10
     }"#,

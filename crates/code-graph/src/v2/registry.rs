@@ -6,7 +6,6 @@
 use crate::v2::config::Language;
 
 use crate::v2::langs::custom::js::JsPipeline;
-use crate::v2::langs::custom::ruby::RubyPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
 use crate::v2::langs::generic::c::{CDsl, CRules};
 use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
@@ -88,7 +87,6 @@ register_v2_pipelines! {
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
     Tag("js") => [JsPipeline],
-    Tag("ruby_prism") => [RubyPipeline],
 }
 
 #[cfg(test)]
@@ -112,7 +110,8 @@ mod tests {
             config: PipelineConfig::default(),
             tracer: crate::v2::trace::Tracer::new(false),
             root_path: "/".to_string(),
-            graph_errors: std::sync::Mutex::new(Vec::new()),
+            skipped: std::sync::Mutex::new(Vec::new()),
+            faults: std::sync::Mutex::new(Vec::new()),
         })
     }
 

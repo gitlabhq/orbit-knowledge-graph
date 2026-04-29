@@ -1,0 +1,19 @@
+# config/ontology/edges/runs_for_group.yaml
+
+description: Runner is registered against a group
+
+variants:
+  - from_node: { type: Runner, id: id }
+    to_node: { type: Group, id: id }
+    description: "Runner serves jobs for this group."
+
+etl:
+  - scope: namespaced
+    source: siphon_ci_runner_namespaces
+    order_by: [traversal_path, id]
+    from:
+      id: runner_id
+      type: Runner
+    to:
+      id: namespace_id
+      type: Group

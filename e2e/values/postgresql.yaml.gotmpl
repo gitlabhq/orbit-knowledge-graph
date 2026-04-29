@@ -1,0 +1,57 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+
+# fullnameOverride keeps the service name `gitlab-postgresql` (matches the
+# bundled subchart name we replaced), so consumers like siphon and pg-cdc-setup
+# don't need FQDN updates.
+fullnameOverride: gitlab-postgresql
+
+image:
+  registry: docker.io
+  repository: {{ $v.postgresql.image.repository }}
+  tag: {{ $v.postgresql.image.tag }}
+  pullPolicy: IfNotPresent
+
+auth:
+  enablePostgresUser: true
+  username: gitlab
+  database: gitlabhq_production
+  existingSecret: gitlab-postgresql-password
+  # Map bitnami's default key names to the keys our consumers (gitlab chart,
+  # pg-cdc-setup) already expect.
+  secretKeys:
+    adminPasswordKey: postgresql-postgres-password
+    userPasswordKey: postgresql-password
+    replicationPasswordKey: postgresql-replication-password
+
+primary:
+  # Disable PVC: emptyDir is fast enough for ephemeral tests when paired with
+  # the fsync=off / synchronous_commit=off tuning below.
+  persistence:
+    enabled: false
+  # Tuned for an ephemeral test cluster that's torn down between runs.
+  # The fsync/full_page_writes/synchronous_commit trio trades crash safety for
+  # raw write throughput. WAL is still produced normally so logical replication
+  # to Siphon is unaffected.
+  extendedConfiguration: |
+    wal_level = logical
+    max_replication_slots = 4
+    max_wal_senders = 4
+
+    fsync = off
+    synchronous_commit = off
+    full_page_writes = off
+
+    checkpoint_timeout = 30min
+    max_wal_size = 2GB
+
+    maintenance_work_mem = 256MB
+    shared_buffers = 256MB
+    work_mem = 32MB
+  resources:
+    requests:
+      cpu: 250m
+      memory: 512Mi
+    limits:
+      cpu: 2
+      memory: 2Gi

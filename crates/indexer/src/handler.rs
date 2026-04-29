@@ -36,12 +36,25 @@ use crate::{
 };
 use gkg_server_config::HandlerConfiguration;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PermanentAction {
+    DeadLetter,
+    Drop,
+}
+
 /// Errors that can occur during message handling.
 #[derive(Debug, Error)]
 pub enum HandlerError {
     /// A general processing error with a descriptive message.
     #[error("processing failed: {0}")]
     Processing(String),
+
+    /// A deterministic failure that will never succeed on retry.
+    #[error("permanent failure: {message}")]
+    Permanent {
+        message: String,
+        action: PermanentAction,
+    },
 
     /// Failed to deserialize the message payload.
     #[error("deserialization failed: {0}")]
@@ -52,8 +65,13 @@ impl HandlerError {
     pub fn error_kind(&self) -> &'static str {
         match self {
             HandlerError::Processing(_) => "processing",
+            HandlerError::Permanent { .. } => "permanent",
             HandlerError::Deserialization(_) => "deserialization",
         }
+    }
+
+    pub fn is_permanent(&self) -> bool {
+        matches!(self, Self::Permanent { .. } | Self::Deserialization(_))
     }
 }
 

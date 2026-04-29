@@ -113,6 +113,7 @@ impl Pipeline {
 
             let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
             total_rows += rows_in_batch;
+            self.metrics.record_batch_rows(&plan.name, rows_in_batch);
 
             self.transform_and_write(
                 &session,
@@ -160,7 +161,7 @@ impl Pipeline {
 
         let elapsed = started_at.elapsed();
         self.metrics
-            .record_pipeline_completion(&plan.name, elapsed.as_secs_f64(), total_rows);
+            .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
         self.metrics
             .record_watermark_lag(&plan.name, &context.watermark);
 

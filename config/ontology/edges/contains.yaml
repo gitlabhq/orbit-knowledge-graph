@@ -32,12 +32,12 @@ variants:
     description: "Directory contains file."
 
 etl:
-  scope: namespaced
-  source: siphon_work_item_parent_links
-  order_by: [traversal_path, work_item_parent_id, id]
-  from:
-    id: work_item_parent_id
-    type: WorkItem
-  to:
-    id: work_item_id
-    type: WorkItem
+  - scope: namespaced
+    source: siphon_work_item_parent_links
+    order_by: [traversal_path, work_item_parent_id, id]
+    from:
+      id: work_item_parent_id
+      type: WorkItem
+    to:
+      id: work_item_id
+      type: WorkItem

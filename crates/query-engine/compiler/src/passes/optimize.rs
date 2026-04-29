@@ -25,9 +25,9 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
-    cascade_cte, node_filter_cte, skip_security_filter_tables,
+    TRAVERSAL_PATH_COLUMN, cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{Input, InputNode, QueryType};
+use crate::input::{Direction, Input, InputNode, QueryType};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -35,6 +35,7 @@ use ontology::constants::{
 };
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input) {
@@ -42,6 +43,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
+            push_kind_literals_into_variable_length_arms(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -51,9 +53,19 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::Traversal && input.relationships.len() > 1 {
                 cascade_node_filter_ctes(q, input);
             }
+            if input.query_type == QueryType::Traversal {
+                narrow_joined_nodes_via_pinned_neighbors(q, input);
+            }
             if input.query_type == QueryType::Aggregation {
                 apply_target_sip_prefilter(q, input);
                 fold_filters_into_aggregates(q, input);
+                prune_unreferenced_node_joins(q, input);
+            }
+            if matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            ) {
+                apply_traversal_hop_frontiers(q, input);
             }
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
@@ -62,31 +74,284 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
     }
 }
 
-/// Inject `source_kind`/`target_kind` filters for each node with a known
-/// entity type whose edge column mapping is recorded in `node_edge_col`.
-/// Gives ClickHouse an extra predicate for granule pruning on the
-/// `by_source`/`by_target` projections whose PK includes the kind column.
-fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
-    let node_edge_col = &input.compiler.node_edge_col;
-    if node_edge_col.is_empty() {
+/// Drop node-table joins whose alias has no role in the result: not in any
+/// `aggregations.{target, group_by}`, no filters, no `node_ids`, and not the
+/// query root. Edge joins to the pruned node stay as existence semi-joins,
+/// so row counts are unchanged.
+fn prune_unreferenced_node_joins(q: &mut Query, input: &Input) {
+    if input.query_type != QueryType::Aggregation || input.relationships.is_empty() {
         return;
     }
+
+    let mut referenced: HashSet<String> = HashSet::new();
+    for agg in &input.aggregations {
+        if let Some(t) = &agg.target {
+            referenced.insert(t.clone());
+        }
+        if let Some(g) = &agg.group_by {
+            referenced.insert(g.clone());
+        }
+    }
+    for n in &input.nodes {
+        if !n.node_ids.is_empty() || !n.filters.is_empty() {
+            referenced.insert(n.id.clone());
+        }
+    }
+    let root_alias = input
+        .relationships
+        .first()
+        .map(|r| r.from.clone())
+        .or_else(|| input.nodes.first().map(|n| n.id.clone()));
+    if let Some(root) = root_alias {
+        referenced.insert(root);
+    }
+
+    // Count how many relationships touch each node alias. Only leaf nodes
+    // (degree ≤ 1) are safe to prune — pruning an intermediate node would
+    // leave the adjacent edge JOINs dangling on the now-undefined alias.
+    // Example: `User -- AUTHORED --> MR -- HAS_NOTE --> Note` with MR
+    // unreferenced in the aggregation. e1's `ON mr.id = e1.source_id` would
+    // reference a missing `mr` alias after pruning.
+    let mut degree: HashMap<&str, usize> = HashMap::new();
+    for rel in &input.relationships {
+        *degree.entry(rel.from.as_str()).or_default() += 1;
+        *degree.entry(rel.to.as_str()).or_default() += 1;
+    }
+
+    let prune: HashSet<String> = input
+        .nodes
+        .iter()
+        .filter(|n| {
+            !referenced.contains(&n.id) && degree.get(n.id.as_str()).copied().unwrap_or(0) <= 1
+        })
+        .map(|n| n.id.clone())
+        .collect();
+    if prune.is_empty() {
+        return;
+    }
+
+    prune_table_joins(&mut q.from, &prune);
+
+    if let Some(w) = q.where_clause.take() {
+        let kept: Vec<Expr> = w
+            .flatten_and()
+            .into_iter()
+            .filter(|c| !c.column_aliases().iter().any(|a| prune.contains(a)))
+            .collect();
+        q.where_clause = Expr::conjoin(kept);
+    }
+
+    q.ctes.retain(|c| {
+        !prune.iter().any(|alias| {
+            c.name == node_filter_cte(alias)
+                || c.name == format!("_cascade_{alias}")
+                || c.name == format!("_target_{alias}_ids")
+        })
+    });
+}
+
+/// Walk the FROM tree and replace `Join { right: TableRef::Subquery|Scan { alias ∈ prune } }`
+/// with the left side. Recurses into left subtree first to handle nested joins.
+fn prune_table_joins(table: &mut TableRef, prune: &HashSet<String>) {
+    loop {
+        match table {
+            TableRef::Join { left, right, .. } => {
+                prune_table_joins(left, prune);
+                let right_alias = match right.as_ref() {
+                    TableRef::Scan { alias, .. } => Some(alias.clone()),
+                    TableRef::Subquery { alias, .. } => Some(alias.clone()),
+                    _ => None,
+                };
+                let should_prune = right_alias.is_some_and(|a| prune.contains(&a));
+                if !should_prune {
+                    return;
+                }
+                let mut placeholder = TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                };
+                std::mem::swap(left.as_mut(), &mut placeholder);
+                *table = placeholder;
+            }
+            _ => return,
+        }
+    }
+}
+
+/// Inject `source_kind`/`target_kind` filters for each node with a known
+/// entity type. Gives ClickHouse an extra predicate for granule pruning on
+/// the `by_source`/`by_target` projections whose PK includes the kind column.
+///
+/// Iterates relationships first so that a node shared between multiple
+/// relationships gets a kind filter on every edge it touches. Without this,
+/// a query like `Project ↔ MR ↔ User` only constrains MR via `e0` and the
+/// `e1` join can match `User AUTHORED <any entity with that ID>` rows,
+/// producing edges with the wrong `target_kind` in the result and missing
+/// kind-PK pruning on the second-hop edge.
+fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
+    let node_edge_col = &input.compiler.node_edge_col;
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| n.entity.as_deref().map(|e| (n.id.as_str(), e)))
+        .collect();
+
     let mut kind_filters: Vec<Expr> = Vec::new();
-    for node in &input.nodes {
-        if let Some(entity) = &node.entity
-            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
-            && let Some(kind_col) = edge_kind_column(edge_col)
-        {
+    let mut seen: HashSet<String> = HashSet::new();
+
+    let mut push_filter = |alias: &str, kind_col: &'static str, entity: &str| {
+        if seen.insert(format!("{alias}.{kind_col}={entity}")) {
             kind_filters.push(Expr::eq(
                 Expr::col(alias, kind_col),
                 Expr::param(ChType::String, entity.to_string()),
             ));
         }
+    };
+
+    // Edge endpoints: for each relationship's edge alias, constrain BOTH
+    // sides if the corresponding node has a known entity type.
+    for (i, rel) in input.relationships.iter().enumerate() {
+        let edge_alias = if rel.max_hops > 1 {
+            format!("hop_e{i}")
+        } else {
+            format!("e{i}")
+        };
+        let (start_col, end_col) = if rel.max_hops > 1 {
+            rel.direction.union_columns()
+        } else {
+            rel.direction.edge_columns()
+        };
+        if let (Some(entity), Some(kind_col)) = (
+            entity_for.get(rel.from.as_str()),
+            edge_kind_column(start_col),
+        ) {
+            push_filter(&edge_alias, kind_col, entity);
+        }
+        if let (Some(entity), Some(kind_col)) =
+            (entity_for.get(rel.to.as_str()), edge_kind_column(end_col))
+        {
+            push_filter(&edge_alias, kind_col, entity);
+        }
     }
+
+    // Single-edge query types (Search/Neighbors) don't have relationships
+    // but still rely on `node_edge_col` for kind injection.
+    for node in &input.nodes {
+        if let Some(entity) = &node.entity
+            && let Some((alias, edge_col)) = node_edge_col.get(&node.id)
+            && let Some(kind_col) = edge_kind_column(edge_col)
+        {
+            push_filter(alias, kind_col, entity);
+        }
+    }
+
     if !kind_filters.is_empty() {
         let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
         parts.extend(kind_filters);
         q.where_clause = Expr::conjoin(parts);
+    }
+}
+
+/// Push static `source_kind`/`target_kind = '<entity>'` literals into each
+/// arm of a variable-length traversal's UNION ALL.
+///
+/// Lowering already constrains kinds at the OUTER alias (`hop_e{i}`), but
+/// ClickHouse will not propagate those into the arm's per-edge scans. The
+/// literals are static, so each inner edge scan can use the kind-led PK
+/// projection (`by_rel_source_kind` / `by_rel_target_kind`) for granule
+/// pruning. Dynamic IN-subqueries cannot — they force per-row hash probes.
+fn push_kind_literals_into_variable_length_arms(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+    if input.relationships.is_empty() {
+        return;
+    }
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops <= 1 {
+            continue;
+        }
+
+        let from_entity = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .and_then(|n| n.entity.as_deref());
+        let to_entity = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .and_then(|n| n.entity.as_deref());
+        if from_entity.is_none() && to_entity.is_none() {
+            continue;
+        }
+
+        // For Outgoing/Both: e1.source_id = rel.from, e<depth>.target_id = rel.to.
+        // For Incoming: e1.target_id = rel.from, e<depth>.source_id = rel.to.
+        let (from_kind_col, to_kind_col) = match rel.direction {
+            Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+            Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+        };
+
+        let alias = format!("hop_e{i}");
+        let union_ref = match find_union_mut(&mut q.from, &alias) {
+            Some(u) => u,
+            None => continue,
+        };
+        let TableRef::Union { queries, .. } = union_ref else {
+            continue;
+        };
+
+        let start = rel.min_hops.max(1);
+        for (arm_idx, arm) in queries.iter_mut().enumerate() {
+            let depth = start + arm_idx as u32;
+            let mut filters: Vec<Expr> = Vec::new();
+            if let Some(ent) = from_entity {
+                filters.push(Expr::eq(
+                    Expr::col("e1", from_kind_col),
+                    Expr::param(ChType::String, ent.to_string()),
+                ));
+            }
+            if let Some(ent) = to_entity {
+                let last = format!("e{depth}");
+                filters.push(Expr::eq(
+                    Expr::col(&last, to_kind_col),
+                    Expr::param(ChType::String, ent.to_string()),
+                ));
+            }
+            if filters.is_empty() {
+                continue;
+            }
+            let mut parts: Vec<Expr> = arm.where_clause.take().into_iter().collect();
+            parts.extend(filters);
+            arm.where_clause = Expr::conjoin(parts);
+        }
+    }
+}
+
+/// Walk a `TableRef` tree to find a `Union` with a given alias.
+fn find_union_mut<'a>(table_ref: &'a mut TableRef, alias: &str) -> Option<&'a mut TableRef> {
+    let is_match = matches!(
+        table_ref,
+        TableRef::Union { alias: a, .. } if a == alias
+    );
+    if is_match {
+        return Some(table_ref);
+    }
+    match table_ref {
+        TableRef::Join { left, right, .. } => {
+            if let Some(found) = find_union_mut(left, alias) {
+                Some(found)
+            } else {
+                find_union_mut(right, alias)
+            }
+        }
+        _ => None,
     }
 }
 
@@ -322,24 +587,46 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
                 cte,
                 &aliases,
                 input,
+                ArmAnchor::First,
             );
         }
         if let Some(ref cte) = to_cte {
-            inject_sip_for_aliases(
-                &mut q.from,
-                &mut q.where_clause,
-                end_col,
-                cte,
-                &aliases,
-                input,
-            );
+            // For variable-length arms whose endpoints both carry static kind
+            // literals (from `push_kind_literals_into_variable_length_arms`),
+            // the per-arm IN-subquery is redundant: the outer to-side node
+            // table is JOIN'd with the same cascade CTE, so the arm rows are
+            // already filtered. Skipping the per-row hash probe inside every
+            // arm lets the kind-led PK projection do its work.
+            let arms_have_kind_literals = rel.max_hops > 1
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.from)
+                    .is_some_and(|n| n.entity.is_some())
+                && input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.to)
+                    .is_some_and(|n| n.entity.is_some());
+
+            if !arms_have_kind_literals {
+                inject_sip_for_aliases(
+                    &mut q.from,
+                    &mut q.where_clause,
+                    end_col,
+                    cte,
+                    &aliases,
+                    input,
+                    ArmAnchor::Last,
+                );
+            }
         }
 
         // Cascading SIP: when the root is selective (node_ids, filters, etc.),
         // chain CTEs through relationships so every edge AND node table scan
         // gets narrowed. Skip cascades for broad roots (e.g. "all MRs") where
         // the cascade CTE itself would scan as many edge rows as the main query.
-        if !has_explicit_selectivity || rel.max_hops > 1 {
+        if !has_explicit_selectivity {
             continue;
         }
 
@@ -348,17 +635,31 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         let to_edge_only = input.compiler.node_edge_col.contains_key(&rel.to);
         let from_edge_only = input.compiler.node_edge_col.contains_key(&rel.from);
 
+        // Use multi-hop cascade for max_hops > 1, single-hop for max_hops == 1.
+        let build_cascade =
+            |node_alias: &str, select_col: &str, filter_col: &str, parent: &str| -> Option<Query> {
+                if rel.max_hops > 1 {
+                    build_multihop_cascade_for_node(
+                        input,
+                        node_alias,
+                        select_col,
+                        filter_col,
+                        parent,
+                        &rel.types,
+                        rel.max_hops,
+                    )
+                } else {
+                    build_cascade_for_node(
+                        input, node_alias, select_col, filter_col, parent, &rel.types,
+                    )
+                }
+            };
+
         if from_cte.is_some()
             && to_cte.is_none()
             && !to_edge_only
-            && let Some(cte) = build_cascade_for_node(
-                input,
-                &rel.to,
-                end_col,
-                start_col,
-                from_cte.as_ref().unwrap(),
-                &rel.types,
-            )
+            && let Some(cte) =
+                build_cascade(&rel.to, end_col, start_col, from_cte.as_ref().unwrap())
         {
             let name = cascade_cte(&rel.to);
             q.ctes.push(Cte::new(&name, cte));
@@ -367,14 +668,8 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         if to_cte.is_some()
             && from_cte.is_none()
             && !from_edge_only
-            && let Some(cte) = build_cascade_for_node(
-                input,
-                &rel.from,
-                start_col,
-                end_col,
-                to_cte.as_ref().unwrap(),
-                &rel.types,
-            )
+            && let Some(cte) =
+                build_cascade(&rel.from, start_col, end_col, to_cte.as_ref().unwrap())
         {
             let name = cascade_cte(&rel.from);
             q.ctes.push(Cte::new(&name, cte));
@@ -485,6 +780,158 @@ fn build_cascade_for_node(
     })
 }
 
+/// Build a multi-hop cascade CTE: UNION ALL of edge chains from depth 1
+/// to `max_hops`. Each arm is a self-join chain anchored on `parent_cte`.
+///
+/// For `max_hops=2`, `select_col=target_id`, `filter_col=source_id`:
+/// ```sql
+/// SELECT ce.target_id AS id FROM gl_edge ce
+///   WHERE ce.source_id IN (parent) AND rel_kind = 'T' AND ce.target_kind = 'E'
+/// UNION ALL
+/// SELECT e2.target_id AS id FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
+///   WHERE e1.source_id IN (parent) AND e1.rel_kind = 'T' AND e2.rel_kind = 'T' AND e2.target_kind = 'E'
+/// ```
+fn build_multihop_cascade_for_node(
+    input: &Input,
+    node_alias: &str,
+    select_col: &str,
+    filter_col: &str,
+    parent_cte: &str,
+    rel_types: &[String],
+    max_hops: u32,
+) -> Option<Query> {
+    let node = input.nodes.iter().find(|n| n.id == node_alias)?;
+    node.table.as_deref()?;
+
+    let tables = input.compiler.resolve_edge_tables(rel_types);
+    let rel_filter_expr = |alias: &str| -> Expr {
+        if rel_types.len() == 1 {
+            Expr::eq(
+                Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
+                Expr::param(ChType::String, rel_types[0].clone()),
+            )
+        } else {
+            Expr::col_in(
+                alias,
+                RELATIONSHIP_KIND_COLUMN,
+                ChType::String,
+                rel_types
+                    .iter()
+                    .map(|t| serde_json::Value::String(t.clone()))
+                    .collect(),
+            )
+            .unwrap_or_else(|| Expr::param(ChType::Bool, true))
+        }
+    };
+
+    let kind_col = if select_col == SOURCE_ID_COLUMN {
+        SOURCE_KIND_COLUMN
+    } else {
+        TARGET_KIND_COLUMN
+    };
+    let kind_filter = |alias: &str| -> Option<Expr> {
+        node.entity.as_ref().map(|entity| {
+            Expr::eq(
+                Expr::col(alias, kind_col),
+                Expr::param(ChType::String, entity.clone()),
+            )
+        })
+    };
+
+    let edge_scan = |alias: &str| -> TableRef {
+        if tables.len() == 1 {
+            TableRef::scan(&tables[0], alias)
+        } else {
+            let queries = tables
+                .iter()
+                .map(|t| Query {
+                    select: vec![SelectExpr::star()],
+                    from: TableRef::scan(t, alias),
+                    ..Default::default()
+                })
+                .collect();
+            TableRef::union_all(queries, alias)
+        }
+    };
+
+    // The join column that chains consecutive edges. For outgoing
+    // (filter_col=source_id, select_col=target_id): chain on target→source.
+    // For incoming (filter_col=target_id, select_col=source_id): chain on source→target.
+    let (chain_next, chain_anchor) = if filter_col == SOURCE_ID_COLUMN {
+        (TARGET_ID_COLUMN, SOURCE_ID_COLUMN)
+    } else {
+        (SOURCE_ID_COLUMN, TARGET_ID_COLUMN)
+    };
+
+    let mut arms: Vec<Query> = Vec::new();
+    for depth in 1..=max_hops {
+        let first_alias = if depth == 1 {
+            CASCADE_EDGE_ALIAS.to_string()
+        } else {
+            "e1".to_string()
+        };
+        let last = if depth == 1 {
+            CASCADE_EDGE_ALIAS.to_string()
+        } else {
+            format!("e{depth}")
+        };
+
+        // Build join chain: e1 JOIN e2 ON ... JOIN e3 ON ...
+        let mut from = edge_scan(&first_alias);
+        for i in 2..=depth {
+            let prev = format!("e{}", i - 1);
+            let curr = format!("e{i}");
+            let join_cond = Expr::eq(Expr::col(&prev, chain_next), Expr::col(&curr, chain_anchor));
+            from = TableRef::join(
+                crate::ast::JoinType::Inner,
+                from,
+                edge_scan(&curr),
+                join_cond,
+            );
+        }
+
+        // WHERE: anchor filter on first edge + rel_type on all edges + kind on last
+        let mut conds: Vec<Expr> = Vec::new();
+        conds.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(&first_alias, filter_col)),
+            cte_name: parent_cte.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        });
+        for i in 1..=depth {
+            let alias = if depth == 1 {
+                CASCADE_EDGE_ALIAS.to_string()
+            } else {
+                format!("e{i}")
+            };
+            conds.push(rel_filter_expr(&alias));
+        }
+        if let Some(kf) = kind_filter(&last) {
+            conds.push(kf);
+        }
+
+        arms.push(Query {
+            select: vec![SelectExpr::new(
+                Expr::col(&last, select_col),
+                DEFAULT_PRIMARY_KEY,
+            )],
+            from,
+            where_clause: Expr::conjoin(conds),
+            ..Default::default()
+        });
+    }
+
+    if arms.len() == 1 {
+        Some(arms.into_iter().next().unwrap())
+    } else {
+        let mut first = arms.into_iter();
+        let base = first.next().unwrap();
+        Some(Query {
+            union_all: first.collect(),
+            ..base
+        })
+    }
+}
+
 /// Target-side SIP for aggregation queries.
 ///
 /// When an aggregation target node has filters, materializes the matching
@@ -534,6 +981,10 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
 
         // Clone target-only conjuncts into the CTE; leave originals in WHERE
         // so fold_filters can still convert them to -If combinators.
+        // Skip `InSubquery` conjuncts: those are structural filters injected by
+        // the cascade pass (e.g. `mr.id IN _cascade_mr`). Materializing them
+        // again as `_target_<alias>_ids` produces a no-op CTE that re-derives
+        // the same id set already in `_cascade_<alias>`.
         let target_only_conds: Vec<Expr> = q
             .where_clause
             .as_ref()
@@ -542,6 +993,9 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
                 conjuncts
                     .into_iter()
                     .filter(|c| {
+                        if matches!(c, Expr::InSubquery { .. }) {
+                            return false;
+                        }
                         let aliases = c.column_aliases();
                         !aliases.is_empty() && aliases.iter().all(|a| a == target_alias)
                     })
@@ -581,16 +1035,27 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
             &cte_name,
             &aliases,
             input,
+            ArmAnchor::Last,
         );
     }
+}
+
+/// Which edge in a multi-hop UNION arm's left-deep join chain a SIP filter
+/// should target. The chain's start-facing column lives on `e1` (leftmost);
+/// the chain's end-facing column lives on `e<depth>` (rightmost).
+#[derive(Copy, Clone)]
+enum ArmAnchor {
+    First,
+    Last,
 }
 
 /// Walk the FROM tree and inject `{edge_alias}.{edge_col} IN (SELECT <id_col> FROM <cte>)`
 /// into edge table scans whose alias is in `target_aliases`.
 ///
-/// This ensures SIP only pushes IDs into edges that connect to the correct node.
-/// For Union arms (multi-hop), injects into the first (leftmost) edge scan
-/// in each arm — intermediate edge scans connect to hop results, not to root IDs.
+/// For Union arms (multi-hop), the `anchor` controls which edge in the arm's
+/// join chain receives the filter:
+/// - `ArmAnchor::First` for from-side SIP (`edge_col` is the chain's start column).
+/// - `ArmAnchor::Last` for to-side SIP (`edge_col` is the chain's end column).
 fn inject_sip_for_aliases(
     table_ref: &mut TableRef,
     outer_where: &mut Option<Expr>,
@@ -598,6 +1063,7 @@ fn inject_sip_for_aliases(
     cte_name: &str,
     target_aliases: &HashSet<String>,
     input: &Input,
+    anchor: ArmAnchor,
 ) {
     match table_ref {
         TableRef::Scan { table, alias, .. }
@@ -608,7 +1074,15 @@ fn inject_sip_for_aliases(
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            inject_sip_for_aliases(left, outer_where, edge_col, cte_name, target_aliases, input);
+            inject_sip_for_aliases(
+                left,
+                outer_where,
+                edge_col,
+                cte_name,
+                target_aliases,
+                input,
+                anchor,
+            );
             inject_sip_for_aliases(
                 right,
                 outer_where,
@@ -616,16 +1090,18 @@ fn inject_sip_for_aliases(
                 cte_name,
                 target_aliases,
                 input,
+                anchor,
             );
         }
         TableRef::Union { alias, queries, .. } if target_aliases.contains(alias.as_str()) => {
             for arm in queries {
-                inject_sip_first_edge(
+                inject_sip_at_anchor(
                     &mut arm.from,
                     &mut arm.where_clause,
                     edge_col,
                     cte_name,
                     input,
+                    anchor,
                 );
             }
         }
@@ -638,28 +1114,35 @@ fn inject_sip_for_aliases(
                 cte_name,
                 target_aliases,
                 input,
+                anchor,
             );
         }
     }
 }
 
-/// Inject SIP into only the first (leftmost) edge scan in a FROM tree.
-/// Used for multi-hop UNION ALL arms where only `e1` connects to root node IDs.
-fn inject_sip_first_edge(
+/// Inject SIP into the first (leftmost) or last (rightmost) edge scan in an
+/// arm's left-deep join chain.
+fn inject_sip_at_anchor(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
     edge_col: &str,
     cte_name: &str,
     input: &Input,
+    anchor: ArmAnchor,
 ) {
     match from {
         TableRef::Scan { table, alias, .. } if is_edge_table(table, input) => {
             let sip_filter = make_sip_filter(alias, edge_col, cte_name);
             *where_clause = Expr::and_all([where_clause.take(), Some(sip_filter)]);
         }
-        TableRef::Join { left, .. } => {
-            inject_sip_first_edge(left, where_clause, edge_col, cte_name, input);
-        }
+        TableRef::Join { left, right, .. } => match anchor {
+            ArmAnchor::First => {
+                inject_sip_at_anchor(left, where_clause, edge_col, cte_name, input, anchor);
+            }
+            ArmAnchor::Last => {
+                inject_sip_at_anchor(right, where_clause, edge_col, cte_name, input, anchor);
+            }
+        },
         _ => {}
     }
 }
@@ -699,6 +1182,19 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         .filter_map(|agg| agg.target.as_deref())
         .filter(|t| !input.compiler.node_edge_col.contains_key(*t))
         .collect();
+
+    // Count aggregations per target alias. When a single aggregation targets
+    // an alias, folded conjuncts can be retained in WHERE so DeduplicatePass
+    // can hoist sort-key (structural) ones into the LIMIT 1 BY subquery for
+    // granule pruning. With multiple aggregations targeting the same alias
+    // (e.g. countIf(state='opened') + countIf(state='closed')), per-If
+    // filters disagree and a retained outer WHERE would corrupt the counts.
+    let mut aggs_per_alias: HashMap<&str, usize> = HashMap::new();
+    for agg in &input.aggregations {
+        if let Some(t) = agg.target.as_deref() {
+            *aggs_per_alias.entry(t).or_default() += 1;
+        }
+    }
 
     // Build group-by alias set to avoid folding their filters.
     let group_aliases: HashSet<&str> = input
@@ -741,6 +1237,17 @@ fn fold_filters_into_aggregates(q: &mut Query, input: &Input) {
         if should_keep {
             remaining.push(conjunct);
         } else if let Some(alias) = aliases.into_iter().next() {
+            // Retain in WHERE when this alias has exactly one aggregation
+            // target. DeduplicatePass.partition_filters will hoist sort-key
+            // columns (id, project_id, traversal_path, branch) into the
+            // dedup subquery's WHERE, enabling granule pruning. Mutable
+            // columns stay in the outer WHERE, where they correctly
+            // evaluate against the deduped row. The countIf(_, conjunct)
+            // becomes redundant in this case but the cost is negligible.
+            let single_target = aggs_per_alias.get(alias.as_str()).copied().unwrap_or(0) <= 1;
+            if single_target {
+                remaining.push(conjunct.clone());
+            }
             folded_by_alias.entry(alias).or_default().push(conjunct);
         }
     }
@@ -872,16 +1379,31 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
                 continue; // already cascaded
             }
 
-            let cte_query = match build_cascade_for_node(
-                input,
-                target_id,
-                edge_select_col,
-                edge_filter_col,
-                &source_cte,
-                &rel.types,
-            ) {
-                Some(q) => q,
-                None => continue,
+            let cte_query = if rel.max_hops > 1 {
+                match build_multihop_cascade_for_node(
+                    input,
+                    target_id,
+                    edge_select_col,
+                    edge_filter_col,
+                    &source_cte,
+                    &rel.types,
+                    rel.max_hops,
+                ) {
+                    Some(q) => q,
+                    None => continue,
+                }
+            } else {
+                match build_cascade_for_node(
+                    input,
+                    target_id,
+                    edge_select_col,
+                    edge_filter_col,
+                    &source_cte,
+                    &rel.types,
+                ) {
+                    Some(q) => q,
+                    None => continue,
+                }
             };
             q.ctes.push(Cte::new(&cascade_name, cte_query));
 
@@ -902,6 +1424,275 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
     }
 }
 
+/// For traversal queries, derive `_nf_{neighbor}` CTEs for un-pinned nodes
+/// that are reachable via a single hop from a pinned node.
+///
+/// Without this, a query like `File[node_ids: [X]] --DEFINES--> Definition`
+/// builds `_nf_f` for the pinned File but leaves the joined-side Definition
+/// table unrestricted. DeduplicatePass.wrap_join_scans then dedups the full
+/// authorized Definition table before the JOIN, which on production data
+/// scans tens of millions of rows for a single file's ~30 definitions.
+///
+/// We materialize the neighbor's reachable ids in `_nf_{neighbor}` once.
+/// `wrap_join_scans` (deduplicate.rs) already injects the standard
+/// `neighbor.id IN (SELECT id FROM _nf_{neighbor})` filter into the
+/// neighbor's dedup subquery whenever such a CTE exists.
+fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
+    if input.relationships.is_empty() {
+        return;
+    }
+
+    // Seed the narrowed set with directly pinned nodes; extend it as we build
+    // `_nf_*` cascade CTEs so that downstream relationships can chain off them.
+    // Without the fixed-point loop, `Project[pinned] → File → Definition` only
+    // narrows File and leaves Definition unrestricted, which forces dedup to
+    // scan the whole authorized Definition table before the join.
+    let mut narrowed: HashSet<String> = input
+        .nodes
+        .iter()
+        .filter(|n| !n.node_ids.is_empty())
+        .map(|n| n.id.clone())
+        .collect();
+    if narrowed.is_empty() {
+        return;
+    }
+
+    let mut changed = true;
+    while changed {
+        changed = false;
+        for rel in &input.relationships {
+            let (start_col, end_col) = rel.direction.edge_columns();
+
+            let (source_id, target_id, edge_filter_col, edge_select_col) =
+                if narrowed.contains(&rel.from) && !narrowed.contains(&rel.to) {
+                    (&rel.from, &rel.to, start_col, end_col)
+                } else if narrowed.contains(&rel.to) && !narrowed.contains(&rel.from) {
+                    (&rel.to, &rel.from, end_col, start_col)
+                } else {
+                    continue;
+                };
+
+            let source_nf = node_filter_cte(source_id);
+            let target_nf = node_filter_cte(target_id);
+
+            if !q.ctes.iter().any(|c| c.name == source_nf) {
+                continue;
+            }
+            if q.ctes.iter().any(|c| c.name == target_nf) {
+                continue;
+            }
+
+            if let Some(cte_query) = build_cascade_for_node(
+                input,
+                target_id,
+                edge_select_col,
+                edge_filter_col,
+                &source_nf,
+                &rel.types,
+            ) {
+                q.ctes.push(Cte::new(&target_nf, cte_query));
+                narrowed.insert(target_id.clone());
+                changed = true;
+            }
+        }
+    }
+}
+
+/// Traversal hop frontier optimization.
+///
+/// For multi-hop traversal relationships (`max_hops > 1`), materializes the
+/// reachable IDs at each hop depth in CTEs and injects SIP filters into the
+/// deeper UNION ALL arms of the multi-hop `TableRef::Union`.
+///
+/// Without this, only `e1` (the first edge in each arm) gets a SIP filter from
+/// the root node's IDs. Intermediate edges (`e2`, `e3`) rely solely on their
+/// join conditions with the previous edge, which forces ClickHouse to do full
+/// edge scans on those tables.
+///
+/// For a relationship at index `i` with `max_hops=3` and a pinned `from` node:
+/// - `_thop{i}_1`: reachable IDs at depth 1 (via edge scan from root)
+/// - `_thop{i}_2`: reachable IDs at depth 2 (via edge scan from `_thop{i}_1`)
+/// - Arm depth=2: `e2.{start_col} IN (SELECT id FROM _thop{i}_1)`
+/// - Arm depth=3: `e3.{start_col} IN (SELECT id FROM _thop{i}_2)`
+fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
+    if !matches!(
+        input.query_type,
+        QueryType::Traversal | QueryType::Aggregation
+    ) {
+        return;
+    }
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops <= 1 {
+            continue;
+        }
+
+        // Skip when neither endpoint has a lowerer-created `_nf_*` CTE or
+        // pinned `node_ids`. Cascade-derived CTEs (from
+        // `narrow_joined_nodes_via_pinned_neighbors`) contain IDs reachable
+        // from another node, not the user's filter result set — forward-
+        // chaining from them produces descendants, not intermediate hops.
+        let from_selective = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.from)
+            .is_some_and(|n| !n.node_ids.is_empty())
+            || input
+                .compiler
+                .lowerer_nf_ctes
+                .contains(&node_filter_cte(&rel.from));
+        let to_selective = input
+            .nodes
+            .iter()
+            .find(|n| n.id == rel.to)
+            .is_some_and(|n| !n.node_ids.is_empty())
+            || input
+                .compiler
+                .lowerer_nf_ctes
+                .contains(&node_filter_cte(&rel.to));
+        if !from_selective && !to_selective {
+            continue;
+        }
+
+        let (start_col, end_col) = rel.direction.edge_columns();
+
+        // Find the source CTE that provides the selective root IDs.
+        // The lowerer creates `_nf_{from}` when the from-node has conditions.
+        // Fall back to `_nf_{to}` if the to-node is the selective side.
+        let (source_cte, anchor_col, next_col) = {
+            let nf_from = node_filter_cte(&rel.from);
+            let nf_to = node_filter_cte(&rel.to);
+            if q.ctes.iter().any(|c| c.name == nf_from) {
+                (nf_from, start_col, end_col)
+            } else if q.ctes.iter().any(|c| c.name == nf_to) {
+                (nf_to, end_col, start_col)
+            } else {
+                // No selective source — frontier CTEs would scan the full
+                // edge table, providing no benefit.
+                continue;
+            }
+        };
+
+        let edge_tables = input.compiler.resolve_edge_tables(&rel.types);
+        let type_filter = if rel.types.is_empty() || (rel.types.len() == 1 && rel.types[0] == "*") {
+            None
+        } else {
+            Some(&rel.types)
+        };
+        let prefix = format!("_thop{i}_");
+
+        // Build frontier CTEs: _thop{i}_1 chains from source CTE,
+        // _thop{i}_2 chains from _thop{i}_1, etc. We need depth-1 CTEs
+        // (depth 1 arm doesn't need a frontier — it already has the root SIP).
+        let mut new_ctes = Vec::new();
+        for hop in 1..rel.max_hops {
+            let hop_name = format!("{prefix}{hop}");
+            let alias = HOP_EDGE_ALIAS;
+
+            // Anchor filter: for hop 1, filter from source CTE;
+            // for hop 2+, chain from previous frontier CTE.
+            let parent_cte = if hop == 1 {
+                source_cte.clone()
+            } else {
+                format!("{prefix}{}", hop - 1)
+            };
+            let anchor_filter = Expr::InSubquery {
+                expr: Box::new(Expr::col(alias, anchor_col)),
+                cte_name: parent_cte,
+                column: DEFAULT_PRIMARY_KEY.to_string(),
+            };
+
+            // Relationship type filter.
+            let rel_filter = type_filter.and_then(|types| {
+                Expr::col_in(
+                    alias,
+                    RELATIONSHIP_KIND_COLUMN,
+                    ChType::String,
+                    types
+                        .iter()
+                        .map(|t| serde_json::Value::String(t.clone()))
+                        .collect(),
+                )
+            });
+
+            let from = if edge_tables.len() == 1 {
+                TableRef::scan(&edge_tables[0], alias)
+            } else {
+                let queries = edge_tables
+                    .iter()
+                    .map(|t| Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan(t, alias),
+                        ..Default::default()
+                    })
+                    .collect();
+                TableRef::union_all(queries, alias)
+            };
+
+            new_ctes.push(Cte::new(
+                &hop_name,
+                Query {
+                    select: vec![SelectExpr::new(
+                        Expr::col(alias, next_col),
+                        DEFAULT_PRIMARY_KEY,
+                    )],
+                    from,
+                    where_clause: Expr::and_all([Some(anchor_filter), rel_filter]),
+                    ..Default::default()
+                },
+            ));
+        }
+
+        // Prepend hop CTEs before existing CTEs so they're available.
+        new_ctes.append(&mut q.ctes);
+        q.ctes = new_ctes;
+
+        // Inject SIP filters into the UNION ALL arms inside the FROM tree.
+        let hop_alias = format!("hop_e{i}");
+        inject_traversal_hop_sip(&mut q.from, &hop_alias, &prefix, anchor_col, rel.min_hops);
+    }
+}
+
+/// Walk the FROM tree to find the `TableRef::Union` with the given alias
+/// and inject hop frontier SIP filters into its arms.
+fn inject_traversal_hop_sip(
+    table_ref: &mut TableRef,
+    target_alias: &str,
+    cte_prefix: &str,
+    anchor_col: &str,
+    min_hops: u32,
+) {
+    match table_ref {
+        TableRef::Union { alias, queries, .. } if alias == target_alias => {
+            // Arms are indexed from min_hops..=max_hops.
+            // Arm 0 = min_hops depth, Arm 1 = min_hops+1, etc.
+            // Only arms at depth >= 2 get a frontier filter (depth 1 already
+            // has the root SIP from inject_sip_first_edge).
+            for (arm_idx, arm) in queries.iter_mut().enumerate() {
+                let depth = min_hops + arm_idx as u32;
+                if depth < 2 {
+                    continue;
+                }
+                // The frontier CTE at hop N-1 materializes IDs reachable at
+                // depth N-1, so arm at depth N filters e{N}.anchor_col against it.
+                let hop_cte_name = format!("{cte_prefix}{}", depth - 1);
+                let last_edge = format!("e{depth}");
+                let sip_filter = Expr::InSubquery {
+                    expr: Box::new(Expr::col(&last_edge, anchor_col)),
+                    cte_name: hop_cte_name,
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                };
+                arm.where_clause = Expr::and_all([arm.where_clause.take(), Some(sip_filter)]);
+            }
+        }
+        TableRef::Join { left, right, .. } => {
+            inject_traversal_hop_sip(left, target_alias, cte_prefix, anchor_col, min_hops);
+            inject_traversal_hop_sip(right, target_alias, cte_prefix, anchor_col, min_hops);
+        }
+        _ => {}
+    }
+}
+
 /// Path hop frontier optimization.
 ///
 /// For path-finding queries with max_depth > 2, materializes the reachable
@@ -916,10 +1707,17 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
 
     let start = input.nodes.iter().find(|n| n.id == path.from);
     let end = input.nodes.iter().find(|n| n.id == path.to);
-    let (start_ids, end_ids) = match (start, end) {
-        (Some(s), Some(e)) => (&s.node_ids, &e.node_ids),
+    let (start_anchor, end_anchor) = match (start, end) {
+        (Some(s), Some(e)) => (path_hop_anchor_source(q, s), path_hop_anchor_source(q, e)),
         _ => return,
     };
+    let start_entity = start.and_then(|n| n.entity.as_deref());
+    let end_entity = end.and_then(|n| n.entity.as_deref());
+    let path_scope_cte = q
+        .ctes
+        .iter()
+        .any(|cte| cte.name == PATH_SCOPE_CTE)
+        .then_some(PATH_SCOPE_CTE);
 
     let max_depth = path.max_depth;
     let forward_depth = max_depth.div_ceil(2);
@@ -927,25 +1725,41 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
     let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
+    let rel_type_filter =
+        if path.rel_types.is_empty() || (path.rel_types.len() == 1 && path.rel_types[0] == "*") {
+            None
+        } else {
+            Some(path.rel_types.as_slice())
+        };
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,
-        FORWARD_CTE,
-        start_ids,
-        forward_depth,
-        true,
         &mut new_ctes,
-        &edge_tables,
+        HopFrontierOptions {
+            cte_name: FORWARD_CTE,
+            anchor_source: start_anchor,
+            max_depth: forward_depth,
+            is_forward: true,
+            edge_tables: &edge_tables,
+            rel_type_filter,
+            path_scope_cte,
+            anchor_entity: start_entity,
+        },
     );
     if backward_depth > 0 {
         inject_hop_frontiers(
             q,
-            BACKWARD_CTE,
-            end_ids,
-            backward_depth,
-            false,
             &mut new_ctes,
-            &edge_tables,
+            HopFrontierOptions {
+                cte_name: BACKWARD_CTE,
+                anchor_source: end_anchor,
+                max_depth: backward_depth,
+                is_forward: false,
+                edge_tables: &edge_tables,
+                rel_type_filter,
+                path_scope_cte,
+                anchor_entity: end_entity,
+            },
         );
     }
 
@@ -954,24 +1768,56 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     q.ctes = new_ctes;
 }
 
-/// Build hop frontier CTEs for one direction and inject SIP filters into
-/// the corresponding frontier CTE's UNION ALL arms.
-fn inject_hop_frontiers(
-    q: &mut Query,
-    cte_name: &str,
-    anchor_ids: &[i64],
+#[derive(Debug, Clone)]
+enum HopAnchorSource {
+    Literal(Vec<i64>),
+    Cte(String),
+}
+
+fn path_hop_anchor_source(q: &Query, node: &InputNode) -> Option<HopAnchorSource> {
+    if !node.node_ids.is_empty() {
+        return Some(HopAnchorSource::Literal(node.node_ids.clone()));
+    }
+
+    if !node.filters.is_empty() || node.id_range.is_some() {
+        let cte_name = node_filter_cte(&node.id);
+        if q.ctes.iter().any(|c| c.name == cte_name) {
+            return Some(HopAnchorSource::Cte(cte_name));
+        }
+    }
+
+    None
+}
+
+struct HopFrontierOptions<'a> {
+    cte_name: &'a str,
+    anchor_source: Option<HopAnchorSource>,
     max_depth: u32,
     is_forward: bool,
-    new_ctes: &mut Vec<Cte>,
-    edge_tables: &[String],
-) {
-    let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
-    let anchor_col = if is_forward {
+    edge_tables: &'a [String],
+    rel_type_filter: Option<&'a [String]>,
+    path_scope_cte: Option<&'a str>,
+    anchor_entity: Option<&'a str>,
+}
+
+/// Build hop frontier CTEs for one direction and inject SIP filters into
+/// the corresponding frontier CTE's UNION ALL arms.
+fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFrontierOptions<'_>) {
+    let Some(anchor_source) = options.anchor_source else {
+        return;
+    };
+
+    let prefix = if options.is_forward {
+        "_fwd_hop"
+    } else {
+        "_bwd_hop"
+    };
+    let anchor_col = if options.is_forward {
         SOURCE_ID_COLUMN
     } else {
         TARGET_ID_COLUMN
     };
-    let next_col = if is_forward {
+    let next_col = if options.is_forward {
         TARGET_ID_COLUMN
     } else {
         SOURCE_ID_COLUMN
@@ -979,7 +1825,7 @@ fn inject_hop_frontiers(
 
     // Build hop frontier CTEs: _fwd_hop1 chains from anchor IDs,
     // _fwd_hop2 chains from _fwd_hop1, etc.
-    for hop in 1..max_depth {
+    for hop in 1..options.max_depth {
         let hop_name = format!("{prefix}{hop}");
         let parent = if hop == 1 {
             None
@@ -995,21 +1841,57 @@ fn inject_hop_frontiers(
                 column: DEFAULT_PRIMARY_KEY.to_string(),
             })
         } else {
+            match &anchor_source {
+                HopAnchorSource::Literal(anchor_ids) => Expr::col_in(
+                    alias,
+                    anchor_col,
+                    ChType::Int64,
+                    anchor_ids
+                        .iter()
+                        .map(|id| serde_json::Value::from(*id))
+                        .collect(),
+                ),
+                HopAnchorSource::Cte(cte_name) => Some(Expr::InSubquery {
+                    expr: Box::new(Expr::col(alias, anchor_col)),
+                    cte_name: cte_name.clone(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                }),
+            }
+        };
+        let rel_filter = options.rel_type_filter.and_then(|types| {
             Expr::col_in(
                 alias,
-                anchor_col,
-                ChType::Int64,
-                anchor_ids
+                RELATIONSHIP_KIND_COLUMN,
+                ChType::String,
+                types
                     .iter()
-                    .map(|id| serde_json::Value::from(*id))
+                    .map(|t| serde_json::Value::String(t.clone()))
                     .collect(),
             )
-        };
+        });
+        let scope_filter = options.path_scope_cte.map(|cte_name| Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+            cte_name: cte_name.to_string(),
+            column: TRAVERSAL_PATH_COLUMN.to_string(),
+        });
+        let anchor_kind_filter = (hop == 1)
+            .then(|| {
+                options.anchor_entity.map(|entity| {
+                    let kind_col = if options.is_forward {
+                        SOURCE_KIND_COLUMN
+                    } else {
+                        TARGET_KIND_COLUMN
+                    };
+                    Expr::eq(Expr::col(alias, kind_col), Expr::string(entity))
+                })
+            })
+            .flatten();
 
-        let from = if edge_tables.len() == 1 {
-            TableRef::scan(&edge_tables[0], alias)
+        let from = if options.edge_tables.len() == 1 {
+            TableRef::scan(&options.edge_tables[0], alias)
         } else {
-            let queries = edge_tables
+            let queries = options
+                .edge_tables
                 .iter()
                 .map(|t| Query {
                     select: vec![SelectExpr::star()],
@@ -1027,7 +1909,12 @@ fn inject_hop_frontiers(
                     DEFAULT_PRIMARY_KEY,
                 )],
                 from,
-                where_clause: anchor_filter,
+                where_clause: Expr::and_all([
+                    anchor_filter,
+                    rel_filter,
+                    scope_filter,
+                    anchor_kind_filter,
+                ]),
                 ..Default::default()
             },
         ));
@@ -1035,7 +1922,7 @@ fn inject_hop_frontiers(
 
     // Inject SIP filters into the UNION ALL arms of the frontier CTE.
     // Arms at depth >= 2 get: e{depth}.anchor_col IN (SELECT id FROM hop{depth-1})
-    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == cte_name) {
+    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == options.cte_name) {
         Some(c) => c,
         None => return,
     };
@@ -1045,7 +1932,7 @@ fn inject_hop_frontiers(
     // Only depth >= 2 gets a SIP filter, so we only touch union_all entries.
     for (i, arm) in frontier_cte.query.union_all.iter_mut().enumerate() {
         let depth = (i + 2) as u32; // union_all[0] = depth 2
-        if depth > max_depth {
+        if depth > options.max_depth {
             continue;
         }
         let hop_cte_name = format!("{prefix}{}", depth - 1);
@@ -1253,10 +2140,12 @@ mod tests {
             other => panic!("expected FuncCall, got {other:?}"),
         }
 
-        // Group-by node filter stays in WHERE.
+        // Group-by node filter stays in WHERE; target's filter is retained
+        // alongside the countIf so DeduplicatePass can hoist sort-key
+        // columns into the LIMIT 1 BY subquery for granule pruning.
         let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
         assert!(where_aliases.contains("p"));
-        assert!(!where_aliases.contains("mr"));
+        assert!(where_aliases.contains("mr"));
     }
 
     #[test]
@@ -1306,7 +2195,8 @@ mod tests {
             }
             other => panic!("expected countIf, got {other:?}"),
         }
-        assert!(q.where_clause.is_none());
+        // Single-aggregate target: filter retained in WHERE for granule pruning.
+        assert!(q.where_clause.is_some());
     }
 
     #[test]
@@ -1365,6 +2255,46 @@ mod tests {
             other => panic!("expected countIf, got {other:?}"),
         }
 
+        // Single-aggregate target: both conjuncts retained in WHERE alongside
+        // the per-If filters, so DeduplicatePass can hoist them.
+        let where_aliases = q.where_clause.as_ref().unwrap().column_aliases();
+        assert!(where_aliases.contains("mr"));
+    }
+
+    #[test]
+    fn multi_aggregate_does_not_retain_conjuncts() {
+        // Two aggregations target the same alias with conflicting per-If
+        // filters. Retaining either filter in outer WHERE would corrupt the
+        // other count, so fold must REMOVE conjuncts from WHERE in this case.
+        let input = agg_input(vec![
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("opened".to_string()),
+            },
+            InputAggregation {
+                function: AggFunction::Count,
+                target: Some("mr".to_string()),
+                group_by: None,
+                property: None,
+                alias: Some("merged".to_string()),
+            },
+        ]);
+        let mut q = Query {
+            select: vec![
+                SelectExpr::new(count_expr("mr", "id"), "opened"),
+                SelectExpr::new(count_expr("mr", "id"), "merged"),
+            ],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(eq_filter("mr", "state", "opened")),
+            ..Default::default()
+        };
+
+        fold_filters_into_aggregates(&mut q, &input);
+
+        // Filter must NOT be retained — would corrupt the other countIf.
         assert!(q.where_clause.is_none());
     }
 
@@ -1441,6 +2371,253 @@ mod tests {
             other => panic!("expected COUNT, got {other:?}"),
         }
         assert!(q.where_clause.is_some());
+    }
+
+    #[test]
+    fn pinned_traversal_creates_neighbor_nf_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Source node is pinned via node_ids; target is unpinned.
+        // The pass must create _nf_<target> by deriving target ids from the
+        // edge filtered by _nf_<source>, so DeduplicatePass can narrow the
+        // target's dedup subquery.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    node_ids: vec![42i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["DEFINES".into()],
+                from: "f".into(),
+                to: "d".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        // Simulate the lowerer having created _nf_f for the pinned File.
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ctes: vec![Cte::new(
+                "_nf_f",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("f", "id"), "id")],
+                    from: TableRef::scan("gl_file", "f"),
+                    where_clause: Some(Expr::eq(Expr::col("f", "id"), Expr::lit(42))),
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        // _nf_d should now exist alongside _nf_f.
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_d"),
+            "expected _nf_d CTE to be derived from edge filtered by _nf_f"
+        );
+    }
+
+    #[test]
+    fn pinned_traversal_cascades_across_multiple_relationships() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Project[pinned] -- IN_PROJECT --> File -- DEFINES --> Definition
+        // The pass must cascade: pinned p -> _nf_f via IN_PROJECT, then
+        // _nf_f -> _nf_d via DEFINES. Without the fixed-point loop, only
+        // _nf_f gets built and Definition's dedup scans the full table.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    node_ids: vec![278964i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![
+                InputRelationship {
+                    types: vec!["IN_PROJECT".into()],
+                    from: "f".into(),
+                    to: "p".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+                InputRelationship {
+                    types: vec!["DEFINES".into()],
+                    from: "f".into(),
+                    to: "d".into(),
+                    min_hops: 1,
+                    max_hops: 1,
+                    direction: Direction::Outgoing,
+                    filters: Default::default(),
+                },
+            ],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ctes: vec![Cte::new(
+                "_nf_p",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("p", "id"), "id")],
+                    from: TableRef::scan("gl_project", "p"),
+                    where_clause: Some(Expr::eq(Expr::col("p", "id"), Expr::lit(278964))),
+                    ..Default::default()
+                },
+            )],
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_f"),
+            "expected _nf_f CTE derived from _nf_p via IN_PROJECT"
+        );
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_d"),
+            "expected _nf_d CTE cascaded from _nf_f via DEFINES"
+        );
+    }
+
+    #[test]
+    fn pinned_traversal_skips_when_both_sides_pinned() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Both pinned: nothing to derive.
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "f".into(),
+                    entity: Some("File".into()),
+                    table: Some("gl_file".into()),
+                    node_ids: vec![1i64],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "d".into(),
+                    entity: Some("Definition".into()),
+                    table: Some("gl_definition".into()),
+                    node_ids: vec![2i64],
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["DEFINES".into()],
+                from: "f".into(),
+                to: "d".into(),
+                min_hops: 1,
+                max_hops: 1,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(Expr::col("d", "name"), "name")],
+            from: TableRef::scan("gl_definition", "d"),
+            ..Default::default()
+        };
+
+        narrow_joined_nodes_via_pinned_neighbors(&mut q, &input);
+
+        assert!(
+            q.ctes.is_empty(),
+            "no CTEs should be created when both sides are pinned"
+        );
+    }
+
+    #[test]
+    fn multihop_cascade_builds_union_all_of_edge_chains() {
+        use crate::input::InputNode;
+
+        let input = Input {
+            nodes: vec![InputNode {
+                id: "f".into(),
+                entity: Some("File".into()),
+                table: Some("gl_file".into()),
+                ..Default::default()
+            }],
+            ..Default::default()
+        };
+
+        let q = build_multihop_cascade_for_node(
+            &input,
+            "f",
+            TARGET_ID_COLUMN,
+            SOURCE_ID_COLUMN,
+            "_root_ids",
+            &["CONTAINS".to_string()],
+            2,
+        );
+        let q = q.expect("should build cascade");
+
+        // max_hops=2: base query is depth-1, union_all has depth-2.
+        assert_eq!(
+            q.union_all.len(),
+            1,
+            "expected 1 union_all arm (depth 2), got: {}",
+            q.union_all.len()
+        );
+
+        // Depth-2 arm has a JOIN (e1 JOIN e2).
+        let depth2 = &q.union_all[0];
+        assert!(
+            matches!(depth2.from, TableRef::Join { .. }),
+            "depth-2 arm should be a JOIN, got: {:?}",
+            std::mem::discriminant(&depth2.from)
+        );
+
+        // max_hops=3 produces 2 union_all arms.
+        let q3 = build_multihop_cascade_for_node(
+            &input,
+            "f",
+            TARGET_ID_COLUMN,
+            SOURCE_ID_COLUMN,
+            "_root_ids",
+            &["CONTAINS".to_string()],
+            3,
+        )
+        .unwrap();
+        assert_eq!(q3.union_all.len(), 2, "max_hops=3 should have 2 union arms");
     }
 
     #[test]
@@ -1736,6 +2913,7 @@ mod tests {
                         crate::input::InputFilter {
                             op: None,
                             value: Some(serde_json::json!("merged")),
+                            ..Default::default()
                         },
                     )]
                     .into(),
@@ -1850,5 +3028,584 @@ mod tests {
             has_kind_filter(w, "e0", "source_kind", "Project"),
             "group-by node p should get source_kind for Incoming direction"
         );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_creates_ctes_and_injects_sip() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        // Build a multi-hop UNION ALL with 3 arms (depth 1, 2, 3).
+        let arm1 = Query {
+            select: vec![SelectExpr::new(Expr::col("e1", "target_id"), "end_id")],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::new(Expr::col("e2", "target_id"), "end_id")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+        let arm3 = Query {
+            select: vec![SelectExpr::new(Expr::col("e3", "target_id"), "end_id")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    TableRef::scan("gl_edge", "e1"),
+                    TableRef::scan("gl_edge", "e2"),
+                    Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+                ),
+                TableRef::scan("gl_edge", "e3"),
+                Expr::eq(Expr::col("e2", "target_id"), Expr::col("e3", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let nf_cte = Cte::new(
+            "_nf_u",
+            Query {
+                select: vec![SelectExpr::new(Expr::col("u", "id"), "id")],
+                from: TableRef::scan("gl_user", "u"),
+                where_clause: Expr::col_in(
+                    "u",
+                    "id",
+                    ChType::Int64,
+                    vec![serde_json::Value::from(1)],
+                ),
+                ..Default::default()
+            },
+        );
+
+        let mut q = Query {
+            ctes: vec![nf_cte],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2, arm3], "hop_e0"),
+            ..Default::default()
+        };
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    node_ids: vec![1],
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["MEMBER_OF".into()],
+                from: "u".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 3,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        // Should have 3 CTEs: _nf_u (existing) + _thop0_1 + _thop0_2
+        let cte_names: Vec<&str> = q.ctes.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            cte_names.contains(&"_thop0_1"),
+            "expected _thop0_1 CTE, got: {cte_names:?}"
+        );
+        assert!(
+            cte_names.contains(&"_thop0_2"),
+            "expected _thop0_2 CTE, got: {cte_names:?}"
+        );
+
+        // _thop0_1 should reference _nf_u (the source CTE)
+        let thop1 = q.ctes.iter().find(|c| c.name == "_thop0_1").unwrap();
+        let thop1_where = thop1
+            .query
+            .where_clause
+            .as_ref()
+            .expect("_thop0_1 must have WHERE");
+        assert!(
+            has_in_subquery(thop1_where, "_nf_u"),
+            "_thop0_1 must reference _nf_u, got: {thop1_where:?}"
+        );
+
+        // _thop0_2 should chain from _thop0_1
+        let thop2 = q.ctes.iter().find(|c| c.name == "_thop0_2").unwrap();
+        let thop2_where = thop2
+            .query
+            .where_clause
+            .as_ref()
+            .expect("_thop0_2 must have WHERE");
+        assert!(
+            has_in_subquery(thop2_where, "_thop0_1"),
+            "_thop0_2 must reference _thop0_1, got: {thop2_where:?}"
+        );
+
+        // Arm at depth 1 should NOT have a frontier SIP
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected Union FROM");
+        };
+        assert!(
+            queries[0].where_clause.is_none(),
+            "depth-1 arm should not have frontier SIP"
+        );
+
+        // Arm at depth 2 should have SIP referencing _thop0_1
+        let arm2_where = queries[1]
+            .where_clause
+            .as_ref()
+            .expect("depth-2 arm must have WHERE");
+        assert!(
+            has_in_subquery(arm2_where, "_thop0_1"),
+            "depth-2 arm must reference _thop0_1, got: {arm2_where:?}"
+        );
+
+        // Arm at depth 3 should have SIP referencing _thop0_2
+        let arm3_where = queries[2]
+            .where_clause
+            .as_ref()
+            .expect("depth-3 arm must have WHERE");
+        assert!(
+            has_in_subquery(arm3_where, "_thop0_2"),
+            "depth-3 arm must reference _thop0_2, got: {arm3_where:?}"
+        );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_skips_without_nf_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let arm1 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        // No _nf_ CTEs — frontier optimization should be skipped.
+        let mut q = Query {
+            ctes: vec![],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2], "hop_e0"),
+            ..Default::default()
+        };
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "u".into(),
+                    entity: Some("User".into()),
+                    table: Some("gl_user".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["MEMBER_OF".into()],
+                from: "u".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        // No frontier CTEs should be created.
+        assert!(
+            q.ctes.is_empty(),
+            "no frontier CTEs without _nf_ source, got: {:?}",
+            q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_fires_for_lowerer_filter_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let arm1 = Query {
+            select: vec![SelectExpr::new(Expr::col("e1", "target_id"), "end_id")],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::new(Expr::col("e2", "target_id"), "end_id")],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let nf_cte = Cte::new(
+            "_nf_mr",
+            Query {
+                select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                from: TableRef::scan("gl_merge_request", "mr"),
+                where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
+                ..Default::default()
+            },
+        );
+
+        let mut q = Query {
+            ctes: vec![nf_cte],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2], "hop_e0"),
+            ..Default::default()
+        };
+
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+        input.compiler.lowerer_nf_ctes.insert("_nf_mr".to_string());
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        let cte_names: Vec<&str> = q.ctes.iter().map(|c| c.name.as_str()).collect();
+        assert!(
+            cte_names.contains(&"_thop0_1"),
+            "hop frontier should fire for lowerer filter CTE, got: {cte_names:?}"
+        );
+    }
+
+    #[test]
+    fn traversal_hop_frontiers_skips_cascade_derived_cte() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let arm1 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::scan("gl_edge", "e1"),
+            ..Default::default()
+        };
+        let arm2 = Query {
+            select: vec![SelectExpr::star()],
+            from: TableRef::join(
+                crate::ast::JoinType::Inner,
+                TableRef::scan("gl_edge", "e1"),
+                TableRef::scan("gl_edge", "e2"),
+                Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+            ),
+            ..Default::default()
+        };
+
+        let nf_cte = Cte::new(
+            "_nf_mr",
+            Query {
+                select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                from: TableRef::scan("gl_merge_request", "mr"),
+                ..Default::default()
+            },
+        );
+
+        let mut q = Query {
+            ctes: vec![nf_cte],
+            select: vec![SelectExpr::star()],
+            from: TableRef::union_all(vec![arm1, arm2], "hop_e0"),
+            ..Default::default()
+        };
+
+        // lowerer_nf_ctes is empty — _nf_mr was cascade-derived
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "mr".into(),
+                    entity: Some("MergeRequest".into()),
+                    table: Some("gl_merge_request".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["IN_PROJECT".into()],
+                from: "mr".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        apply_traversal_hop_frontiers(&mut q, &input);
+
+        assert!(
+            !q.ctes.iter().any(|c| c.name.starts_with("_thop")),
+            "cascade-derived CTE should not trigger hop frontiers"
+        );
+    }
+
+    #[test]
+    fn variable_length_arms_get_static_kind_literals() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "g".into(),
+                    entity: Some("Group".into()),
+                    table: Some("gl_group".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    table: Some("gl_project".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "g".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 3,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let arm = |depth: u32| {
+            let mut from = TableRef::scan("gl_edge", "e1");
+            for i in 2..=depth {
+                let prev = format!("e{}", i - 1);
+                let curr = format!("e{i}");
+                from = TableRef::join(
+                    crate::ast::JoinType::Inner,
+                    from,
+                    TableRef::scan("gl_edge", &curr),
+                    Expr::eq(Expr::col(&prev, "target_id"), Expr::col(&curr, "source_id")),
+                );
+            }
+            Query {
+                select: vec![SelectExpr::star()],
+                from,
+                ..Default::default()
+            }
+        };
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(vec![arm(1), arm(2), arm(3)], "hop_e0"),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected hop_e0 union");
+        };
+        assert_eq!(queries.len(), 3);
+
+        let w1 = queries[0].where_clause.as_ref().expect("arm1 WHERE");
+        assert!(has_kind_filter(w1, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w1, "e1", "target_kind", "Project"));
+
+        let w2 = queries[1].where_clause.as_ref().expect("arm2 WHERE");
+        assert!(has_kind_filter(w2, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w2, "e2", "target_kind", "Project"));
+        assert!(!has_kind_filter(w2, "e1", "target_kind", "Project"));
+
+        let w3 = queries[2].where_clause.as_ref().expect("arm3 WHERE");
+        assert!(has_kind_filter(w3, "e1", "source_kind", "Group"));
+        assert!(has_kind_filter(w3, "e3", "target_kind", "Project"));
+    }
+
+    #[test]
+    fn variable_length_arms_skip_when_no_entity_pinned() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "g".into(),
+                    entity: None,
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "p".into(),
+                    entity: None,
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "g".into(),
+                to: "p".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Outgoing,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(
+                vec![
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::join(
+                            crate::ast::JoinType::Inner,
+                            TableRef::scan("gl_edge", "e1"),
+                            TableRef::scan("gl_edge", "e2"),
+                            Expr::eq(Expr::col("e1", "target_id"), Expr::col("e2", "source_id")),
+                        ),
+                        ..Default::default()
+                    },
+                ],
+                "hop_e0",
+            ),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected union");
+        };
+        for arm in queries {
+            assert!(arm.where_clause.is_none(), "no kinds → no injection");
+        }
+    }
+
+    #[test]
+    fn variable_length_arms_incoming_swaps_kind_columns() {
+        use crate::input::{Direction, InputNode, InputRelationship};
+
+        let input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![
+                InputNode {
+                    id: "p".into(),
+                    entity: Some("Project".into()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "g".into(),
+                    entity: Some("Group".into()),
+                    ..Default::default()
+                },
+            ],
+            relationships: vec![InputRelationship {
+                types: vec!["CONTAINS".into()],
+                from: "p".into(),
+                to: "g".into(),
+                min_hops: 1,
+                max_hops: 2,
+                direction: Direction::Incoming,
+                filters: Default::default(),
+            }],
+            ..Default::default()
+        };
+
+        let mut q = Query {
+            select: vec![SelectExpr::new(count_expr("hop_e0", "end_id"), "n")],
+            from: TableRef::union_all(
+                vec![
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::scan("gl_edge", "e1"),
+                        ..Default::default()
+                    },
+                    Query {
+                        select: vec![SelectExpr::star()],
+                        from: TableRef::join(
+                            crate::ast::JoinType::Inner,
+                            TableRef::scan("gl_edge", "e1"),
+                            TableRef::scan("gl_edge", "e2"),
+                            Expr::eq(Expr::col("e1", "source_id"), Expr::col("e2", "target_id")),
+                        ),
+                        ..Default::default()
+                    },
+                ],
+                "hop_e0",
+            ),
+            ..Default::default()
+        };
+
+        push_kind_literals_into_variable_length_arms(&mut q, &input);
+
+        let TableRef::Union { queries, .. } = &q.from else {
+            panic!("expected union");
+        };
+        let w1 = queries[0].where_clause.as_ref().expect("arm1 WHERE");
+        assert!(has_kind_filter(w1, "e1", "target_kind", "Project"));
+        assert!(has_kind_filter(w1, "e1", "source_kind", "Group"));
+
+        let w2 = queries[1].where_clause.as_ref().expect("arm2 WHERE");
+        assert!(has_kind_filter(w2, "e1", "target_kind", "Project"));
+        assert!(has_kind_filter(w2, "e2", "source_kind", "Group"));
     }
 }

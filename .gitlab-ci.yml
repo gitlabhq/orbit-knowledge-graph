@@ -191,6 +191,16 @@ metrics-catalog-check:
   script:
     - mise run metrics:catalog:check
 
+dashboards-check:
+  stage: lint
+  extends:
+    - .job-template
+    - .sccache-template
+    - .mr-and-main-rules
+  needs: []
+  script:
+    - mise run dashboards:check
+
 ddl-freshness-check:
   stage: lint
   extends:
@@ -522,18 +532,6 @@ code-indexing-benchmark-build:
       - gkg-benchmark-*.json
     expire_in: 3 weeks
 
-code-indexing-benchmark-linux:
-  extends:
-    - .job-template
-    - .code-indexing-benchmark-template
-  tags:
-    - saas-linux-large-amd64
-  variables:
-    ARCH: "linux-x86_64"
-  parallel:
-    matrix:
-      - GROUP: [ruby, typescript, java, go]
-
 code-indexing-benchmark-v2-linux:
   extends:
     - .job-template
@@ -592,13 +590,6 @@ code-indexing-benchmark-v2-linux:
       - gkg-benchmark-*-results.json
       - gkg-benchmark-*.json
     expire_in: 1 week
-
-code-indexing-benchmark-analyze:
-  extends: .code-indexing-benchmark-analyze-template
-  needs:
-    - code-indexing-benchmark-linux
-  variables:
-    SCENARIO: index
 
 code-indexing-benchmark-v2-analyze:
   extends: .code-indexing-benchmark-analyze-template

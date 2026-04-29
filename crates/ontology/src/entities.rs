@@ -46,6 +46,8 @@ pub struct NodeStorage {
     pub indexes: Vec<StorageIndex>,
     /// Complete list of projections (no auto-generation).
     pub projections: Vec<StorageProjection>,
+    /// Raw ClickHouse MergeTree table settings emitted into CREATE TABLE.
+    pub settings: BTreeMap<String, String>,
 }
 
 /// An index definition from storage metadata.
@@ -80,6 +82,7 @@ pub struct EdgeTableStorage {
     pub columns: Vec<StorageColumn>,
     pub indexes: Vec<StorageIndex>,
     pub projections: Vec<StorageProjection>,
+    pub settings: BTreeMap<String, String>,
 }
 
 /// A non-ontology auxiliary table definition (checkpoint, etc.).
@@ -139,6 +142,29 @@ impl NodeStyle {
     }
 }
 
+/// GitLab access levels. Discriminants match `Gitlab::Access` in Rails so
+/// that YAML strings, JWT claim integers, and compiler-side comparisons all
+/// agree. `SecurityManager` intentionally sits between `Reporter` and
+/// `Developer` (25) to match the role's hybrid scope: broader than reporter
+/// for security resources, narrower than developer for code changes.
+#[repr(u32)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Deserialize, strum::FromRepr)]
+#[serde(rename_all = "snake_case")]
+pub enum RequiredRole {
+    Guest = 10,
+    Reporter = 20,
+    SecurityManager = 25,
+    Developer = 30,
+    Maintainer = 40,
+    Owner = 50,
+}
+
+impl RequiredRole {
+    pub fn as_access_level(self) -> u32 {
+        self as u32
+    }
+}
+
 /// Redaction configuration for an entity.
 ///
 /// Defines how this entity should be validated against Rails' RedactionService
@@ -155,6 +181,13 @@ pub struct RedactionConfig {
     /// Defaults to "read".
     #[serde(default = "RedactionConfig::default_ability")]
     pub ability: String,
+    /// Minimum GitLab role required on a traversal path for rows of this
+    /// entity to survive the compiler security pass. Defaults to `Reporter`
+    /// to preserve the pre-role-scoping behavior for entities that did not
+    /// opt in. Set to `SecurityManager` (or stricter) for entities whose
+    /// ability is only granted at that level, e.g. `read_vulnerability`.
+    #[serde(default = "RedactionConfig::default_required_role")]
+    pub required_role: RequiredRole,
 }
 
 impl RedactionConfig {
@@ -164,6 +197,10 @@ impl RedactionConfig {
 
     fn default_ability() -> String {
         "read".to_string()
+    }
+
+    fn default_required_role() -> RequiredRole {
+        RequiredRole::Reporter
     }
 }
 

@@ -67,8 +67,8 @@ impl TestObserver {
 
 fn search_json() -> &'static str {
     r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
         "limit": 10
     }"#
 }
@@ -292,8 +292,8 @@ fn error_stops_pipeline_early() {
     // Invalid entity type — ValidatePass will succeed (valid JSON + schema),
     // but NormalizePass should fail on unknown entity.
     let json = r#"{
-        "query_type": "search",
-        "node": {"id": "x", "entity": "NonExistent", "columns": []},
+        "query_type": "traversal",
+        "node": {"id": "x", "entity": "NonExistent", "node_ids": [1], "columns": []},
         "limit": 10
     }"#;
     let state = QueryState::from_json(json);
@@ -340,7 +340,7 @@ fn clickhouse_preset_compiles_search_query() {
         .unwrap();
 
     assert!(!result.base.sql.is_empty());
-    assert_eq!(result.query_type, compiler::QueryType::Search);
+    assert_eq!(result.query_type, compiler::QueryType::Traversal);
 }
 
 #[test]
@@ -349,7 +349,7 @@ fn clickhouse_preset_compiles_traversal_query() {
     let json = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["username"]},
+            {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             {"id": "p", "entity": "Project", "columns": ["name"]}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
@@ -375,8 +375,8 @@ fn from_input_preset_compiles_pre_built_input() {
     let env = SecureEnv::new(Arc::new(ontology.clone()), ctx);
 
     let json = r#"{
-        "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "query_type": "traversal",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);
@@ -394,7 +394,7 @@ fn from_input_preset_compiles_pre_built_input() {
         .into_output()
         .unwrap();
 
-    assert_eq!(result.query_type, compiler::QueryType::Search);
+    assert_eq!(result.query_type, compiler::QueryType::Traversal);
     assert!(!result.base.sql.is_empty());
 }
 
@@ -406,8 +406,8 @@ fn hydration_preset_skips_security_and_check() {
     let env = SecureEnv::new(Arc::new(Ontology::new()), ctx);
 
     let json = r#"{
-        "query_type": "search",
-        "node": {"id": "p", "entity": "Project", "columns": ["name"]},
+        "query_type": "traversal",
+        "node": {"id": "p", "entity": "Project", "node_ids": [1], "columns": ["name"]},
         "limit": 10
     }"#;
     let v = Validator::new(&ontology);

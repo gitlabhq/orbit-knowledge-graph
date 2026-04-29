@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.1.0
+version: 0.3.0
 license: MIT
 metadata:
   audience: developers
@@ -56,7 +56,7 @@ POST to `orbit/query` requires an explicit `Content-Type`. Without it you get
 cat > /tmp/q.json <<'JSON'
 {
   "query": {
-    "query_type": "search",
+    "query_type": "traversal",
     "node": {"id": "p", "entity": "Project"},
     "limit": 5
   },
@@ -102,6 +102,7 @@ External links (require internet):
 - [MCP tool definitions](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/queries/mcp_tools.md)
 - [Orbit product overview](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/_index.md)
 - [Real query examples (`sdlc_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/sdlc_queries.yaml)
+- [Code-graph traversal examples (`code_graph_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/code_graph_queries.yaml) — `CALLS` and `EXTENDS` traversal patterns
 
 ## Agent guidelines
 
@@ -111,13 +112,17 @@ External links (require internet):
 3. **Set `Content-Type: application/json` on POST.** Missing → 415.
 4. **No `-R owner/repo`.** Orbit endpoints are user-scoped at the API level.
 5. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
-6. **`query_type` dictates the top-level key:** `search` / `neighbors` → `node` (singular);
-   `traversal` / `aggregation` / `path_finding` → `nodes` (array).
+6. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
+   multi-node `traversal` / `aggregation` / `path_finding` → `nodes` (array).
 7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
 8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
-9. **Read-only.** All endpoints are idempotent queries — no data is modified.
-10. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
+9. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
+   When an endpoint uses `filters` or `id_range`, specify `rel_types` in the `path` config to
+   constrain which relationship types the frontier traverses. When both endpoints use `node_ids`,
+   `rel_types` is optional.
+10. **Read-only.** All endpoints are idempotent queries — no data is modified.
+11. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
     (see `HTTP 429` in troubleshooting). Prefer aggregation/traversal in one
     query over N separate queries.
 

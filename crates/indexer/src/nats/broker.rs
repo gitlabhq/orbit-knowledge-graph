@@ -7,6 +7,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 const FETCH_RETRY_DELAY: Duration = Duration::from_millis(100);
+const DEAD_LETTER_MAX_AGE: Duration = Duration::ZERO;
 
 use async_nats::jetstream::consumer::PullConsumer;
 use async_nats::jetstream::consumer::pull::Config as ConsumerConfig;
@@ -82,13 +83,21 @@ impl NatsBroker {
     }
 
     pub async fn ensure_streams(&self, subscriptions: &[Subscription]) -> Result<(), NatsError> {
+        self.ensure_managed_streams(subscriptions).await?;
+        self.ensure_unmanaged_streams_exist(subscriptions).await?;
+        Ok(())
+    }
+
+    pub(crate) async fn ensure_managed_streams(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
         if !self.config.auto_create_streams {
             return Ok(());
         }
 
         let mut managed_streams: std::collections::HashMap<&Arc<str>, Vec<String>> =
             std::collections::HashMap::new();
-        let mut unmanaged_streams: Vec<&Arc<str>> = Vec::new();
 
         for subscription in subscriptions {
             if subscription.manage_stream {
@@ -96,19 +105,13 @@ impl NatsBroker {
                     .entry(&subscription.stream)
                     .or_default()
                     .push(subscription.subject.to_string());
-            } else {
-                unmanaged_streams.push(&subscription.stream);
             }
         }
 
         for (stream_name, subjects) in managed_streams {
             self.inner
-                .create_or_update_stream(stream_name, subjects)
+                .create_or_update_stream(stream_name, subjects, None)
                 .await?;
-        }
-
-        for stream_name in unmanaged_streams {
-            self.inner.get_stream(stream_name).await?;
         }
 
         self.ensure_dead_letter_stream().await?;
@@ -116,10 +119,27 @@ impl NatsBroker {
         Ok(())
     }
 
+    pub(crate) async fn ensure_unmanaged_streams_exist(
+        &self,
+        subscriptions: &[Subscription],
+    ) -> Result<(), NatsError> {
+        let unmanaged: Vec<&Arc<str>> = subscriptions
+            .iter()
+            .filter(|s| !s.manage_stream)
+            .map(|s| &s.stream)
+            .collect();
+
+        for stream_name in unmanaged {
+            self.inner.get_stream(stream_name).await?;
+        }
+
+        Ok(())
+    }
+
     async fn ensure_dead_letter_stream(&self) -> Result<(), NatsError> {
         let subject = format!("{}.>", DEAD_LETTER_SUBJECT_PREFIX);
         self.inner
-            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject])
+            .create_or_update_stream(DEAD_LETTER_STREAM, vec![subject], Some(DEAD_LETTER_MAX_AGE))
             .await?;
         Ok(())
     }
@@ -138,8 +158,9 @@ impl NatsBroker {
                 NatsError::Publish(format!("failed to serialize dead letter: {error}"))
             })?;
 
-        let subject = dead_letter_subject(original_subscription);
-        self.inner
+        let subject = dead_letter_subject(original_subscription, envelope);
+        let ack_future = self
+            .inner
             .jetstream()
             .publish(subject.clone(), payload)
             .await
@@ -148,6 +169,12 @@ impl NatsBroker {
                     "failed to publish dead letter to '{subject}': {error}"
                 ))
             })?;
+
+        ack_future.await.map_err(|error| {
+            NatsError::Publish(format!(
+                "dead letter publish ack failed for '{subject}': {error}"
+            ))
+        })?;
 
         Ok(())
     }
@@ -262,6 +289,7 @@ impl NatsBroker {
             None => "ephemeral".to_string(),
         };
         let batch_size = self.config.batch_size();
+        let fetch_expires = self.config.fetch_expires();
         info!(
             topic = %format!("{}.{}", subscription.stream, subscription.subject),
             consumer_type,
@@ -280,7 +308,13 @@ impl NatsBroker {
                 }
 
                 let fetch_start = std::time::Instant::now();
-                let batch = match consumer.fetch().max_messages(batch_size).messages().await {
+                let batch = match consumer
+                    .batch()
+                    .max_messages(batch_size)
+                    .expires(fetch_expires)
+                    .messages()
+                    .await
+                {
                     Ok(batch) => batch,
                     Err(e) => {
                         warn!(error = %e, "fetch batch error");

@@ -6,7 +6,7 @@ pub(super) async fn traversal_user_group_returns_correct_pairs_and_edges(ctx: &T
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -47,9 +47,9 @@ pub(super) async fn traversal_three_hop_returns_all_user_group_project_paths(ctx
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]},
-                {"id": "p", "entity": "Project", "columns": ["name"]}
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -95,7 +95,7 @@ pub(super) async fn traversal_user_authored_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -127,7 +127,7 @@ pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "APPROVED", "from": "u", "to": "mr"}],
@@ -151,6 +151,36 @@ pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestC
     });
 }
 
+pub(super) async fn traversal_wildcard_user_to_mr_infers_relationship_kinds(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(4);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
+    resp.assert_edge_set("APPROVED", &[(1, 2002)]);
+    resp.assert_edge_count("ASSIGNED", 0);
+    resp.assert_edge_count("CLOSED", 0);
+    resp.assert_edge_count("LAST_EDITED_BY", 0);
+    resp.assert_edge_count("MERGED", 0);
+    resp.assert_edge_count("REVIEWER", 0);
+    resp.assert_edge_count("UPDATED_BY", 0);
+    resp.assert_referential_integrity();
+}
+
 pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);
@@ -161,7 +191,7 @@ pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestCont
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -186,7 +216,7 @@ pub(super) async fn traversal_with_order_by(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -266,7 +296,7 @@ pub(super) async fn traversal_with_filter_narrows_results(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username", "state"],
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                  "filters": {"state": "blocked"}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
@@ -304,6 +334,90 @@ pub(super) async fn traversal_variable_length_min_hops_skips_shallow(ctx: &TestC
     resp.assert_node_ids("Group", &[100, 300]);
     resp.assert_node_absent("Group", 200);
     resp.assert_edge_exists("Group", 100, "Group", 300, "CONTAINS");
+}
+
+pub(super) async fn traversal_variable_length_includes_depth_2_path_to_project(ctx: &TestContext) {
+    // Reproducer for the variable-length cliff (MR !1069):
+    // User 7 -> AUTHORED -> WI 4010 -> IN_PROJECT -> Project 1010, with
+    // Project 1010 reachable via Group 100 -> Group 200 -> Project 1010
+    // (depth-2 CONTAINS chain).
+    //
+    // Pre-fix bug: `inject_sip_first_edge` placed `e1.target_id IN _cascade_p`
+    // on every UNION arm. At depth-2 the intermediate Group 200 ID is not in
+    // _cascade_p (which holds Project IDs only), so depth-2 arms returned no
+    // rows. The Group 100 -> Project 1010 path was silently dropped.
+    //
+    // Post-fix: the depth-2 path is included; both Group 100 and Group 200
+    // appear with edges spanning all hops.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [7], "columns": ["username"]},
+                {"id": "wi", "entity": "WorkItem", "columns": ["title"]},
+                {"id": "p", "entity": "Project", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "columns": ["name"]}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "wi"},
+                {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
+            ],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_referential_integrity();
+    // 1 user + 1 wi + 1 project + 2 groups = 5 nodes.
+    resp.assert_node_count(5);
+    resp.assert_node_ids("User", &[7]);
+    resp.assert_node_ids("WorkItem", &[4010]);
+    resp.assert_node_ids("Project", &[1010]);
+    // Both groups must appear: Group 200 (depth-1 to Project 1010) and
+    // Group 100 (depth-2 via Group 200). Pre-fix dropped Group 100.
+    resp.assert_node_ids("Group", &[100, 200]);
+    resp.assert_edge_exists("User", 7, "WorkItem", 4010, "AUTHORED");
+    resp.assert_edge_exists("WorkItem", 4010, "Project", 1010, "IN_PROJECT");
+    // Variable-length CONTAINS arms collapse each path into a single
+    // (start_group, end_project) edge in the response, with intermediate
+    // hops carried in path_nodes. Both depth-1 (Group 200 → Project 1010)
+    // and depth-2 (Group 100 → ... → Project 1010) arms must contribute.
+    resp.assert_edge_exists("Group", 200, "Project", 1010, "CONTAINS");
+    resp.assert_edge_exists("Group", 100, "Project", 1010, "CONTAINS");
+}
+
+pub(super) async fn aggregation_variable_length_counts_all_depths(ctx: &TestContext) {
+    // Aggregation analog of the M1 cliff. group_by=u keeps the per-User row
+    // so we can read the count from User 7's `n` property. Two matching
+    // paths exist (Group 200, depth-1) and (Group 100, depth-2), so n=2 when
+    // the depth-2 arm is correctly scanned. Pre-fix bug returned n=1.
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [7]},
+                {"id": "wi", "entity": "WorkItem"},
+                {"id": "p", "entity": "Project"},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "wi"},
+                {"type": "IN_PROJECT", "from": "wi", "to": "p"},
+                {"type": "CONTAINS", "from": "g", "to": "p", "min_hops": 1, "max_hops": 2}
+            ],
+            "aggregations": [{"function": "count", "target": "g", "group_by": "u", "alias": "n"}],
+            "limit": 5
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_ids("User", &[7]);
+    resp.assert_node("User", 7, |n| n.prop_i64("n") == Some(2));
 }
 
 pub(super) async fn traversal_variable_length_with_redaction_at_depth(ctx: &TestContext) {
@@ -401,7 +515,7 @@ pub(super) async fn traversal_order_by_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -425,7 +539,7 @@ pub(super) async fn traversal_order_by_source_node_property(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

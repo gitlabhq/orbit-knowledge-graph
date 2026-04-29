@@ -6,3 +6,14 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     description: "User is a reviewer of merge request."
+
+etl:
+  - scope: namespaced
+    source: siphon_merge_request_reviewers
+    order_by: [traversal_path, merge_request_id, id]
+    from:
+      id: user_id
+      type: User
+    to:
+      id: merge_request_id
+      type: MergeRequest

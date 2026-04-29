@@ -50,7 +50,9 @@ The Namespace Graph represents the software development lifecycle (SDLC) entitie
 | `MergeRequestDiff`    | Represents a merge request diff version.                                                                | `id`, `merge_request_id`, `project_id`, `state`, `diff_type`, `files_count`, `real_size`, `stored_externally` |
 | `MergeRequestDiffFile`| Represents a file inside a merge request diff.                                                          | `id`, `merge_request_id`, `merge_request_diff_id`, `new_path`, `old_path`, `generated`, `a_mode`, `b_mode` |
 | `Stage`               | Represents a CI stage.                                                                                  | `id`, `name`, `status`, `position`                                            |
-| `Job`                 | Represents a CI job.                                                                                    | `id`, `name`, `status`, `ref`, `allow_failure`                                |
+| `Job`                 | Represents a CI job (`Ci::Build` or `Ci::Bridge`).                                                      | `id`, `name`, `status`, `ref`, `allow_failure`, `type`, `runner_id`, `timeout`, `timeout_source`, `exit_code`, `scheduling_type`, `auto_canceled_by_id` |
+| `JobMetadata`         | Per-job runtime metadata sourced from `siphon_p_ci_builds_metadata`.                                    | `id`, `build_id`, `interruptible`, `timeout`, `timeout_source`, `exit_code`, `expanded_environment_name` |
+| `Runner`              | Represents a CI/CD runner (`Ci::Runner`). Global node, no `traversal_path` on the node table.            | `id`, `runner_type`, `name`, `active`, `locked`, `access_level`               |
 | `Finding`             | Represents a security finding.                                                                          | `id`, `uuid`, `name`, `severity`                                              |
 | `SecurityScan`        | Represents a security scan run.                                                                         | `id`, `scan_type`, `status`, `latest`                                         |
 | `VulnerabilityOccurrence` | Represents a concrete vulnerability occurrence.                                                   | `id`, `uuid`, `report_type`, `severity`, `location`                           |
@@ -64,7 +66,7 @@ graph TD
     Group -- CONTAINS --> Project
     Group -- CONTAINS --> Group
     Project -- HAS_MERGE_REQUEST --> MergeRequest
-    Project -- HAS_PIPELINE --> Pipeline
+    Pipeline -- IN_PROJECT --> Project
     Project -- HAS_VULNERABILITY --> Vulnerability
     Branch -- IN_PROJECT --> Project
 
@@ -94,9 +96,8 @@ graph TD
 | ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
 | `CONTAINS`                          | `Group`        | `Group`, `Project` | A group contains a subgroup or project.                                                            |
 | `HAS_MERGE_REQUEST`                 | `Project`      | `MergeRequest` | A project has a merge request.                                                                          |
-| `HAS_PIPELINE`                      | `Project`      | `Pipeline`     | A project has a CI/CD pipeline.                                                                         |
 | `HAS_VULNERABILITY`                 | `Project`      | `Vulnerability`| A project has a vulnerability finding.                                                                  |
-| `IN_PROJECT`                        | `Branch`, `WorkItem` | `Project` | An entity belongs to a project.                                                                     |
+| `IN_PROJECT`                        | `Branch`, `WorkItem`, `Pipeline`, `Stage`, `Job`, `Vulnerability`, `Finding`, `VulnerabilityIdentifier`, `Milestone`, `Label`, `SecurityScan`, `Deployment`, `Environment`, `MergeRequestDiff`, `Note`, `MergeRequest` | `Project` | An entity belongs to a project. (FK on each node.)                                                  |
 | `IN_GROUP`                          | `WorkItem`     | `Group`        | A work item belongs to a group scope.                                                                   |
 | `AUTHORED`                          | `User`         | `WorkItem`, `MergeRequest` | A user authored an entity.                                                                |
 | `COMMENTS_ON`                       | `User`         | `MergeRequest`, `WorkItem` | A user commented on an entity (via a `Note`).                                            |
@@ -111,8 +112,17 @@ graph TD
 | `CONFIRMED_BY`                      | `User`         | `Vulnerability`| A user confirmed a vulnerability.                                                                       |
 | `DISMISSED_BY`                      | `User`         | `Vulnerability`| A user dismissed a vulnerability.                                                                       |
 | `RESOLVED_BY`                       | `User`         | `Vulnerability`| A user resolved a vulnerability.                                                                        |
-| `HAS_JOB`                           | `Pipeline`     | `Job`          | A pipeline contains jobs.                                                                               |
+| `HAS_JOB`                           | `Stage`, `Pipeline` | `Job`     | A stage contains jobs (canonical Pipeline → Stage → Job traversal); also exposed directly as Pipeline → Job for the natural CI mental model. |
+| `HAS_METADATA`                      | `Job`          | `JobMetadata`  | Job has runtime metadata (interruptible, effective timeout, expanded environment) sourced from `siphon_p_ci_builds_metadata`. |
+| `IN_PIPELINE`                       | `Job`, `SecurityScan` | `Pipeline` | A job or security scan belongs to a pipeline (one-hop replacement for `Pipeline → Stage → Job`).   |
 | `HAS_STAGE`                         | `Pipeline`     | `Stage`        | A pipeline contains stages.                                                                             |
+| `AUTO_CANCELED_BY`                  | `Pipeline`, `Job` | `Pipeline`, `Job` | Entity was auto-canceled when a newer entity of the same kind superseded it.                       |
+| `CHILD_OF`                          | `Pipeline`     | `Pipeline`     | A pipeline is a downstream child of a parent pipeline (sourced from `ci_sources_pipelines`).            |
+| `TRIGGERS_PIPELINE`                 | `Job`          | `Pipeline`     | A bridge job (`type='Ci::Bridge'`) triggered the downstream pipeline.                                   |
+| `TRIGGERED_BY_PIPELINE`             | `Job`          | `Pipeline`     | A job runs in a child pipeline whose parent is the upstream pipeline (sourced from `upstream_pipeline_id` on builds). |
+| `RUNS_ON`                           | `Job`          | `Runner`       | The runner that executed the job.                                                                       |
+| `RUNS_FOR_GROUP`                    | `Runner`       | `Group`        | A group runner is registered against a group.                                                           |
+| `RUNS_FOR_PROJECT`                  | `Runner`       | `Project`      | A project runner is registered against a project.                                                       |
 | `HAS_NOTE`                          | `MergeRequest`, `WorkItem` | `Note` | An entity has notes attached.                                                          |
 | `HAS_LABEL`                         | `WorkItem`     | `Label`        | A work item has labels.                                                                                 |
 | `IN_MILESTONE`                      | `WorkItem`     | `Milestone`    | A work item belongs to a milestone.                                                                     |
@@ -145,8 +155,8 @@ The Code Graph represents the structure and relationships within the source code
 | `Branch`              | Root of the code file tree for a specific branch.                                                       | `id`, `name`, `project_id`, `is_default`                                    |
 | `Directory`           | Represents a directory within a repository.                                                             | `relative_path`, `absolute_path`, `repository_name`                         |
 | `File`                | Represents a file within a repository.                                                                  | `relative_path`, `absolute_path`, `language`, `repository_name`             |
-| `Definition`          | Represents a code definition (e.g., class, function, method, module).                                   | `fully_qualified_name`, `display_name`, `definition_type`, `file_path`      |
-| `ImportedSymbol`      | Represents an imported symbol or module within a file.                                                  | `symbol_name`, `source_module`, `file_path`                                 |
+| `Definition`          | A code definition such as a class, function, method, or module.                                         | `fqn`, `name`, `definition_type`, `file_path`, `start_line`, `end_line`, `branch`, `commit_sha`, virtual `content` |
+| `ImportedSymbol`      | An imported symbol or module reference within a file.                                                   | `import_path`, `import_type`, `identifier_name`, `identifier_alias`, `file_path` |
 
 ### Relationship Visualization
 
@@ -155,28 +165,29 @@ graph TD
     Branch -- CONTAINS --> Directory
     Branch -- CONTAINS --> File
     Branch -- IN_PROJECT --> Project
-    Directory -- DIR_CONTAINS_DIR --> Directory
-    Directory -- DIR_CONTAINS_FILE --> File
-    File -- FILE_DEFINES --> Definition
-    File -- FILE_IMPORTS --> ImportedSymbol
-    Definition -- DEFINITION_TO_DEFINITION --> Definition
-    Definition -- DEFINES_IMPORTED_SYMBOL --> ImportedSymbol
-    ImportedSymbol -- IMPORTED_SYMBOL_TO_DEFINITION --> Definition
+    Directory -- CONTAINS --> Directory
+    Directory -- CONTAINS --> File
+    File -- DEFINES --> Definition
+    File -- IMPORTS --> ImportedSymbol
+    File -- CALLS --> Definition
+    Definition -- DEFINES --> Definition
+    Definition -- CALLS --> Definition
+    Definition -- CALLS --> ImportedSymbol
+    Definition -- EXTENDS --> Definition
+    ImportedSymbol -- IMPORTS --> Definition
 ```
 
 ### Relationship Types
 
-| Relationship                        | From Node      | To Node        | Description                                                                                             |
-| ----------------------------------- | -------------- | -------------- | ------------------------------------------------------------------------------------------------------- |
-| `CONTAINS`                          | `Branch`       | `Directory`, `File` | A branch contains root-level directories and files.                                                |
-| `IN_PROJECT`                        | `Branch`       | `Project`      | A branch belongs to a project (links the Code Graph to the Namespace Graph).                            |
-| `DIR_CONTAINS_DIR`                  | `Directory`    | `Directory`    | A directory contains another directory.                                                                 |
-| `DIR_CONTAINS_FILE`                 | `Directory`    | `File`         | A directory contains a file.                                                                            |
-| `FILE_DEFINES`                      | `File`         | `Definition`   | A file contains a code definition.                                                                      |
-| `FILE_IMPORTS`                      | `File`         | `ImportedSymbol`| A file imports a symbol.                                                                                |
-| `DEFINITION_TO_DEFINITION`          | `Definition`   | `Definition`   | Represents a call graph edge (e.g., a function calls another function, a class inherits from another).    |
-| `DEFINES_IMPORTED_SYMBOL`           | `Definition`   | `ImportedSymbol`| A definition (e.g., an exported function) is the source of an imported symbol.                          |
-| `IMPORTED_SYMBOL_TO_DEFINITION`     | `ImportedSymbol`| `Definition`   | An imported symbol resolves to a specific definition.                                                   |
+| Relationship | From Node | To Node | Description |
+| --- | --- | --- | --- |
+| `CONTAINS`   | `Branch`, `Directory` | `Directory`, `File` | A branch or directory lexically contains a directory or file. |
+| `IN_PROJECT` | `Branch`              | `Project`           | A branch belongs to a project (links the Code Graph to the Namespace Graph). |
+| `ON_BRANCH`  | `Directory`, `File`, `Definition`, `ImportedSymbol` | `Branch` | Snapshots a code-graph node to a specific branch and commit. |
+| `DEFINES`    | `File`, `Definition`  | `Definition`        | File-level definition or lexical nesting between two definitions (e.g. a class containing methods). Inheritance is `EXTENDS`; call sites are `CALLS`. |
+| `IMPORTS`    | `File`, `ImportedSymbol` | `ImportedSymbol`, `Definition` | Module-system import edges. Covers `File → ImportedSymbol` for the import statement itself, and `ImportedSymbol → Definition` resolution (JS/TS today). |
+| `CALLS`      | `File`, `Definition`  | `Definition`, `ImportedSymbol` | Function or method invocation. Variants: `Definition → Definition` (resolved call), `File → Definition` (top-level call outside any definition), and `Definition → ImportedSymbol` (call whose target is still an unresolved import). |
+| `EXTENDS`    | `Definition`          | `Definition`        | Supertype declaration. Covers class extension, interface implementation, and struct embedding (Go). |
 
 ---
 

@@ -1,6 +1,7 @@
 # config/ontology/edges/calls.yaml
 
 description: Call relationships in source code representing function/method invocations
+table: gl_code_edge
 
 variants:
   - from_node: { type: Definition, id: id }
@@ -9,12 +10,8 @@ variants:
 
   - from_node: { type: File, id: id }
     to_node: { type: Definition, id: id }
-    description: "File contains a call to a definition (top-level call)."
-
-  - from_node: { type: File, id: id }
-    to_node: { type: ImportedSymbol, id: id }
-    description: "File contains a call to an imported symbol (top-level call to import)."
+    description: "File contains a top-level call to a definition (call site outside any enclosing definition)."
 
   - from_node: { type: Definition, id: id }
     to_node: { type: ImportedSymbol, id: id }
-    description: "Definition calls an imported symbol."
+    description: "Definition calls an imported symbol whose target is not yet resolved to a concrete definition."

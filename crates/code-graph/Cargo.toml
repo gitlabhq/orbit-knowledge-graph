@@ -18,26 +18,28 @@ bumpalo = { workspace = true }
 cargo-platform = { workspace = true }
 cargo-util-schemas = { workspace = true }
 cargo_metadata = { workspace = true }
-chrono = { workspace = true }
+crossbeam-channel = "0.5"
 either = { workspace = true }
-futures = { workspace = true }
 globset = { workspace = true }
 ignore = { workspace = true }
 indicatif = { workspace = true }
-internment = { workspace = true, features = ["arc"] }
-log = { workspace = true }
-num_cpus = { workspace = true }
-once_cell = { workspace = true }
-pastey = { workspace = true }
 petgraph = { workspace = true }
 rayon = { workspace = true }
-regex = { workspace = true }
 rust-lapper = { workspace = true }
 rust-embed = { workspace = true }
 rustc-hash = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-serde_yaml = { workspace = true }
+smallvec = { workspace = true }
+smol_str = "0.3"
+stacker = { workspace = true }
+strum = { workspace = true }
+tempfile = { workspace = true }
+toml = { workspace = true }
+tracing = { workspace = true }
+triomphe = { workspace = true }
+
+# Rust-analyzer
 ra_ap_hir = { workspace = true }
 ra_ap_cfg = { workspace = true }
 ra_ap_ide = { workspace = true }
@@ -48,35 +50,11 @@ ra_ap_paths = { workspace = true }
 ra_ap_project_model = { workspace = true }
 ra_ap_syntax = { workspace = true }
 ra_ap_vfs = { workspace = true }
-smallvec = { workspace = true }
-stacker = { workspace = true }
-strum = { workspace = true }
-tempfile = { workspace = true }
-thiserror = { workspace = true }
-tokio = { workspace = true }
-tokio-rayon = { workspace = true }
-tokio-stream = { workspace = true }
-toml = { workspace = true }
-tracing = { workspace = true }
-triomphe = { workspace = true }
 
-# Ruby parser
-ruby-prism = "1.7.0"
-
-# SWC (TypeScript/JavaScript)
-swc_common = "18.0.1"
-swc_ecma_parser = "32.0.0"
-swc_ecma_ast = "19.0.0"
-swc_ecma_visit = "19.0.0"
-swc_atoms = "9.0.0"
-
-# OXC (v2 custom JavaScript/TypeScript pipeline)
+# OXC (JavaScript/TypeScript)
 oxc = { workspace = true }
 oxc_linter = { workspace = true }
 oxc_resolver = { workspace = true }
-crossbeam-channel = "0.5"
-smol_str = "0.3"
-memmap2 = "0.9"
 
 [dev-dependencies]
 gitalisk-core = { workspace = true }

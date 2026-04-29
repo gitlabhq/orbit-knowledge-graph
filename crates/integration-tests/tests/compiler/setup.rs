@@ -7,6 +7,12 @@ pub fn test_ctx() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).unwrap()
 }
 
+pub fn admin_ctx() -> SecurityContext {
+    SecurityContext::new(1, vec!["1/".into()])
+        .unwrap()
+        .with_role(true, None)
+}
+
 pub fn test_ontology() -> Ontology {
     Ontology::new()
         .with_nodes(["User", "Project", "Note", "Group"])

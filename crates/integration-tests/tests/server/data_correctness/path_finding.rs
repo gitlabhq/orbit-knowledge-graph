@@ -1,4 +1,5 @@
 use super::helpers::*;
+use crate::common::compile_and_execute;
 
 pub(super) async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
     let resp = run_query(
@@ -49,6 +50,75 @@ pub(super) async fn path_finding_returns_valid_complete_paths(ctx: &TestContext)
     resp.assert_node_exists("User", 1);
     resp.assert_node_exists("Group", 100);
     resp.assert_node_exists("Project", 1000);
+}
+
+pub(super) async fn path_finding_filtered_start_endpoint_reaches_project(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+                {"id": "end", "entity": "Project", "node_ids": [1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert_eq!(
+        pids.len(),
+        1,
+        "filtered start endpoint should find alice's path to Project 1004"
+    );
+
+    let path = resp.path(pids[0]);
+    assert_eq!(path.len(), 2);
+    assert_eq!((path[0].from.as_str(), path[0].from_id), ("User", 1));
+    assert_eq!(path[0].edge_type, "MEMBER_OF");
+    assert_eq!((path[1].to.as_str(), path[1].to_id), ("Project", 1004));
+    assert_eq!(path[1].edge_type, "CONTAINS");
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username") == Some("alice")
+    });
+    resp.assert_referential_integrity();
+}
+
+pub(super) async fn path_finding_wildcard_keeps_intermediate_hops_unconstrained(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["*"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert_eq!(
+        pids.len(),
+        1,
+        "wildcard path should traverse User -> Group -> Project"
+    );
+
+    let path = resp.path(pids[0]);
+    assert_eq!(path.len(), 2);
+    assert_eq!((path[0].from.as_str(), path[0].from_id), ("User", 1));
+    assert_eq!((path[0].to.as_str(), path[0].to_id), ("Group", 102));
+    assert_eq!(path[0].edge_type, "MEMBER_OF");
+    assert_eq!((path[1].from.as_str(), path[1].from_id), ("Group", 102));
+    assert_eq!((path[1].to.as_str(), path[1].to_id), ("Project", 1004));
+    assert_eq!(path[1].edge_type, "CONTAINS");
+    resp.assert_referential_integrity();
 }
 
 pub(super) async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestContext) {
@@ -349,16 +419,17 @@ pub(super) async fn path_finding_target_entity_constrains_results(ctx: &TestCont
 }
 
 pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestContext) {
-    // Without specifying target node_ids, find all paths from User(1) to
-    // MergeRequest. The frontier should only include edges where the
-    // target_kind matches MergeRequest.
+    // Find all paths from User(1) to any MergeRequest in the seed range.
+    // Uses id_range instead of node_ids to exercise the filtered-endpoint
+    // path. The frontier should only include edges where the target_kind
+    // matches MergeRequest.
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "path_finding",
             "nodes": [
                 {"id": "start", "entity": "User", "node_ids": [1]},
-                {"id": "end", "entity": "MergeRequest"}
+                {"id": "end", "entity": "MergeRequest", "id_range": {"start": 2000, "end": 2003}}
             ],
             "path": {"type": "any", "from": "start", "to": "end", "max_depth": 1,
                      "rel_types": ["AUTHORED"]}
@@ -393,4 +464,39 @@ pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestCo
             );
         }
     }
+}
+
+pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_path(
+    ctx: &TestContext,
+) {
+    let (_compiled, result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["CALLS"]},
+            "limit": 10
+        }"#,
+    )
+    .await;
+
+    let paths: Vec<Vec<i64>> = result
+        .rows()
+        .iter()
+        .map(|row| row.path_nodes().iter().map(|node| node.id).collect())
+        .collect();
+
+    assert_eq!(
+        paths,
+        vec![vec![12000, 12001, 12002]],
+        "filtered Definition path finding must not join CALLS hops across traversal_path"
+    );
+    assert!(
+        paths.iter().all(|path| path.last() != Some(&12102)),
+        "cross-project decoy run_query must not be reachable: {paths:?}"
+    );
 }

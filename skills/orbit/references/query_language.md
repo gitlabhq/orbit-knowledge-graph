@@ -49,13 +49,12 @@ Queries support the following fields:
 
 The type of query to run:
 
-| Query type    | Description                                                   |
-|---------------|---------------------------------------------------------------|
-| `search`      | Find nodes that match filters.                                |
-| `traversal`   | Start from one or more nodes and follow relationships.        |
-| `aggregation` | Search nodes and group the results.                           |
-| `path_finding`| Find paths between nodes.                                     |
-| `neighbors`   | Find nodes directly connected to a starting node.             |
+| Query type    | Description                                                          |
+|---------------|----------------------------------------------------------------------|
+| `traversal`   | Find nodes that match filters, optionally following relationships.   |
+| `aggregation` | Search nodes and group the results.                                  |
+| `path_finding`| Find paths between nodes.                                            |
+| `neighbors`   | Find nodes directly connected to a starting node.                    |
 
 Example:
 
@@ -77,7 +76,7 @@ Find all users who have authored open merge requests and return up to 10 results
 
 ## `node`
 
-A single graph node. Use with `search` and `neighbors` queries.
+A single graph node. Use with `traversal` and `neighbors` queries.
 
 | Field         | Required    | Type             | Description                                                                                                                        |
 |---------------|-------------|------------------|------------------------------------------------------------------------------------------------------------------------------------|
@@ -95,7 +94,7 @@ Search for users whose username starts with `admin` and return their username an
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
@@ -112,7 +111,7 @@ Search for users whose username starts with `admin` and return their username an
 
 An array of graph nodes. Use with `traversal`, `aggregation`, and `path_finding` queries.
 
-For `traversal` queries, you must specify at least two nodes. For all other queries, you must specify at least one node.
+For multi-node `traversal` queries, you must specify at least two nodes. For all other queries, you must specify at least one node.
 You can't specify more than five nodes in one query.
 
 Each node uses the same fields as [`node`](#node).
@@ -211,7 +210,7 @@ Path finding configuration. Required when `query_type` is `path_finding`.
 | `from`      | {{< yes >}} | `string`  | The `id` of the start node selector.                                  |
 | `to`        | {{< yes >}} | `string`  | The `id` of the end node selector.                                    |
 | `max_depth` | {{< yes >}} | `integer` | Maximum path depth. Range: `1`-`3`.                                   |
-| `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. If omitted, all types are considered. |
+| `rel_types` | {{< no >}}  | `array`   | Relationship types to traverse. Required when an endpoint uses `filters` or `id_range`. Optional when both endpoints use `node_ids`. |
 
 Supported path types:
 
@@ -279,7 +278,7 @@ Search for all projects in the graph and return the name and full path of up to 
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "p",
     "entity": "Project",
@@ -291,7 +290,7 @@ Search for all projects in the graph and return the name and full path of up to 
 
 ## `order_by`
 
-Result ordering for `search` and `traversal` queries.
+Result ordering for `traversal` queries.
 
 | Field       | Required    | Type     | Description                               |
 |-------------|-------------|----------|-------------------------------------------|
@@ -333,7 +332,7 @@ Return usernames for up to 20 users at a time, starting at the 21st user.
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
@@ -382,11 +381,12 @@ Count vulnerabilities in each project and return results in descending order.
 
 Presentation preferences that do not affect query semantics.
 
-| Field             | Required   | Type     | Description                                                                                                                                                                                          |
-|-------------------|------------|----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
-| `dynamic_columns` | {{< no >}} | `string` | Columns fetched for dynamically discovered entities in `path_finding` and `neighbors` queries. `"default"` returns each entity's default columns. `"*"` returns all columns. Default: `"default"`.  |
+| Field               | Required   | Type      | Description                                                                                                                                                                                          |
+|---------------------|------------|-----------|------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
+| `dynamic_columns`   | {{< no >}} | `string`  | Columns fetched for dynamically discovered entities in `path_finding` and `neighbors` queries. `"default"` returns each entity's default columns. `"*"` returns all columns. Default: `"default"`.  |
+| `include_debug_sql` | {{< no >}} | `boolean` | When `true`, includes the compiled ClickHouse SQL in response metadata. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Default: `false`.  |
 
-`dynamic_columns` has no effect on `search` and `traversal` queries, where column selection is controlled through the `columns` field.
+`dynamic_columns` has no effect on `traversal` queries, where column selection is controlled through the `columns` field.
 
 Example:
 
@@ -408,3 +408,35 @@ Find the shortest path between user ID 1 and project ID 100 across all relations
   "options": {"dynamic_columns": "*"}
 }
 ```
+
+## Entity ID quirks
+
+- **`Definition` IDs are content-hashed Int64s, scoped per project and
+  branch.** Two definitions of the same symbol that live in different
+  projects (or different branches of the same project) have different
+  `id` values even when `fqn` and `file_path` are identical. Searching by
+  `name = "Foo"` typically returns one row per (project, branch) where
+  `Foo` is defined. Pin all variants explicitly via `node_ids` if you need
+  full coverage. Hashed IDs are masked to a positive Int64 range
+  (`[0, 2^63)`), so they always serialize as non-negative decimal
+  strings. Rows indexed before the masking change can still appear as
+  negative until the affected projects are reindexed.
+- **All entity IDs are emitted as strings** in the JSON response so that
+  values beyond `Number.MAX_SAFE_INTEGER` (2^53) survive a JS round-trip.
+  Cast back to integers in your client when comparing.
+
+## Result deduplication
+
+The graph DDL stores each row as a versioned tuple in
+ReplacingMergeTree. Between background merges, multiple `_version` copies
+of the same logical row can coexist on disk. The query engine collapses
+these to a single result row, but the strategy depends on query type:
+
+- `traversal`, `aggregation`: node tables are dedup'd via
+  `LIMIT 1 BY id` ordered by `_version DESC`. One row per node.
+- `path_finding`, `neighbors`: edge rows can still surface multiple
+  `_version` copies. The formatter collapses them by canonical edge tuple
+  (`from`, `from_id`, `to`, `to_id`, `type`) and by canonical path tuple,
+  so callers see one `path_id` per logical path and one entry per edge.
+  If you want to inspect the raw versioned rows, use the `goon` formatter
+  or query `system.query_log` directly.

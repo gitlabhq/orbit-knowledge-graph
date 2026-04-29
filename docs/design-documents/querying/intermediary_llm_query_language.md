@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Knowledge Graph uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports entity search, traversal, aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.
+The Knowledge Graph uses a JSON query DSL that compiles to ClickHouse SQL. Rather than exposing multiple specialized tools, we provide a single query schema that supports traversal (including single-entity lookups), aggregation, path finding, and neighborhood exploration. The graph ontology validates all queries at runtime.
 
 The query engine follows this pipeline:
 
@@ -40,15 +40,15 @@ sequenceDiagram
 
 ## Query Schema
 
-The JSON query schema supports five query types through a single unified structure.
+The JSON query schema supports four query types through a single unified structure.
 
 ### Required Fields
 
 | Field | Type | Description |
 |-------|------|-------------|
-| `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `search`, `neighbors` |
-| `nodes` | `array` | Node selectors to match (required for traversal, aggregation, path_finding) |
-| `node` | `object` | Single node selector (required for search, neighbors) |
+| `query_type` | `string` | One of: `traversal`, `aggregation`, `path_finding`, `neighbors` |
+| `nodes` | `array` | Node selectors to match (required for multi-node traversal, aggregation, path_finding) |
+| `node` | `object` | Single node selector (required for `neighbors`, allowed for single-entity `traversal`) |
 
 ### Optional Fields
 
@@ -66,7 +66,7 @@ The JSON query schema supports five query types through a single unified structu
 
 ## Node Selectors
 
-Each node selector specifies which graph nodes to match. For `search` and `neighbors` queries, use the `node` field (singular). For `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
+Each node selector specifies which graph nodes to match. For `neighbors` queries and single-entity `traversal` lookups, use the `node` field (singular). For multi-node `traversal`, `aggregation`, and `path_finding` queries, use the `nodes` array. You cannot specify both.
 
 ```json
 {
@@ -226,13 +226,13 @@ Find paths between nodes using recursive CTEs.
 | `all_shortest` | Find all paths of minimum length |
 | `any` | Find any valid path |
 
-### Search Queries
+### Single-entity Traversal (lookup)
 
-Match a single entity type with optional filters. Search queries use the `node` field (singular) instead of `nodes`.
+Match a single entity type with optional filters — a `traversal` query with one node and no relationships. Use the `node` field (singular) instead of `nodes`.
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "u",
     "entity": "User",
@@ -289,6 +289,7 @@ The `options` object controls presentation behavior without changing query seman
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
 | `dynamic_columns` | `string` | `"default"` | Columns fetched for dynamically-discovered entities during PathFinding/Neighbors hydration. `"default"` returns the entity's `default_columns` from the ontology. `"*"` returns all columns. |
+| `include_debug_sql` | `boolean` | `false` | When `true`, includes compiled ClickHouse SQL in response metadata. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). |
 
 This is relevant for PathFinding and Neighbors queries where entity types are discovered at runtime. For Search and Traversal queries, column selection is controlled per-node via the `columns` field and this option has no effect.
 

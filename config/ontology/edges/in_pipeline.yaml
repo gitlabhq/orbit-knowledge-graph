@@ -6,3 +6,7 @@ variants:
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Pipeline, id: id }
     description: "Security scan belongs to pipeline."
+
+  - from_node: { type: Job, id: id }
+    to_node: { type: Pipeline, id: id }
+    description: "Job belongs to pipeline (skips the Stage hop)."

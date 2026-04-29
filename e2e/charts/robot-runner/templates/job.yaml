@@ -33,11 +33,11 @@ spec:
         env:
         - name: GITLAB_URL
           value: "http://gitlab-webservice-default.{{ .Values.namespaces.gitlab }}.svc.cluster.local:8181"
-        - name: GITLAB_ROOT_PASSWORD
+        - name: GITLAB_ROOT_PAT
           valueFrom:
             secretKeyRef:
-              name: {{ .Values.rootCredentialsSecret }}
-              key: password
+              name: {{ .Values.rootPatSecret }}
+              key: {{ .Values.rootPatSecretKey }}
         volumeMounts:
         - name: tests
           mountPath: /tests

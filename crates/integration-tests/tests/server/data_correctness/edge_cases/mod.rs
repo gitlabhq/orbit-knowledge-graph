@@ -12,9 +12,9 @@ pub(super) async fn traversal_referential_integrity_on_complex_query(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group"},
-                {"id": "p", "entity": "Project"}
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}}
             ],
             "relationships": [
                 {"type": "MEMBER_OF", "from": "u", "to": "g"},
@@ -39,7 +39,7 @@ pub(super) async fn giant_string_survives_pipeline(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3002]},
             "limit": 10
         }"#,
@@ -59,7 +59,7 @@ pub(super) async fn sql_injection_string_preserved(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "n", "entity": "Note", "columns": ["note"], "node_ids": [3003]},
             "limit": 10
         }"#,
@@ -108,7 +108,7 @@ pub(super) async fn sip_prefilter_with_filter_returns_correct_results(ctx: &Test
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username", "user_type"],
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "user_type"],
                  "filters": {"user_type": "project_bot"}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
@@ -164,7 +164,7 @@ pub(super) async fn sip_target_aggregation_with_filter_returns_correct_counts(ct
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -201,7 +201,7 @@ pub(super) async fn cross_namespace_user_authors_mr_in_different_group(ctx: &Tes
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -240,7 +240,7 @@ pub(super) async fn cross_namespace_group_containment_across_depth(ctx: &TestCon
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "child", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "child"}],
@@ -271,7 +271,7 @@ pub(super) async fn cross_namespace_isolation_no_leakage(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -306,7 +306,7 @@ pub(super) async fn cross_namespace_narrow_scope_returns_all_authors(ctx: &TestC
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest", "columns": ["title"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -340,7 +340,7 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "p", "entity": "Project"},
+                {"id": "p", "entity": "Project", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group", "columns": ["name"]}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -353,9 +353,11 @@ pub(super) async fn cross_namespace_aggregation_respects_scope(ctx: &TestContext
     .await;
 
     // Group 100 CONTAINS projects 1000 (edge ns 1/100/1000/) and 1002
-    // (edge ns 1/100/1002/) — both in the 1/100/ subtree
-    resp.assert_node_count(1);
+    // (edge ns 1/100/1002/) — both in the 1/100/ subtree.
+    // Group 200 CONTAINS Project 1010 (edge ns 1/100/200/1010/) — also in scope.
+    resp.assert_node_count(2);
     resp.assert_node("Group", 100, |n| n.prop_i64("project_count") == Some(2));
+    resp.assert_node("Group", 200, |n| n.prop_i64("project_count") == Some(1));
 
     // Groups 101 and 102 have CONTAINS edges outside 1/100/ — must not appear
     resp.assert_node_absent("Group", 101);
@@ -420,7 +422,7 @@ pub(super) async fn empty_result_has_valid_schema(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "u", "entity": "User", "columns": ["username"], "node_ids": [99999]},
             "limit": 10
         }"#,

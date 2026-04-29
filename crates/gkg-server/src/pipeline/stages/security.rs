@@ -1,7 +1,4 @@
-use query_engine::compiler::SecurityContext;
-use thiserror::Error;
-
-use crate::auth::Claims;
+use crate::auth::{Claims, build_security_context};
 
 use query_engine::pipeline::{
     PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext,
@@ -9,27 +6,6 @@ use query_engine::pipeline::{
 
 #[derive(Clone)]
 pub struct SecurityStage;
-
-impl SecurityStage {
-    fn build_context(claims: &Claims) -> Result<SecurityContext, SecurityError> {
-        let org_id = claims
-            .organization_id
-            .ok_or_else(|| SecurityError("missing organization_id in claims".to_string()))?
-            as i64;
-        let traversal_paths = if claims.admin {
-            vec![format!("{}/", org_id)]
-        } else if claims.group_traversal_ids.is_empty() {
-            return Err(SecurityError(
-                "no enabled namespaces for this user".to_string(),
-            ));
-        } else {
-            claims.group_traversal_ids.clone()
-        };
-        SecurityContext::new(org_id, traversal_paths)
-            .map(|sc| sc.with_role(claims.admin, claims.min_access_level))
-            .map_err(|e| SecurityError(e.to_string()))
-    }
-}
 
 impl PipelineStage for SecurityStage {
     type Input = ();
@@ -43,25 +19,26 @@ impl PipelineStage for SecurityStage {
         let claims = ctx.server_extensions.get::<Claims>().ok_or_else(|| {
             PipelineError::Security("Claims not found in server_extensions".into())
         })?;
-        let result = Self::build_context(claims)
-            .map_err(|e| PipelineError::Security(e.to_string()))
+        let result = build_security_context(claims)
+            .map_err(PipelineError::Security)
             .inspect_err(|e| obs.record_error(e))?;
         ctx.security_context = Some(result);
         Ok(())
     }
 }
 
-#[derive(Debug, Error)]
-#[error("{0}")]
-pub struct SecurityError(pub String);
-
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     use super::*;
+    use crate::auth::claims::TraversalPathClaim;
+    use ontology::Ontology;
+    use query_engine::pipeline::{NoOpObserver, TypeMap};
 
     fn make_claims(
         admin: bool,
-        group_traversal_ids: Vec<String>,
+        group_traversal_ids: Vec<TraversalPathClaim>,
         organization_id: Option<u64>,
     ) -> Claims {
         Claims {
@@ -89,32 +66,74 @@ mod tests {
         }
     }
 
-    #[test]
-    fn admin_gets_org_wide_access() {
+    fn pipeline_context(claims: Claims) -> QueryPipelineContext {
+        let mut extensions = TypeMap::default();
+        extensions.insert(claims);
+        QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::load_embedded().unwrap()),
+            security_context: None,
+            server_extensions: extensions,
+            phases: TypeMap::default(),
+        }
+    }
+
+    #[tokio::test]
+    async fn populates_security_context_for_admin() {
         let claims = make_claims(true, vec![], Some(42));
-        let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert_eq!(ctx.org_id, 42);
-        assert_eq!(ctx.traversal_paths, vec!["42/"]);
+        let mut ctx = pipeline_context(claims);
+        let mut obs = NoOpObserver;
+
+        SecurityStage.execute(&mut ctx, &mut obs).await.unwrap();
+
+        let sc = ctx.security_context.unwrap();
+        assert_eq!(sc.org_id, 42);
+        assert_eq!(sc.traversal_paths[0].path, "42/");
     }
 
-    #[test]
-    fn missing_org_id_returns_error() {
-        let claims = make_claims(true, vec![], None);
-        let err = SecurityStage::build_context(&claims).unwrap_err();
-        assert!(err.to_string().contains("missing organization_id"));
+    #[tokio::test]
+    async fn populates_security_context_for_non_admin() {
+        let claims = make_claims(
+            false,
+            vec![TraversalPathClaim {
+                path: "1/22/".to_string(),
+                access_levels: vec![20],
+            }],
+            Some(1),
+        );
+        let mut ctx = pipeline_context(claims);
+        let mut obs = NoOpObserver;
+
+        SecurityStage.execute(&mut ctx, &mut obs).await.unwrap();
+
+        let sc = ctx.security_context.unwrap();
+        assert_eq!(sc.traversal_paths[0].path, "1/22/");
     }
 
-    #[test]
-    fn non_admin_gets_their_group_paths() {
-        let claims = make_claims(false, vec!["1/22/".into(), "1/33/".into()], Some(1));
-        let ctx = SecurityStage::build_context(&claims).unwrap();
-        assert_eq!(ctx.traversal_paths, vec!["1/22/", "1/33/"]);
+    #[tokio::test]
+    async fn missing_claims_returns_security_error() {
+        let mut ctx = QueryPipelineContext {
+            query_json: String::new(),
+            compiled: None,
+            ontology: Arc::new(Ontology::load_embedded().unwrap()),
+            security_context: None,
+            server_extensions: TypeMap::default(),
+            phases: TypeMap::default(),
+        };
+        let mut obs = NoOpObserver;
+
+        let err = SecurityStage.execute(&mut ctx, &mut obs).await.unwrap_err();
+        assert!(matches!(err, PipelineError::Security(_)));
     }
 
-    #[test]
-    fn non_admin_with_empty_traversal_ids_returns_error() {
+    #[tokio::test]
+    async fn invalid_claims_returns_security_error() {
         let claims = make_claims(false, vec![], Some(1));
-        let err = SecurityStage::build_context(&claims).unwrap_err();
-        assert!(err.to_string().contains("no enabled namespaces"));
+        let mut ctx = pipeline_context(claims);
+        let mut obs = NoOpObserver;
+
+        let err = SecurityStage.execute(&mut ctx, &mut obs).await.unwrap_err();
+        assert!(matches!(err, PipelineError::Security(_)));
     }
 }

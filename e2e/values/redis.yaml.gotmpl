@@ -1,0 +1,30 @@
+{{ $sha := requiredEnv "E2E_SHA" }}
+{{ $v := fromYaml (readFile "../config/versions.yaml") }}
+
+# fullnameOverride keeps the master service at `gitlab-redis-master`, matching
+# the FQDN the bundled subchart used.
+fullnameOverride: gitlab-redis
+
+architecture: standalone
+
+image:
+  registry: docker.io
+  repository: {{ $v.redis.image.repository }}
+  tag: {{ $v.redis.image.tag }}
+  pullPolicy: IfNotPresent
+
+auth:
+  enabled: true
+  existingSecret: gitlab-redis-password
+  existingSecretPasswordKey: redis-password
+
+master:
+  persistence:
+    enabled: false
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi

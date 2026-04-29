@@ -153,9 +153,6 @@ impl GraphFormatter {
             .collect();
 
         match result_context.query_type {
-            Some(QueryType::Search) => {
-                self.extract_search_nodes(result, result_context, &edge_prefixes, &mut node_map);
-            }
             Some(QueryType::Traversal) => {
                 self.extract_search_nodes(result, result_context, &edge_prefixes, &mut node_map);
                 self.extract_traversal_edges(
@@ -185,6 +182,7 @@ impl GraphFormatter {
                     output,
                     &mut node_map,
                     &mut edges,
+                    &mut edge_set,
                 );
             }
             Some(QueryType::Hydration) | None => {}
@@ -398,9 +396,27 @@ impl GraphFormatter {
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
     ) {
-        for (row_idx, row) in result.authorized_rows().enumerate() {
+        // Dedupe paths by canonical (node_seq, edge_kinds) tuple. ReplacingMergeTree
+        // edge rows can leak multiple `_version` copies between background merges,
+        // which inflates path_finding into N identical logical paths. Collapse here
+        // so callers see one path_id per logical path.
+        type PathKey = (Vec<(String, i64)>, Vec<String>);
+        let mut seen_paths: HashSet<PathKey> = HashSet::new();
+        let mut path_id_counter: usize = 0;
+
+        for row in result.authorized_rows() {
             let dynamic_nodes = row.dynamic_nodes();
             let edge_kinds = row.edge_kinds();
+
+            let path_signature: Vec<(String, i64)> = dynamic_nodes
+                .iter()
+                .map(|n| (n.entity_type.clone(), n.id))
+                .collect();
+            if !seen_paths.insert((path_signature, edge_kinds.to_vec())) {
+                continue;
+            }
+            let path_id = path_id_counter;
+            path_id_counter += 1;
 
             for node_ref in dynamic_nodes {
                 let key = (node_ref.entity_type.clone(), node_ref.id);
@@ -431,13 +447,14 @@ impl GraphFormatter {
                     to_id: to.id,
                     edge_type,
                     depth: None,
-                    path_id: Some(row_idx),
+                    path_id: Some(path_id),
                     step: Some(hop_idx),
                 });
             }
         }
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn extract_neighbors(
         &self,
         result: &QueryResult,
@@ -446,6 +463,7 @@ impl GraphFormatter {
         output: &PipelineOutput,
         node_map: &mut IndexMap<(String, i64), GraphNode>,
         edges: &mut Vec<GraphEdge>,
+        edge_set: &mut HashSet<EdgeKey>,
     ) {
         let direction = output
             .compiled
@@ -479,19 +497,6 @@ impl GraphFormatter {
                 continue;
             };
 
-            let mut neighbor_props = serde_json::Map::new();
-            for (key, value) in &neighbor.properties {
-                if !is_reserved_node_key(key) {
-                    neighbor_props.insert(key.clone(), column_value_to_json(value));
-                }
-            }
-            let neighbor_key = (neighbor.entity_type.clone(), neighbor.id);
-            node_map.entry(neighbor_key).or_insert_with(|| GraphNode {
-                entity_type: neighbor.entity_type.clone(),
-                id: neighbor.id,
-                properties: neighbor_props,
-            });
-
             let rel_type = row
                 .get_column_string(relationship_type_column())
                 .unwrap_or_default();
@@ -522,6 +527,34 @@ impl GraphFormatter {
                     center_id,
                 )
             };
+
+            // Collapse multi-`_version` edge rows surfacing as duplicate neighbors.
+            // Check dedup before materializing neighbor properties so duplicate
+            // rows don't do unnecessary node-map work.
+            let key = (
+                from.clone(),
+                from_id,
+                to.clone(),
+                to_id,
+                rel_type.clone(),
+                None,
+            );
+            if !edge_set.insert(key) {
+                continue;
+            }
+
+            let mut neighbor_props = serde_json::Map::new();
+            for (key, value) in &neighbor.properties {
+                if !is_reserved_node_key(key) {
+                    neighbor_props.insert(key.clone(), column_value_to_json(value));
+                }
+            }
+            let neighbor_key = (neighbor.entity_type.clone(), neighbor.id);
+            node_map.entry(neighbor_key).or_insert_with(|| GraphNode {
+                entity_type: neighbor.entity_type.clone(),
+                id: neighbor.id,
+                properties: neighbor_props,
+            });
 
             edges.push(GraphEdge {
                 from,
@@ -566,17 +599,17 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
+        result_ctx.query_type = Some(QueryType::Traversal);
 
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
         PipelineOutput {
             row_count: qr.authorized_count(),
             redacted_count: 0,
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
+                query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
@@ -586,7 +619,7 @@ mod tests {
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
+                    "query_type": "traversal",
                     "node": {"id": "p", "entity": "Project"},
                     "limit": 10
                 }))
@@ -605,7 +638,7 @@ mod tests {
         let formatter = GraphFormatter;
         let response = formatter.build_response(&output);
 
-        assert_eq!(response.query_type, "search");
+        assert_eq!(response.query_type, "traversal");
         assert_eq!(response.nodes.len(), 2);
         assert!(response.edges.is_empty());
         assert!(response.columns.is_none(), "search should not have columns");
@@ -683,16 +716,16 @@ mod tests {
 
         let mut result_ctx = ResultContext::new();
         result_ctx.add_node("p", "Project");
-        result_ctx.query_type = Some(QueryType::Search);
+        result_ctx.query_type = Some(QueryType::Traversal);
         let qr = QueryResult::from_batches(&[batch], &result_ctx);
 
         let output = PipelineOutput {
             row_count: qr.authorized_count(),
             redacted_count: 0,
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             raw_query_strings: vec![],
             compiled: Arc::new(CompiledQueryContext {
-                query_type: QueryType::Search,
+                query_type: QueryType::Traversal,
                 base: ParameterizedQuery {
                     sql: String::new(),
                     params: HashMap::new(),
@@ -702,7 +735,7 @@ mod tests {
                 },
                 hydration: HydrationPlan::None,
                 input: serde_json::from_value(serde_json::json!({
-                    "query_type": "search",
+                    "query_type": "traversal",
                     "node": {"id": "p", "entity": "Project"},
                     "limit": 10
                 }))
@@ -748,6 +781,210 @@ mod tests {
             Some("Project"),
             "serialized 'type' must be the entity type, not the p_type column value"
         );
+    }
+
+    #[test]
+    fn path_finding_dedupes_duplicate_paths() {
+        use arrow::array::{Array, ListArray, StructArray};
+        use arrow::buffer::OffsetBuffer;
+
+        let n_rows = 4;
+        let mut all_ids = Vec::new();
+        let mut all_types = Vec::new();
+        let mut offsets = vec![0i32];
+        for _ in 0..n_rows {
+            all_ids.extend_from_slice(&[1_i64, 2, 3]);
+            all_types.extend_from_slice(&["User", "Group", "Project"]);
+            offsets.push(all_ids.len() as i32);
+        }
+
+        let struct_fields = vec![
+            Arc::new(Field::new("1", DataType::Int64, false)),
+            Arc::new(Field::new("2", DataType::Utf8, false)),
+        ];
+        let struct_array = StructArray::new(
+            struct_fields.into(),
+            vec![
+                Arc::new(Int64Array::from(all_ids)) as _,
+                Arc::new(StringArray::from(all_types)) as _,
+            ],
+            None,
+        );
+        let list_field = Arc::new(Field::new("item", struct_array.data_type().clone(), true));
+        let path_list = ListArray::new(
+            list_field,
+            OffsetBuffer::new(offsets.into()),
+            Arc::new(struct_array),
+            None,
+        );
+
+        let edge_struct = StringArray::from(vec![
+            "MEMBER_OF",
+            "CONTAINS",
+            "MEMBER_OF",
+            "CONTAINS",
+            "MEMBER_OF",
+            "CONTAINS",
+            "MEMBER_OF",
+            "CONTAINS",
+        ]);
+        let edge_field = Arc::new(Field::new("item", DataType::Utf8, true));
+        let edge_offsets = OffsetBuffer::new(vec![0i32, 2, 4, 6, 8].into());
+        let edge_list = ListArray::new(edge_field, edge_offsets, Arc::new(edge_struct), None);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_path", path_list.data_type().clone(), true),
+            Field::new("_gkg_edge_kinds", edge_list.data_type().clone(), true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![Arc::new(path_list) as _, Arc::new(edge_list) as _],
+        )
+        .unwrap();
+
+        let mut result_ctx = ResultContext::new();
+        result_ctx.query_type = Some(QueryType::PathFinding);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        let output = PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "path_finding".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::PathFinding,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "path_finding",
+                    "path": {"type": "any", "from": "u", "to": "p", "max_depth": 2},
+                    "nodes": [
+                        {"id": "u", "entity": "User"},
+                        {"id": "p", "entity": "Project"}
+                    ],
+                    "limit": 5
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        };
+
+        let response = GraphFormatter.build_response(&output);
+
+        // 4 raw rows -> 1 logical path (User -> Group -> Project)
+        let path_ids: HashSet<usize> = response.edges.iter().filter_map(|e| e.path_id).collect();
+        assert_eq!(
+            path_ids.len(),
+            1,
+            "duplicate paths must collapse to one path_id"
+        );
+        assert_eq!(response.edges.len(), 2, "one logical path -> two hops");
+        assert_eq!(response.nodes.len(), 3, "User, Group, Project");
+    }
+
+    #[test]
+    fn path_finding_keeps_genuinely_distinct_paths() {
+        use arrow::array::{Array, ListArray, StructArray};
+        use arrow::buffer::OffsetBuffer;
+
+        // Two paths sharing endpoints but going through different intermediate
+        // nodes. Dedup must NOT collapse them.
+        // Path A: User(1) -> Group(2) -> Project(99)
+        // Path B: User(1) -> Group(3) -> Project(99)
+        let all_ids: Vec<i64> = vec![1, 2, 99, 1, 3, 99];
+        let all_types = vec!["User", "Group", "Project", "User", "Group", "Project"];
+        let offsets = vec![0i32, 3, 6];
+
+        let struct_fields = vec![
+            Arc::new(Field::new("1", DataType::Int64, false)),
+            Arc::new(Field::new("2", DataType::Utf8, false)),
+        ];
+        let struct_array = StructArray::new(
+            struct_fields.into(),
+            vec![
+                Arc::new(Int64Array::from(all_ids)) as _,
+                Arc::new(StringArray::from(all_types)) as _,
+            ],
+            None,
+        );
+        let list_field = Arc::new(Field::new("item", struct_array.data_type().clone(), true));
+        let path_list = ListArray::new(
+            list_field,
+            OffsetBuffer::new(offsets.into()),
+            Arc::new(struct_array),
+            None,
+        );
+
+        let edge_struct = StringArray::from(vec!["MEMBER_OF", "CONTAINS", "MEMBER_OF", "CONTAINS"]);
+        let edge_field = Arc::new(Field::new("item", DataType::Utf8, true));
+        let edge_offsets = OffsetBuffer::new(vec![0i32, 2, 4].into());
+        let edge_list = ListArray::new(edge_field, edge_offsets, Arc::new(edge_struct), None);
+
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("_gkg_path", path_list.data_type().clone(), true),
+            Field::new("_gkg_edge_kinds", edge_list.data_type().clone(), true),
+        ]));
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![Arc::new(path_list) as _, Arc::new(edge_list) as _],
+        )
+        .unwrap();
+
+        let mut result_ctx = ResultContext::new();
+        result_ctx.query_type = Some(QueryType::PathFinding);
+        let qr = QueryResult::from_batches(&[batch], &result_ctx);
+
+        let output = PipelineOutput {
+            row_count: qr.authorized_count(),
+            redacted_count: 0,
+            query_type: "path_finding".to_string(),
+            raw_query_strings: vec![],
+            compiled: Arc::new(CompiledQueryContext {
+                query_type: QueryType::PathFinding,
+                base: ParameterizedQuery {
+                    sql: String::new(),
+                    params: HashMap::new(),
+                    result_context: result_ctx.clone(),
+                    query_config: Default::default(),
+                    dialect: Default::default(),
+                },
+                hydration: HydrationPlan::None,
+                input: serde_json::from_value(serde_json::json!({
+                    "query_type": "path_finding",
+                    "path": {"type": "any", "from": "u", "to": "p", "max_depth": 2},
+                    "nodes": [
+                        {"id": "u", "entity": "User"},
+                        {"id": "p", "entity": "Project"}
+                    ],
+                    "limit": 5
+                }))
+                .unwrap(),
+            }),
+            query_result: qr,
+            result_context: result_ctx,
+            execution_log: vec![],
+            pagination: None,
+        };
+
+        let response = GraphFormatter.build_response(&output);
+
+        let path_ids: HashSet<usize> = response.edges.iter().filter_map(|e| e.path_id).collect();
+        assert_eq!(
+            path_ids.len(),
+            2,
+            "distinct paths must keep distinct path_ids"
+        );
+        assert_eq!(response.edges.len(), 4, "two paths * two hops");
+        assert_eq!(response.nodes.len(), 4, "User, Group(2), Group(3), Project");
     }
 
     #[test]

@@ -269,14 +269,25 @@ impl CodeIndexingPipeline {
             .indexing_duration
             .record(indexing_start.elapsed().as_secs_f64(), &[]);
 
+        // The pipeline orchestrator increments `stats.files_parsed` by
+        // the full batch size for each language whose `process_files`
+        // returns `Ok(())` — including files that recorded a per-file
+        // skip or fault. Subtract those out here so the reported parsed
+        // count is the truly successful one.
+        let parsed_count = result
+            .stats
+            .files_parsed
+            .saturating_sub(result.skipped.len() + result.faults.len());
+        let skipped_count = result.stats.files_skipped + result.skipped.len();
+
         self.metrics
             .record_files_processed(result.stats.files_discovered as u64, "discovered");
         self.metrics
             .record_repository_source_size(result.stats.bytes_discovered);
         self.metrics
-            .record_files_processed(result.stats.files_parsed as u64, "parsed");
+            .record_files_processed(parsed_count as u64, "parsed");
         self.metrics
-            .record_files_processed(result.stats.files_skipped as u64, "skipped");
+            .record_files_processed(skipped_count as u64, "skipped");
         self.metrics
             .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
         self.metrics
@@ -284,33 +295,36 @@ impl CodeIndexingPipeline {
         self.metrics
             .record_nodes_indexed(result.stats.edges_count as u64, "edge");
 
-        // Record typed pipeline errors (file read, parse, conversion failures).
-        for graph_error in &result.graph_errors {
+        for skipped in &result.skipped {
             self.metrics
-                .errors
-                .add(1, &[KeyValue::new("stage", graph_error.stage())]);
+                .record_file_skipped(skipped.kind.as_metric_label());
         }
 
-        let parse_error_count = result.errors.iter().filter(|error| !error.fatal).count();
-        if parse_error_count > 0 {
+        for fault in &result.faults {
+            self.metrics.record_file_fault(fault.kind.as_metric_label());
+        }
+        if !result.faults.is_empty() {
             warn!(
                 project_id,
                 branch = %branch,
-                count = parse_error_count,
-                "some files failed to parse during code indexing"
+                count = result.faults.len(),
+                "files faulted during code indexing"
             );
             self.metrics
-                .record_files_processed(parse_error_count as u64, "errored");
+                .record_files_processed(result.faults.len() as u64, "errored");
         }
 
         if let Some(error) = result.errors.iter().find(|error| error.fatal) {
             self.metrics
                 .errors
                 .add(1, &[KeyValue::new("stage", error.stage)]);
-            return Err(HandlerError::Processing(format!(
-                "fatal code indexing pipeline error during {} for {}: {}",
-                error.stage, error.file_path, error.error
-            )));
+            return Err(HandlerError::Permanent {
+                message: format!(
+                    "fatal code indexing pipeline error during {} for {}: {}",
+                    error.stage, error.file_path, error.error
+                ),
+                action: crate::handler::PermanentAction::DeadLetter,
+            });
         }
 
         context.progress.notify_in_progress().await;

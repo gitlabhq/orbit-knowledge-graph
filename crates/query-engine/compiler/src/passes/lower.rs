@@ -13,9 +13,10 @@ use crate::constants::{
 };
 use crate::error::{QueryError, Result};
 use crate::input::{
-    ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter, InputNode,
-    InputRelationship, OrderDirection, QueryType,
+    AggFunction, ColumnSelection, Direction, FilterOp, Input, InputAggregation, InputFilter,
+    InputNode, InputRelationship, OrderDirection, QueryType,
 };
+use ontology::DataType;
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, EDGE_RESERVED_COLUMNS, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN,
     SOURCE_KIND_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN, TRAVERSAL_PATH_COLUMN,
@@ -54,7 +55,7 @@ fn edge_path_nodes_select_expr(alias: &str) -> SelectExpr {
 /// Writes metadata to `input.compiler` for downstream passes.
 pub fn lower(input: &mut Input) -> Result<Node> {
     let node = match input.query_type {
-        QueryType::Search => lower_search(input),
+        QueryType::Traversal if input.is_search() => lower_search(input),
         QueryType::Traversal => lower_traversal_edge_only(input),
         QueryType::Aggregation => lower_aggregation(input),
         QueryType::PathFinding => lower_path_finding(input),
@@ -303,8 +304,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
 
     // Add IN subquery for each node that has conditions
     for node in &input.nodes {
-        let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-        if !has_conditions {
+        if !node_has_conditions(node) {
             continue;
         }
         if let Some((alias, edge_col)) = node_edge_col.get(&node.id) {
@@ -321,6 +321,7 @@ fn lower_traversal_edge_only(input: &mut Input) -> Result<Node> {
                 ..Default::default()
             };
             ctes.push(Cte::new(&cte_name, cte_query));
+            input.compiler.lowerer_nf_ctes.insert(cte_name.clone());
             where_parts.push(Expr::InSubquery {
                 expr: Box::new(Expr::col(alias, edge_col.as_str())),
                 cte_name,
@@ -444,10 +445,27 @@ fn build_node_where(node: &InputNode) -> Option<Expr> {
     {
         parts.push(filter);
     }
+    if let Some(ref range) = node.id_range {
+        parts.push(Expr::binary(
+            Op::Ge,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(range.start),
+        ));
+        parts.push(Expr::binary(
+            Op::Le,
+            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+            Expr::int(range.end),
+        ));
+    }
     for (col, filter) in &node.filters {
         parts.push(filter_expr(&node.id, col, filter));
     }
     Expr::and_all(parts.into_iter().map(Some))
+}
+
+/// Whether a node has conditions that should generate a filter CTE.
+fn node_has_conditions(node: &InputNode) -> bool {
+    !node.node_ids.is_empty() || !node.filters.is_empty() || node.id_range.is_some()
 }
 
 fn lower_aggregation(input: &mut Input) -> Result<Node> {
@@ -482,7 +500,24 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
             // those aggregations are property-less (e.g. COUNT without a
             // property field). Nodes that are not targeted by any aggregation
             // (intermediate join nodes) must keep their table scan in FROM.
-            if !targeting_aggs.is_empty() && targeting_aggs.iter().all(|a| a.property.is_none()) {
+            let all_property_less =
+                !targeting_aggs.is_empty() && targeting_aggs.iter().all(|a| a.property.is_none());
+
+            // Skipping the node table for an edge-only aggregation means the
+            // compiler's security pass has no alias to hang a role filter on.
+            // For entities whose ontology requires a stricter role than the
+            // default (Reporter), that would let a Reporter-only user count
+            // e.g. Vulnerability rows via an IN_PROJECT edge group-by. Keep
+            // the node scan so the security pass can emit `Bool(false)` for
+            // the target alias when the user lacks the required role.
+            let requires_node_scan_for_role = node
+                .entity
+                .as_deref()
+                .and_then(|e| input.entity_auth.get(e))
+                .is_some_and(|cfg| {
+                    cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL
+                });
+            if all_property_less && !requires_node_scan_for_role {
                 edge_only_targets.insert(node.id.clone());
             }
         }
@@ -549,8 +584,7 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
                 node_edge_col.insert(node.id.clone(), (edge_alias.clone(), edge_col.to_string()));
             }
 
-            let has_conditions = !node.node_ids.is_empty() || !node.filters.is_empty();
-            if !has_conditions {
+            if !node_has_conditions(node) {
                 continue;
             }
             let table = resolve_table(node)?;
@@ -576,6 +610,31 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
 
     input.compiler.node_edge_col = node_edge_col;
 
+    // Edge-only count targets without filters or pinned ids can use bare
+    // `count()` — projection-eligible against `agg_counts`. A target is
+    // disqualified if any of its aggregations carries a property or is
+    // not `count`, or if its node has filters / `node_ids`.
+    let unfiltered_count_targets: HashSet<String> = edge_only_targets
+        .iter()
+        .filter(|alias| {
+            let aggs_for_target = || {
+                input
+                    .aggregations
+                    .iter()
+                    .filter(move |a| a.target.as_deref() == Some(alias.as_str()))
+            };
+            let all_count = aggs_for_target()
+                .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
+            let has_conds = input
+                .nodes
+                .iter()
+                .find(|n| &n.id == *alias)
+                .is_some_and(node_has_conditions);
+            all_count && !has_conds
+        })
+        .cloned()
+        .collect();
+
     let mut select = Vec::new();
     let mut group_by_exprs = Vec::new();
 
@@ -593,7 +652,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
     }
 
     for agg in &input.aggregations {
-        let expr = agg_expr_with_edge_col(agg, &input.compiler.node_edge_col);
+        let expr = agg_expr_with_edge_col(
+            agg,
+            &input.compiler.node_edge_col,
+            &unfiltered_count_targets,
+        );
         select.push(SelectExpr::new(
             expr,
             agg.alias
@@ -623,7 +686,11 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
         Some(s) => {
             let agg = &input.aggregations[s.agg_index];
             let mut exprs = vec![OrderExpr {
-                expr: agg_expr_with_edge_col(agg, &input.compiler.node_edge_col),
+                expr: agg_expr_with_edge_col(
+                    agg,
+                    &input.compiler.node_edge_col,
+                    &unfiltered_count_targets,
+                ),
                 desc: s.direction == OrderDirection::Desc,
             }];
             // Aggregate values frequently collide (e.g. many groups with
@@ -653,9 +720,18 @@ fn lower_aggregation(input: &mut Input) -> Result<Node> {
 
 /// Build the aggregate expression. Uses edge columns for targets in
 /// `node_edge_col` (edge-only), node table columns otherwise.
+///
+/// `unfiltered_count_targets` is the set of edge-only target aliases that
+/// (a) only appear in `count` aggregations and (b) carry no node-level
+/// filters or `node_ids`. For those, we emit `count()` (no argument) so
+/// ClickHouse's projection optimizer can route the query to the
+/// pre-aggregated `agg_counts` projection on the edge table — a 100x-1000x
+/// reduction for `count(File) GROUP BY Project`-style queries on hot
+/// edge tables.
 fn agg_expr_with_edge_col(
     agg: &InputAggregation,
     node_edge_col: &HashMap<String, (String, String)>,
+    unfiltered_count_targets: &HashSet<String>,
 ) -> Expr {
     let arg = match (&agg.property, &agg.target) {
         (Some(prop), Some(target)) => {
@@ -663,7 +739,11 @@ fn agg_expr_with_edge_col(
             Expr::col(target, prop)
         }
         (None, Some(target)) => {
-            // Property-less: use edge column if target is edge-only.
+            if matches!(agg.function, AggFunction::Count)
+                && unfiltered_count_targets.contains(target.as_str())
+            {
+                return Expr::func(agg.function.as_sql(), vec![]);
+            }
             if let Some((alias, col)) = node_edge_col.get(target.as_str()) {
                 Expr::col(alias, col.as_str())
             } else {
@@ -698,7 +778,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let start = find_node(&input.nodes, &path.from)?;
     let end = find_node(&input.nodes, &path.to)?;
-
     let start_entity = start
         .entity
         .as_deref()
@@ -708,33 +787,77 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("end node has no entity".into()))?;
 
+    let wildcard_path = is_wildcard_type_list(&path.rel_types);
     let rel_type_filter = type_filter(&path.rel_types);
+    let forward_first_hop_types = if wildcard_path {
+        path.forward_first_hop_rel_types.clone()
+    } else {
+        path.rel_types.clone()
+    };
+    let backward_first_hop_types = if wildcard_path {
+        path.backward_first_hop_rel_types.clone()
+    } else {
+        path.rel_types.clone()
+    };
+    let forward_first_hop_rel_type_filter = type_filter(&forward_first_hop_types);
+    let backward_first_hop_rel_type_filter = type_filter(&backward_first_hop_types);
     let max_depth = path.max_depth;
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
     let et = input.compiler.resolve_edge_tables(&path.rel_types);
+    let scoped_by_traversal_path = can_scope_path_by_traversal_path(input, start, end, &et);
+
+    // Build anchor conditions and optional CTEs for filtered endpoints.
+    // When a node has concrete node_ids, use a literal IN list.
+    // When it has filters or id_range, resolve via a _nf_* CTE with a cap.
+    let mut anchor_ctes: Vec<Cte> = Vec::new();
+    let start_anchor = build_path_anchor(
+        input,
+        start,
+        SOURCE_ID_COLUMN,
+        &mut anchor_ctes,
+        scoped_by_traversal_path,
+    )?;
+    let end_anchor = build_path_anchor(
+        input,
+        end,
+        TARGET_ID_COLUMN,
+        &mut anchor_ctes,
+        scoped_by_traversal_path,
+    )?;
+    let path_scope_cte = build_path_scope_cte(&start_anchor, &end_anchor);
+
+    let frontier_options = FrontierOptions {
+        rel_type_filter: &rel_type_filter,
+        first_hop_rel_type_filter: &forward_first_hop_rel_type_filter,
+        anchor_entity: Some(start_entity),
+        edge_tables: &et,
+        path_scope_cte: path_scope_cte.as_ref().map(|cte| cte.name.as_str()),
+        include_traversal_path: scoped_by_traversal_path,
+    };
+
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
-            &start.node_ids,
+            start_anchor.edge_filter,
             forward_depth,
-            &rel_type_filter,
-            true,
-            Some(start_entity),
-            &et,
+            FrontierDirection::Forward,
+            &frontier_options,
         ),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
-                &end.node_ids,
+                end_anchor.edge_filter.clone(),
                 backward_depth,
-                &rel_type_filter,
-                false,
-                Some(end_entity),
-                &et,
+                FrontierDirection::Backward,
+                &FrontierOptions {
+                    first_hop_rel_type_filter: &backward_first_hop_rel_type_filter,
+                    anchor_entity: Some(end_entity),
+                    ..frontier_options
+                },
             ),
         ))
     } else {
@@ -788,12 +911,8 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
                 Expr::string(end_entity),
             )),
-            Expr::col_in(
-                FORWARD_ALIAS,
-                END_ID_COLUMN,
-                ChType::Int64,
-                end.node_ids.iter().map(|id| Value::from(*id)).collect(),
-            ),
+            // Filter direct paths by end-node anchor: literal IN or subquery.
+            build_path_endpoint_filter(end, FORWARD_ALIAS, END_ID_COLUMN),
         ]),
         ..Default::default()
     };
@@ -838,15 +957,27 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::join(
-            JoinType::Inner,
-            TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
-            TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
-            Expr::eq(
+        from: {
+            let mut join_cond = Expr::eq(
                 Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
                 Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
-            ),
-        ),
+            );
+            if scoped_by_traversal_path {
+                join_cond = Expr::and(
+                    join_cond,
+                    Expr::eq(
+                        Expr::col(FORWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(BACKWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    ),
+                );
+            }
+            TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+                TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+                join_cond,
+            )
+        },
         where_clause: Some(Expr::binary(
             Op::Le,
             Expr::binary(
@@ -872,9 +1003,33 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // Security filters are applied by the security pass to every gl_edge scan
     // inside the forward/backward CTEs. No separate start/end table join
     // is needed: the edge anchors already filter by start/end node IDs.
+    let mut order_by = vec![OrderExpr {
+        expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
+        desc: false,
+    }];
+    if input.cursor.is_some() {
+        order_by.extend([
+            OrderExpr {
+                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::func(
+                    "toString",
+                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
+                ),
+                desc: false,
+            },
+        ]);
+    }
+
     Ok(Node::Query(Box::new(Query {
         ctes: {
-            let mut ctes = vec![];
+            // Anchor CTEs must come before frontier CTEs that reference them.
+            let mut ctes = anchor_ctes;
+            if let Some(scope_cte) = path_scope_cte {
+                ctes.push(scope_cte);
+            }
             ctes.push(forward_cte);
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
@@ -890,29 +1045,204 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
         ],
         from: paths_union,
-        order_by: vec![
-            OrderExpr {
-                expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
-                desc: false,
-            },
-            // toString() forces a deterministic string comparison on the
-            // Array(Tuple(Int64, String)) path column, avoiding flaky
-            // ordering from ClickHouse parallel merge on complex types.
-            OrderExpr {
-                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
-                desc: false,
-            },
-            OrderExpr {
-                expr: Expr::func(
-                    "toString",
-                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
-                ),
-                desc: false,
-            },
-        ],
+        order_by,
         limit,
         ..Default::default()
     })))
+}
+
+const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
+const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
+const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
+
+#[derive(Debug, Clone)]
+struct PathAnchor {
+    edge_filter: Option<Expr>,
+    cte_name: Option<String>,
+    has_traversal_path: bool,
+}
+
+fn can_scope_path_by_traversal_path(
+    input: &Input,
+    start: &InputNode,
+    end: &InputNode,
+    edge_tables: &[String],
+) -> bool {
+    if edge_tables.is_empty()
+        || edge_tables.iter().any(|table| {
+            !input
+                .compiler
+                .table_has_column(table, TRAVERSAL_PATH_COLUMN)
+        })
+    {
+        return false;
+    }
+
+    [start, end].into_iter().all(|node| {
+        resolve_table(node).is_ok_and(|table| {
+            input
+                .compiler
+                .table_has_column(&table, TRAVERSAL_PATH_COLUMN)
+        })
+    })
+}
+
+fn build_path_scope_cte(start: &PathAnchor, end: &PathAnchor) -> Option<Cte> {
+    let start_cte = start.cte_name.as_deref()?;
+    let end_cte = end.cte_name.as_deref()?;
+    if !start.has_traversal_path || !end.has_traversal_path {
+        return None;
+    }
+
+    Some(Cte::new(
+        PATH_SCOPE_CTE,
+        Query {
+            select: vec![SelectExpr::new(
+                Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
+                TRAVERSAL_PATH_COLUMN,
+            )],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(start_cte, PATH_SCOPE_START_ALIAS),
+                TableRef::scan(end_cte, PATH_SCOPE_END_ALIAS),
+                Expr::eq(
+                    Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    Expr::col(PATH_SCOPE_END_ALIAS, TRAVERSAL_PATH_COLUMN),
+                ),
+            ),
+            group_by: vec![Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN)],
+            ..Default::default()
+        },
+    ))
+}
+
+fn path_scope_filter(alias: &str, cte_name: &str) -> Expr {
+    Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+        cte_name: cte_name.to_string(),
+        column: TRAVERSAL_PATH_COLUMN.to_string(),
+    }
+}
+
+/// Build an anchor condition for a path_finding endpoint.
+///
+/// - If the node has `node_ids`, returns a literal `e1.<edge_col> IN (ids)`.
+/// - If the node has `filters` or `id_range`, creates a `_nf_<id>` CTE with
+///   a LIMIT cap and returns `e1.<edge_col> IN (SELECT id FROM _nf_<id>)`.
+///
+/// `edge_col` is the edge column to filter (SOURCE_ID_COLUMN for forward
+/// start, TARGET_ID_COLUMN for backward end).
+fn build_path_anchor(
+    input: &Input,
+    node: &InputNode,
+    edge_col: &str,
+    ctes: &mut Vec<Cte>,
+    force_cte: bool,
+) -> Result<PathAnchor> {
+    if !force_cte && !node.node_ids.is_empty() {
+        return Ok(PathAnchor {
+            edge_filter: Expr::col_in(
+                "e1",
+                edge_col,
+                ChType::Int64,
+                node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+            ),
+            cte_name: None,
+            has_traversal_path: false,
+        });
+    }
+
+    // Filters or id_range: resolve via a capped CTE.
+    let node_where = build_node_where(node);
+    if node_where.is_none() {
+        return Ok(PathAnchor {
+            edge_filter: None,
+            cte_name: None,
+            has_traversal_path: false,
+        });
+    }
+
+    let table = resolve_table(node)?;
+    let cte_name = node_filter_cte(&node.id);
+    let has_traversal_path = input
+        .compiler
+        .table_has_column(&table, TRAVERSAL_PATH_COLUMN);
+    let mut select = vec![SelectExpr::new(
+        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+        DEFAULT_PRIMARY_KEY,
+    )];
+    if has_traversal_path {
+        select.push(SelectExpr::new(
+            Expr::col(&node.id, TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
+    let cte_query = Query {
+        select,
+        from: TableRef::scan(&table, &node.id),
+        where_clause: node_where,
+        limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
+        ..Default::default()
+    };
+    ctes.push(Cte::new(&cte_name, cte_query));
+
+    Ok(PathAnchor {
+        edge_filter: Some(Expr::InSubquery {
+            expr: Box::new(Expr::col("e1", edge_col)),
+            cte_name: cte_name.clone(),
+            column: DEFAULT_PRIMARY_KEY.into(),
+        }),
+        cte_name: Some(cte_name),
+        has_traversal_path,
+    })
+}
+
+/// Build an endpoint filter for the direct_query WHERE clause.
+///
+/// For nodes with `node_ids`, returns a literal IN on the frontier column.
+/// For nodes with `filters` or `id_range`, returns an `InSubquery` referencing
+/// the `_nf_<id>` CTE (which must already exist in `anchor_ctes`).
+fn build_path_endpoint_filter(
+    node: &InputNode,
+    frontier_alias: &str,
+    frontier_col: &str,
+) -> Option<Expr> {
+    if !node.node_ids.is_empty() {
+        return Expr::col_in(
+            frontier_alias,
+            frontier_col,
+            ChType::Int64,
+            node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+        );
+    }
+
+    // For filtered endpoints, the _nf CTE was already created by build_path_anchor.
+    if node_has_conditions(node) {
+        let cte_name = node_filter_cte(&node.id);
+        return Some(Expr::InSubquery {
+            expr: Box::new(Expr::col(frontier_alias, frontier_col)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.into(),
+        });
+    }
+
+    None
+}
+
+#[derive(Clone, Copy)]
+enum FrontierDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, Copy)]
+struct FrontierOptions<'a> {
+    rel_type_filter: &'a Option<Vec<String>>,
+    first_hop_rel_type_filter: &'a Option<Vec<String>>,
+    anchor_entity: Option<&'a str>,
+    edge_tables: &'a [String],
+    path_scope_cte: Option<&'a str>,
+    include_traversal_path: bool,
 }
 
 /// Build a frontier CTE body: UNION ALL of hop arms for depths 1..max_depth.
@@ -920,28 +1250,20 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 /// `is_forward=true`:  anchors on source_id, traverses source→target
 /// `is_forward=false`: anchors on target_id, traverses target→source
 ///
+/// `anchor_cond`: pre-built expression filtering the anchor side of e1
+/// (e.g. `e1.source_id IN (1, 2)` or `e1.source_id IN (SELECT id FROM _nf_start)`).
+///
 /// `anchor_entity`: when set, adds `e1.source_kind = entity` (forward) or
 /// `e1.target_kind = entity` (backward) to constrain the anchor side to
 /// the expected entity type.
 fn build_frontier(
-    anchor_ids: &[i64],
+    anchor_cond: Option<Expr>,
     max_depth: u32,
-    rel_type_filter: &Option<Vec<String>>,
-    is_forward: bool,
-    anchor_entity: Option<&str>,
-    edge_tables: &[String],
+    direction: FrontierDirection,
+    options: &FrontierOptions<'_>,
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| {
-            build_frontier_arm(
-                anchor_ids,
-                depth,
-                rel_type_filter,
-                is_forward,
-                anchor_entity,
-                edge_tables,
-            )
-        })
+        .map(|depth| build_frontier_arm(anchor_cond.clone(), depth, direction, options))
         .collect();
 
     // Wrap in a UNION ALL. For a single arm just return it directly.
@@ -964,34 +1286,47 @@ fn build_frontier(
 ///   FROM gl_edge e1 JOIN gl_edge e2 ON e1.target_id = e2.source_id
 ///   WHERE e1.source_id IN (start_ids) AND e1.source_kind = 'User'
 ///
+/// `anchor_cond`: pre-built expression filtering the anchor side of e1.
+///
 /// `anchor_entity`: when set, adds a kind predicate on the anchor side of
 /// the first edge so the frontier only starts from the expected entity type.
 fn build_frontier_arm(
-    anchor_ids: &[i64],
+    anchor_cond: Option<Expr>,
     depth: u32,
-    rel_type_filter: &Option<Vec<String>>,
-    is_forward: bool,
-    anchor_entity: Option<&str>,
-    edge_tables: &[String],
+    direction: FrontierDirection,
+    options: &FrontierOptions<'_>,
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
-    let (anchor_col, next_col, next_kind_col) = if is_forward {
-        (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
-    } else {
-        (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
+    let (anchor_col, next_col, next_kind_col) = match direction {
+        FrontierDirection::Forward => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
+        FrontierDirection::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
     };
 
     let last = format!("e{depth}");
 
     // Build join chain: e1 JOIN e2 ON e1.next = e2.anchor JOIN e3 ...
-    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", rel_type_filter);
+    let (mut from, first_type_cond) =
+        multi_edge_scan(options.edge_tables, "e1", options.first_hop_rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let (edge_tbl, edge_type_cond) = multi_edge_scan(edge_tables, &curr, rel_type_filter);
+        let (edge_tbl, edge_type_cond) =
+            multi_edge_scan(options.edge_tables, &curr, options.rel_type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
+        if options.include_traversal_path {
+            join_cond = Expr::and(
+                join_cond,
+                Expr::eq(
+                    Expr::col(&prev, TRAVERSAL_PATH_COLUMN),
+                    Expr::col(&curr, TRAVERSAL_PATH_COLUMN),
+                ),
+            );
+        }
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
+        }
+        if let Some(scope_cte) = options.path_scope_cte {
+            join_cond = Expr::and(join_cond, path_scope_filter(&curr, scope_cte));
         }
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
@@ -1001,10 +1336,9 @@ fn build_frontier_arm(
     // For backward arms, exclude the last hop (the meeting point) because
     // it's already the last element in forward's path_nodes. Only include
     // intermediate nodes between the end anchor and the meeting point.
-    let path_node_range = if is_forward {
-        1..=depth
-    } else {
-        1..=depth.saturating_sub(1)
+    let path_node_range = match direction {
+        FrontierDirection::Forward => 1..=depth,
+        FrontierDirection::Backward => 1..=depth.saturating_sub(1),
     };
     let path_node_tuples: Vec<Expr> = path_node_range
         .map(|i| {
@@ -1042,35 +1376,38 @@ fn build_frontier_arm(
             .collect(),
     );
 
-    // Anchor condition: first edge connects to the anchor node(s).
-    let anchor_cond = Expr::col_in(
-        "e1",
-        anchor_col,
-        ChType::Int64,
-        anchor_ids.iter().map(|id| Value::from(*id)).collect(),
-    );
-
     // Anchor entity kind filter: constrain the anchor side of the first edge
     // to the expected entity type (e.g. source_kind = 'User' for forward).
-    let anchor_kind_col = if is_forward {
-        SOURCE_KIND_COLUMN
-    } else {
-        TARGET_KIND_COLUMN
+    let anchor_kind_col = match direction {
+        FrontierDirection::Forward => SOURCE_KIND_COLUMN,
+        FrontierDirection::Backward => TARGET_KIND_COLUMN,
     };
-    let anchor_kind_cond = anchor_entity
+    let anchor_kind_cond = options
+        .anchor_entity
         .map(|entity| Expr::eq(Expr::col("e1", anchor_kind_col), Expr::string(entity)));
+    let scope_cond = options
+        .path_scope_cte
+        .map(|scope_cte| path_scope_filter("e1", scope_cte));
+
+    let mut select = vec![
+        SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
+        SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
+        SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
+        SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
+        SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
+        SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+    ];
+    if options.include_traversal_path {
+        select.push(SelectExpr::new(
+            Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
 
     Query {
-        select: vec![
-            SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
-            SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
-            SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
-            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-            SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
-            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
-        ],
+        select,
         from,
-        where_clause: Expr::and_all([anchor_cond, first_type_cond, anchor_kind_cond]),
+        where_clause: Expr::and_all([anchor_cond, first_type_cond, anchor_kind_cond, scope_cond]),
         ..Default::default()
     }
 }
@@ -1133,9 +1470,9 @@ fn lower_neighbors(input: &mut Input) -> Result<Node> {
     };
     let limit = Some(input.limit);
 
-    // Build _nf CTE for center node filtering (IDs + filters).
+    // Build _nf CTE for center node filtering (IDs, filters, id_range).
     // Dedup pass will wrap this CTE's scan for soft-delete correctness.
-    let has_conditions = !center_node.node_ids.is_empty() || !center_node.filters.is_empty();
+    let has_conditions = node_has_conditions(center_node);
     let cte_name = node_filter_cte(&center_id);
     let ctes = if has_conditions {
         let node_where = build_node_where(center_node);
@@ -1457,11 +1794,15 @@ fn edge_scan(
 }
 
 fn type_filter(types: &[String]) -> Option<Vec<String>> {
-    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+    if is_wildcard_type_list(types) {
         None
     } else {
         Some(types.to_vec())
     }
+}
+
+fn is_wildcard_type_list(types: &[String]) -> bool {
+    types.is_empty() || (types.len() == 1 && types[0] == "*")
 }
 
 /// Build an edge scan that may span multiple physical tables.
@@ -1801,7 +2142,7 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || {
         let v = filter.value.clone().unwrap_or(Value::Null);
-        Expr::param(ChType::from_value(&v), v)
+        Expr::param(filter_value_ch_type(filter, &v), v)
     };
 
     match filter.op {
@@ -1812,10 +2153,25 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::Lte) => Expr::binary(Op::Le, col, val()),
         Some(FilterOp::In) => Expr::binary(Op::In, col, val()),
         Some(FilterOp::Contains) => like_pattern(col, filter, "%", "%"),
-        Some(FilterOp::StartsWith) => like_pattern(col, filter, "", "%"),
-        Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
+        Some(FilterOp::StartsWith) => Expr::func("startsWith", vec![col, val()]),
+        Some(FilterOp::EndsWith) => Expr::func("endsWith", vec![col, val()]),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
+        Some(FilterOp::TokenMatch) => Expr::func("hasToken", vec![col, val()]),
+        Some(FilterOp::AllTokens) => Expr::func("hasAllTokens", vec![col, val()]),
+        Some(FilterOp::AnyTokens) => Expr::func("hasAnyTokens", vec![col, val()]),
+    }
+}
+
+/// `IN` (Value::Array) falls back to value-based inference because
+/// `Array(ChScalar)` has no temporal element type.
+fn filter_value_ch_type(filter: &InputFilter, value: &Value) -> ChType {
+    if matches!(value, Value::Array(_) | Value::Null) {
+        return ChType::from_value(value);
+    }
+    match filter.data_type {
+        Some(DataType::DateTime) => ChType::DateTime64,
+        _ => ChType::from_value(value),
     }
 }
 
@@ -1925,10 +2281,21 @@ mod tests {
     fn validated_input(json: &str) -> Input {
         let ontology = test_ontology();
         let input = parse_input(json).unwrap();
-        validate::Validator::new(&ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, &ontology).unwrap()
+        let validator = validate::Validator::new(&ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, &ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
+    }
+
+    #[test]
+    fn filter_value_ch_type_uses_datetime64_for_datetime_columns() {
+        let value = Value::String("2026-03-28T00:00:00Z".into());
+        let filter = InputFilter {
+            data_type: Some(DataType::DateTime),
+            ..Default::default()
+        };
+        assert_eq!(filter_value_ch_type(&filter, &value), ChType::DateTime64);
     }
 
     #[test]
@@ -1938,7 +2305,7 @@ mod tests {
             "query_type": "traversal",
             "nodes": [
                 {"id": "n", "entity": "Note"},
-                {"id": "u", "entity": "User"}
+                {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "limit": 25
@@ -1963,7 +2330,7 @@ mod tests {
         let mut input = validated_input(
             r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "columns": ["username"]}],
+            "nodes": [{"id": "n", "entity": "Note"}, {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]}],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
             "limit": 10
@@ -1988,7 +2355,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "mr", "entity": "Note"},
-                {"id": "u", "entity": "User", "columns": ["username", "state"]}
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username", "state"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_count"}],
@@ -2023,7 +2390,7 @@ mod tests {
             "query_type": "aggregation",
             "nodes": [
                 {"id": "n", "entity": "Note"},
-                {"id": "u", "entity": "User", "columns": "*"}
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": "*"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
             "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "note_count"}],
@@ -2075,7 +2442,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_order_by_depth_path_edge_kinds() {
+    fn path_finding_without_cursor_orders_by_depth_only() {
         let mut input = validated_input(
             r#"{
             "query_type": "path_finding",
@@ -2093,8 +2460,8 @@ mod tests {
 
         assert_eq!(
             q.order_by.len(),
-            3,
-            "path finding should ORDER BY depth, path, edge_kinds"
+            1,
+            "path finding should only ORDER BY depth unless cursor pagination needs tie-breakers"
         );
         // depth ASC
         if let Expr::Column { column, .. } = &q.order_by[0].expr {
@@ -2103,39 +2470,13 @@ mod tests {
             panic!("expected depth column");
         }
         assert!(!q.order_by[0].desc);
-        // toString(_gkg_path) ASC
-        if let Expr::FuncCall { name, args } = &q.order_by[1].expr {
-            assert_eq!(name, "toString");
-            assert_eq!(args.len(), 1);
-            if let Expr::Column { column, .. } = &args[0] {
-                assert_eq!(column, &path_column());
-            } else {
-                panic!("expected path column inside toString");
-            }
-        } else {
-            panic!("expected toString(path) function");
-        }
-        assert!(!q.order_by[1].desc);
-        // toString(_gkg_edge_kinds) ASC
-        if let Expr::FuncCall { name, args } = &q.order_by[2].expr {
-            assert_eq!(name, "toString");
-            assert_eq!(args.len(), 1);
-            if let Expr::Column { column, .. } = &args[0] {
-                assert_eq!(column, &edge_kinds_column());
-            } else {
-                panic!("expected edge_kinds column inside toString");
-            }
-        } else {
-            panic!("expected toString(edge_kinds) function");
-        }
-        assert!(!q.order_by[2].desc);
     }
 
     #[test]
     fn test_lower_with_filters() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2161,7 +2502,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2223,7 +2564,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -2301,7 +2642,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -2330,7 +2671,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2365,7 +2706,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{
@@ -2395,7 +2736,7 @@ mod tests {
     fn test_lower_search() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
@@ -2429,10 +2770,11 @@ mod tests {
     fn test_lower_search_simple() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "p",
-                "entity": "Project"
+                "entity": "Project",
+                "node_ids": [1]
             },
             "limit": 50
         }"#,
@@ -2455,10 +2797,11 @@ mod tests {
     fn test_lower_with_specific_columns() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": ["username", "state"]
             },
             "limit": 10
@@ -2480,10 +2823,11 @@ mod tests {
     fn test_lower_with_wildcard_columns() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": "*"
             },
             "limit": 10
@@ -2509,7 +2853,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["confidential"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2532,10 +2876,11 @@ mod tests {
     fn test_lower_no_columns_uses_defaults() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
-                "entity": "User"
+                "entity": "User",
+                "node_ids": [1]
             },
             "limit": 10
         }"#,
@@ -2561,10 +2906,11 @@ mod tests {
     fn test_lower_columns_with_id_in_list() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {
                 "id": "u",
                 "entity": "User",
+                "node_ids": [1],
                 "columns": ["id", "username"]
             },
             "limit": 10
@@ -2721,7 +3067,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"},
                 {"id": "p", "entity": "Project"}
             ],
@@ -2764,7 +3110,7 @@ mod tests {
         // Edge-centric puts the type filter in WHERE, not JOIN ON.
         // Single type — WHERE should contain relationship_kind = 'AUTHORED'
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"AUTHORED","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2776,7 +3122,7 @@ mod tests {
 
         // Multiple types — should use IN
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":["AUTHORED","CONTAINS"],"from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2788,7 +3134,7 @@ mod tests {
 
         // Wildcard — no type filter
         let mut inp = validated_input(
-            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User"},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
+            r#"{"query_type":"traversal","nodes":[{"id":"u","entity":"User","node_ids":[1]},{"id":"n","entity":"Note"}],"relationships":[{"type":"*","from":"u","to":"n"}]}"#,
         );
         let Node::Query(q) = lower(&mut inp).unwrap() else {
             panic!()
@@ -2833,7 +3179,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2856,7 +3202,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{
@@ -2916,7 +3262,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "n", "entity": "Note", "columns": ["confidential"]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2950,7 +3296,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -2984,7 +3330,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3015,7 +3361,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3075,7 +3421,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "p", "min_hops": 1, "max_hops": 2}],
@@ -3099,7 +3445,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3131,7 +3477,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [1]},
                 {"id": "d", "entity": "MergeRequestDiff"}
             ],
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
@@ -3153,7 +3499,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3227,8 +3573,8 @@ mod tests {
     fn search_cursor_injects_default_order_by_id() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
         }"#,
@@ -3252,8 +3598,8 @@ mod tests {
     fn search_without_cursor_has_no_default_order() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "limit": 10
         }"#,
         );
@@ -3269,8 +3615,8 @@ mod tests {
     fn search_explicit_order_by_with_cursor_appends_pk_tiebreaker() {
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "username", "direction": "DESC"},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
@@ -3309,8 +3655,8 @@ mod tests {
         // When the user already sorts by "id", don't append a redundant PK tie-breaker.
         let mut input = validated_input(
             r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 10,
             "cursor": {"offset": 0, "page_size": 5}
@@ -3334,7 +3680,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3420,7 +3766,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["id", "username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3467,7 +3813,7 @@ mod tests {
             r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "node_ids": [1]},
                 {"id": "n", "entity": "Note"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
@@ -3553,7 +3899,7 @@ mod tests {
             r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["id", "username"]},
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["id", "username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -3703,10 +4049,11 @@ mod tests {
 
     fn validated_input_with(json: &str, ontology: &Ontology) -> Input {
         let input = parse_input(json).unwrap();
-        validate::Validator::new(ontology)
-            .check_references(&input)
-            .unwrap();
-        normalize::normalize(input, ontology).unwrap()
+        let validator = validate::Validator::new(ontology);
+        validator.check_references(&input).unwrap();
+        let mut input = normalize::normalize(input, ontology).unwrap();
+        validator.annotate_filter_types(&mut input);
+        input
     }
 
     fn has_union(t: &TableRef) -> bool {
@@ -3736,7 +4083,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
@@ -3764,7 +4111,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "f", "entity": "File"},
+                    {"id": "f", "entity": "File", "node_ids": [1]},
                     {"id": "d", "entity": "Definition"}
                 ],
                 "relationships": [{"type": "DEFINES", "from": "f", "to": "d"}],
@@ -3792,7 +4139,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "*", "from": "u", "to": "p"}],
@@ -3821,7 +4168,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": ["AUTHORED", "DEFINES"], "from": "u", "to": "p"}],
@@ -3846,7 +4193,7 @@ mod tests {
             r#"{
                 "query_type": "traversal",
                 "nodes": [
-                    {"id": "u", "entity": "User"},
+                    {"id": "u", "entity": "User", "node_ids": [1]},
                     {"id": "p", "entity": "Project"}
                 ],
                 "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
@@ -3860,6 +4207,95 @@ mod tests {
         assert!(
             !has_union(&q.from),
             "single-table ontology should not produce UNION ALL in FROM"
+        );
+    }
+
+    #[test]
+    fn traversal_id_range_generates_cte() {
+        let mut input = validated_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Should have a _nf_u CTE from the id_range
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_u"),
+            "id_range on node should generate a _nf CTE; got CTEs: {:?}",
+            q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+
+        // The CTE should contain range predicates
+        let cte = q.ctes.iter().find(|c| c.name == "_nf_u").unwrap();
+        let sql = format!("{:?}", cte.query.where_clause);
+        assert!(
+            sql.contains("Ge") && sql.contains("Le"),
+            "CTE should contain range conditions, got: {sql}"
+        );
+    }
+
+    #[test]
+    fn aggregation_id_range_on_target_generates_cte() {
+        // id_range on a non-group-by target node should generate a _nf CTE
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 100}}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "c"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        assert!(
+            q.ctes.iter().any(|c| c.name == "_nf_n"),
+            "id_range on non-group-by node should generate a _nf CTE; got CTEs: {:?}",
+            q.ctes.iter().map(|c| &c.name).collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn aggregation_id_range_on_group_by_uses_where() {
+        // id_range on a group-by node: no CTE, but WHERE should contain range
+        let mut input = validated_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 100}},
+                {"id": "n", "entity": "Note"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "n"}],
+            "aggregations": [{"function": "count", "target": "n", "group_by": "u", "alias": "c"}],
+            "limit": 10
+        }"#,
+        );
+
+        let Node::Query(q) = lower(&mut input).unwrap() else {
+            panic!("expected Query");
+        };
+
+        // Group-by nodes don't get CTEs — conditions go to WHERE via build_where
+        let sql = format!("{:?}", q.where_clause);
+        assert!(
+            sql.contains("Ge") && sql.contains("Le"),
+            "WHERE should contain range conditions for group-by node, got: {sql}"
         );
     }
 }

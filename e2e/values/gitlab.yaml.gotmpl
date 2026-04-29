@@ -6,7 +6,7 @@ global:
   # subscription/activation client at the staging portal. Applied to every Rails
   # component (webservice, sidekiq, toolbox, migrations) so the license is
   # decryptable from first boot. The activation itself is performed by
-  # scripts/activate-license.sh after gitlab is Ready.
+  # scripts/bootstrap-instance.sh after gitlab is Ready.
   extraEnv:
     GITLAB_LICENSE_MODE: "test"
     CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
@@ -15,6 +15,12 @@ global:
     # regular migrations but left PDMs for the async background runner. Only
     # safe in ephemeral test environments; production must leave this unset.
     BYPASS_POST_DEPLOYMENT: "true"
+    # Enable the Security Manager built-in role (access_level=25). Gated by
+    # Gitlab::Security::SecurityManagerConfig.enabled? -> reads this env var.
+    # Without it, POST /api/v4/groups/:id/members rejects access_level=25 with
+    # "is not included in the list", which the role-scoped authz e2e suite
+    # exercises as the threshold case below Developer (=30).
+    GITLAB_SECURITY_MANAGER_ROLE: "true"
   hosts:
     domain: e2e.local
     https: false
@@ -37,6 +43,25 @@ global:
       jwtSecret:
         secret: gitlab-knowledge-graph-jwt
         key: knowledge_graph_jwt_shared_key
+    # Object storage disabled — chart v10 removed bundled MinIO and no e2e
+    # test exercises features that need it. Each type is set to enabled:false
+    # so the chart's _checkConfig_object_storage validation passes.
+    object_store:
+      enabled: false
+    artifacts:
+      enabled: false
+    lfs:
+      enabled: false
+    uploads:
+      enabled: false
+    packages:
+      enabled: false
+    dependencyProxy:
+      enabled: false
+    terraformState:
+      enabled: false
+    externalDiffs:
+      enabled: false
   certificates:
     customCAs:
       - secret: gkg-grpc-ca
@@ -51,7 +76,7 @@ global:
       url: "http://clickhouse.e2e-{{ requiredEnv "E2E_SHA" }}-clickhouse.svc.cluster.local:8123"
 
   minio:
-    enabled: true
+    enabled: false
   kas:
     enabled: false
   pages:
@@ -61,10 +86,26 @@ global:
   shell:
     port: 32022
 
+  # Standalone bitnami/postgresql release in this same namespace (see
+  # postgresql release in helmfile.yaml.gotmpl). fullnameOverride keeps the
+  # service name unchanged from the previously-bundled subchart.
   psql:
+    host: gitlab-postgresql.e2e-{{ requiredEnv "E2E_SHA" }}-gitlab.svc.cluster.local
+    port: 5432
+    database: gitlabhq_production
+    username: gitlab
     password:
       secret: gitlab-postgresql-password
       key: postgresql-password
+
+  # Standalone bitnami/redis release in this same namespace.
+  redis:
+    host: gitlab-redis-master.e2e-{{ requiredEnv "E2E_SHA" }}-gitlab.svc.cluster.local
+    port: 6379
+    auth:
+      enabled: true
+      secret: gitlab-redis-password
+      key: redis-password
 
 upgradeCheck:
   enabled: false
@@ -73,6 +114,12 @@ installCertmanager: false
 
 certmanager:
   install: false
+
+# Required by chart 9.11.2+ even when certmanager.install=false: the
+# certmanager-issuer subchart's configmap template asserts email is set
+# regardless of install gates, so a placeholder unblocks the helm install.
+certmanager-issuer:
+  email: e2e@gitlab-knowledge-graph.invalid
 
 nginx-ingress:
   enabled: false
@@ -109,7 +156,7 @@ gitlab:
     resources:
       requests:
         cpu: 300m
-        memory: 2Gi
+        memory: 1Gi
       limits:
         cpu: 4
         memory: 6Gi
@@ -143,8 +190,15 @@ gitlab:
         cpu: 100m
         memory: 1Gi
       limits:
-        cpu: 1
-        memory: 3Gi
+        cpu: 2
+        memory: 4Gi
+    # Backups are never run in e2e but the chart's _checkConfig requires a
+    # backup target when bundled MinIO is disabled. Setting backend=gcs is the
+    # one path that satisfies the check without requiring a real secret
+    # (Workload Identity exemption — see _checkConfig_toolbox.tpl).
+    backups:
+      objectStorage:
+        backend: gcs
   gitlab-exporter:
     enabled: false
   kas:
@@ -168,51 +222,11 @@ gitlab:
         cpu: 2
         memory: 4Gi
 
+# Bundled postgresql and redis subcharts removed in chart v10. They live as
+# standalone bitnami releases now — see e2e/values/{postgresql,redis}.yaml.gotmpl
+# and the helmfile.
 postgresql:
-  install: true
-  primary:
-    # Tuned for an ephemeral test cluster that's torn down between runs.
-    # The fsync/full_page_writes/synchronous_commit trio trades crash safety
-    # for raw write throughput (PG docs pair these explicitly). WAL is still
-    # produced normally so logical replication to Siphon is unaffected. The
-    # *_work_mem bumps speed up the CREATE INDEX / ALTER TABLE wave that
-    # dominates a first-time migration.
-    extendedConfiguration: |
-      wal_level = logical
-      max_replication_slots = 4
-      max_wal_senders = 4
-
-      fsync = off
-      synchronous_commit = off
-      full_page_writes = off
-
-      checkpoint_timeout = 30min
-      max_wal_size = 2GB
-
-      maintenance_work_mem = 256MB
-      shared_buffers = 256MB
-      work_mem = 32MB
-    persistence:
-      size: 10Gi
-    resources:
-      requests:
-        cpu: 250m
-        memory: 512Mi
-      limits:
-        cpu: 2
-        memory: 2Gi
-    # GitLab chart hardcodes initdb.scriptsConfigMap — custom scripts via
-    # initdb.scripts are ignored. Siphon PG setup runs via pg-cdc-setup helm chart.
+  install: false
 
 redis:
-  install: true
-  master:
-    persistence:
-      enabled: false
-    resources:
-      requests:
-        cpu: 100m
-        memory: 256Mi
-      limits:
-        cpu: 500m
-        memory: 512Mi
+  install: false

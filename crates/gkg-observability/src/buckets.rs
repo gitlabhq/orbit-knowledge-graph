@@ -10,6 +10,12 @@ pub const LATENCY: &[f64] = &[
     0.005, 0.01, 0.025, 0.05, 0.075, 0.1, 0.25, 0.5, 0.75, 1.0, 2.5, 5.0, 7.5, 10.0,
 ];
 
+/// Coarse pipeline buckets (100 ms to 5 min). For operations that routinely
+/// exceed 10 s: project indexing, repository fetch, full pipeline runs.
+pub const LATENCY_SLOW: &[f64] = &[
+    0.1, 0.5, 1.0, 2.5, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0,
+];
+
 /// Tighter latency buckets for Gitaly, content resolution, and other
 /// sub-second RPC paths.
 pub const LATENCY_FAST: &[f64] = &[

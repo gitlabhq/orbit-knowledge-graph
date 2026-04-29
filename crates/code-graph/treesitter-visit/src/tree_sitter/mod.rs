@@ -76,7 +76,7 @@ impl<L: LanguageExt> StrDoc<L> {
                     let offset = state.current_byte_offset() as u64;
                     if offset == last_offset.load(Ordering::Relaxed) {
                         if stall_count.fetch_add(1, Ordering::Relaxed) >= max_stall {
-                            log::warn!(
+                            tracing::warn!(
                                 "tree-sitter parse aborted: stalled at byte offset {offset} \
                                  (>{max_stall} iterations without progress)"
                             );

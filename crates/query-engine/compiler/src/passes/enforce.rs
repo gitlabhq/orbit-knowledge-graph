@@ -136,7 +136,7 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
             .iter()
             .filter_map(|agg| agg.group_by.as_deref())
             .collect(),
-        QueryType::Traversal | QueryType::Search | QueryType::Neighbors => {
+        QueryType::Traversal | QueryType::Neighbors => {
             input.nodes.iter().map(|n| n.id.as_str()).collect()
         }
         QueryType::PathFinding | QueryType::Hydration => HashSet::new(),
@@ -204,10 +204,13 @@ fn enforce_return_columns(
     let select_len_before = q.select.len();
     // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
     // because the center edge column differs per direction.
+    // Search-shaped traversal (1 node, 0 rels) uses table-centric columns
+    // like search, not edge-centric. The lowerer produces a flat table scan
+    // without populating node_edge_col.
     let globally_edge_centric = matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Neighbors
-    );
+    ) && !input.is_search();
     let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
@@ -377,7 +380,7 @@ fn enforce_return_columns(
 mod tests {
     use super::*;
     use crate::ast::{JoinType, TableRef};
-    use crate::input::{InputNode, QueryType};
+    use crate::input::{CompilerMetadata, InputNode, QueryType};
 
     fn has_scan(t: &TableRef, tbl: &str) -> bool {
         match t {
@@ -388,9 +391,24 @@ mod tests {
         }
     }
 
+    /// Single-node traversal (search shape) for table-centric enforce tests.
     fn test_input() -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "u".to_string(),
+                entity: Some("User".to_string()),
+                table: Some("gl_user".to_string()),
+                ..Default::default()
+            }],
+            ..Input::default()
+        }
+    }
+
+    /// Two-node input for tests that need multiple selectable nodes.
+    fn test_input_two_nodes() -> Input {
+        Input {
+            query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "u".to_string(),
@@ -405,8 +423,20 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            compiler: CompilerMetadata {
+                node_edge_col: [
+                    ("u".into(), ("e0".into(), "source_id".into())),
+                    ("p".into(), ("e0".into(), "target_id".into())),
+                ]
+                .into(),
+                ..Default::default()
+            },
             ..Input::default()
         }
+    }
+
+    fn single_table_from() -> TableRef {
+        TableRef::scan("gl_user", "u")
     }
 
     fn two_table_from() -> TableRef {
@@ -436,7 +466,7 @@ mod tests {
             ..Default::default()
         };
 
-        let input = test_input();
+        let input = test_input_two_nodes();
         let mut node = Node::Query(Box::new(query));
 
         enforce_return(&mut node, &input).unwrap();
@@ -485,7 +515,7 @@ mod tests {
             ..Default::default()
         };
 
-        let input = test_input();
+        let input = test_input_two_nodes();
         let mut node = Node::Query(Box::new(query));
 
         enforce_return(&mut node, &input).unwrap();
@@ -508,7 +538,7 @@ mod tests {
                 expr: Expr::col("u", "username"),
                 alias: Some("name".into()),
             }],
-            from: two_table_from(),
+            from: single_table_from(),
             limit: Some(30),
             ..Default::default()
         };
@@ -522,12 +552,10 @@ mod tests {
             panic!("expected Query")
         };
 
-        assert_eq!(q.select.len(), 5);
+        assert_eq!(q.select.len(), 3);
         assert_eq!(q.select[0].alias, Some("name".into()));
         assert_eq!(q.select[1].alias, Some("_gkg_u_id".into()));
         assert_eq!(q.select[2].alias, Some("_gkg_u_type".into()));
-        assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
-        assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
 
         if let Expr::Column { table, column } = &q.select[1].expr {
             assert_eq!(table, "u");
@@ -570,7 +598,7 @@ mod tests {
 
     #[test]
     fn builds_result_context() {
-        let input = test_input();
+        let input = test_input_two_nodes();
         let query = Query {
             select: vec![],
             from: two_table_from(),
@@ -810,7 +838,7 @@ mod tests {
         }));
 
         let input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![
                 InputNode {
                     id: "d".to_string(),
@@ -826,6 +854,14 @@ mod tests {
                     ..Default::default()
                 },
             ],
+            compiler: CompilerMetadata {
+                node_edge_col: [
+                    ("d".into(), ("e0".into(), "source_id".into())),
+                    ("p".into(), ("e0".into(), "target_id".into())),
+                ]
+                .into(),
+                ..Default::default()
+            },
             limit: 10,
             ..Input::default()
         };
@@ -838,17 +874,22 @@ mod tests {
 
         assert_eq!(q.select.len(), 5);
 
-        // Definition: pk column (d.id) + auth id column (d.project_id) + type literal
+        // Definition (edge-centric, non-default redaction): pk = edge col,
+        // auth id = joined d.project_id, type = literal
         assert_eq!(q.select[0].alias, Some("_gkg_d_pk".into()));
-        assert!(matches!(&q.select[0].expr, Expr::Column { column, .. } if column == "id"));
+        assert!(
+            matches!(&q.select[0].expr, Expr::Column { table, column } if table == "e0" && column == "source_id")
+        );
         assert_eq!(q.select[1].alias, Some("_gkg_d_id".into()));
         assert!(matches!(&q.select[1].expr, Expr::Column { column, .. } if column == "project_id"));
         assert_eq!(q.select[2].alias, Some("_gkg_d_type".into()));
         assert!(matches!(&q.select[2].expr, Expr::Param { value, .. } if value == "Definition"));
 
-        // Project: default id column + type literal (no separate pk needed)
+        // Project (edge-centric, default redaction): id = edge col, type = literal
         assert_eq!(q.select[3].alias, Some("_gkg_p_id".into()));
-        assert!(matches!(&q.select[3].expr, Expr::Column { column, .. } if column == "id"));
+        assert!(
+            matches!(&q.select[3].expr, Expr::Column { table, column } if table == "e0" && column == "target_id")
+        );
         assert_eq!(q.select[4].alias, Some("_gkg_p_type".into()));
         assert!(matches!(&q.select[4].expr, Expr::Param { value, .. } if value == "Project"));
 
@@ -892,6 +933,8 @@ mod tests {
                 to: "end".to_string(),
                 max_depth: 3,
                 rel_types: vec![],
+                forward_first_hop_rel_types: vec![],
+                backward_first_hop_rel_types: vec![],
             }),
             ..Input::default()
         };
@@ -939,7 +982,7 @@ mod tests {
     #[test]
     fn default_entity_does_not_emit_pk_column() {
         let input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "p".to_string(),
                 entity: Some("Project".to_string()),
@@ -1213,13 +1256,22 @@ mod tests {
 
     #[test]
     fn traversal_node_without_edge_mapping_returns_error() {
+        // Multi-node traversal: node "x" is selectable but has no edge mapping.
         let input = traversal_input_with_edge_col(
-            vec![InputNode {
-                id: "x".to_string(),
-                entity: Some("User".to_string()),
-                table: Some("gl_user".to_string()),
-                ..Default::default()
-            }],
+            vec![
+                InputNode {
+                    id: "x".to_string(),
+                    entity: Some("User".to_string()),
+                    table: Some("gl_user".to_string()),
+                    ..Default::default()
+                },
+                InputNode {
+                    id: "y".to_string(),
+                    entity: Some("Project".to_string()),
+                    table: Some("gl_project".to_string()),
+                    ..Default::default()
+                },
+            ],
             HashMap::new(),
         );
 

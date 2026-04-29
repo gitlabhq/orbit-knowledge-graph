@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use arrow::array::{BooleanArray, Int64Array, StringArray};
+use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
 use gkg_utils::arrow::ArrowUtils;
@@ -53,6 +53,107 @@ async fn indexes_repository() {
     // Nested files should not have direct Branch --CONTAINS--> File edges
     assert_edge_count_for_traversal_path(&clickhouse, "CONTAINS", "Branch", "File", "/test", 0)
         .await;
+}
+
+/// End-to-end test for CALLS and EXTENDS edges:
+/// indexes Java code with class inheritance and a method call, then
+/// queries `gl_code_edge` to verify both relationship kinds were written.
+#[tokio::test]
+async fn indexes_calls_and_extends_edges() {
+    let project_id: i64 = 99;
+    let commit_sha = "callsdef";
+    let traversal_path = "1/99";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[(
+            "src/Zoo.java",
+            "public class Animal {
+                public void speak() {}
+            }
+            public class Dog extends Animal {
+                public void fetch() { speak(); }
+            }",
+        )],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        traversal_path,
+    )
+    .await;
+
+    // Both edges land in gl_code_edge per ontology routing
+    // (the schema version prefix is added at runtime).
+    let ontology = integration_testkit::load_ontology();
+    let calls_table = ontology.edge_table_for_relationship("CALLS");
+    let extends_table = ontology.edge_table_for_relationship("EXTENDS");
+    assert!(
+        calls_table.ends_with("gl_code_edge"),
+        "CALLS must route to gl_code_edge, got {calls_table}"
+    );
+    assert!(
+        extends_table.ends_with("gl_code_edge"),
+        "EXTENDS must route to gl_code_edge, got {extends_table}"
+    );
+
+    let calls = count_active_edges(&clickhouse, project_id, "CALLS").await;
+    assert!(
+        calls >= 1,
+        "expected at least one CALLS edge for fetch()->speak(), got {calls}"
+    );
+
+    let extends = count_active_edges(&clickhouse, project_id, "EXTENDS").await;
+    assert!(
+        extends >= 1,
+        "expected at least one EXTENDS edge for Dog extends Animal, got {extends}"
+    );
+
+    // Now run a real query through the compiler against the indexed data:
+    // CALLS traversal Definition -> Definition. The compiler resolves the
+    // CALLS edge through the embedded ontology (proves schema.yaml
+    // registration works) and the SQL must hit gl_code_edge.
+    let json = format!(
+        r#"{{
+        "query_type": "traversal",
+        "nodes": [
+            {{"id": "caller", "entity": "Definition", "filters": {{"project_id": {project_id}}}, "columns": ["name", "fqn"]}},
+            {{"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}}
+        ],
+        "relationships": [{{"type": "CALLS", "from": "caller", "to": "callee"}}],
+        "limit": 25
+    }}"#
+    );
+    let json = json.as_str();
+    let security_ctx = compiler::SecurityContext::new(1, vec!["1/".into()])
+        .expect("security context")
+        .with_role(true, None);
+    let compiled = compiler::compile(json, &ontology, &security_ctx).expect("CALLS query compiles");
+    let sql = compiled.base.render();
+    assert!(
+        sql.contains("gl_code_edge"),
+        "compiled CALLS query must scan gl_code_edge (table: {calls_table}): {sql}"
+    );
+    let rows = clickhouse.query(&sql).await;
+    let total: usize = rows.iter().map(|b| b.num_rows()).sum();
+    assert!(
+        total >= 1,
+        "compiled CALLS query should return at least one row, got {total}"
+    );
 }
 
 #[tokio::test]
@@ -337,6 +438,93 @@ async fn does_not_checkpoint_or_stale_delete_when_writer_fails() {
             .as_deref()
             .is_some_and(|error| error.contains("fatal code indexing pipeline error")),
         "failed run should record the fatal pipeline error in indexing progress, got {progress:?}"
+    );
+}
+
+#[tokio::test]
+async fn empty_200_archive_checkpoints_as_empty_repository() {
+    let project_id: i64 = 7;
+    let traversal_path = "/empty-archive-test";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project_with_empty_archive(project_id, "main");
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    let context = handler_context(&clickhouse);
+    let envelope = code_indexing_task_envelope(project_id, "abc123", 11, traversal_path);
+
+    let result = handler.handle(context, envelope).await;
+    assert!(
+        result.is_ok(),
+        "empty 200 archive should ack on first attempt, got {:?}",
+        result
+    );
+
+    // Checkpoint is set with no commit, marking the project as indexed-empty.
+    let checkpoint_rows = clickhouse
+        .query(&format!(
+            "SELECT last_task_id, last_commit FROM {} FINAL \
+             WHERE traversal_path = '{traversal_path}' AND project_id = {project_id} \
+             AND branch = 'main' AND _deleted = false",
+            t("code_indexing_checkpoint")
+        ))
+        .await;
+    let batch = checkpoint_rows
+        .first()
+        .expect("checkpoint row must exist after empty-archive ack");
+    assert_eq!(batch.num_rows(), 1, "expected exactly one checkpoint row");
+    let task_ids = ArrowUtils::get_column_by_name::<Int64Array>(batch, "last_task_id")
+        .expect("last_task_id column");
+    assert_eq!(task_ids.value(0), 11);
+    let last_commits = ArrowUtils::get_column_by_name::<StringArray>(batch, "last_commit")
+        .expect("last_commit column");
+    assert!(
+        last_commits.is_null(0) || last_commits.value(0).is_empty(),
+        "empty-archive checkpoint should record no commit, got {:?}",
+        last_commits.value(0)
+    );
+
+    // No graph rows should have been written for this project.
+    let files = clickhouse
+        .query(&format!(
+            "SELECT path FROM {} WHERE project_id = {project_id}",
+            t("gl_file")
+        ))
+        .await;
+    assert!(
+        files.first().is_none_or(|b| b.num_rows() == 0),
+        "no files should be written for an empty-archive project"
+    );
+    let definitions = clickhouse
+        .query(&format!(
+            "SELECT name FROM {} WHERE project_id = {project_id}",
+            t("gl_definition")
+        ))
+        .await;
+    assert!(
+        definitions.first().is_none_or(|b| b.num_rows() == 0),
+        "no definitions should be written for an empty-archive project"
+    );
+    let ontology = integration_testkit::load_ontology();
+    let defines_edges = clickhouse
+        .query(&format!(
+            "SELECT source_id FROM {} \
+             WHERE relationship_kind = 'DEFINES' \
+             AND source_id IN (SELECT id FROM {} WHERE project_id = {project_id})",
+            ontology.edge_table_for_relationship("DEFINES"),
+            t("gl_definition")
+        ))
+        .await;
+    assert!(
+        defines_edges.first().is_none_or(|b| b.num_rows() == 0),
+        "no DEFINES edges should be written for an empty-archive project"
     );
 }
 

@@ -15,8 +15,8 @@ pub(super) async fn cursor_first_page(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -33,8 +33,8 @@ pub(super) async fn cursor_second_page(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 2}
@@ -51,8 +51,8 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 4, "page_size": 10}
@@ -61,17 +61,17 @@ pub(super) async fn cursor_last_page_partial(ctx: &TestContext) {
     )
     .await;
 
-    // 6 users total, offset=4 → users 5, 6
-    resp.assert_node_count(2);
-    resp.assert_node_order("User", &[5, 6]);
+    // 7 users total, offset=4 → users 5, 6, 7
+    resp.assert_node_count(3);
+    resp.assert_node_order("User", &[5, 6, 7]);
 }
 
 pub(super) async fn cursor_offset_beyond_data(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User"},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             "limit": 100,
             "cursor": {"offset": 50, "page_size": 10}
         }"#,
@@ -91,8 +91,8 @@ pub(super) async fn cursor_with_filter(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -111,8 +111,8 @@ pub(super) async fn cursor_with_filter_second_page(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
@@ -141,8 +141,8 @@ pub(super) async fn cursor_with_redaction(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 0, "page_size": 2}
@@ -164,8 +164,8 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"]},
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
             "order_by": {"node": "u", "property": "id", "direction": "ASC"},
             "limit": 100,
             "cursor": {"offset": 2, "page_size": 10}
@@ -184,17 +184,17 @@ pub(super) async fn cursor_with_redaction_second_page(ctx: &TestContext) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 6 users in pages of 2, collecting IDs from each page.
+    // Page through all 7 users in pages of 2, collecting IDs from each page.
     let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
         let json = format!(
             r#"{{
-                "query_type": "search",
-                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
-                "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
-                "limit": 100,
-                "cursor": {{"offset": {offset}, "page_size": 2}}
+                "query_type": "traversal",
+"node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+                 "order_by": {{"node": "u", "property": "id", "direction": "ASC"}},
+                 "limit": 100,
+                 "cursor": {{"offset": {offset}, "page_size": 2}}
             }}"#
         );
 
@@ -221,7 +221,7 @@ pub(super) async fn cursor_pages_cover_all_data(ctx: &TestContext) {
 
     assert_eq!(
         all_ids,
-        vec![1, 2, 3, 4, 5, 6],
+        vec![1, 2, 3, 4, 5, 6, 7],
         "pages should cover all users in order"
     );
 }
@@ -238,7 +238,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -259,7 +259,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -286,7 +286,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -310,7 +310,7 @@ pub(super) async fn cursor_traversal(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "u", "entity": "User"},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
                 {"id": "g", "entity": "Group"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -337,8 +337,8 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
     // Without explicit order_by, cursor queries now inject a default ORDER BY id ASC.
     // Run the same query twice and verify identical results.
     let query = r#"{
-        "query_type": "search",
-        "node": {"id": "u", "entity": "User", "columns": ["username"]},
+        "query_type": "traversal",
+        "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
         "limit": 100,
         "cursor": {"offset": 0, "page_size": 3}
     }"#;
@@ -358,17 +358,17 @@ pub(super) async fn cursor_without_order_by_is_deterministic(ctx: &TestContext) 
 }
 
 pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestContext) {
-    // Page through all 6 users in pages of 2 without explicit order_by.
+    // Page through all 7 users in pages of 2 without explicit order_by.
     // The default ORDER BY id ASC should give stable, non-overlapping pages.
     let mut all_ids: Vec<i64> = Vec::new();
 
     for offset in (0u32..).step_by(2) {
         let json = format!(
             r#"{{
-                "query_type": "search",
-                "node": {{"id": "u", "entity": "User", "columns": ["username"]}},
-                "limit": 100,
-                "cursor": {{"offset": {offset}, "page_size": 2}}
+                "query_type": "traversal",
+"node": {{"id": "u", "entity": "User", "id_range": {{"start": 1, "end": 10000}}, "columns": ["username"]}},
+                 "limit": 100,
+                 "cursor": {{"offset": {offset}, "page_size": 2}}
             }}"#
         );
 
@@ -392,7 +392,7 @@ pub(super) async fn cursor_without_order_by_pages_cover_all_data(ctx: &TestConte
 
     assert_eq!(
         all_ids,
-        vec![1, 2, 3, 4, 5, 6],
+        vec![1, 2, 3, 4, 5, 6, 7],
         "pages without explicit order_by should cover all users in id-ascending order"
     );
 }
@@ -401,7 +401,7 @@ pub(super) async fn cursor_traversal_without_order_by_is_deterministic(ctx: &Tes
     let query = r#"{
         "query_type": "traversal",
         "nodes": [
-            {"id": "u", "entity": "User"},
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}},
             {"id": "g", "entity": "Group"}
         ],
         "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -433,7 +433,7 @@ pub(super) async fn cursor_aggregation_without_sort_is_deterministic(ctx: &TestC
     let query = r#"{
         "query_type": "aggregation",
         "nodes": [
-            {"id": "u", "entity": "User", "columns": ["id", "username"]},
+            {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["id", "username"]},
             {"id": "mr", "entity": "MergeRequest"}
         ],
         "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],

@@ -631,10 +631,10 @@ impl CodeGraph {
 
     pub fn def(&self, idx: NodeIndex) -> &GraphDef {
         self.try_def(idx).unwrap_or_else(|| {
-            panic!(
-                "Expected Definition at {:?}, got {:?}",
-                idx, self.graph[idx]
-            )
+            std::panic::panic_any(crate::v2::error::CodeGraphError::UnexpectedNodeType {
+                expected: "Definition",
+                got: format!("{:?} at {idx:?}", self.graph[idx]),
+            })
         })
     }
 
@@ -646,8 +646,12 @@ impl CodeGraph {
     }
 
     pub fn import(&self, idx: NodeIndex) -> &GraphImport {
-        self.try_import(idx)
-            .unwrap_or_else(|| panic!("Expected Import at {:?}, got {:?}", idx, self.graph[idx]))
+        self.try_import(idx).unwrap_or_else(|| {
+            std::panic::panic_any(crate::v2::error::CodeGraphError::UnexpectedNodeType {
+                expected: "Import",
+                got: format!("{:?} at {idx:?}", self.graph[idx]),
+            })
+        })
     }
 
     /// Returns the definition name as `&str`.
@@ -910,7 +914,8 @@ fn dir_to_string(dir: &Path) -> String {
 fn compute_id(components: &[&str]) -> i64 {
     let mut hasher = FxHasher::default();
     components.hash(&mut hasher);
-    hasher.finish() as i64
+    // Mask clears the sign bit so the result is always a positive i64.
+    (hasher.finish() & 0x7FFF_FFFF_FFFF_FFFF) as i64
 }
 
 // ── Arrow serialization ─────────────────────────────────────────
@@ -1292,6 +1297,36 @@ mod tests {
     }
 
     #[test]
+    fn compute_id_is_always_non_negative() {
+        // Inputs hand-picked because their unmasked FxHash output has
+        // the high bit set, which used to produce negative i64 ids.
+        let cases: &[&[&str]] = &[
+            &[
+                "1",
+                "main",
+                "def",
+                "src/lib.rs",
+                "lower_traversal_edge_only",
+                "100:120",
+            ],
+            &[
+                "42",
+                "feature/x",
+                "def",
+                "internal/foo.go",
+                "main.Dup",
+                "200:220",
+            ],
+            &["7", "main", "def", "a.py", "pkg.A.method", "0:5"],
+            &["999", "release/1", "branch", "main", "", "0:0"],
+        ];
+        for components in cases {
+            let id = compute_id(components);
+            assert!(id >= 0, "compute_id({components:?}) returned {id}");
+        }
+    }
+
+    #[test]
     fn assign_ids_distinguishes_imports_sharing_path_in_same_file() {
         // Regression: v2 Import ids previously hashed only
         // (project_id, branch, file_path, import_path, name|"*"),
@@ -1334,5 +1369,43 @@ mod tests {
 
         assert_eq!(import_ids.len(), 2);
         assert_ne!(import_ids[0], import_ids[1]);
+    }
+
+    #[test]
+    fn def_on_import_panics_with_typed_unexpected_node_type() {
+        use crate::v2::error::CodeGraphError;
+        let mut cg = CodeGraph::new_with_root("/repo".to_string());
+        let import = CanonicalImport {
+            import_type: "NamedImport",
+            binding_kind: ImportBindingKind::Named,
+            mode: ImportMode::Declarative,
+            path: "std::fs".to_string(),
+            name: Some("read".to_string()),
+            alias: None,
+            scope_fqn: None,
+            range: Range::new(Position::new(0, 0), Position::new(0, 10), (0, 10)),
+            is_type_only: false,
+            wildcard: false,
+        };
+        let (_, _, import_nodes) =
+            cg.add_file("/repo/x.rs", "rs", Language::Python, 1, &[], &[import]);
+        let import_idx = import_nodes[0];
+
+        let payload = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let _ = cg.def(import_idx);
+        }))
+        .expect_err("def() on Import index must panic");
+
+        let typed = payload
+            .downcast::<CodeGraphError>()
+            .expect("panic payload should be a CodeGraphError");
+        assert!(matches!(
+            *typed,
+            CodeGraphError::UnexpectedNodeType {
+                expected: "Definition",
+                ..
+            }
+        ));
+        assert_eq!(typed.stage(), "graph_node");
     }
 }

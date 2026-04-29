@@ -36,8 +36,9 @@ where
         let v = validate::Validator::new(ontology);
         let value = v.check_json(json)?;
         v.check_ontology(&value)?;
-        let input: Input = serde_json::from_value(value)?;
+        let mut input: Input = serde_json::from_value(value)?;
         v.check_references(&input)?;
+        v.annotate_filter_types(&mut input);
         state.set_input(input);
         Ok(())
     }
@@ -133,14 +134,14 @@ pub struct SecurityPass;
 
 impl<E, S> CompilerPass<E, S> for SecurityPass
 where
-    E: PipelineEnv + HasSecurityCtx,
+    E: PipelineEnv + HasSecurityCtx + HasOntology,
     S: PipelineState + HasNode,
 {
     const NAME: &'static str = "security";
 
     fn run(&self, env: &E, state: &mut S) -> Result<()> {
         let node = state.node_mut()?;
-        security::apply_security_context(node, env.security_ctx())
+        security::apply_security_context(node, env.security_ctx(), env.ontology())
     }
 }
 

@@ -12,7 +12,7 @@ fn compile_query(json: &str) -> query_engine::compiler::CompiledQueryContext {
 #[test]
 fn search_with_wildcard_excludes_virtual_columns_from_sql() {
     let compiled = compile_query(
-        r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": "*"}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}, "limit": 5}"#,
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -28,7 +28,7 @@ fn search_with_wildcard_excludes_virtual_columns_from_sql() {
 #[test]
 fn search_with_explicit_content_excludes_from_sql() {
     let compiled = compile_query(
-        r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "content"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}, "limit": 5}"#,
     );
     let sql = &compiled.base.sql;
     assert!(
@@ -41,7 +41,7 @@ fn search_with_explicit_content_excludes_from_sql() {
 #[test]
 fn search_with_content_produces_hydration_plan() {
     let compiled = compile_query(
-        r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "content"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]}, "limit": 5}"#,
     );
     match &compiled.hydration {
         HydrationPlan::Static(templates) => {
@@ -76,7 +76,7 @@ fn search_with_content_produces_hydration_plan() {
 #[test]
 fn search_without_content_has_no_hydration_plan() {
     let compiled = compile_query(
-        r#"{"query_type": "search", "node": {"id": "f", "entity": "File", "columns": ["id", "name", "path"]}, "limit": 5}"#,
+        r#"{"query_type": "traversal", "node": {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "path"]}, "limit": 5}"#,
     );
     assert!(
         matches!(&compiled.hydration, HydrationPlan::None),
@@ -90,7 +90,7 @@ fn aggregation_with_content_produces_hydration_plan() {
     let compiled = compile_query(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "f", "entity": "File", "columns": ["id", "content"]}],
+            "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "content"]}],
             "aggregations": [{"function": "count", "target": "f", "alias": "total"}],
             "limit": 5
         }"#,
@@ -116,7 +116,7 @@ fn aggregation_with_wildcard_excludes_virtual_columns_from_sql() {
     let compiled = compile_query(
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "f", "entity": "File", "columns": "*"}],
+            "nodes": [{"id": "f", "entity": "File", "node_ids": [1], "columns": "*"}],
             "aggregations": [{"function": "count", "target": "f", "alias": "total"}],
             "limit": 5
         }"#,
@@ -134,7 +134,7 @@ fn traversal_with_content_includes_virtual_in_hydration_plan() {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "f", "entity": "File", "columns": ["id", "name", "content"]},
+                {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "name", "content"]},
                 {"id": "b", "entity": "Branch", "columns": ["id", "name"]}
             ],
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
@@ -172,7 +172,7 @@ fn traversal_hydration_injects_depends_on_columns() {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "b", "entity": "Branch", "columns": ["id", "name"]},
+                {"id": "b", "entity": "Branch", "node_ids": [1], "columns": ["id", "name"]},
                 {"id": "f", "entity": "File", "columns": ["id", "content"]}
             ],
             "relationships": [{"type": "ON_BRANCH", "from": "f", "to": "b"}],
@@ -205,7 +205,7 @@ fn definition_content_also_handled() {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "f", "entity": "File", "columns": ["id", "path"]},
+                {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "path"]},
                 {"id": "def", "entity": "Definition", "columns": ["id", "name", "content"]}
             ],
             "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],
@@ -249,7 +249,7 @@ fn multiple_virtual_entities_in_same_query() {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "f", "entity": "File", "columns": ["id", "path", "content"]},
+                {"id": "f", "entity": "File", "node_ids": [1], "columns": ["id", "path", "content"]},
                 {"id": "def", "entity": "Definition", "columns": ["id", "name", "content"]}
             ],
             "relationships": [{"type": "DEFINES", "from": "f", "to": "def"}],

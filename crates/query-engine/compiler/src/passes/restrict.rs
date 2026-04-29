@@ -209,7 +209,7 @@ mod tests {
 
     fn input_with_columns(cols: Vec<&str>) -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -229,10 +229,11 @@ mod tests {
             InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(value),
+                ..Default::default()
             },
         );
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -321,7 +322,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: None,
@@ -335,7 +336,7 @@ mod tests {
 
     fn input_with_order_by(property: &str) -> Input {
         Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -512,6 +513,7 @@ mod tests {
             InputFilter {
                 op: Some(FilterOp::Eq),
                 value: Some(Value::String("bob".into())),
+                ..Default::default()
             },
         );
         let err = restrict(&mut input, &ont, &ctx).unwrap_err();
@@ -571,7 +573,7 @@ mod tests {
         let ont = ontology();
         let ctx = non_admin_ctx();
         let mut input = Input {
-            query_type: QueryType::Search,
+            query_type: QueryType::Traversal,
             nodes: vec![InputNode {
                 id: "_u".into(),
                 entity: Some("User".into()),
@@ -585,5 +587,184 @@ mod tests {
             err.to_string().contains("normalization"),
             "should reference normalization: {err}"
         );
+    }
+
+    // ── Real-ontology coverage for User admin-only columns ────────────────
+    //
+    // The synthetic ontology above only declares is_admin/is_auditor as
+    // admin_only. These tests load the embedded production ontology so any
+    // future drift in user.yaml is caught here, in addition to the pin test
+    // in the ontology crate.
+
+    const USER_ADMIN_ONLY_COLUMNS: &[&str] = &[
+        "email",
+        "first_name",
+        "last_name",
+        "preferred_language",
+        "private_profile",
+        "is_external",
+        "is_admin",
+        "is_auditor",
+        "updated_at",
+    ];
+
+    fn user_filter_input(field: &str, value: Value) -> Input {
+        let mut filters = HashMap::new();
+        filters.insert(
+            field.to_string(),
+            InputFilter {
+                op: Some(FilterOp::Eq),
+                value: Some(value),
+                ..Default::default()
+            },
+        );
+        Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_u".into(),
+                entity: Some("User".into()),
+                columns: Some(ColumnSelection::List(vec!["username".into()])),
+                filters,
+                ..Default::default()
+            }],
+            ..Input::default()
+        }
+    }
+
+    fn user_order_by_input(field: &str) -> Input {
+        Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_u".into(),
+                entity: Some("User".into()),
+                columns: Some(ColumnSelection::List(vec!["username".into()])),
+                ..Default::default()
+            }],
+            order_by: Some(InputOrderBy {
+                node: "_u".into(),
+                property: field.into(),
+                direction: OrderDirection::Desc,
+            }),
+            ..Input::default()
+        }
+    }
+
+    fn sample_value(field: &str) -> Value {
+        match field {
+            "private_profile" | "is_external" | "is_admin" | "is_auditor" => Value::Bool(true),
+            "updated_at" => Value::String("2026-01-01T00:00:00Z".into()),
+            _ => Value::String("x".into()),
+        }
+    }
+
+    #[test]
+    fn real_ontology_non_admin_strips_user_admin_only_columns() {
+        let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        let ctx = non_admin_ctx();
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_u".into(),
+                entity: Some("User".into()),
+                columns: Some(ColumnSelection::List(
+                    USER_ADMIN_ONLY_COLUMNS
+                        .iter()
+                        .copied()
+                        .chain(["username", "name", "public_email"])
+                        .map(String::from)
+                        .collect(),
+                )),
+                ..Default::default()
+            }],
+            ..Input::default()
+        };
+        restrict(&mut input, &ont, &ctx).expect("restrict pass succeeds for non-admin select");
+        let cols = match &input.nodes[0].columns {
+            Some(ColumnSelection::List(c)) => c.clone(),
+            _ => panic!("expected List"),
+        };
+        for forbidden in USER_ADMIN_ONLY_COLUMNS {
+            assert!(
+                !cols.contains(&forbidden.to_string()),
+                "non-admin column selection must not retain {forbidden}: {cols:?}"
+            );
+        }
+        assert!(cols.contains(&"username".to_string()));
+        assert!(cols.contains(&"public_email".to_string()));
+    }
+
+    #[test]
+    fn real_ontology_non_admin_rejects_filter_on_each_user_admin_only_column() {
+        let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        let ctx = non_admin_ctx();
+        for field in USER_ADMIN_ONLY_COLUMNS {
+            let mut input = user_filter_input(field, sample_value(field));
+            let err = restrict(&mut input, &ont, &ctx).expect_err(field);
+            let msg = err.to_string();
+            assert!(
+                msg.contains(field) && msg.contains("administrator"),
+                "expected admin-required rejection for filter on User.{field}, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_ontology_non_admin_rejects_order_by_on_each_user_admin_only_column() {
+        let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        let ctx = non_admin_ctx();
+        for field in USER_ADMIN_ONLY_COLUMNS {
+            let mut input = user_order_by_input(field);
+            let err = restrict(&mut input, &ont, &ctx).expect_err(field);
+            let msg = err.to_string();
+            assert!(
+                msg.contains(field) && msg.contains("administrator"),
+                "expected admin-required rejection for order_by on User.{field}, got: {msg}"
+            );
+        }
+    }
+
+    #[test]
+    fn real_ontology_admin_keeps_all_user_admin_only_columns() {
+        let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        let ctx = admin_ctx();
+        let mut input = Input {
+            query_type: QueryType::Traversal,
+            nodes: vec![InputNode {
+                id: "_u".into(),
+                entity: Some("User".into()),
+                columns: Some(ColumnSelection::List(
+                    USER_ADMIN_ONLY_COLUMNS
+                        .iter()
+                        .map(|c| c.to_string())
+                        .collect(),
+                )),
+                ..Default::default()
+            }],
+            ..Input::default()
+        };
+        restrict(&mut input, &ont, &ctx).expect("admin restrict succeeds");
+        let cols = match &input.nodes[0].columns {
+            Some(ColumnSelection::List(c)) => c.clone(),
+            _ => panic!("expected List"),
+        };
+        for col in USER_ADMIN_ONLY_COLUMNS {
+            assert!(
+                cols.contains(&col.to_string()),
+                "admin must retain User.{col} in selection"
+            );
+        }
+    }
+
+    #[test]
+    fn real_ontology_admin_can_filter_each_user_admin_only_column() {
+        let ont = ontology::Ontology::load_embedded().expect("embedded ontology loads");
+        let ctx = admin_ctx();
+        for field in USER_ADMIN_ONLY_COLUMNS {
+            let mut input = user_filter_input(field, sample_value(field));
+            assert!(
+                restrict(&mut input, &ont, &ctx).is_ok(),
+                "admin must be allowed to filter on User.{field}"
+            );
+        }
     }
 }

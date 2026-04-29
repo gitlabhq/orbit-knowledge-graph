@@ -20,6 +20,10 @@ pub struct CodeMetrics {
     pub(super) files_processed: Counter<u64>,
     pub(super) nodes_indexed: Counter<u64>,
     pub(super) errors: Counter<u64>,
+    pub(super) files_skipped: Counter<u64>,
+    pub(super) file_faults: Counter<u64>,
+    pub(super) archive_entries_skipped: Counter<u64>,
+    pub(super) archive_bytes_skipped: Counter<u64>,
 }
 
 impl CodeMetrics {
@@ -44,6 +48,10 @@ impl CodeMetrics {
             files_processed: code::FILES_PROCESSED.build_counter_u64(meter),
             nodes_indexed: code::NODES_INDEXED.build_counter_u64(meter),
             errors: code::ERRORS.build_counter_u64(meter),
+            files_skipped: code::FILES_SKIPPED.build_counter_u64(meter),
+            file_faults: code::FILE_FAULTS.build_counter_u64(meter),
+            archive_entries_skipped: code::ARCHIVE_ENTRIES_SKIPPED.build_counter_u64(meter),
+            archive_bytes_skipped: code::ARCHIVE_BYTES_SKIPPED.build_counter_u64(meter),
         }
     }
 }
@@ -91,6 +99,22 @@ impl CodeMetrics {
     pub(super) fn record_nodes_indexed(&self, count: u64, kind: &'static str) {
         self.nodes_indexed
             .add(count, &[KeyValue::new(code::labels::KIND, kind)]);
+    }
+
+    pub(super) fn record_file_skipped(&self, reason: &'static str) {
+        self.files_skipped
+            .add(1, &[KeyValue::new(code::labels::REASON, reason)]);
+    }
+
+    pub(super) fn record_file_fault(&self, kind: &'static str) {
+        self.file_faults
+            .add(1, &[KeyValue::new(code::labels::KIND, kind)]);
+    }
+
+    pub(super) fn record_archive_entry_skipped(&self, reason: &'static str, bytes: u64) {
+        let labels = [KeyValue::new(code::labels::REASON, reason)];
+        self.archive_entries_skipped.add(1, &labels);
+        self.archive_bytes_skipped.add(bytes, &labels);
     }
 }
 

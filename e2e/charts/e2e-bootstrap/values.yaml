@@ -12,3 +12,7 @@ secrets:
   chGraphPass: ""
   chGraphReadPass: ""
   gitlabRootPass: ""
+  pgGitlabPass: ""
+  pgPostgresPass: ""
+  pgReplicationPass: ""
+  redisPass: ""

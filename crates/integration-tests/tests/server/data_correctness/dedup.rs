@@ -47,8 +47,8 @@ pub(super) async fn search_returns_latest_version(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "name", "state"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "name", "state"],
                      "node_ids": [9001]},
             "limit": 10
         }"#,
@@ -78,8 +78,8 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"],
                      "node_ids": [9002]},
             "limit": 10
         }"#,
@@ -152,8 +152,8 @@ pub(super) async fn search_filter_returns_latest_matching_version(ctx: &TestCont
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,
@@ -188,8 +188,8 @@ pub(super) async fn search_filter_excludes_stale_match(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
-            "node": {"id": "u", "entity": "User", "columns": ["username", "state"],
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username", "state"],
                      "filters": {"state": "active"}},
             "limit": 100
         }"#,
@@ -386,7 +386,7 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
                 {"id": "p", "entity": "Project", "node_ids": [1004]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -396,15 +396,13 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
 
-    // The traversal is edge-only: the MR node table is not joined, so
-    // MR 9500's deletion status is not visible to the query. The edge row
-    // itself is not deleted, so it still appears. This documents a known
-    // limitation: edge-only traversals cannot filter out deleted nodes.
-    resp.assert_node_count(3);
+    // The MR node's id_range generates a _nf_mr CTE that joins the node
+    // table with dedup, filtering out deleted MR 9500. Only the alive MR
+    // 9501's edge survives the IN subquery filter.
+    resp.assert_node_count(2);
     resp.assert_node_ids("Project", &[1004]);
     resp.assert_edge_exists("MergeRequest", 9501, "Project", 1004, "IN_PROJECT");
-    resp.assert_edge_exists("MergeRequest", 9500, "Project", 1004, "IN_PROJECT");
-    resp.assert_edge_count("IN_PROJECT", 2);
+    resp.assert_edge_count("IN_PROJECT", 1);
 }
 
 /// Neighbors dedup: duplicate user rows should not produce duplicate edges.
@@ -565,7 +563,7 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
                 {"id": "p", "entity": "Project", "node_ids": [1000]}
             ],
             "relationships": [{"type": "IN_PROJECT", "from": "mr", "to": "p"}],
@@ -603,7 +601,7 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
-            "query_type": "search",
+            "query_type": "traversal",
             "node": {"id": "mr", "entity": "MergeRequest",
                      "columns": ["title", "state"],
                      "node_ids": [9800, 9801]},

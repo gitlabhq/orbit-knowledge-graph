@@ -86,7 +86,12 @@
             "retry_interval_secs": null
           }
         },
-        "max_concurrent_workers": 16
+        "max_concurrent_workers": 16,
+        "modules": [
+          "sdlc",
+          "code",
+          "namespace_deletion"
+        ]
       }
     },
     "gitlab": {
@@ -200,7 +205,10 @@
     "query": {
       "$ref": "#/$defs/QuerySettings",
       "default": {
-        "default": {}
+        "default": {
+          "max_execution_time": 30,
+          "query_cache_ttl": 60
+        }
       }
     },
     "schedule": {
@@ -461,7 +469,7 @@
       ]
     },
     "EngineConfiguration": {
-      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers",
+      "description": "ETL engine configuration.\n\n# Defaults\n\n- `max_concurrent_workers`: 16\n- `concurrency_groups`: empty\n- `handlers`: defaults for all handlers\n- `modules`: all variants of [`IndexerModule`] (universal indexer)",
       "type": "object",
       "properties": {
         "concurrency_groups": {
@@ -526,6 +534,18 @@
           "format": "uint",
           "default": 16,
           "minimum": 0
+        },
+        "modules": {
+          "description": "Modules whose handlers this indexer process should register. Defaults to all\nmodules for backward compatibility (universal indexer). Set to a subset to\nrun a specialised pool, e.g. `[code]` for a code-only Deployment.",
+          "type": "array",
+          "default": [
+            "sdlc",
+            "code",
+            "namespace_deletion"
+          ],
+          "items": {
+            "$ref": "#/$defs/IndexerModule"
+          }
         }
       },
       "additionalProperties": false
@@ -747,6 +767,26 @@
         }
       },
       "additionalProperties": false
+    },
+    "IndexerModule": {
+      "description": "Indexer module selector. Each variant maps to a domain in `crates/indexer/src/modules/`.\n\nAn indexer process registers handlers only for the modules listed in\n[`EngineConfiguration::modules`], letting operators run multiple specialised\nindexer Deployments (e.g. a light SDLC pool and a beefy code pool) from the\nsame binary.",
+      "oneOf": [
+        {
+          "description": "SDLC handlers: `global-handler` and `namespace-handler`.",
+          "type": "string",
+          "const": "sdlc"
+        },
+        {
+          "description": "Code indexing handler: clones repositories, runs tree-sitter, writes the code graph.",
+          "type": "string",
+          "const": "code"
+        },
+        {
+          "description": "Namespace deletion handler.",
+          "type": "string",
+          "const": "namespace_deletion"
+        }
+      ]
     },
     "JwtConfig": {
       "type": "object",
@@ -1183,7 +1223,6 @@
       "additionalProperties": false
     },
     "QueryConfig": {
-      "description": "Query execution settings. All fields map to ClickHouse query-level\nsettings. The closed set of fields prevents arbitrary user input from\nreaching the SETTINGS clause (CWE-89).\n\n`None` means \"not specified at this layer\" -- the merge logic in\n[`QuerySettings::resolve`] fills in from the default.",
       "type": "object",
       "properties": {
         "graph_query_cache_enabled": {
@@ -1204,8 +1243,45 @@
           "minimum": 0,
           "writeOnly": true
         },
+        "max_bytes_to_read": {
+          "description": "ClickHouse `max_bytes_to_read` in bytes. Limits uncompressed data\nread from tables. Unset by default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
         "max_execution_time": {
           "description": "ClickHouse `max_execution_time` in seconds.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "default": 30,
+          "minimum": 0
+        },
+        "max_memory_usage": {
+          "description": "ClickHouse `max_memory_usage` in bytes. Limits the amount of RAM\na single query can consume on the ClickHouse server. When exceeded,\nClickHouse aborts the query with MEMORY_LIMIT_EXCEEDED. Unset by\ndefault (ClickHouse uses its server-level setting).",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_rows_in_set": {
+          "description": "ClickHouse `max_rows_in_set`. Limits the size of hash tables built\nfor IN (subquery) clauses. Unset by default.",
+          "type": [
+            "integer",
+            "null"
+          ],
+          "format": "uint64",
+          "minimum": 0
+        },
+        "max_rows_to_read": {
+          "description": "ClickHouse `max_rows_to_read`. Limits the total number of rows\nread from tables during query execution. Unset by default.",
           "type": [
             "integer",
             "null"
@@ -1220,6 +1296,7 @@
             "null"
           ],
           "format": "uint32",
+          "default": 60,
           "minimum": 0
         },
         "use_query_cache": {
@@ -1238,7 +1315,10 @@
       "properties": {
         "default": {
           "$ref": "#/$defs/QueryConfig",
-          "default": {}
+          "default": {
+            "max_execution_time": 30,
+            "query_cache_ttl": 60
+          }
         }
       },
       "additionalProperties": {

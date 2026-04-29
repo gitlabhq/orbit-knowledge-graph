@@ -11,7 +11,7 @@
     },
     "node": {
       "$ref": "#/$defs/NodeSelector",
-      "description": "Single node for search queries"
+      "description": "Single node selector"
     },
     "nodes": {
       "type": "array",
@@ -93,7 +93,7 @@
     {
       "if": {
         "properties": {
-          "query_type": { "enum": ["search", "neighbors"] }
+          "query_type": { "const": "neighbors" }
         }
       },
       "then": {
@@ -103,10 +103,17 @@
         }
       },
       "else": {
-        "required": ["nodes"],
-        "not": {
-          "required": ["node"]
-        }
+        "oneOf": [
+          {
+            "required": ["nodes"],
+            "not": { "required": ["node"] }
+          },
+          {
+            "required": ["node"],
+            "not": { "required": ["nodes"] },
+            "description": "Single-node traversal: 1 node, 0 relationships"
+          }
+        ]
       }
     },
     {
@@ -134,6 +141,16 @@
           "nodes": {
             "minItems": 1,
             "description": "Aggregation requires at least 1 node"
+          },
+          "relationships": {
+            "items": {
+              "properties": {
+                "direction": {
+                  "enum": ["outgoing", "incoming"],
+                  "description": "Aggregation only supports outgoing or incoming direction."
+                }
+              }
+            }
           }
         }
       }
@@ -145,17 +162,27 @@
         }
       },
       "then": {
-        "required": ["relationships"],
-        "properties": {
-          "nodes": {
-            "minItems": 2,
-            "description": "Traversal queries require at least 2 nodes"
+        "description": "Multi-node traversal requires nodes + relationships. Single-node traversal requires only a node.",
+        "oneOf": [
+          {
+            "required": ["relationships"],
+            "properties": {
+              "nodes": {
+                "minItems": 2,
+                "description": "Multi-node traversal requires at least 2 nodes"
+              },
+              "relationships": {
+                "minItems": 1,
+                "description": "Multi-node traversal requires at least 1 relationship"
+              }
+            }
           },
-          "relationships": {
-            "minItems": 1,
-            "description": "Traversal queries require at least 1 relationship"
+          {
+            "required": ["node"],
+            "not": { "required": ["relationships"] },
+            "description": "Single-node traversal (table scan)"
           }
-        }
+        ]
       }
     },
     {
@@ -186,7 +213,7 @@
     "QueryType": {
       "type": "string",
       "description": "Type of graph query to execute",
-      "enum": ["traversal", "aggregation", "path_finding", "search", "neighbors"]
+      "enum": ["traversal", "aggregation", "path_finding", "neighbors"]
     },
     "EntityType": {
       "type": "string",
@@ -363,11 +390,11 @@
       "properties": {
         "op": {
           "type": "string",
-          "description": "Filter operator. is_null and is_not_null do not require a value; all others do.",
-          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null"]
+          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring matching: contains, starts_with, ends_with. Nullability: is_null, is_not_null (no value). Word matching: token_match (exact word match), all_tokens (all words present), any_tokens (any word present) — only on fields that support word matching.",
+          "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
         },
         "value": {
-          "description": "Filter value. Required for all operators except is_null and is_not_null. Type depends on operator: array for 'in', string for contains/starts_with/ends_with, FilterValue for comparison operators."
+          "description": "Filter value. Required for all operators except is_null/is_not_null. Type: array for 'in', string for contains/starts_with/ends_with/token_match/all_tokens/any_tokens, scalar for comparison operators."
         }
       },
       "additionalProperties": false,
@@ -392,6 +419,10 @@
         },
         {
           "if": { "properties": { "op": { "enum": ["contains", "starts_with", "ends_with"] } } },
+          "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
+        },
+        {
+          "if": { "properties": { "op": { "enum": ["token_match", "all_tokens", "any_tokens"] } } },
           "then": { "required": ["value"], "properties": { "value": { "type": "string", "maxLength": 1024 } } }
         }
       ]
@@ -553,7 +584,7 @@
         },
         "rel_types": {
           "type": "array",
-          "description": "Optional: relationship types to traverse. If omitted, all types are considered.",
+          "description": "Relationship types to traverse. Required when an endpoint uses filters or id_range (not node_ids) to constrain the frontier. Optional when both endpoints use node_ids.",
           "items": {
             "$ref": "#/$defs/RelationshipTypeName"
           },
@@ -646,6 +677,11 @@
           "$ref": "#/$defs/DynamicColumnMode",
           "description": "Columns fetched for dynamically-discovered entities (PathFinding, Neighbors hydration). '*' returns all columns; 'default' returns the entity's default_columns from the ontology. Defaults to 'default'.",
           "default": "default"
+        },
+        "include_debug_sql": {
+          "type": "boolean",
+          "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
+          "default": false
         }
       },
       "additionalProperties": false

@@ -6,7 +6,7 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "columns": ["username"]},
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
@@ -30,13 +30,41 @@ pub(super) async fn aggregation_count_returns_correct_values(ctx: &TestContext) 
     });
 }
 
+pub(super) async fn aggregation_wildcard_user_to_mr_counts_inferred_edges(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mr_edge_count"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("User", 1, |n| {
+        n.prop_str("username") == Some("alice") && n.prop_i64("mr_edge_count") == Some(3)
+    });
+    resp.assert_node("User", 2, |n| {
+        n.prop_str("username") == Some("bob") && n.prop_i64("mr_edge_count") == Some(2)
+    });
+    resp.assert_node("User", 3, |n| {
+        n.prop_str("username") == Some("charlie") && n.prop_i64("mr_edge_count") == Some(2)
+    });
+}
+
 pub(super) async fn aggregation_count_group_contains_projects(ctx: &TestContext) {
     let resp = run_query(
         ctx,
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -64,7 +92,7 @@ pub(super) async fn aggregation_sort_orders_by_aggregate_value(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -89,7 +117,7 @@ pub(super) async fn aggregation_sum_produces_correct_totals(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -117,7 +145,7 @@ pub(super) async fn aggregation_redaction_excludes_unauthorized_from_counts(ctx:
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -141,7 +169,7 @@ pub(super) async fn aggregation_avg_produces_correct_values(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -166,7 +194,7 @@ pub(super) async fn aggregation_min_max_produce_correct_values(ctx: &TestContext
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -200,7 +228,7 @@ pub(super) async fn aggregation_min_on_string_column(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -231,7 +259,7 @@ pub(super) async fn aggregation_multiple_functions_in_one_query(ctx: &TestContex
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -273,7 +301,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -300,7 +328,7 @@ pub(super) async fn aggregation_path_single_nested_group(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -326,7 +354,7 @@ pub(super) async fn aggregation_path_multiple_groups(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -354,7 +382,7 @@ pub(super) async fn aggregation_sum_with_restricted_path(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -382,7 +410,7 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "p", "entity": "Project"}
             ],
             "relationships": [{"type": "CONTAINS", "from": "g", "to": "p"}],
@@ -400,29 +428,31 @@ pub(super) async fn aggregation_nested_path_includes_child_projects(ctx: &TestCo
     resp.assert_node_absent("Group", 102);
 }
 
-// Aggregation with a relationship but no `group_by` makes every participating
-// node edge-only. The optimizer must not emit `node.id IN (...)` for cascade
-// CTEs on edge-only nodes: their tables are absent from FROM and the bare
-// identifier would be parsed as a database name by ClickHouse.
+// Multi-node aggregation without group_by is now rejected at validation time
+// to prevent full cross-join scans. Verify the rejection.
 pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
                 {"id": "u", "entity": "User", "node_ids": [1]}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "aggregations": [{"function": "count", "target": "mr", "alias": "total_mrs"}],
             "limit": 10
         }"#,
-        &allow_all(),
-    )
-    .await;
+        &ontology,
+        &test_security_context(),
+    );
 
-    resp.skip_requirement(Requirement::NodeIds);
-    resp.assert_aggregation_value_i64("total_mrs", 2);
+    let err = result.expect_err("multi-node aggregation without group_by must reject");
+    assert!(
+        err.to_string().contains("group_by"),
+        "error should mention group_by, got: {err}"
+    );
 }
 
 // When both nodes of the relationship are edge-only, `build_joins` starts
@@ -430,25 +460,30 @@ pub(super) async fn aggregation_no_group_by_with_filtered_other_node(ctx: &TestC
 // reach the WHERE clause or the count leaks rows from every relationship
 // type between the two endpoint kinds. Seed has 4 AUTHORED User to
 // MergeRequest edges and 3 APPROVED edges on the same endpoint kinds.
+// Multi-node aggregation without group_by is now rejected at validation time.
 pub(super) async fn aggregation_no_group_by_preserves_relationship_kind(ctx: &TestContext) {
-    let resp = run_query(
-        ctx,
+    let _ = ctx;
+    let ontology = Arc::new(load_ontology());
+    let result = compile(
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
             "aggregations": [{"function": "count", "target": "mr", "alias": "total_authored"}],
             "limit": 10
         }"#,
-        &allow_all(),
-    )
-    .await;
+        &ontology,
+        &test_security_context(),
+    );
 
-    resp.skip_requirement(Requirement::NodeIds);
-    resp.assert_aggregation_value_i64("total_authored", 4);
+    let err = result.expect_err("multi-node aggregation without group_by must reject");
+    assert!(
+        err.to_string().contains("group_by"),
+        "error should mention group_by, got: {err}"
+    );
 }
 
 pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
@@ -460,7 +495,7 @@ pub(super) async fn aggregation_non_nested_path_only(ctx: &TestContext) {
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
@@ -491,7 +526,7 @@ pub(super) async fn aggregation_group_by_non_default_redaction_id_column(ctx: &T
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "mr", "entity": "MergeRequest", "id_range": {"start": 1, "end": 10000}},
                 {"id": "d", "entity": "MergeRequestDiff", "columns": ["state"]}
             ],
             "relationships": [{"type": "HAS_DIFF", "from": "mr", "to": "d"}],
@@ -529,7 +564,7 @@ pub(super) async fn aggregation_three_node_with_cascade_intermediate(ctx: &TestC
             "nodes": [
                 {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
                 {"id": "mr", "entity": "MergeRequest"},
-                {"id": "n", "entity": "Note"}
+                {"id": "n", "entity": "Note", "id_range": {"start": 1, "end": 10000}}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
@@ -571,7 +606,7 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
         r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "g", "entity": "Group", "columns": ["name"]},
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
                 {"id": "u", "entity": "User"}
             ],
             "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],

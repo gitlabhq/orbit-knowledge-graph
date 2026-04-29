@@ -148,7 +148,7 @@ impl ResponseView {
             response.query_type, input.query_type,
         );
 
-        if matches!(input.query_type, QueryType::Search | QueryType::Aggregation) {
+        if input.is_search() || input.query_type == QueryType::Aggregation {
             assert!(
                 response.edges.is_empty(),
                 "{} response must have zero edges, got {}",
@@ -393,6 +393,28 @@ impl ResponseView {
         assert!(
             predicate(node),
             "node {entity_type}:{id} did not satisfy predicate. Node: {node:?}",
+        );
+    }
+
+    /// Assert that an aggregation response returned zero rows. Satisfies
+    /// [`Requirement::Aggregation`] along with NodeCount/Filter/NodeIds,
+    /// since all of those are vacuously true when the response is empty.
+    /// Use this for security tests where an aggregation is expected to
+    /// return no rows (e.g. a Reporter-only user querying Vulnerability
+    /// counts should see an empty response, not a hang or a compile error).
+    pub fn assert_empty_aggregation(&self) {
+        self.tracker.satisfy(Requirement::Aggregation);
+        self.tracker.satisfy(Requirement::NodeCount);
+        self.tracker.satisfy(Requirement::NodeIds);
+        self.tracker.satisfy(Requirement::Cursor);
+        // Any Filter requirements accumulated from the query are implicitly
+        // satisfied — an empty result cannot violate a filter predicate.
+        self.tracker.satisfy_all_filters();
+        assert!(
+            self.response.nodes.is_empty(),
+            "expected empty aggregation, got {} nodes: {:?}",
+            self.response.nodes.len(),
+            self.response.nodes
         );
     }
 
@@ -832,7 +854,7 @@ pub(crate) mod tests {
     pub(crate) fn sample_search_response() -> GraphResponse {
         GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![
                 make_node("User", 1, &[("username", json!("alice"))]),
                 make_node("User", 2, &[("username", json!("bob"))]),
@@ -1278,7 +1300,7 @@ pub(crate) mod tests {
     fn empty_response_returns_zero_counts_and_empty_collections() {
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![],
             edges: vec![],
             columns: None,
@@ -1371,7 +1393,7 @@ mod edge_coverage_tests {
     fn assert_all_edge_types_covered_empty_response_passes() {
         let resp = GraphResponse {
             format_version: query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string(),
-            query_type: "search".to_string(),
+            query_type: "traversal".to_string(),
             nodes: vec![],
             edges: vec![],
             columns: None,

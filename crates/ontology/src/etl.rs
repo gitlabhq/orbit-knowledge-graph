@@ -13,7 +13,7 @@ pub enum EtlScope {
 }
 
 /// Direction of an edge relative to the node defining the FK column.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, serde::Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum EdgeDirection {
     /// Node with FK is edge source: (this_node) -[edge]-> (fk_target)
@@ -29,10 +29,6 @@ pub enum EdgeTarget {
     /// A fixed node type (e.g., "User").
     Literal(String),
     /// Type read from a column at runtime (e.g., "noteable_type").
-    ///
-    /// `type_mapping` collapses raw legacy values into ontology node names
-    /// (e.g., `Issue -> WorkItem`). Values missing from the map pass through
-    /// unchanged — the `TypeIn` extract filter still rejects unrelated types.
     Column {
         column: String,
         type_mapping: BTreeMap<String, String>,
@@ -57,8 +53,9 @@ pub enum EtlConfig {
         watermark: String,
         deleted: String,
         order_by: Vec<String>,
-        /// Edges to generate from columns. Key is the source column name.
-        edges: BTreeMap<String, EdgeMapping>,
+        /// Edges keyed by source column name. Each column may declare one or
+        /// more mappings.
+        edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
     Query {
         scope: EtlScope,
@@ -69,7 +66,9 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         traversal_path_filter: Option<String>,
-        edges: BTreeMap<String, EdgeMapping>,
+        /// Edges keyed by source column name. Each column may declare one or
+        /// more mappings.
+        edges: BTreeMap<String, Vec<EdgeMapping>>,
     },
 }
 
@@ -102,11 +101,21 @@ impl EtlConfig {
         }
     }
 
-    pub fn edges(&self) -> &BTreeMap<String, EdgeMapping> {
+    pub fn edges(&self) -> &BTreeMap<String, Vec<EdgeMapping>> {
         match self {
             EtlConfig::Table { edges, .. } => edges,
             EtlConfig::Query { edges, .. } => edges,
         }
+    }
+
+    pub fn edge_mappings(&self) -> impl Iterator<Item = (&String, &EdgeMapping)> + '_ {
+        self.edges()
+            .iter()
+            .flat_map(|(col, mappings)| mappings.iter().map(move |m| (col, m)))
+    }
+
+    pub fn has_edges(&self) -> bool {
+        self.edges().values().any(|v| !v.is_empty())
     }
 
     pub fn validate_query_parameters(&self) -> Vec<&'static str> {

@@ -4,3 +4,14 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
     description: "User approved a merge request."
+
+etl:
+  - scope: namespaced
+    source: siphon_approvals
+    order_by: [traversal_path, merge_request_id, id]
+    from:
+      id: user_id
+      type: User
+    to:
+      id: merge_request_id
+      type: MergeRequest

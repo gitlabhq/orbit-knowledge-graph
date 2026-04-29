@@ -18,11 +18,11 @@
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
 //!
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
-use crate::constants::node_filter_cte;
+use crate::constants::{TRAVERSAL_PATH_COLUMN, node_filter_cte};
 use crate::input::{Input, QueryType};
 use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN};
@@ -61,8 +61,9 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     }
 }
 
-/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs select `id`
-/// for edge semi-joins. Using LIMIT 1 BY with the sort key prefix lets
+/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs always select `id`
+/// for edge semi-joins and may carry extra stable columns for optimizer CTEs.
+/// Using LIMIT 1 BY with the sort key prefix lets
 /// ClickHouse stream in primary key order instead of hash-aggregating
 /// the entire table.
 fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
@@ -71,10 +72,27 @@ fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
     {
         let table = table.clone();
         let alias = alias.clone();
-        apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
-        // The CTE only needs `id`, but the LIMIT 1 BY subquery selects *.
-        // Narrow the outer select back to just `id`.
-        q.select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
+        let select = std::mem::take(&mut q.select);
+        let selects_traversal_path = select
+            .iter()
+            .any(|expr| expr.alias.as_deref() == Some(TRAVERSAL_PATH_COLUMN));
+        if selects_traversal_path {
+            apply_limit_by_dedup_with_inner_filters(
+                &mut q.from,
+                &mut q.where_clause,
+                &table,
+                ontology,
+            );
+        } else {
+            apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
+        }
+        // The LIMIT 1 BY subquery selects *. Narrow the outer select back to
+        // the lowerer's requested CTE columns.
+        q.select = if select.is_empty() {
+            vec![SelectExpr::new(Expr::col(&alias, "id"), "id")]
+        } else {
+            select
+        };
     }
 }
 
@@ -143,8 +161,7 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
             let table = table.clone();
 
             match input.query_type {
-                QueryType::Search
-                | QueryType::Traversal
+                QueryType::Traversal
                 | QueryType::Aggregation
                 | QueryType::PathFinding
                 | QueryType::Neighbors => {
@@ -155,11 +172,15 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            let nf_cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+            let cte_filters: HashMap<String, Option<Expr>> = q
+                .ctes
+                .iter()
+                .map(|c| (c.name.clone(), c.query.where_clause.clone()))
+                .collect();
             wrap_join_scans(
                 &mut q.from,
                 &mut q.where_clause,
-                &nf_cte_names,
+                &cte_filters,
                 input,
                 ontology,
             );
@@ -353,6 +374,20 @@ fn apply_limit_by_dedup(
     wrap_scan_with_limit_by(from, where_clause, table_name, alias, None, sort_key);
 }
 
+fn apply_limit_by_dedup_with_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table: &str,
+    ontology: &Ontology,
+) {
+    let (table_name, alias) = match from {
+        TableRef::Scan { table, alias, .. } => (table.clone(), alias.clone()),
+        _ => return,
+    };
+    let sort_key = ontology.sort_key_for_table(table).unwrap_or_default();
+    wrap_scan_with_limit_by_inner_filters(from, where_clause, table_name, alias, sort_key);
+}
+
 fn wrap_scan_with_limit_by(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
@@ -370,13 +405,30 @@ fn wrap_scan_with_limit_by(
     *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
 }
 
+fn wrap_scan_with_limit_by_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table_name: String,
+    alias: String,
+    sort_key: &[String],
+) {
+    let inner_filters = where_clause
+        .take()
+        .map(Expr::flatten_and)
+        .unwrap_or_default();
+    *where_clause = Some(not_deleted(&alias));
+    *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
+}
+
 /// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
-/// When a `_nf_{alias}` CTE exists, its filter is pushed into the dedup
-/// subquery so ClickHouse sorts only the filtered subset.
+/// When a `_nf_{alias}` CTE exists, its WHERE conditions are inlined into
+/// the dedup subquery instead of referencing the CTE via InSubquery. This
+/// avoids ClickHouse re-evaluating the CTE body (which scans the same node
+/// table again) since ClickHouse inlines CTEs rather than materializing them.
 fn wrap_join_scans(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
-    cte_names: &HashSet<String>,
+    cte_filters: &HashMap<String, Option<Expr>>,
     input: &Input,
     ontology: &Ontology,
 ) {
@@ -388,11 +440,28 @@ fn wrap_join_scans(
             let alias_str = alias.clone();
             let sort_key = ontology.sort_key_for_table(&table_name).unwrap_or_default();
             let nf_cte = node_filter_cte(&alias_str);
-            let nf_filter = cte_names.contains(&nf_cte).then(|| Expr::InSubquery {
-                expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
-                cte_name: nf_cte,
-                column: DEFAULT_PRIMARY_KEY.to_string(),
+
+            // Prefer inlining the _nf_* CTE's WHERE conditions directly
+            // into the dedup subquery. Falls back to InSubquery when the
+            // CTE is cascade-derived (WHERE references edge aliases like
+            // _ce.source_id that don't exist in the dedup subquery scope).
+            // Cascade-derived CTEs are identified by containing InSubquery
+            // anywhere in their WHERE tree.
+            let nf_filter = cte_filters.get(&nf_cte).and_then(|cte_where| {
+                let cte_where = cte_where.as_ref()?;
+                if cte_where.contains_in_subquery() {
+                    // Cascade-derived: fall back to CTE reference
+                    Some(Expr::InSubquery {
+                        expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
+                        cte_name: nf_cte,
+                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                    })
+                } else {
+                    // Lowerer-created: inline the WHERE conditions
+                    Some(cte_where.clone())
+                }
             });
+
             wrap_scan_with_limit_by(
                 from,
                 where_clause,
@@ -404,8 +473,8 @@ fn wrap_join_scans(
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause, cte_names, input, ontology);
-            wrap_join_scans(right, where_clause, cte_names, input, ontology);
+            wrap_join_scans(left, where_clause, cte_filters, input, ontology);
+            wrap_join_scans(right, where_clause, cte_filters, input, ontology);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }
@@ -559,6 +628,36 @@ mod tests {
         };
         let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
         assert!(has_limit_by(inner));
+    }
+
+    #[test]
+    fn aggregation_pushes_sort_key_filter_inside() {
+        // When fold_filters_into_aggregates retains a structural conjunct in
+        // the outer WHERE for a single-aggregate target, deduplicate must
+        // hoist it into the LIMIT 1 BY subquery so ClickHouse can use the
+        // primary-key index to skip granules. Regression guard for the
+        // 411x slowdown on count(Definition where project_id=X).
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+            from: TableRef::scan("gl_merge_request", "mr"),
+            where_clause: Some(Expr::and(
+                Expr::eq(Expr::col("mr", "id"), Expr::lit(42)),
+                Expr::eq(Expr::col("mr", "state"), Expr::lit("opened")),
+            )),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Aggregation), &ont);
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let inner = find_subquery(&q.from, "mr").expect("should be wrapped");
+        // id is in the sort key -- pushed inside.
+        assert!(where_contains(&inner.where_clause, "\"id\""));
+        // state is mutable -- stays in outer WHERE.
+        assert!(!where_contains(&inner.where_clause, "state"));
+        assert!(where_contains(&q.where_clause, "state"));
     }
 
     #[test]
@@ -797,7 +896,7 @@ mod tests {
             limit: Some(50),
             ..Default::default()
         }));
-        deduplicate(&mut node, &input_for(QueryType::Search), &ont);
+        deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
 
         let Node::Query(q) = &node else {
             unreachable!()

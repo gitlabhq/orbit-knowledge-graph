@@ -53,6 +53,10 @@ settings:
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
             group_by: [relationship_kind, source_kind, target_id, traversal_path]
           - type: aggregate
+            name: agg_counts_by_source
+            select: [relationship_kind, target_kind, source_id, traversal_path, "count()"]
+            group_by: [relationship_kind, target_kind, source_id, traversal_path]
+          - type: aggregate
             name: node_edge_counts
             select: [traversal_path, source_kind, target_kind, relationship_kind, "uniq(source_id)", "uniq(target_id)", "uniq(source_id, target_id)"]
             group_by: [traversal_path, source_kind, target_kind, relationship_kind]
@@ -84,8 +88,29 @@ settings:
           - type: reorder
             name: by_target
             order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_rel_source_kind
+            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
+          - type: reorder
+            name: by_rel_target_kind
+            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+          # `count(target) GROUP BY source` — e.g. definitions per file via
+          # DEFINES. Without this, the wildcard scan over vendored JS bundles
+          # (`echarts.js` ≈ 13K defs, `pdf.worker.js` ≈ 12K defs) materializes
+          # every edge row before counting.
+          - type: aggregate
+            name: agg_counts_by_source
+            select: [relationship_kind, target_kind, source_id, traversal_path, "count()"]
+            group_by: [relationship_kind, target_kind, source_id, traversal_path]
+          # Mirrors `gl_edge.agg_counts` for the inverse direction
+          # (`count(source) GROUP BY target` — e.g. files importing a given
+          # definition via IMPORTS).
+          - type: aggregate
+            name: agg_counts_by_target
+            select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
+            group_by: [relationship_kind, source_kind, target_id, traversal_path]
   internal_column_prefix: "_gkg_"
-  skip_security_filter_for_entities: [User]
+  skip_security_filter_for_entities: [User, Runner]
   local_db:
     entities:
       - name: Directory
@@ -151,13 +176,15 @@ domains:
       MergeRequestDiff: nodes/code_review/merge_request_diff.yaml
       MergeRequestDiffFile: nodes/code_review/merge_request_diff_file.yaml
   ci:
-    description: "Entities related to CI/CD pipelines, stages, jobs, deployments, and environments."
+    description: "Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners."
     nodes:
       Pipeline: nodes/ci/pipeline.yaml
       Stage: nodes/ci/stage.yaml
       Job: nodes/ci/job.yaml
+      JobMetadata: nodes/ci/job_metadata.yaml
       Deployment: nodes/ci/deployment.yaml
       Environment: nodes/ci/environment.yaml
+      Runner: nodes/ci/runner.yaml
   security:
     description: "Entities related to security vulnerabilities and findings."
     nodes:
@@ -214,6 +241,8 @@ edges:
   HAS_NOTE: edges/has_note.yaml
   DEFINES: edges/defines.yaml
   IMPORTS: edges/imports.yaml
+  CALLS: edges/calls.yaml
+  EXTENDS: edges/extends.yaml
   TARGETS: edges/targets.yaml
   FROM_BRANCH: edges/from_branch.yaml
   ON_BRANCH: edges/on_branch.yaml
@@ -230,3 +259,11 @@ edges:
   HAS_LATEST_DIFF: edges/has_latest_diff.yaml
   UPDATED_BY: edges/updated_by.yaml
   LAST_EDITED_BY: edges/last_edited_by.yaml
+  AUTO_CANCELED_BY: edges/auto_canceled_by.yaml
+  TRIGGERED_BY_PIPELINE: edges/triggered_by_pipeline.yaml
+  RUNS_ON: edges/runs_on.yaml
+  RUNS_FOR_GROUP: edges/runs_for_group.yaml
+  RUNS_FOR_PROJECT: edges/runs_for_project.yaml
+  CHILD_OF: edges/child_of.yaml
+  TRIGGERS_PIPELINE: edges/triggers_pipeline.yaml
+  HAS_METADATA: edges/has_metadata.yaml

@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::time::Duration;
 
 use async_nats::jetstream::Context;
 use async_nats::jetstream::kv::{CreateErrorKind, Store as KvStore, UpdateErrorKind};
@@ -85,12 +86,13 @@ impl NatsClient {
         &self,
         stream_name: &str,
         subjects: Vec<String>,
+        max_age: Option<Duration>,
     ) -> Result<Stream, NatsError> {
         let stream_config = async_nats::jetstream::stream::Config {
             name: stream_name.to_string(),
             subjects: subjects.clone(),
             num_replicas: self.config.stream_replicas,
-            max_age: self.config.stream_max_age().unwrap_or_default(),
+            max_age: max_age.unwrap_or(self.config.stream_max_age().unwrap_or_default()),
             max_bytes: self.config.stream_max_bytes.unwrap_or(-1),
             max_messages: self.config.stream_max_messages.unwrap_or(-1),
             max_messages_per_subject: 1,
@@ -160,7 +162,7 @@ impl NatsClient {
 
         let store = self
             .jetstream
-            .create_key_value(kv_config)
+            .create_or_update_key_value(kv_config)
             .await
             .map_err(|e| NatsError::KvBucket {
                 bucket: bucket.to_string(),

@@ -1,0 +1,408 @@
+{
+   "annotations": {
+      "list": [ ]
+   },
+   "description": "Siphon producer and ClickHouse consumer metrics (analytics-eventsdot tenant).",
+   "editable": true,
+   "fiscalYearStartMonth": 0,
+   "graphTooltip": 1,
+   "id": null,
+   "links": [
+      {
+         "asDropdown": true,
+         "includeVars": true,
+         "keepTime": true,
+         "tags": [
+            "orbit"
+         ],
+         "title": "Orbit",
+         "type": "dashboards"
+      }
+   ],
+   "panels": [
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 0
+         },
+         "id": 1,
+         "panels": [ ],
+         "title": "Overview",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Siphon CDC operations emitted per second.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 0,
+            "y": 1
+         },
+         "id": 2,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(siphon_operations_total{namespace=\"siphon\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "ops/s",
+               "refId": "A"
+            }
+         ],
+         "title": "Producer ops / s",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Events consumed off NATS and written to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 8,
+            "y": 1
+         },
+         "id": 3,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum(rate(siphon_clickhouse_consumer_number_of_events{namespace=\"siphon\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "events/s",
+               "refId": "A"
+            }
+         ],
+         "title": "Consumer events / s",
+         "type": "stat"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Distinct apps producing into Siphon.",
+         "fieldConfig": {
+            "defaults": {
+               "noValue": "—",
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 4,
+            "w": 8,
+            "x": 16,
+            "y": 1
+         },
+         "id": 4,
+         "options": {
+            "colorMode": "value",
+            "graphMode": "area",
+            "justifyMode": "auto",
+            "reduceOptions": {
+               "calcs": [
+                  "lastNotNull"
+               ],
+               "fields": "",
+               "values": false
+            },
+            "textMode": "value_and_name"
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "count(count by (app_id) (siphon_operations_total{namespace=\"siphon\", cluster=~\"$cluster\"}))",
+               "legendFormat": "apps",
+               "refId": "A"
+            }
+         ],
+         "title": "Producer apps (distinct)",
+         "type": "stat"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 5
+         },
+         "id": 5,
+         "panels": [ ],
+         "title": "Producers",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Siphon producer ops (CDC events emitted).",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 6
+         },
+         "id": 6,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (app_id, container) (rate(siphon_operations_total{namespace=\"siphon\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{app_id}} / {{container}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_operations_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "collapsed": false,
+         "gridPos": {
+            "h": 1,
+            "w": 24,
+            "x": 0,
+            "y": 14
+         },
+         "id": 7,
+         "panels": [ ],
+         "title": "ClickHouse consumers",
+         "type": "row"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Events consumed off NATS and written to ClickHouse.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 0,
+            "y": 15
+         },
+         "id": 8,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (product_app_id) (rate(siphon_clickhouse_consumer_number_of_events{namespace=\"siphon\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{product_app_id}}",
+               "refId": "A"
+            }
+         ],
+         "title": "siphon_clickhouse_consumer_number_of_events — rate/s",
+         "type": "timeseries"
+      }
+   ],
+   "refresh": "1m",
+   "schemaVersion": 39,
+   "tags": [
+      "orbit",
+      "protected",
+      "siphon"
+   ],
+   "templating": {
+      "list": [
+         {
+            "current": {
+               "text": "Mimir - Analytics Eventsdot",
+               "value": "mimir-analytics-eventsdot"
+            },
+            "hide": 0,
+            "label": "Orbit datasource (analytics-eventsdot tenant)",
+            "name": "ORBIT_DS",
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "/Analytics Eventsdot/",
+            "type": "datasource"
+         },
+         {
+            "current": {
+               "text": "Mimir - Gitlab Gprd",
+               "value": "mimir-gitlab-gprd"
+            },
+            "hide": 0,
+            "label": "Rails datasource (gitlab tenant)",
+            "name": "RAILS_DS",
+            "query": "prometheus",
+            "refresh": 1,
+            "regex": "/Gitlab Gstg|Gitlab Gprd/",
+            "type": "datasource"
+         },
+         {
+            "current": {
+               "text": "orbit-prd",
+               "value": "orbit-prd"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Orbit cluster",
+            "multi": false,
+            "name": "cluster",
+            "options": [
+               {
+                  "selected": true,
+                  "text": "orbit-prd",
+                  "value": "orbit-prd"
+               },
+               {
+                  "selected": false,
+                  "text": "orbit-stg",
+                  "value": "orbit-stg"
+               },
+               {
+                  "selected": false,
+                  "text": "all",
+                  "value": "orbit-.*"
+               }
+            ],
+            "query": "orbit-prd,orbit-stg,orbit-.*",
+            "type": "custom"
+         },
+         {
+            "current": {
+               "text": "gprd",
+               "value": "gprd"
+            },
+            "hide": 0,
+            "includeAll": false,
+            "label": "Rails env",
+            "multi": false,
+            "name": "rails_env",
+            "options": [
+               {
+                  "selected": true,
+                  "text": "gprd",
+                  "value": "gprd"
+               },
+               {
+                  "selected": false,
+                  "text": "gstg",
+                  "value": "gstg"
+               },
+               {
+                  "selected": false,
+                  "text": "both",
+                  "value": "gstg|gprd"
+               }
+            ],
+            "query": "gprd,gstg,gstg|gprd",
+            "type": "custom"
+         }
+      ]
+   },
+   "time": {
+      "from": "now-3h",
+      "to": "now"
+   },
+   "timezone": "utc",
+   "title": "Orbit — Siphon",
+   "uid": "orbit-siphon",
+   "version": 1
+}

@@ -69,7 +69,7 @@ You should see normal JSON output in your terminal.
 
 ```bash
 cat > /tmp/q-min.json <<'JSON'
-{"query": {"query_type": "search", "node": {"id": "p", "entity": "Project"}, "limit": 1},
+{"query": {"query_type": "traversal", "node": {"id": "p", "entity": "Project"}, "limit": 1},
  "response_format": "raw"}
 JSON
 glab api --method POST orbit/query \
@@ -84,10 +84,11 @@ has no matches.
 
 **Cause:** Query didn't match the DSL JSON Schema. Common causes:
 
-- Using `node` (singular) with `traversal` / `aggregation` / `path_finding`
+- Using `node` (singular) with `aggregation` / `path_finding`
   (they require `nodes`, plural).
-- Using `nodes` with `search` / `neighbors` (they require `node`, singular).
-- `query_type: "traversal"` without at least 2 nodes and 1 relationship.
+- Using `nodes` (plural) with `neighbors` or single-node `traversal`
+  (they require `node`, singular).
+- Multi-node `traversal` (uses `nodes`) without at least 2 nodes and 1 relationship.
 - `query_type: "aggregation"` without any `aggregations` entries.
 - `max_hops` or `max_depth` > 3 (server-enforced ceiling).
 - `cursor.offset + cursor.page_size > limit`.

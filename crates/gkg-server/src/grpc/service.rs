@@ -11,7 +11,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
-use crate::auth::{Claims, JwtValidator};
+use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
@@ -286,9 +286,15 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         let req = request.get_ref();
         authorize_traversal_path(&claims, &req.traversal_path)?;
 
-        info!(traversal_path = %req.traversal_path, "Fetching graph status for user");
+        let security_context =
+            build_security_context(&claims).map_err(|e| Status::unauthenticated(e.to_string()))?;
 
-        let response = self.graph_status.get_status(&req.traversal_path).await?;
+        info!(traversal_path = %req.traversal_path, format = ?req.format, "Fetching graph status for user");
+
+        let response = self
+            .graph_status
+            .get_status(&req.traversal_path, req.format, &security_context)
+            .await?;
         Ok(Response::new(response))
     }
 }
@@ -439,10 +445,14 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
         .organization_id
         .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
 
-    let authorized_paths = if claims.admin {
+    let authorized_paths: Vec<String> = if claims.admin {
         vec![format!("{org_id}/")]
     } else {
-        claims.group_traversal_ids.clone()
+        claims
+            .group_traversal_ids
+            .iter()
+            .map(|tp| tp.path.clone())
+            .collect()
     };
 
     let is_authorized = authorized_paths
@@ -749,7 +759,13 @@ mod tests {
         };
         let user = |org, groups: Vec<&str>| Claims {
             organization_id: Some(org),
-            group_traversal_ids: groups.into_iter().map(String::from).collect(),
+            group_traversal_ids: groups
+                .into_iter()
+                .map(|p| crate::auth::claims::TraversalPathClaim {
+                    path: p.to_string(),
+                    access_levels: vec![20],
+                })
+                .collect(),
             ..test_claims()
         };
 

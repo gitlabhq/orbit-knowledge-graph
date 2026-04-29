@@ -297,9 +297,32 @@
       "domain": "indexer.etl"
     },
     {
+      "otel_name": "gkg.indexer.code.archive.bytes.skipped",
+      "prom_name": "gkg_indexer_code_archive_bytes_skipped_bytes_total",
+      "description": "Total bytes that the archive extractor refused to write to disk, summed from the tar header sizes of skipped entries. Same `reason` labels as `gkg.indexer.code.archive.entries.skipped`.",
+      "kind": "counter",
+      "unit": "By",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.archive.entries.skipped",
+      "prom_name": "gkg_indexer_code_archive_entries_skipped_total",
+      "description": "Tar archive entries dropped before extraction so they never touch disk. Reasons: `excluded_extension` (basename matches the binary-asset / media / archive denylist in `code-graph::v2::config::filter::EXCLUDED_INDEXING_GLOBS`), `oversize` (declared size exceeds the configured per-file ceiling).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.errors",
       "prom_name": "gkg_indexer_code_errors_total",
-      "description": "Total code indexing errors by pipeline stage.",
+      "description": "Task-level code indexing failures by pipeline stage. Increments only when a code indexing task ends with a fatal pipeline error (sink write, thread pool, sentinel spawn, internal panic). Per-file failures land in `gkg.indexer.code.file_faults` instead, so this rate is suitable for alerting.",
       "kind": "counter",
       "labels": [
         "stage"
@@ -319,12 +342,34 @@
       "domain": "indexer.code"
     },
     {
+      "otel_name": "gkg.indexer.code.file_faults",
+      "prom_name": "gkg_indexer_code_file_faults_total",
+      "description": "Per-file failures during code indexing, by kind. The task itself completes successfully; individual files were excluded from the graph. Kinds: `file_read`, `invalid_utf8`, `syntax_error`, `oxc_panic`, `oxc_semantic`, `analyzer_panic`, `unknown_source_type`, `embedded_script_parse`, `rust_workspace_missing`.",
+      "kind": "counter",
+      "labels": [
+        "kind"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
       "otel_name": "gkg.indexer.code.files.processed",
       "prom_name": "gkg_indexer_code_files_processed_total",
       "description": "Total files seen by the code-graph indexer.",
       "kind": "counter",
       "labels": [
         "outcome"
+      ],
+      "stability": "stable",
+      "domain": "indexer.code"
+    },
+    {
+      "otel_name": "gkg.indexer.code.files.skipped",
+      "prom_name": "gkg_indexer_code_files_skipped_total",
+      "description": "Source files skipped by the code-graph indexer for policy or watchdog reasons. Not an error. Reasons: `oversize`, `oversize_combined`, `line_too_long`, `minified`, `not_utf8`, `non_regular_file`, `unsafe_path`, `timeout_sentinel`.",
+      "kind": "counter",
+      "labels": [
+        "reason"
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -337,20 +382,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
-        0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
-        10.0
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -363,20 +405,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
-        0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
-        10.0
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -422,20 +461,17 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
-        0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
-        10.0
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.code"
@@ -568,20 +604,17 @@
         "handler"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
-        0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
-        10.0
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"
@@ -596,20 +629,17 @@
         "entity"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
-        0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
-        10.0
+        10.0,
+        15.0,
+        30.0,
+        60.0,
+        120.0,
+        300.0
       ],
       "stability": "stable",
       "domain": "indexer.sdlc"

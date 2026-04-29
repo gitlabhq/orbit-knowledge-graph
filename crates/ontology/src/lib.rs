@@ -31,8 +31,8 @@ pub use constants::{
 pub use entities::{
     AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
     EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
-    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, StorageColumn, StorageIndex,
-    StorageProjection, VirtualSource,
+    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
+    StorageIndex, StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -109,7 +109,7 @@ pub struct Ontology {
     pub(crate) edges: BTreeMap<String, Vec<EdgeEntity>>,
     pub(crate) edge_descriptions: BTreeMap<String, String>,
     /// ETL configs for edges sourced from join tables (keyed by relationship kind).
-    pub(crate) edge_etl_configs: BTreeMap<String, EdgeSourceEtlConfig>,
+    pub(crate) edge_etl_configs: BTreeMap<String, Vec<EdgeSourceEtlConfig>>,
     pub(crate) etl_settings: EtlSettings,
     pub(crate) internal_column_prefix: String,
     pub(crate) skip_security_filter_for_tables: Vec<String>,
@@ -423,7 +423,25 @@ impl Ontology {
             resource_type: resource_type.into(),
             id_column: id_column.into(),
             ability: "read".to_string(),
+            required_role: RequiredRole::Reporter,
         });
+        self
+    }
+
+    /// Override the `required_role` on a node's existing redaction config.
+    /// Panics if the node is missing or has no redaction block. Builder-style
+    /// helper for ontologies constructed in tests; production ontologies
+    /// load the role directly from YAML.
+    #[must_use]
+    pub fn with_redaction_role(mut self, node_name: &str, role: RequiredRole) -> Self {
+        let redaction = self
+            .nodes
+            .get_mut(node_name)
+            .unwrap_or_else(|| panic!("node \"{node_name}\" does not exist"))
+            .redaction
+            .as_mut()
+            .unwrap_or_else(|| panic!("node \"{node_name}\" has no redaction config"));
+        redaction.required_role = role;
         self
     }
 
@@ -576,6 +594,31 @@ impl Ontology {
             .collect()
     }
 
+    /// Get relationship kinds whose variants match any of the supplied endpoint pairs.
+    ///
+    /// Passing `None` for an endpoint leaves that side unconstrained.
+    pub fn relationship_kinds_matching<'a>(
+        &self,
+        endpoints: impl IntoIterator<Item = (Option<&'a str>, Option<&'a str>)>,
+    ) -> Vec<String> {
+        let endpoints: Vec<_> = endpoints.into_iter().collect();
+        self.edges()
+            .filter(|edge| {
+                endpoints.iter().any(|(source_kind, target_kind)| {
+                    source_kind
+                        .as_ref()
+                        .is_none_or(|kind| edge.source_kind == *kind)
+                        && target_kind
+                            .as_ref()
+                            .is_none_or(|kind| edge.target_kind == *kind)
+                })
+            })
+            .map(|edge| edge.relationship_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Check if a node exists.
     #[must_use]
     pub fn has_node(&self, name: &str) -> bool {
@@ -598,6 +641,26 @@ impl Ontology {
     #[must_use]
     pub fn requires_redaction(&self, entity_name: &str) -> bool {
         self.get_redaction_config(entity_name).is_some()
+    }
+
+    /// Minimum access level required to include rows of the node backing
+    /// `table` in a query result. Returns `None` if no node owns this
+    /// physical table.
+    ///
+    /// A `v{N}_` schema-version prefix on the input is stripped before the
+    /// lookup because the compiler may receive either the base
+    /// `destination_table` or the version-prefixed form produced by
+    /// [`Ontology::with_schema_version_prefix`]. Callers that pass edge
+    /// tables or CTE names get `None` and should fall back to a default
+    /// role.
+    #[must_use]
+    pub fn min_access_level_for_table(&self, table: &str) -> Option<u32> {
+        let normalized = strip_schema_version_prefix(table);
+        self.nodes
+            .values()
+            .find(|n| strip_schema_version_prefix(&n.destination_table) == normalized)
+            .and_then(|n| n.redaction.as_ref())
+            .map(|r| r.required_role.as_access_level())
     }
 
     /// Iterator over names of `admin_only` fields on the given entity.
@@ -774,6 +837,24 @@ impl Ontology {
         &self.auxiliary_tables
     }
 
+    /// Returns the text index tokenizer for a column on a node entity, if one exists.
+    ///
+    /// Looks up `StorageIndex` entries whose `index_type` starts with `text(`.
+    /// Returns the full tokenizer parameter string (e.g. `"tokenizer = splitByNonAlpha"`).
+    #[must_use]
+    pub fn text_index_tokenizer(&self, entity_name: &str, column_name: &str) -> Option<&str> {
+        let node = self.nodes.get(entity_name)?;
+        node.storage
+            .indexes
+            .iter()
+            .find(|idx| idx.column == column_name && idx.index_type.starts_with("text("))
+            .map(|idx| {
+                // Extract the inner params: "text(tokenizer = splitByNonAlpha)" -> "tokenizer = splitByNonAlpha"
+                let s = idx.index_type.as_str();
+                &s[5..s.len() - 1]
+            })
+    }
+
     /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
     pub fn default_entity_sort_key(&self) -> &[String] {
@@ -813,11 +894,13 @@ impl Ontology {
         self.edge_descriptions.get(name).map(|s| s.as_str())
     }
 
-    /// Get ETL config for an edge by relationship kind.
+    /// Get ETL configs for an edge by relationship kind.
     ///
     /// Returns `Some` only for edges sourced from join tables.
-    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&EdgeSourceEtlConfig> {
-        self.edge_etl_configs.get(relationship_kind)
+    pub fn get_edge_etl(&self, relationship_kind: &str) -> Option<&[EdgeSourceEtlConfig]> {
+        self.edge_etl_configs
+            .get(relationship_kind)
+            .map(|v| v.as_slice())
     }
 
     /// Check if an edge has ETL config (i.e., is sourced from a join table).
@@ -825,9 +908,11 @@ impl Ontology {
         self.edge_etl_configs.contains_key(relationship_kind)
     }
 
-    /// Iterator over all edge ETL configs (relationship_kind, config).
+    /// Iterator over all edge ETL configs, flattened to (relationship_kind, config) pairs.
     pub fn edge_etl_configs(&self) -> impl Iterator<Item = (&str, &EdgeSourceEtlConfig)> {
-        self.edge_etl_configs.iter().map(|(k, v)| (k.as_str(), v))
+        self.edge_etl_configs
+            .iter()
+            .flat_map(|(k, configs)| configs.iter().map(move |c| (k.as_str(), c)))
     }
 
     // --- Query validation helpers ---
@@ -965,6 +1050,22 @@ impl fmt::Display for Ontology {
     }
 }
 
+/// Strip a `v{N}_` schema-version prefix from a physical table name, if
+/// present. `N` must be one or more ASCII digits. Used to normalize table
+/// names when an ontology built with
+/// [`Ontology::with_schema_version_prefix`] is queried with a lookup key
+/// that may or may not carry the prefix (and vice versa).
+fn strip_schema_version_prefix(table: &str) -> &str {
+    let Some(rest) = table.strip_prefix('v') else {
+        return table;
+    };
+    let digits = rest.bytes().take_while(u8::is_ascii_digit).count();
+    if digits == 0 {
+        return table;
+    }
+    rest[digits..].strip_prefix('_').unwrap_or(table)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1024,6 +1125,33 @@ mod tests {
         assert!(edge_names.contains(&"AUTHORED"));
         let edges: Vec<_> = ontology.edges().collect();
         assert!(!edges.is_empty(), "edges should return at least one edge");
+    }
+
+    #[test]
+    fn code_graph_edges_are_registered() {
+        let ontology = Ontology::load_from_dir(fixtures_dir()).expect("should load ontology");
+
+        // Code-graph emits CALLS, EXTENDS, DEFINES, IMPORTS via the linker
+        // resolver. All four must be registered for queries to compile, and
+        // they must all route to the same edge table so traversals can JOIN
+        // them with edges from other code-graph relationships.
+        for kind in ["CALLS", "EXTENDS", "DEFINES", "IMPORTS"] {
+            let entries = ontology
+                .get_edge(kind)
+                .unwrap_or_else(|| panic!("{kind} should be registered"));
+            assert!(!entries.is_empty(), "{kind} should have variants");
+            assert!(
+                entries.iter().any(|e| e.relationship_kind == kind),
+                "{kind} relationship_kind mismatch"
+            );
+            for entry in entries {
+                assert_eq!(
+                    entry.destination_table, "gl_code_edge",
+                    "{kind} variant {:?} -> {:?} should route to gl_code_edge",
+                    entry.source_kind, entry.target_kind,
+                );
+            }
+        }
     }
 
     #[test]
@@ -1171,6 +1299,83 @@ mod tests {
 
         let err = ontology.table_name("Unknown").unwrap_err();
         assert!(err.to_string().contains("unknown node label"));
+    }
+
+    #[test]
+    fn strip_schema_version_prefix_matches_vn_underscore() {
+        assert_eq!(strip_schema_version_prefix("gl_user"), "gl_user");
+        assert_eq!(strip_schema_version_prefix("v1_gl_user"), "gl_user");
+        assert_eq!(
+            strip_schema_version_prefix("v42_gl_vulnerability"),
+            "gl_vulnerability"
+        );
+        // No digits after `v` — leave untouched.
+        assert_eq!(strip_schema_version_prefix("v_gl_user"), "v_gl_user");
+        assert_eq!(strip_schema_version_prefix("version_gl_x"), "version_gl_x");
+        // Missing underscore after digits — leave untouched.
+        assert_eq!(strip_schema_version_prefix("v1gl_user"), "v1gl_user");
+    }
+
+    fn ontology_with_role(node: &str, role: RequiredRole) -> Ontology {
+        let mut ontology = Ontology::new()
+            .with_nodes([node])
+            .with_redaction(node, "dummy", "id");
+        ontology
+            .nodes
+            .get_mut(node)
+            .and_then(|n| n.redaction.as_mut())
+            .expect("node has redaction")
+            .required_role = role;
+        ontology
+    }
+
+    #[test]
+    fn min_access_level_for_table_reads_redaction_required_role() {
+        let ontology = ontology_with_role("Project", RequiredRole::SecurityManager);
+        assert_eq!(ontology.min_access_level_for_table("gl_project"), Some(25));
+    }
+
+    #[test]
+    fn min_access_level_for_table_normalizes_schema_version_prefix() {
+        // The ontology carries the unprefixed `destination_table` but the
+        // compiler may look up the prefixed form, or vice-versa.
+        let ontology = ontology_with_role("Vulnerability", RequiredRole::SecurityManager);
+        assert_eq!(
+            ontology.min_access_level_for_table("gl_vulnerability"),
+            Some(25)
+        );
+        assert_eq!(
+            ontology.min_access_level_for_table("v1_gl_vulnerability"),
+            Some(25)
+        );
+        assert_eq!(
+            ontology.min_access_level_for_table("v42_gl_vulnerability"),
+            Some(25)
+        );
+
+        // Prefixed ontology, prefixed or unprefixed query — both ends
+        // normalize.
+        let prefixed = ontology_with_role("Vulnerability", RequiredRole::SecurityManager)
+            .with_schema_version_prefix("v1_");
+        assert_eq!(
+            prefixed.min_access_level_for_table("v1_gl_vulnerability"),
+            Some(25)
+        );
+        assert_eq!(
+            prefixed.min_access_level_for_table("gl_vulnerability"),
+            Some(25)
+        );
+    }
+
+    #[test]
+    fn min_access_level_for_table_is_none_for_unknown_or_unredacted() {
+        let ontology = Ontology::new().with_nodes(["Project"]);
+        // Edge tables and CTEs aren't known nodes.
+        assert!(ontology.min_access_level_for_table("gl_edge").is_none());
+        assert!(ontology.min_access_level_for_table("some_cte").is_none());
+        // Node without a `redaction` block yields None — caller picks the
+        // default role.
+        assert!(ontology.min_access_level_for_table("gl_project").is_none());
     }
 
     // --- JSON Schema tests ---
@@ -1994,6 +2199,47 @@ properties:
         let ont = admin_only_ontology();
         assert!(!ont.is_admin_only("User", "bogus_field"));
         assert!(!ont.is_admin_only("Bogus", "is_admin"));
+    }
+
+    #[test]
+    fn user_node_marks_sensitive_columns_admin_only() {
+        // Pin the real ontology so any future edit that drops admin_only on a
+        // sensitive User column fails CI. Each column listed here is one that
+        // GitLab does not expose to non-admins on its public REST/GraphQL
+        // surfaces; see config/ontology/nodes/core/user.yaml for the rationale.
+        let ontology = Ontology::load_embedded().expect("embedded ontology loads");
+        for field in [
+            "email",
+            "first_name",
+            "last_name",
+            "preferred_language",
+            "private_profile",
+            "is_external",
+            "is_admin",
+            "is_auditor",
+            "updated_at",
+        ] {
+            assert!(
+                ontology.is_admin_only("User", field),
+                "User.{field} must be admin_only"
+            );
+        }
+        for field in [
+            "id",
+            "username",
+            "name",
+            "state",
+            "avatar_url",
+            "public_email",
+            "user_type",
+            "last_activity_on",
+            "created_at",
+        ] {
+            assert!(
+                !ontology.is_admin_only("User", field),
+                "User.{field} must not be admin_only"
+            );
+        }
     }
 
     #[test]

@@ -160,7 +160,7 @@ async fn pipeline_observer_records_query_metrics() {
     let (provider, exporter) = setup_meter_provider();
 
     let mut obs = OTelPipelineObserver::start();
-    obs.set_query_type("search");
+    obs.set_query_type("traversal");
     obs.compiled(Duration::from_millis(5));
     obs.executed(Duration::from_millis(50), 3);
     obs.authorized(Duration::from_millis(10));

@@ -164,7 +164,7 @@ mod tests {
     fn billing_observer_emits_on_finish() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_claims());
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(42, 3);
 
         assert_eq!(tracker.count(), 1);
@@ -174,7 +174,7 @@ mod tests {
     fn billing_observer_skips_on_error() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
         let mut obs = BillingObserver::new(Some(tracker.clone()), test_claims());
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.record_error(&PipelineError::Execution("test error".into()));
         obs.finish(42, 3);
 
@@ -189,7 +189,7 @@ mod tests {
             ..test_claims()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
 
         assert_eq!(tracker.count(), 1);
@@ -203,7 +203,7 @@ mod tests {
             ..test_claims()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
 
         assert_eq!(tracker.count(), 1);
@@ -217,7 +217,7 @@ mod tests {
             ..test_claims()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
 
         assert_eq!(tracker.count(), 0);
@@ -231,7 +231,7 @@ mod tests {
             ..test_claims()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
 
         assert_eq!(tracker.count(), 0);
@@ -252,7 +252,7 @@ mod tests {
             ..test_claims()
         };
         let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
 
         assert_eq!(tracker.count(), 1);
@@ -263,7 +263,7 @@ mod tests {
     #[test]
     fn billing_observer_skips_when_tracker_none() {
         let mut obs = BillingObserver::new(None, test_claims());
-        obs.set_query_type("search");
+        obs.set_query_type("traversal");
         obs.finish(1, 0);
     }
 }

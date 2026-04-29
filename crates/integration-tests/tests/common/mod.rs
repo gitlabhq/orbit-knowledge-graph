@@ -11,6 +11,10 @@ pub fn test_security_context() -> SecurityContext {
     SecurityContext::new(1, vec!["1/".into()]).expect("valid security context")
 }
 
+pub fn admin_security_context() -> SecurityContext {
+    test_security_context().with_role(true, None)
+}
+
 pub async fn compile_and_execute(
     ctx: &TestContext,
     json: &str,
@@ -40,7 +44,10 @@ impl DummyClaims for gkg_server::auth::Claims {
             admin: true,
             organization_id: Some(1),
             min_access_level: Some(20),
-            group_traversal_ids: vec!["1/".into()],
+            group_traversal_ids: vec![gkg_server::auth::TraversalPathClaim {
+                path: "1/".into(),
+                access_levels: vec![20],
+            }],
             source_type: "rest".into(),
             ai_session_id: None,
             instance_id: None,

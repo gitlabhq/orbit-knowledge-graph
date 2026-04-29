@@ -40,8 +40,6 @@ impl ArrowClickHouseClient {
             .with_user(username)
             .with_setting("output_format_arrow_string_as_string", "1")
             .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_setting("join_algorithm", "hash")
-            .with_setting("query_plan_join_swap_table", "true")
             .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0");
 
@@ -141,7 +139,17 @@ impl ArrowClickHouseClient {
     /// arrays `ch_type` determines the element type for binding.
     pub fn bind_param(query: ArrowQuery, key: &str, value: &Value, ch_type: &ChType) -> ArrowQuery {
         match value {
-            Value::String(s) => query.param(key, s.as_str()),
+            Value::String(s) => {
+                // CH's HTTP-param parser for DateTime64/Date rejects the ISO
+                // 8601 trailing `Z` ("BAD_QUERY_PARAMETER, only 19 of 20 bytes
+                // was parsed"). Column already pins UTC, so dropping it
+                // preserves the value.
+                let normalized = match ch_type {
+                    ChType::DateTime64 => s.strip_suffix('Z').unwrap_or(s),
+                    _ => s.as_str(),
+                };
+                query.param(key, normalized)
+            }
             Value::Number(n) => {
                 if let Some(i) = n.as_i64() {
                     query.param(key, i)

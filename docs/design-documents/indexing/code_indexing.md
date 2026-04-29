@@ -188,6 +188,10 @@ Example NATS KV:
 
 After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
+The extractor uses the same parsability predicate as the parser (`code_graph::v2::config::is_parsable`) before unpacking each tar entry. Entries the parser would never accept — files whose extension no language claims, paths matching a per-language exclude suffix such as `*.min.js` or `*_test.go`, and entries whose declared size exceeds the configured per-file ceiling — are dropped from the tar stream so they never touch disk. Symlinks, hardlinks, and directories bypass the filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
+
+The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
+
 #### Transform (call graph construction)
 
 ##### Parser architecture
@@ -203,7 +207,7 @@ The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` a
 - **Python, Kotlin, Java, and C#** use tree-sitter grammars.
 - **Legacy JavaScript and TypeScript** parsing still exists under `src/legacy/` and continues to use SWC while the v2 JS pipeline work is integrated.
 
-Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits call-like `DefinitionToDefinition` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
+Automatic v2 language dispatch is extension-based. The JavaScript pipeline owns `.js`, `.jsx`, `.mjs`, `.cjs`, `.vue`, `.graphql`, `.gql`, and `.json`; the TypeScript pipeline owns `.ts`, `.tsx`, `.mts`, and `.cts`; the Rust pipeline owns `.rs`. Ruby, JavaScript/TypeScript, Python, Kotlin, and Java support full reference extraction. Rust emits `CALLS` edges from rust-analyzer semantic resolution and local SSA flow; it does not currently materialize arbitrary non-call reference edges. C# currently supports definitions and imports only.
 
 For each file, the parser extracts three categories of information:
 
@@ -217,8 +221,8 @@ For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` 
 
 The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
 
-1. **Directory walking** discovers files, respecting `.gitignore` rules and skipping `.git` directories and nested repositories.
-2. **Extension filtering** keeps only files with supported language extensions.
+1. **Directory walking** discovers files. Because non-parsable entries were already dropped at archive-extraction time, the walker mostly sees source files only.
+2. **Extension filtering** runs the same `is_parsable` predicate as the extractor as a defence-in-depth check, then groups files by language.
 3. **Async file reads** load file contents with bounded IO concurrency.
 4. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
 5. **Analysis** groups parsed results by language and builds the graph.
@@ -245,7 +249,7 @@ The graph captures fine-grained relationships across several categories:
 - **Imports** connect files and symbols to the definitions or files they import.
 - **References** represent call sites, property accesses, and ambiguous calls where the target cannot be resolved to a single definition.
 
-Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into four high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, and **CALLS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
+Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into five high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, **CALLS**, and **EXTENDS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
 
 #### Load
 

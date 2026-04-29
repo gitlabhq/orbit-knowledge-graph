@@ -1,18 +1,18 @@
 use bolero::check;
-use code_graph::legacy::parser::LanguageParser;
-use code_graph::legacy::parser::parser::{GenericParser, SupportedLanguage};
-use code_graph::legacy::parser::python::analyzer::PythonAnalyzer;
-use std::str::from_utf8;
+use code_graph::v2::config::Language;
+use code_graph::v2::dsl::types::DslLanguage;
+use code_graph::v2::langs::generic::python::PythonDsl;
+use code_graph::v2::trace::Tracer;
+use std::sync::OnceLock;
+
+fn spec() -> &'static code_graph::v2::dsl::types::LanguageSpec {
+    static SPEC: OnceLock<code_graph::v2::dsl::types::LanguageSpec> = OnceLock::new();
+    SPEC.get_or_init(PythonDsl::spec)
+}
 
 fn main() {
-    let parser = GenericParser::default_for_language(SupportedLanguage::Python);
-    let analyzer = PythonAnalyzer::new();
-
+    let tracer = Tracer::new(false);
     check!().for_each(|input: &[u8]| {
-        if let Ok(s) = from_utf8(input)
-            && let Ok(result) = parser.parse(s, Some("fuzz.py"))
-        {
-            let _ = analyzer.analyze(&result);
-        }
+        let _ = spec().parse_full_collect(input, "fuzz.py", Language::Python, &tracer);
     });
 }

@@ -46,6 +46,24 @@ pub struct ParseFullResult {
     pub unresolved_aliases: Vec<(usize, String)>,
 }
 
+/// Typed errors from `parse_full_collect`. Adding a producer means
+/// adding a variant — the consumer's `match` becomes a compile error
+/// until the new arm is handled.
+#[derive(Debug)]
+pub enum ParseFullError {
+    InvalidUtf8(std::str::Utf8Error),
+}
+
+impl std::fmt::Display for ParseFullError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::InvalidUtf8(e) => write!(f, "invalid UTF-8: {e}"),
+        }
+    }
+}
+
+impl std::error::Error for ParseFullError {}
+
 struct ScopeMatch {
     name: String,
     label: &'static str,
@@ -511,17 +529,15 @@ impl LanguageSpec {
         file_path: &str,
         language: Language,
         tracer: &Tracer,
-    ) -> Result<ParseFullResult, crate::v2::pipeline::PipelineError> {
-        let source_str = std::str::from_utf8(source).map_err(|e| {
-            crate::v2::pipeline::PipelineError::parse(file_path, format!("Invalid UTF-8: {e}"))
-        })?;
+    ) -> Result<ParseFullResult, ParseFullError> {
+        let source_str = std::str::from_utf8(source).map_err(ParseFullError::InvalidUtf8)?;
 
         let ast = language.parse_ast(source_str);
         let root = ast.root();
         let sep = language.fqn_separator();
 
         let arena = bumpalo::Bump::new();
-        let mut state = WalkFullState::new(&arena, tracer);
+        let mut state = WalkFullState::new(&arena, tracer, file_path);
 
         if let Some(f) = self.hooks.module_scope
             && let Some(module) = f(file_path, sep)
@@ -688,10 +704,12 @@ impl LanguageSpec {
         state: &mut WalkFullState<'a>,
         sep: &'static str,
     ) {
-        if stacker::remaining_stack().unwrap_or(usize::MAX)
-            < crate::legacy::parser::MINIMUM_STACK_REMAINING
+        if stacker::remaining_stack().unwrap_or(usize::MAX) < crate::utils::MINIMUM_STACK_REMAINING
         {
-            tracing::warn!("stack limit reached during AST walk, subtree truncated");
+            tracing::warn!(
+                file_path = state.file_path,
+                "stack limit reached during AST walk, subtree truncated"
+            );
             return;
         }
 
@@ -1374,10 +1392,11 @@ struct WalkFullState<'a> {
     top_level_depth: usize,
     in_return: bool,
     tracer: &'a Tracer,
+    file_path: &'a str,
 }
 
 impl<'a> WalkFullState<'a> {
-    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer) -> Self {
+    fn new(arena: &'a bumpalo::Bump, tracer: &'a Tracer, file_path: &'a str) -> Self {
         let mut ssa = super::ssa::SsaEngine::new().with_tracer(tracer);
         let entry = ssa.add_block();
         ssa.seal_block(entry);
@@ -1396,6 +1415,7 @@ impl<'a> WalkFullState<'a> {
             top_level_depth: 0,
             in_return: false,
             tracer,
+            file_path,
         }
     }
 
@@ -1482,10 +1502,7 @@ mod tests {
     use treesitter_visit::extract::field;
     use treesitter_visit::predicate::*;
 
-    fn parse_with(
-        spec: &LanguageSpec,
-        code: &str,
-    ) -> Result<ParsedDefs, crate::v2::pipeline::PipelineError> {
+    fn parse_with(spec: &LanguageSpec, code: &str) -> Result<ParsedDefs, ParseFullError> {
         spec.parse_full_collect(
             code.as_bytes(),
             "test.py",

@@ -35,7 +35,8 @@ properties:
     source: email
     nullable: false
     like_allowed: false
-    description: "Primary email address."
+    admin_only: true
+    description: "Primary email address. Gated by `read_user_email_address` in GitLab; surfaced here only to admins until per-cell authorization lands."
 
   name:
     type: string
@@ -47,13 +48,15 @@ properties:
     type: string
     source: first_name
     nullable: true
-    description: "First name, if provided."
+    admin_only: true
+    description: "First name, if provided. Not exposed on any public GitLab user surface; admins only."
 
   last_name:
     type: string
     source: last_name
     nullable: true
-    description: "Last name, if provided."
+    admin_only: true
+    description: "Last name, if provided. Not exposed on any public GitLab user surface; admins only."
 
   created_at:
     type: timestamp
@@ -65,7 +68,8 @@ properties:
     type: timestamp
     source: updated_at
     nullable: true
-    description: "Timestamp when the user record was last updated."
+    admin_only: true
+    description: "Timestamp when the user record was last updated. Not exposed on any public GitLab user surface; admins only."
 
   state:
     type: enum
@@ -98,7 +102,8 @@ properties:
     type: string
     source: preferred_language
     nullable: true
-    description: "User's preferred UI language."
+    admin_only: true
+    description: "User's preferred UI language. Self-only on GitLab REST; admins only here until per-cell authorization lands."
 
   last_activity_on:
     type: date
@@ -110,7 +115,8 @@ properties:
     type: boolean
     source: private_profile
     nullable: false
-    description: "Whether the user profile is private."
+    admin_only: true
+    description: "Whether the user profile is private. Self-only on GitLab REST; admins only here."
 
   is_admin:
     type: boolean
@@ -130,7 +136,8 @@ properties:
     type: boolean
     source: external
     nullable: false
-    description: "Whether the user is marked as external."
+    admin_only: true
+    description: "Whether the user is marked as external. Self-only on GitLab REST and admin-only via UserWithAdmin; admins only here."
 
   user_type:
     type: enum
@@ -187,3 +194,5 @@ storage:
     - {name: idx_is_admin, column: is_admin, type: "minmax", granularity: 1}
     - {name: idx_is_auditor, column: is_auditor, type: "minmax", granularity: 1}
     - {name: idx_is_external, column: is_external, type: "minmax", granularity: 1}
+    - {name: idx_username, column: username, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}

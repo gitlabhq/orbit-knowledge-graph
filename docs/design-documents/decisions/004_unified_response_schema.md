@@ -93,13 +93,13 @@ Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids Ja
 
 Every query returns `{ query_type, nodes, edges }`. Aggregation queries additionally include `columns`. The content varies, the base shape does not.
 
-#### Search
+#### Single-entity Traversal (lookup)
 
-Nodes only, no edges.
+A `traversal` with a single node and no relationships — what was previously a separate `search` query type. Nodes only, no edges.
 
 ```json
 {
-  "query_type": "search",
+  "query_type": "traversal",
   "nodes": [
     { "type": "User", "id": "1", "username": "alice", "name": "Alice", "state": "active" },
     { "type": "User", "id": "2", "username": "bob", "name": "Bob", "state": "active" }
@@ -266,7 +266,7 @@ Optional fields: `depth` (variable-length traversals), `path_id` + `step` (path 
 
 1. Nodes are deduplicated. Each entity appears once.
 2. Edges are instance-level. Each edge connects two specific nodes by `type`+`id`.
-3. One shape for all query types. Search, traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
+3. One shape for all query types. Traversal, aggregation, path_finding, neighbors all produce `{ query_type, nodes, edges, pagination }`. Aggregation queries additionally include `columns` to describe the computed values.
 4. No internal columns leak. The formatter strips `_gkg_*` prefixes.
 5. Metadata in proto, data in JSON. `query_type`, `raw_query_strings`, `row_count`, `pagination` are typed proto fields. The JSON includes `pagination` when a cursor was requested.
 6. No redaction info exposed. Authorization is applied server-side. The consumer only sees what they are allowed to see.
@@ -280,8 +280,8 @@ The frontend picks a default view from `query_type`:
 
 | Query type | Default view |
 |------------|-------------|
-| `search`, `aggregation` | Table |
-| `traversal`, `path_finding`, `neighbors` | Graph |
+| `aggregation`, single-node `traversal` | Table |
+| multi-node `traversal`, `path_finding`, `neighbors` | Graph |
 
 The user can always switch.
 
@@ -315,7 +315,7 @@ GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a 
 **What gets harder:**
 
 - Breaking change to `result_json`. Rails passes the JSON through without parsing, so no Rails changes are needed, but any consumer that parses the JSON will need to handle the new shape.
-- Single-entity search responses are slightly larger due to the envelope overhead.
+- Single-entity traversal responses are slightly larger due to the envelope overhead.
 - Adding a new query type means adding a new extractor in `GraphFormatter`.
 
 ## References
