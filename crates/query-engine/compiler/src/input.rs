@@ -36,6 +36,15 @@ pub struct QueryOptions {
     /// org members with Reporter+ access).
     #[serde(default)]
     pub include_debug_sql: bool,
+    /// When true, skips the ReplacingMergeTree deduplication pass for node
+    /// tables. Rows are still filtered by `_deleted = false` but stale
+    /// duplicates from un-merged parts may appear in results.
+    ///
+    /// Not allowed for aggregation queries (would produce incorrect counts).
+    /// Useful for traversal/neighbors/path_finding where the caller tolerates
+    /// eventual consistency in exchange for lower latency.
+    #[serde(default)]
+    pub skip_dedup: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -974,6 +983,33 @@ mod tests {
         .unwrap();
 
         assert!(!input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_skip_dedup_true() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"skip_dedup": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(input.options.skip_dedup);
+    }
+
+    #[test]
+    fn options_skip_dedup_defaults_false() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(!input.options.skip_dedup);
     }
 
     #[test]

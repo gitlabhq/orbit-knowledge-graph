@@ -1121,9 +1121,6 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // The original node-table _nf_pipe CTE (scanning gl_pipeline) should
-        // be eliminated. A SIP-derived CTE named _nf_pipe may still exist
-        // (scanning gl_edge), which is expected.
         assert!(
             !sql.contains("gl_pipeline"),
             "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
@@ -1197,7 +1194,6 @@ mod tests {
     #[test]
     fn denorm_partial_filters_keeps_nf_cte() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
-        // Pipeline has 'status' denormalized but 'source' is not.
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
@@ -1247,10 +1243,6 @@ mod tests {
         );
     }
 
-    /// The GROUP BY rewrite replaces `GROUP BY node.prop` with
-    /// `GROUP BY edge.denorm_col` when all GROUP BY columns are
-    /// denormalized. The node table join may still remain if the
-    /// node is referenced for redaction IDs or other columns.
     #[test]
     fn denorm_aggregation_count_with_filter_uses_edge_column() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -1279,18 +1271,12 @@ mod tests {
             sql.contains("has(e0.source_tags, 'status:failed')"),
             "filter on denormalized property must use has edge filter, got:\n{sql}"
         );
-        // The _nf_pipe node-filter CTE (with status filter + LIMIT 1 BY)
-        // should be eliminated. gl_pipeline may still appear in SIP/cascade
-        // CTEs, but those don't scan for the status property.
         assert!(
             !sql.contains("pipe.status"),
             "node-table status filter should be eliminated by denorm rewrite, got:\n{sql}"
         );
     }
 
-    /// Role-gated entities (e.g. Vulnerability with required_role > Reporter)
-    /// must keep their node table in FROM so the security pass can apply
-    /// role-scoped traversal path filters.
     #[test]
     fn denorm_preserves_role_gated_node_table_for_security() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -1315,11 +1301,38 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Vulnerability requires SecurityManager role. Even though the state
-        // filter is denormalized, the node table must remain for security.
         assert!(
             sql.contains("gl_vulnerability"),
             "role-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn skip_dedup_removes_limit_by_but_keeps_deleted_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10,
+            "options": {"skip_dedup": true}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("LIMIT 1 BY"),
+            "skip_dedup should eliminate LIMIT 1 BY, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_deleted"),
+            "skip_dedup should still filter by _deleted, got:\n{sql}"
         );
     }
 }
