@@ -20,6 +20,8 @@ pub use gkg_utils::clickhouse::{ChScalar, ChType};
 pub enum Expr {
     /// Column reference → `table.column`
     Column { table: String, column: String },
+    /// Bare SQL identifier, used for lambda parameters.
+    Identifier(String),
     /// Constant value → parameterized as `{pN:Type}`, type inferred from Value.
     Literal(Value),
     /// Constant value with explicit ClickHouse type → `{pN:Type}`.
@@ -27,6 +29,8 @@ pub enum Expr {
     /// Function call → `NAME(arg1, arg2, ...)`
     /// Used for aggregates (COUNT, SUM) and ClickHouse functions (arrayConcat, has).
     FuncCall { name: String, args: Vec<Expr> },
+    /// Lambda expression → `param -> body`.
+    Lambda { param: String, body: Box<Expr> },
     /// Binary operation → `(left OP right)`
     /// Examples: `x = y`, `a AND b`, `col IN (1, 2, 3)`
     BinaryOp {
@@ -295,6 +299,10 @@ impl Expr {
         }
     }
 
+    pub fn ident(name: impl Into<String>) -> Self {
+        Expr::Identifier(name.into())
+    }
+
     pub fn lit(value: impl Into<Value>) -> Self {
         Expr::Literal(value.into())
     }
@@ -331,6 +339,13 @@ impl Expr {
         Expr::FuncCall {
             name: name.into(),
             args,
+        }
+    }
+
+    pub fn lambda(param: impl Into<String>, body: Expr) -> Self {
+        Expr::Lambda {
+            param: param.into(),
+            body: Box::new(body),
         }
     }
 
@@ -454,9 +469,10 @@ impl Expr {
                     a.collect_aliases(out);
                 }
             }
+            Expr::Lambda { body, .. } => body.collect_aliases(out),
             Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
             Expr::InSubquery { expr, .. } => expr.collect_aliases(out),
-            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
         }
     }
 
@@ -468,6 +484,7 @@ impl Expr {
                 left.contains_in_subquery() || right.contains_in_subquery()
             }
             Expr::FuncCall { args, .. } => args.iter().any(|a| a.contains_in_subquery()),
+            Expr::Lambda { body, .. } => body.contains_in_subquery(),
             Expr::UnaryOp { expr, .. } => expr.contains_in_subquery(),
             _ => false,
         }
@@ -494,9 +511,10 @@ impl Expr {
                     a.collect_columns(out);
                 }
             }
+            Expr::Lambda { body, .. } => body.collect_columns(out),
             Expr::UnaryOp { expr, .. } => expr.collect_columns(out),
             Expr::InSubquery { expr, .. } => expr.collect_columns(out),
-            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
         }
     }
 
@@ -505,8 +523,9 @@ impl Expr {
     pub fn references_only(&self, alias: &str) -> bool {
         match self {
             Expr::Column { table, .. } => table == alias,
-            Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
+            Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => true,
             Expr::FuncCall { args, .. } => args.iter().all(|a| a.references_only(alias)),
+            Expr::Lambda { body, .. } => body.references_only(alias),
             Expr::BinaryOp { left, right, .. } => {
                 left.references_only(alias) && right.references_only(alias)
             }

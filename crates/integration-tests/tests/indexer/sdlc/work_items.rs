@@ -3,8 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edge_tags_by_target, assert_edges_have_traversal_path, assert_node_count,
+    create_namespace, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_work_items_with_edges(ctx: &TestContext) {
@@ -122,6 +122,18 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "WorkItem", "1/100/", 3).await;
+    assert_edge_tags_by_target(
+        ctx,
+        "ASSIGNED",
+        "User",
+        "WorkItem",
+        "target_tags",
+        &[
+            (1, &["state:opened", "wi_type:issue"]),
+            (2, &["state:opened", "wi_type:task"]),
+        ],
+    )
+    .await;
 }
 
 pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {

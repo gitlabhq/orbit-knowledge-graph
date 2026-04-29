@@ -806,37 +806,58 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
 
     let et = input.compiler.resolve_edge_tables(&path.rel_types);
+    let scoped_by_traversal_path = can_scope_path_by_traversal_path(input, start, end, &et);
 
     // Build anchor conditions and optional CTEs for filtered endpoints.
     // When a node has concrete node_ids, use a literal IN list.
     // When it has filters or id_range, resolve via a _nf_* CTE with a cap.
     let mut anchor_ctes: Vec<Cte> = Vec::new();
-    let start_anchor_cond = build_path_anchor(start, SOURCE_ID_COLUMN, &mut anchor_ctes)?;
-    let end_anchor_cond = build_path_anchor(end, TARGET_ID_COLUMN, &mut anchor_ctes)?;
+    let start_anchor = build_path_anchor(
+        input,
+        start,
+        SOURCE_ID_COLUMN,
+        &mut anchor_ctes,
+        scoped_by_traversal_path,
+    )?;
+    let end_anchor = build_path_anchor(
+        input,
+        end,
+        TARGET_ID_COLUMN,
+        &mut anchor_ctes,
+        scoped_by_traversal_path,
+    )?;
+    let path_scope_cte = build_path_scope_cte(&start_anchor, &end_anchor);
+
+    let frontier_options = FrontierOptions {
+        rel_type_filter: &rel_type_filter,
+        first_hop_rel_type_filter: &forward_first_hop_rel_type_filter,
+        anchor_entity: Some(start_entity),
+        edge_tables: &et,
+        path_scope_cte: path_scope_cte.as_ref().map(|cte| cte.name.as_str()),
+        include_traversal_path: scoped_by_traversal_path,
+    };
 
     let forward_cte = Cte::new(
         FORWARD_CTE,
         build_frontier(
-            start_anchor_cond,
+            start_anchor.edge_filter,
             forward_depth,
-            &rel_type_filter,
-            &forward_first_hop_rel_type_filter,
-            true,
-            Some(start_entity),
-            &et,
+            FrontierDirection::Forward,
+            &frontier_options,
         ),
     );
     let backward_cte = if backward_depth > 0 {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
-                end_anchor_cond.clone(),
+                end_anchor.edge_filter.clone(),
                 backward_depth,
-                &rel_type_filter,
-                &backward_first_hop_rel_type_filter,
-                false,
-                Some(end_entity),
-                &et,
+                FrontierDirection::Backward,
+                &FrontierOptions {
+                    first_hop_rel_type_filter: &backward_first_hop_rel_type_filter,
+                    anchor_entity: Some(end_entity),
+                    ..frontier_options
+                },
             ),
         ))
     } else {
@@ -936,15 +957,27 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 edge_kinds_column(),
             ),
         ],
-        from: TableRef::join(
-            JoinType::Inner,
-            TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
-            TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
-            Expr::eq(
+        from: {
+            let mut join_cond = Expr::eq(
                 Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
                 Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
-            ),
-        ),
+            );
+            if scoped_by_traversal_path {
+                join_cond = Expr::and(
+                    join_cond,
+                    Expr::eq(
+                        Expr::col(FORWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(BACKWARD_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    ),
+                );
+            }
+            TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(FORWARD_CTE, FORWARD_ALIAS),
+                TableRef::scan(BACKWARD_CTE, BACKWARD_ALIAS),
+                join_cond,
+            )
+        },
         where_clause: Some(Expr::binary(
             Op::Le,
             Expr::binary(
@@ -994,6 +1027,9 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         ctes: {
             // Anchor CTEs must come before frontier CTEs that reference them.
             let mut ctes = anchor_ctes;
+            if let Some(scope_cte) = path_scope_cte {
+                ctes.push(scope_cte);
+            }
             ctes.push(forward_cte);
             if let Some(bc) = backward_cte {
                 ctes.push(bc);
@@ -1015,6 +1051,79 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     })))
 }
 
+const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
+const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
+const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
+
+#[derive(Debug, Clone)]
+struct PathAnchor {
+    edge_filter: Option<Expr>,
+    cte_name: Option<String>,
+    has_traversal_path: bool,
+}
+
+fn can_scope_path_by_traversal_path(
+    input: &Input,
+    start: &InputNode,
+    end: &InputNode,
+    edge_tables: &[String],
+) -> bool {
+    if edge_tables.is_empty()
+        || edge_tables.iter().any(|table| {
+            !input
+                .compiler
+                .table_has_column(table, TRAVERSAL_PATH_COLUMN)
+        })
+    {
+        return false;
+    }
+
+    [start, end].into_iter().all(|node| {
+        resolve_table(node).is_ok_and(|table| {
+            input
+                .compiler
+                .table_has_column(&table, TRAVERSAL_PATH_COLUMN)
+        })
+    })
+}
+
+fn build_path_scope_cte(start: &PathAnchor, end: &PathAnchor) -> Option<Cte> {
+    let start_cte = start.cte_name.as_deref()?;
+    let end_cte = end.cte_name.as_deref()?;
+    if !start.has_traversal_path || !end.has_traversal_path {
+        return None;
+    }
+
+    Some(Cte::new(
+        PATH_SCOPE_CTE,
+        Query {
+            select: vec![SelectExpr::new(
+                Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
+                TRAVERSAL_PATH_COLUMN,
+            )],
+            from: TableRef::join(
+                JoinType::Inner,
+                TableRef::scan(start_cte, PATH_SCOPE_START_ALIAS),
+                TableRef::scan(end_cte, PATH_SCOPE_END_ALIAS),
+                Expr::eq(
+                    Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
+                    Expr::col(PATH_SCOPE_END_ALIAS, TRAVERSAL_PATH_COLUMN),
+                ),
+            ),
+            group_by: vec![Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN)],
+            ..Default::default()
+        },
+    ))
+}
+
+fn path_scope_filter(alias: &str, cte_name: &str) -> Expr {
+    Expr::InSubquery {
+        expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+        cte_name: cte_name.to_string(),
+        column: TRAVERSAL_PATH_COLUMN.to_string(),
+    }
+}
+
 /// Build an anchor condition for a path_finding endpoint.
 ///
 /// - If the node has `node_ids`, returns a literal `e1.<edge_col> IN (ids)`.
@@ -1024,32 +1133,52 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 /// `edge_col` is the edge column to filter (SOURCE_ID_COLUMN for forward
 /// start, TARGET_ID_COLUMN for backward end).
 fn build_path_anchor(
+    input: &Input,
     node: &InputNode,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
-) -> Result<Option<Expr>> {
-    if !node.node_ids.is_empty() {
-        return Ok(Expr::col_in(
-            "e1",
-            edge_col,
-            ChType::Int64,
-            node.node_ids.iter().map(|id| Value::from(*id)).collect(),
-        ));
+    force_cte: bool,
+) -> Result<PathAnchor> {
+    if !force_cte && !node.node_ids.is_empty() {
+        return Ok(PathAnchor {
+            edge_filter: Expr::col_in(
+                "e1",
+                edge_col,
+                ChType::Int64,
+                node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+            ),
+            cte_name: None,
+            has_traversal_path: false,
+        });
     }
 
     // Filters or id_range: resolve via a capped CTE.
     let node_where = build_node_where(node);
     if node_where.is_none() {
-        return Ok(None);
+        return Ok(PathAnchor {
+            edge_filter: None,
+            cte_name: None,
+            has_traversal_path: false,
+        });
     }
 
     let table = resolve_table(node)?;
     let cte_name = node_filter_cte(&node.id);
+    let has_traversal_path = input
+        .compiler
+        .table_has_column(&table, TRAVERSAL_PATH_COLUMN);
+    let mut select = vec![SelectExpr::new(
+        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+        DEFAULT_PRIMARY_KEY,
+    )];
+    if has_traversal_path {
+        select.push(SelectExpr::new(
+            Expr::col(&node.id, TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
     let cte_query = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
+        select,
         from: TableRef::scan(&table, &node.id),
         where_clause: node_where,
         limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
@@ -1057,11 +1186,15 @@ fn build_path_anchor(
     };
     ctes.push(Cte::new(&cte_name, cte_query));
 
-    Ok(Some(Expr::InSubquery {
-        expr: Box::new(Expr::col("e1", edge_col)),
-        cte_name,
-        column: DEFAULT_PRIMARY_KEY.into(),
-    }))
+    Ok(PathAnchor {
+        edge_filter: Some(Expr::InSubquery {
+            expr: Box::new(Expr::col("e1", edge_col)),
+            cte_name: cte_name.clone(),
+            column: DEFAULT_PRIMARY_KEY.into(),
+        }),
+        cte_name: Some(cte_name),
+        has_traversal_path,
+    })
 }
 
 /// Build an endpoint filter for the direct_query WHERE clause.
@@ -1096,6 +1229,22 @@ fn build_path_endpoint_filter(
     None
 }
 
+#[derive(Clone, Copy)]
+enum FrontierDirection {
+    Forward,
+    Backward,
+}
+
+#[derive(Clone, Copy)]
+struct FrontierOptions<'a> {
+    rel_type_filter: &'a Option<Vec<String>>,
+    first_hop_rel_type_filter: &'a Option<Vec<String>>,
+    anchor_entity: Option<&'a str>,
+    edge_tables: &'a [String],
+    path_scope_cte: Option<&'a str>,
+    include_traversal_path: bool,
+}
+
 /// Build a frontier CTE body: UNION ALL of hop arms for depths 1..max_depth.
 ///
 /// `is_forward=true`:  anchors on source_id, traverses source→target
@@ -1110,24 +1259,11 @@ fn build_path_endpoint_filter(
 fn build_frontier(
     anchor_cond: Option<Expr>,
     max_depth: u32,
-    rel_type_filter: &Option<Vec<String>>,
-    first_hop_rel_type_filter: &Option<Vec<String>>,
-    is_forward: bool,
-    anchor_entity: Option<&str>,
-    edge_tables: &[String],
+    direction: FrontierDirection,
+    options: &FrontierOptions<'_>,
 ) -> Query {
     let arms: Vec<Query> = (1..=max_depth)
-        .map(|depth| {
-            build_frontier_arm(
-                anchor_cond.clone(),
-                depth,
-                rel_type_filter,
-                first_hop_rel_type_filter,
-                is_forward,
-                anchor_entity,
-                edge_tables,
-            )
-        })
+        .map(|depth| build_frontier_arm(anchor_cond.clone(), depth, direction, options))
         .collect();
 
     // Wrap in a UNION ALL. For a single arm just return it directly.
@@ -1157,30 +1293,40 @@ fn build_frontier(
 fn build_frontier_arm(
     anchor_cond: Option<Expr>,
     depth: u32,
-    rel_type_filter: &Option<Vec<String>>,
-    first_hop_rel_type_filter: &Option<Vec<String>>,
-    is_forward: bool,
-    anchor_entity: Option<&str>,
-    edge_tables: &[String],
+    direction: FrontierDirection,
+    options: &FrontierOptions<'_>,
 ) -> Query {
     // Column naming: forward traverses source→target, backward target→source.
-    let (anchor_col, next_col, next_kind_col) = if is_forward {
-        (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN)
-    } else {
-        (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN)
+    let (anchor_col, next_col, next_kind_col) = match direction {
+        FrontierDirection::Forward => (SOURCE_ID_COLUMN, TARGET_ID_COLUMN, TARGET_KIND_COLUMN),
+        FrontierDirection::Backward => (TARGET_ID_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN),
     };
 
     let last = format!("e{depth}");
 
     // Build join chain: e1 JOIN e2 ON e1.next = e2.anchor JOIN e3 ...
-    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", first_hop_rel_type_filter);
+    let (mut from, first_type_cond) =
+        multi_edge_scan(options.edge_tables, "e1", options.first_hop_rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let (edge_tbl, edge_type_cond) = multi_edge_scan(edge_tables, &curr, rel_type_filter);
+        let (edge_tbl, edge_type_cond) =
+            multi_edge_scan(options.edge_tables, &curr, options.rel_type_filter);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
+        if options.include_traversal_path {
+            join_cond = Expr::and(
+                join_cond,
+                Expr::eq(
+                    Expr::col(&prev, TRAVERSAL_PATH_COLUMN),
+                    Expr::col(&curr, TRAVERSAL_PATH_COLUMN),
+                ),
+            );
+        }
         if let Some(tc) = edge_type_cond {
             join_cond = Expr::and(join_cond, tc);
+        }
+        if let Some(scope_cte) = options.path_scope_cte {
+            join_cond = Expr::and(join_cond, path_scope_filter(&curr, scope_cte));
         }
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
@@ -1190,10 +1336,9 @@ fn build_frontier_arm(
     // For backward arms, exclude the last hop (the meeting point) because
     // it's already the last element in forward's path_nodes. Only include
     // intermediate nodes between the end anchor and the meeting point.
-    let path_node_range = if is_forward {
-        1..=depth
-    } else {
-        1..=depth.saturating_sub(1)
+    let path_node_range = match direction {
+        FrontierDirection::Forward => 1..=depth,
+        FrontierDirection::Backward => 1..=depth.saturating_sub(1),
     };
     let path_node_tuples: Vec<Expr> = path_node_range
         .map(|i| {
@@ -1233,25 +1378,36 @@ fn build_frontier_arm(
 
     // Anchor entity kind filter: constrain the anchor side of the first edge
     // to the expected entity type (e.g. source_kind = 'User' for forward).
-    let anchor_kind_col = if is_forward {
-        SOURCE_KIND_COLUMN
-    } else {
-        TARGET_KIND_COLUMN
+    let anchor_kind_col = match direction {
+        FrontierDirection::Forward => SOURCE_KIND_COLUMN,
+        FrontierDirection::Backward => TARGET_KIND_COLUMN,
     };
-    let anchor_kind_cond = anchor_entity
+    let anchor_kind_cond = options
+        .anchor_entity
         .map(|entity| Expr::eq(Expr::col("e1", anchor_kind_col), Expr::string(entity)));
+    let scope_cond = options
+        .path_scope_cte
+        .map(|scope_cte| path_scope_filter("e1", scope_cte));
+
+    let mut select = vec![
+        SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
+        SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
+        SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
+        SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
+        SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
+        SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+    ];
+    if options.include_traversal_path {
+        select.push(SelectExpr::new(
+            Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
 
     Query {
-        select: vec![
-            SelectExpr::new(Expr::col("e1", anchor_col), ANCHOR_ID_COLUMN),
-            SelectExpr::new(Expr::col(&last, next_col), END_ID_COLUMN),
-            SelectExpr::new(Expr::col(&last, next_kind_col), END_KIND_COLUMN),
-            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
-            SelectExpr::new(edge_kinds, FRONTIER_EDGE_KINDS_COLUMN),
-            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
-        ],
+        select,
         from,
-        where_clause: Expr::and_all([anchor_cond, first_type_cond, anchor_kind_cond]),
+        where_clause: Expr::and_all([anchor_cond, first_type_cond, anchor_kind_cond, scope_cond]),
         ..Default::default()
     }
 }

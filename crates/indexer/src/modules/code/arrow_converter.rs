@@ -194,6 +194,22 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
             nullable: false,
         })
         .collect();
+
+    let mut seen = std::collections::HashSet::new();
+    for table_name in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table_name) {
+            for col in &config.storage.denormalized_columns {
+                if seen.insert(col.name.clone()) {
+                    specs.push(ColumnSpec {
+                        name: col.name.clone(),
+                        col_type: ColumnType::StrList,
+                        nullable: false,
+                    });
+                }
+            }
+        }
+    }
+
     specs.push(ColumnSpec {
         name: "_version".into(),
         col_type: ColumnType::TimestampMicros,
@@ -293,6 +309,21 @@ fn convert_edges(
 ) -> Result<RecordBatch, ArrowError> {
     let specs = edge_specs(ontology);
 
+    let denorm_cols: Vec<String> = {
+        let mut seen = std::collections::HashSet::new();
+        let mut cols = Vec::new();
+        for table_name in ontology.edge_tables() {
+            if let Some(config) = ontology.edge_table_config(table_name) {
+                for col in &config.storage.denormalized_columns {
+                    if seen.insert(col.name.clone()) {
+                        cols.push(col.name.clone());
+                    }
+                }
+            }
+        }
+        cols
+    };
+
     struct IndexerEdgeRow<'a> {
         env: &'a IndexerEnvelope,
         source_id: i64,
@@ -300,6 +331,7 @@ fn convert_edges(
         edge_kind: &'a str,
         source_node_kind: &'a str,
         target_node_kind: &'a str,
+        denormalized_column_names: &'a [String],
     }
 
     impl AsRecordBatch for IndexerEdgeRow<'_> {
@@ -311,6 +343,9 @@ fn convert_edges(
             b.col("relationship_kind")?.push_str(self.edge_kind)?;
             b.col("target_id")?.push_int(self.target_id)?;
             b.col("target_kind")?.push_str(self.target_node_kind)?;
+            for col_name in self.denormalized_column_names {
+                b.col(col_name)?.push_empty_str_list()?;
+            }
             b.col("_version")?
                 .push_timestamp_micros(self.env.version_micros)?;
             b.col("_deleted")?.push_bool(false)?;
@@ -330,6 +365,7 @@ fn convert_edges(
         edge_kind: "IN_PROJECT",
         source_node_kind: "Branch",
         target_node_kind: "Project",
+        denormalized_column_names: &denorm_cols,
     });
 
     // Branch --CONTAINS--> root-level directories and files
@@ -342,6 +378,7 @@ fn convert_edges(
                 edge_kind: "CONTAINS",
                 source_node_kind: "Branch",
                 target_node_kind: "Directory",
+                denormalized_column_names: &denorm_cols,
             });
         }
     }
@@ -354,6 +391,7 @@ fn convert_edges(
                 edge_kind: "CONTAINS",
                 source_node_kind: "Branch",
                 target_node_kind: "File",
+                denormalized_column_names: &denorm_cols,
             });
         }
     }
@@ -369,6 +407,7 @@ fn convert_edges(
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
+            denormalized_column_names: &denorm_cols,
         });
     }
 

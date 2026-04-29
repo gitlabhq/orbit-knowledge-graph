@@ -518,6 +518,52 @@ mod tests {
     }
 
     #[test]
+    fn path_finding_code_filtered_endpoints_prune_by_traversal_path() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["CALLS"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_path_scope_traversal_paths"),
+            "code path finding should compute candidate traversal paths, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("e1.traversal_path = e2.traversal_path"),
+            "code edge self-joins should stay within one traversal_path, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("f.traversal_path = b.traversal_path"),
+            "frontier intersection should stay within one traversal_path, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_fwd_hop1") && sql.contains("FROM _nf_start"),
+            "filtered code endpoint hop frontier should seed from _nf_start, got:\n{sql}"
+        );
+        assert!(
+            sql.contains(
+                "_he.traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"
+            ),
+            "filtered code endpoint hop frontier should use traversal_path scope, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_he.source_kind = 'Definition'"),
+            "filtered code endpoint hop frontier should keep the start entity kind, got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn path_finding_without_cursor_orders_only_by_depth() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
 
@@ -674,6 +720,35 @@ mod tests {
             "inferred aggregation relationship kinds should avoid scanning code edge table, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn path_finding_user_paths_do_not_join_on_traversal_path() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("_path_scope_traversal_paths"),
+            "path finding without traversal_path endpoints should not compute traversal_path candidates, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("f.traversal_path = b.traversal_path"),
+            "User paths must not require traversal_path on frontier rows, got:\n{sql}"
+        );
+    }
+
     /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
     /// EVERY edge it touches, not just whichever side `node_edge_col`
     /// happens to map first. Without this, `User AUTHORED MR` joined to

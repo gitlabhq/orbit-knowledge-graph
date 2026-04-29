@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
-use crate::constants::node_filter_cte;
+use crate::constants::{TRAVERSAL_PATH_COLUMN, node_filter_cte};
 use crate::input::{Input, QueryType};
 use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN};
@@ -61,8 +61,9 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     }
 }
 
-/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs select `id`
-/// for edge semi-joins. Using LIMIT 1 BY with the sort key prefix lets
+/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs always select `id`
+/// for edge semi-joins and may carry extra stable columns for optimizer CTEs.
+/// Using LIMIT 1 BY with the sort key prefix lets
 /// ClickHouse stream in primary key order instead of hash-aggregating
 /// the entire table.
 fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
@@ -71,10 +72,40 @@ fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
     {
         let table = table.clone();
         let alias = alias.clone();
-        apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
-        // The CTE only needs `id`, but the LIMIT 1 BY subquery selects *.
-        // Narrow the outer select back to just `id`.
-        q.select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
+        let select = std::mem::take(&mut q.select);
+        let selects_traversal_path = select
+            .iter()
+            .any(|expr| expr.alias.as_deref() == Some(TRAVERSAL_PATH_COLUMN));
+
+        // When the CTE is fed by a cascade (WHERE id IN (SELECT id FROM
+        // _cascade_*)), use [id] as the sort key so the ORDER BY becomes
+        // `id ASC, _version DESC`. This lets ClickHouse use the by_id
+        // projection instead of the main table's primary key order,
+        // avoiding a full-table sort on traversal_path.
+        let has_cascade = q
+            .where_clause
+            .as_ref()
+            .is_some_and(|w| w.contains_in_subquery());
+
+        if selects_traversal_path && !has_cascade {
+            apply_limit_by_dedup_with_inner_filters(
+                &mut q.from,
+                &mut q.where_clause,
+                &table,
+                ontology,
+            );
+        } else if has_cascade {
+            apply_limit_by_dedup_id_only(&mut q.from, &mut q.where_clause, selects_traversal_path);
+        } else {
+            apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
+        }
+        // The LIMIT 1 BY subquery selects *. Narrow the outer select back to
+        // the lowerer's requested CTE columns.
+        q.select = if select.is_empty() {
+            vec![SelectExpr::new(Expr::col(&alias, "id"), "id")]
+        } else {
+            select
+        };
     }
 }
 
@@ -342,6 +373,27 @@ fn make_dedup_subquery(
     )
 }
 
+/// Cascade-optimized dedup: uses `ORDER BY id, _version DESC` so ClickHouse
+/// can pick the `by_id` projection instead of the main table's primary key
+/// order. All WHERE filters are pushed inside since cascade CTEs have an
+/// `id IN (...)` filter that already restricts the scan.
+fn apply_limit_by_dedup_id_only(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    push_all_filters_inside: bool,
+) {
+    let (table_name, alias) = match from {
+        TableRef::Scan { table, alias, .. } => (table.clone(), alias.clone()),
+        _ => return,
+    };
+    let id_sort_key: &[String] = &[DEFAULT_PRIMARY_KEY.to_string()];
+    if push_all_filters_inside {
+        wrap_scan_with_limit_by_inner_filters(from, where_clause, table_name, alias, id_sort_key);
+    } else {
+        wrap_scan_with_limit_by(from, where_clause, table_name, alias, None, id_sort_key);
+    }
+}
+
 fn apply_limit_by_dedup(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
@@ -354,6 +406,20 @@ fn apply_limit_by_dedup(
     };
     let sort_key = ontology.sort_key_for_table(table).unwrap_or_default();
     wrap_scan_with_limit_by(from, where_clause, table_name, alias, None, sort_key);
+}
+
+fn apply_limit_by_dedup_with_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table: &str,
+    ontology: &Ontology,
+) {
+    let (table_name, alias) = match from {
+        TableRef::Scan { table, alias, .. } => (table.clone(), alias.clone()),
+        _ => return,
+    };
+    let sort_key = ontology.sort_key_for_table(table).unwrap_or_default();
+    wrap_scan_with_limit_by_inner_filters(from, where_clause, table_name, alias, sort_key);
 }
 
 fn wrap_scan_with_limit_by(
@@ -370,6 +436,21 @@ fn wrap_scan_with_limit_by(
 
     outer_filters.insert(0, not_deleted(&alias));
     *where_clause = Expr::conjoin(outer_filters);
+    *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
+}
+
+fn wrap_scan_with_limit_by_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table_name: String,
+    alias: String,
+    sort_key: &[String],
+) {
+    let inner_filters = where_clause
+        .take()
+        .map(Expr::flatten_and)
+        .unwrap_or_default();
+    *where_clause = Some(not_deleted(&alias));
     *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
 }
 
@@ -400,20 +481,36 @@ fn wrap_join_scans(
             // _ce.source_id that don't exist in the dedup subquery scope).
             // Cascade-derived CTEs are identified by containing InSubquery
             // anywhere in their WHERE tree.
-            let nf_filter = cte_filters.get(&nf_cte).and_then(|cte_where| {
-                let cte_where = cte_where.as_ref()?;
-                if cte_where.contains_in_subquery() {
-                    // Cascade-derived: fall back to CTE reference
-                    Some(Expr::InSubquery {
-                        expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
-                        cte_name: nf_cte,
-                        column: DEFAULT_PRIMARY_KEY.to_string(),
-                    })
-                } else {
-                    // Lowerer-created: inline the WHERE conditions
-                    Some(cte_where.clone())
-                }
-            });
+            let (nf_filter, is_cascade) =
+                cte_filters.get(&nf_cte).map_or((None, false), |cte_where| {
+                    let Some(cte_where) = cte_where.as_ref() else {
+                        return (None, false);
+                    };
+                    if cte_where.contains_in_subquery() {
+                        // Cascade-derived: fall back to CTE reference
+                        (
+                            Some(Expr::InSubquery {
+                                expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
+                                cte_name: nf_cte,
+                                column: DEFAULT_PRIMARY_KEY.to_string(),
+                            }),
+                            true,
+                        )
+                    } else {
+                        // Lowerer-created: inline the WHERE conditions
+                        (Some(cte_where.clone()), false)
+                    }
+                });
+
+            // When cascade-derived, use [id] as sort key so ClickHouse
+            // picks the by_id projection instead of the main table order.
+            let effective_sort_key: Vec<String>;
+            let sort_key = if is_cascade {
+                effective_sort_key = vec![DEFAULT_PRIMARY_KEY.to_string()];
+                &effective_sort_key
+            } else {
+                sort_key
+            };
 
             wrap_scan_with_limit_by(
                 from,
@@ -973,6 +1070,94 @@ mod tests {
         let arm2 = &q.union_all[0];
         assert!(!arm2.group_by.is_empty(), "second arm should have GROUP BY");
         assert!(arm2.having.is_some(), "second arm should have HAVING");
+    }
+
+    #[test]
+    fn cascade_fed_nf_cte_uses_id_only_sort_key() {
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "_nf_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    where_clause: Some(Expr::and(
+                        Expr::func(
+                            "startsWith",
+                            vec![
+                                Expr::col("mr", TRAVERSAL_PATH_COLUMN),
+                                Expr::string("1/100/"),
+                            ],
+                        ),
+                        Expr::InSubquery {
+                            expr: Box::new(Expr::col("mr", "id")),
+                            cte_name: "_cascade_mr".to_string(),
+                            column: "id".to_string(),
+                        },
+                    )),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
+            from: TableRef::scan("_nf_mr", "b"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let cte_q = &q.ctes[0].query;
+        let inner = find_subquery(&cte_q.from, "mr").expect("CTE scan should be wrapped");
+        assert!(has_limit_by(inner), "inner should have LIMIT 1 BY");
+        // CASCADE-FED: ORDER BY should be [id ASC, _version DESC], NOT
+        // [traversal_path ASC, id ASC, _version DESC]. This lets
+        // ClickHouse use the by_id projection.
+        assert_eq!(
+            inner.order_by.len(),
+            2,
+            "should have exactly 2 ORDER BY columns (id, _version)"
+        );
+        let first = &inner.order_by[0];
+        assert!(
+            matches!(&first.expr, Expr::Column { column, .. } if column == "id"),
+            "first ORDER BY should be id"
+        );
+        assert!(!first.desc, "id should be ASC");
+        let second = &inner.order_by[1];
+        assert!(second.desc, "second ORDER BY should be _version DESC");
+    }
+
+    #[test]
+    fn non_cascade_nf_cte_uses_full_sort_key() {
+        let ont = ontology();
+        let mut node = Node::Query(Box::new(Query {
+            ctes: vec![Cte::new(
+                "_nf_mr",
+                Query {
+                    select: vec![SelectExpr::new(Expr::col("mr", "id"), "id")],
+                    from: TableRef::scan("gl_merge_request", "mr"),
+                    where_clause: Some(Expr::eq(Expr::col("mr", "state"), Expr::string("merged"))),
+                    ..Default::default()
+                },
+            )],
+            select: vec![SelectExpr::new(Expr::col("b", "id"), "id")],
+            from: TableRef::scan("_nf_mr", "b"),
+            ..Default::default()
+        }));
+        deduplicate(&mut node, &input_for(QueryType::Traversal), &ont);
+
+        let Node::Query(q) = &node else {
+            unreachable!()
+        };
+        let cte_q = &q.ctes[0].query;
+        let inner = find_subquery(&cte_q.from, "mr").expect("CTE scan should be wrapped");
+        assert!(has_limit_by(inner), "inner should have LIMIT 1 BY");
+        // NON-CASCADE: ORDER BY should include traversal_path (full sort key)
+        assert!(
+            inner.order_by.len() > 2,
+            "non-cascade should have full sort key + _version"
+        );
     }
 
     #[test]

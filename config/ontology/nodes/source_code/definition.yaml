@@ -107,7 +107,8 @@ properties:
     description: "Source text of the definition. Resolved from Gitaly at query time using start_byte/end_byte."
 
 storage:
-  version_only_engine: true
+  settings:
+    index_granularity: "1024"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
