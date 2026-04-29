@@ -221,8 +221,15 @@ Wait For Role Scoped Fixture Indexed
     Wait For Node Indexed Within Budget    Vulnerability    ${NESTED_DEVELOPER_VULNERABILITY_ID}
 
 Query Vulnerability Counts As Victim
+    [Documentation]    Aggregation across the suite's seeded projects only. Orbit
+    ...                rejects unconstrained traversal/aggregation queries to
+    ...                prevent full edge-table scans, so we pin the Project node
+    ...                via node_ids. The role-scoped authz fix is what determines
+    ...                which of those project rows survive into the response.
+    ${project_ids}=    Evaluate
+    ...    [int($REPORTER_PROJECT_ID), int($SECURITY_PROJECT_ID), int($DEVELOPER_PROJECT_ID), int($MAINTAINER_PROJECT_ID), int($NESTED_REPORTER_PROJECT_ID), int($NESTED_DEVELOPER_PROJECT_ID)]
     ${query}=    Evaluate
-    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"]}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}], "limit": 20}
+    ...    {"query_type": "aggregation", "nodes": [{"id": "p", "entity": "Project", "columns": ["name"], "node_ids": $project_ids}, {"id": "v", "entity": "Vulnerability"}], "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}], "aggregations": [{"function": "count", "target": "v", "group_by": "p", "alias": "vuln_count"}], "limit": 20}
     ${resp}=    Orbit Query With Token    ${query}    ${ROLE_AUTHZ_VICTIM_PAT}
     RETURN    ${resp}
 
