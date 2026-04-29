@@ -56,6 +56,13 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
             if input.options.skip_dedup {
                 // Only apply soft-delete filters, no dedup subqueries.
                 add_deleted_filters_recursive(q);
+            } else if input.options.use_final {
+                // Use FINAL modifier on node table scans instead of LIMIT 1 BY.
+                // FINAL tells ClickHouse to resolve RMT duplicates at read time.
+                // We still need _deleted = false since FINAL with
+                // `do_not_merge_across_partitions_select_final` may not collapse
+                // delete tombstones across partitions.
+                apply_final_recursive(q, input);
             } else {
                 for cte in &mut q.ctes {
                     if cte.name.starts_with("_nf_") {
@@ -80,6 +87,60 @@ fn add_deleted_filters_recursive(q: &mut Query) {
         add_deleted_filters_recursive(arm);
     }
     visit_from_for_deleted(&mut q.from, &mut q.where_clause);
+}
+
+/// When use_final is set, mark all node table scans with FINAL and add
+/// `_deleted = false` filters. Edge tables get only the _deleted filter
+/// (they don't need FINAL -- their full-tuple ORDER BY makes RMT dedup effective).
+fn apply_final_recursive(q: &mut Query, input: &Input) {
+    for cte in &mut q.ctes {
+        apply_final_recursive(&mut cte.query, input);
+    }
+    for arm in &mut q.union_all {
+        apply_final_recursive(arm, input);
+    }
+    visit_from_for_final(
+        &mut q.from,
+        &mut q.where_clause,
+        &input.compiler.edge_tables,
+    );
+}
+
+/// Walk the FROM tree, set `final_ = true` on node table scans,
+/// and add `_deleted = false` for all gl_* table scans.
+fn visit_from_for_final(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    edge_tables: &HashSet<String>,
+) {
+    match from {
+        TableRef::Scan {
+            table,
+            alias,
+            final_,
+        } => {
+            if GL_TABLE_RE.is_match(table) {
+                // _deleted = false on all tables.
+                let deleted_filter =
+                    Expr::eq(Expr::col(alias.as_str(), DELETED_COLUMN), Expr::lit(false));
+                *where_clause = Some(match where_clause.take() {
+                    Some(existing) => Expr::and(existing, deleted_filter),
+                    None => deleted_filter,
+                });
+                // FINAL only on node tables, not edges.
+                if !edge_tables.contains(table.as_str()) {
+                    *final_ = true;
+                }
+            }
+        }
+        TableRef::Join {
+            left, right, on: _, ..
+        } => {
+            visit_from_for_final(left, where_clause, edge_tables);
+            visit_from_for_final(right, where_clause, edge_tables);
+        }
+        TableRef::Subquery { .. } | TableRef::Union { .. } => {}
+    }
 }
 
 /// Walk the FROM tree and add `_deleted = false` for every gl_* table scan.

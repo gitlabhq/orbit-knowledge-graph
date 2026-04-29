@@ -45,6 +45,18 @@ pub struct QueryOptions {
     /// eventual consistency in exchange for lower latency.
     #[serde(default)]
     pub skip_dedup: bool,
+    /// When true, uses `FINAL` modifier on node table scans instead of the
+    /// `LIMIT 1 BY id` dedup subquery. ClickHouse resolves duplicates at
+    /// read time using the ReplacingMergeTree engine's merge logic.
+    ///
+    /// Trades dedup strategy: `FINAL` avoids the sort-based `LIMIT 1 BY`
+    /// but uses ClickHouse's internal vertical merge. Can be faster for
+    /// point lookups with the `by_id` projection; may be slower for large
+    /// filtered scans where `LIMIT 1 BY` streams in primary key order.
+    ///
+    /// Mutually exclusive with `skip_dedup`. Not allowed for aggregation.
+    #[serde(default)]
+    pub use_final: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -992,6 +1004,20 @@ mod tests {
         .unwrap();
 
         assert!(input.options.skip_dedup);
+    }
+
+    #[test]
+    fn options_use_final_true() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"use_final": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(input.options.use_final);
     }
 
     #[test]
