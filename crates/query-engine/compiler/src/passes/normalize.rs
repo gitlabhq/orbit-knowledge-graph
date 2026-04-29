@@ -80,6 +80,22 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         })
         .collect();
 
+    // Populate denormalized columns map for the optimizer.
+    for dp in ontology.denormalized_properties() {
+        let dir_prefix = match dp.direction {
+            ontology::DenormDirection::Source => "source",
+            ontology::DenormDirection::Target => "target",
+        };
+        input.compiler.denormalized_columns.insert(
+            (
+                dp.node_kind.clone(),
+                dp.property_name.clone(),
+                dir_prefix.to_string(),
+            ),
+            (dp.edge_column.clone(), dp.tag_key.clone()),
+        );
+    }
+
     // Populate text index metadata from the ontology's StorageIndex entries.
     for node_entity in ontology.nodes() {
         for idx in &node_entity.storage.indexes {

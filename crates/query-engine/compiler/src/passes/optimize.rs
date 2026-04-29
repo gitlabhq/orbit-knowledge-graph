@@ -27,7 +27,7 @@ use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
-use crate::input::{Direction, Input, InputNode, QueryType};
+use crate::input::{AggFunction, ColumnSelection, Direction, Input, InputNode, QueryType};
 
 use ontology::constants::{
     DEFAULT_PRIMARY_KEY, RELATIONSHIP_KIND_COLUMN, SOURCE_ID_COLUMN, SOURCE_KIND_COLUMN,
@@ -43,6 +43,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             push_kind_literals_into_variable_length_arms(q, input);
+            rewrite_denormalized_node_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -330,6 +331,568 @@ fn push_kind_literals_into_variable_length_arms(q: &mut Query, input: &Input) {
             parts.extend(filters);
             arm.where_clause = Expr::conjoin(parts);
         }
+    }
+}
+
+/// Rewrite `_nf_` CTEs to edge-column filters when ALL node filters
+/// reference properties denormalized onto the edge table.
+///
+/// Before:
+///   WITH _nf_pipe AS (SELECT id FROM gl_pipeline WHERE status='failed' ... LIMIT 1 BY id)
+///   SELECT COUNT(e0.source_id) FROM gl_edge e0
+///   WHERE e0.source_id IN (SELECT id FROM _nf_pipe) AND e0.target_id=278964
+///
+/// After:
+///   SELECT COUNT() FROM gl_edge e0
+///   WHERE e0.source_status='failed' AND e0.source_kind='Pipeline' AND e0.target_id=278964
+///
+/// Handles all query shapes:
+/// - Single-hop: filters added to outer WHERE with `e0`
+/// - Multi-hop: filters injected into UNION ALL arm WHEREs with `e1`
+/// - Neighbors: filters replaced in `q.union_all` arm WHEREs
+/// - PathFinding: filters replaced inside frontier CTE queries
+fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
+    if input.compiler.denormalized_columns.is_empty() {
+        return;
+    }
+
+    let mut ctes_to_remove: Vec<String> = Vec::new();
+    // Map CTE name → edge-column filter exprs (using placeholder alias "EDGE")
+    let mut filters_per_cte: HashMap<String, Vec<Expr>> = HashMap::new();
+
+    for cte in &q.ctes {
+        let Some(alias) = cte.name.strip_prefix("_nf_") else {
+            continue;
+        };
+        let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
+            continue;
+        };
+        if node.filters.is_empty() || !node.node_ids.is_empty() || node.id_range.is_some() {
+            continue;
+        }
+        let entity = match &node.entity {
+            Some(e) => e,
+            None => continue,
+        };
+
+        let Some(dir_prefix) = resolve_denorm_direction(node, input) else {
+            continue;
+        };
+
+        let mut all_rewritable = true;
+        // Collect tag values per edge column for hasAll batching.
+        let mut tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
+
+        for (prop_name, filter) in &node.filters {
+            let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
+            if let Some((edge_column, tag_key)) = input.compiler.denormalized_columns.get(&key) {
+                if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
+                    all_rewritable = false;
+                    break;
+                }
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                tags_per_column
+                    .entry(edge_column.clone())
+                    .or_default()
+                    .push(format!("{tag_key}:{val}"));
+            } else {
+                all_rewritable = false;
+                break;
+            }
+        }
+
+        // Build filter expressions: has() for single tag, hasAll() for multiple.
+        let edge_filters: Vec<Expr> = tags_per_column
+            .into_iter()
+            .map(|(col, tags)| {
+                if tags.len() == 1 {
+                    Expr::func("has", vec![Expr::col("EDGE", &col), Expr::string(&tags[0])])
+                } else {
+                    Expr::func(
+                        "hasAll",
+                        vec![
+                            Expr::col("EDGE", &col),
+                            Expr::func("array", tags.iter().map(Expr::string).collect()),
+                        ],
+                    )
+                }
+            })
+            .collect();
+
+        if !all_rewritable {
+            continue;
+        }
+
+        ctes_to_remove.push(cte.name.clone());
+        filters_per_cte.insert(cte.name.clone(), edge_filters);
+    }
+
+    if ctes_to_remove.is_empty() {
+        return;
+    }
+
+    // Remove the _nf_ CTEs.
+    q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
+
+    let has_union_in_from = has_union_table_ref(&q.from);
+
+    // Phase 1: Replace InSubquery in outer WHERE.
+    // Single-hop: add edge-column filters to outer WHERE with e0.
+    // Multi-hop: don't add to outer WHERE (column lives on inner e1); injection below.
+    if let Some(ref mut where_clause) = q.where_clause {
+        let conjuncts = where_clause.clone().flatten_and();
+        let mut kept: Vec<Expr> = Vec::new();
+        for conj in conjuncts {
+            if let Expr::InSubquery { cte_name, .. } = &conj
+                && ctes_to_remove.contains(cte_name)
+            {
+                if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                    kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                }
+                continue;
+            }
+            kept.push(conj);
+        }
+        *where_clause = Expr::conjoin(kept).unwrap_or(Expr::int(1));
+    }
+
+    // Phase 2: Multi-hop — inject filters into UNION ALL arms in FROM.
+    // The first edge in each arm is always e1 (from build_hop_arm).
+    if has_union_in_from {
+        for cte_name in &ctes_to_remove {
+            if let Some(filters) = filters_per_cte.get(cte_name) {
+                let arm_filters: Vec<Expr> =
+                    filters.iter().map(|f| set_edge_alias(f, "e1")).collect();
+                inject_filters_into_from_unions(&mut q.from, &arm_filters);
+            }
+        }
+    }
+
+    // Phase 3: Neighbors — replace InSubquery in main query and union_all arm
+    // WHEREs. The center node is source in the outgoing arm and target in the
+    // incoming arm, so we need direction-specific filters per arm.
+    if input.neighbors.is_some() {
+        // Build direction-specific filter maps for neighbors.
+        let neighbors_filters = build_neighbors_denorm_filters(&ctes_to_remove, input);
+        if let Some((outgoing_filters, incoming_filters)) = neighbors_filters {
+            // Main query is the outgoing arm (or single-direction arm).
+            replace_in_subquery_in_where(
+                &mut q.where_clause,
+                &ctes_to_remove,
+                &outgoing_filters,
+                "e",
+            );
+            // union_all[0] is the incoming arm (only present for Direction::Both).
+            for arm in &mut q.union_all {
+                replace_in_subquery_in_where(
+                    &mut arm.where_clause,
+                    &ctes_to_remove,
+                    &incoming_filters,
+                    "e",
+                );
+            }
+        }
+    }
+
+    // Phase 4: PathFinding — replace InSubquery inside frontier CTE queries.
+    // Frontier arms use e1 as the first edge (from build_frontier_arm).
+    for cte in &mut q.ctes {
+        replace_in_subquery_in_where(
+            &mut cte.query.where_clause,
+            &ctes_to_remove,
+            &filters_per_cte,
+            "e1",
+        );
+        for union_arm in &mut cte.query.union_all {
+            replace_in_subquery_in_where(
+                &mut union_arm.where_clause,
+                &ctes_to_remove,
+                &filters_per_cte,
+                "e1",
+            );
+        }
+    }
+
+    // GROUP BY rewrite — only for single-relationship queries where we can
+    // unambiguously resolve the edge alias.
+    if input.query_type == QueryType::Aggregation {
+        rewrite_denormalized_group_by(q, input);
+    }
+
+    // Rewrite COUNT(e0.source_id) → COUNT() for edge-only targets whose
+    // _nf_ CTE was the only filter (single-relationship only).
+    if input.relationships.len() == 1 {
+        for cte_name in &ctes_to_remove {
+            let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
+            let Some(node) = input.nodes.iter().find(|n| n.id == alias) else {
+                continue;
+            };
+            let is_edge_only = input.compiler.node_edge_col.contains_key(alias);
+            if !is_edge_only {
+                continue;
+            }
+            let all_bare_count = input
+                .aggregations
+                .iter()
+                .filter(|a| a.target.as_deref() == Some(alias))
+                .all(|a| matches!(a.function, AggFunction::Count) && a.property.is_none());
+            if !all_bare_count || !node.node_ids.is_empty() {
+                continue;
+            }
+            if let Some((edge_alias, edge_col)) = input.compiler.node_edge_col.get(alias) {
+                rewrite_count_to_bare(q, edge_alias, edge_col);
+            }
+        }
+    }
+}
+
+/// Determine which side of which relationship a node occupies.
+/// Returns `"source"` or `"target"` for the denormalized column prefix.
+fn resolve_denorm_direction(node: &InputNode, input: &Input) -> Option<&'static str> {
+    for rel in &input.relationships {
+        if node.id == rel.from {
+            return Some(match rel.direction {
+                Direction::Outgoing | Direction::Both => "source",
+                Direction::Incoming => "target",
+            });
+        }
+        if node.id == rel.to {
+            return Some(match rel.direction {
+                Direction::Outgoing | Direction::Both => "target",
+                Direction::Incoming => "source",
+            });
+        }
+    }
+    // Neighbors query: center node with no relationships in input.
+    // PathFinding: node is referenced via input.path, not relationships.
+    // Check path endpoints.
+    if let Some(path) = &input.path {
+        if node.id == path.from {
+            return Some("source");
+        }
+        if node.id == path.to {
+            return Some("target");
+        }
+    }
+    // Neighbors: handled per-arm in Phase 3, not here.
+    None
+}
+
+type FilterMap = HashMap<String, Vec<Expr>>;
+
+/// Build direction-specific filter maps for neighbors queries.
+/// Returns (outgoing_filters, incoming_filters) where outgoing uses source_*
+/// columns and incoming uses target_* columns for the center node's properties.
+fn build_neighbors_denorm_filters(
+    ctes_to_remove: &[String],
+    input: &Input,
+) -> Option<(FilterMap, FilterMap)> {
+    let mut outgoing: HashMap<String, Vec<Expr>> = HashMap::new();
+    let mut incoming: HashMap<String, Vec<Expr>> = HashMap::new();
+
+    for cte_name in ctes_to_remove {
+        let alias = cte_name.strip_prefix("_nf_")?;
+        let node = input.nodes.iter().find(|n| n.id == alias)?;
+        let entity = node.entity.as_ref()?;
+
+        let mut out_tags_per_col: HashMap<String, Vec<String>> = HashMap::new();
+        let mut in_tags_per_col: HashMap<String, Vec<String>> = HashMap::new();
+        let mut all_ok = true;
+
+        for (prop_name, filter) in &node.filters {
+            let src_key = (entity.clone(), prop_name.clone(), "source".to_string());
+            let tgt_key = (entity.clone(), prop_name.clone(), "target".to_string());
+            let src_entry = input.compiler.denormalized_columns.get(&src_key);
+            let tgt_entry = input.compiler.denormalized_columns.get(&tgt_key);
+            match (src_entry, tgt_entry) {
+                (Some((sc, sk)), Some((tc, tk))) => {
+                    if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
+                        all_ok = false;
+                        break;
+                    }
+                    let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                    out_tags_per_col
+                        .entry(sc.clone())
+                        .or_default()
+                        .push(format!("{sk}:{val}"));
+                    in_tags_per_col
+                        .entry(tc.clone())
+                        .or_default()
+                        .push(format!("{tk}:{val}"));
+                }
+                _ => {
+                    all_ok = false;
+                    break;
+                }
+            }
+        }
+
+        if !all_ok {
+            return None;
+        }
+
+        let build_exprs = |tags_per_col: HashMap<String, Vec<String>>| -> Vec<Expr> {
+            tags_per_col
+                .into_iter()
+                .map(|(col, tags)| {
+                    if tags.len() == 1 {
+                        Expr::func("has", vec![Expr::col("EDGE", &col), Expr::string(&tags[0])])
+                    } else {
+                        Expr::func(
+                            "hasAll",
+                            vec![
+                                Expr::col("EDGE", &col),
+                                Expr::func("array", tags.iter().map(Expr::string).collect()),
+                            ],
+                        )
+                    }
+                })
+                .collect()
+        };
+
+        outgoing.insert(cte_name.clone(), build_exprs(out_tags_per_col));
+        incoming.insert(cte_name.clone(), build_exprs(in_tags_per_col));
+    }
+
+    Some((outgoing, incoming))
+}
+
+/// Replace column references matching `(from_table, from_col)` with
+/// `(to_table, to_col)` throughout an expression tree. When `from_col`
+/// is `None`, all columns on `from_table` are rewritten (keeping the
+/// original column name).
+fn rewrite_column_refs(
+    expr: &mut Expr,
+    from_table: &str,
+    from_col: Option<&str>,
+    to_table: &str,
+    to_col: Option<&str>,
+) {
+    match expr {
+        Expr::Column { table, column }
+            if table == from_table && from_col.is_none_or(|fc| column.as_str() == fc) =>
+        {
+            *table = to_table.to_string();
+            if let Some(tc) = to_col {
+                *column = tc.to_string();
+            }
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            rewrite_column_refs(left, from_table, from_col, to_table, to_col);
+            rewrite_column_refs(right, from_table, from_col, to_table, to_col);
+        }
+        Expr::UnaryOp { expr: inner, .. } => {
+            rewrite_column_refs(inner, from_table, from_col, to_table, to_col);
+        }
+        Expr::FuncCall { args, .. } => {
+            for arg in args {
+                rewrite_column_refs(arg, from_table, from_col, to_table, to_col);
+            }
+        }
+        Expr::InSubquery { expr: inner, .. } => {
+            rewrite_column_refs(inner, from_table, from_col, to_table, to_col);
+        }
+        _ => {}
+    }
+}
+
+/// Replace the placeholder edge alias "EDGE" with a concrete alias.
+fn set_edge_alias(expr: &Expr, alias: &str) -> Expr {
+    let mut out = expr.clone();
+    rewrite_column_refs(&mut out, "EDGE", None, alias, None);
+    out
+}
+
+/// Check whether a `TableRef` tree contains a `Union` node.
+fn has_union_table_ref(table_ref: &TableRef) -> bool {
+    match table_ref {
+        TableRef::Union { .. } => true,
+        TableRef::Join { left, right, .. } => {
+            has_union_table_ref(left) || has_union_table_ref(right)
+        }
+        _ => false,
+    }
+}
+
+/// Walk a `TableRef` tree and add filters to every `Union` arm's WHERE clause.
+fn inject_filters_into_from_unions(table_ref: &mut TableRef, filters: &[Expr]) {
+    match table_ref {
+        TableRef::Union { queries, .. } => {
+            for query in queries {
+                if !filters.is_empty() {
+                    let mut parts: Vec<Expr> = query.where_clause.take().into_iter().collect();
+                    parts.extend(filters.iter().cloned());
+                    query.where_clause = Expr::conjoin(parts);
+                }
+                inject_filters_into_from_unions(&mut query.from, filters);
+            }
+        }
+        TableRef::Join { left, right, .. } => {
+            inject_filters_into_from_unions(left, filters);
+            inject_filters_into_from_unions(right, filters);
+        }
+        _ => {}
+    }
+}
+
+/// Remove `InSubquery` conjuncts referencing any of the given CTE names from
+/// a WHERE clause, and inject replacement edge-column filters.
+fn replace_in_subquery_in_where(
+    where_clause: &mut Option<Expr>,
+    ctes_to_remove: &[String],
+    filters_per_cte: &HashMap<String, Vec<Expr>>,
+    edge_alias: &str,
+) {
+    let Some(w) = where_clause.as_ref() else {
+        return;
+    };
+    let conjuncts = w.clone().flatten_and();
+    let mut kept: Vec<Expr> = Vec::new();
+    let mut found_any = false;
+    for conj in conjuncts {
+        if let Expr::InSubquery { cte_name, .. } = &conj
+            && ctes_to_remove.contains(cte_name)
+        {
+            if let Some(filters) = filters_per_cte.get(cte_name) {
+                kept.extend(filters.iter().map(|f| set_edge_alias(f, edge_alias)));
+            }
+            found_any = true;
+            continue;
+        }
+        kept.push(conj);
+    }
+    if found_any {
+        *where_clause = Expr::conjoin(kept);
+    }
+}
+
+/// Rewrite `COUNT(alias.col)` → `COUNT()` in SELECT expressions.
+fn rewrite_count_to_bare(q: &mut Query, edge_alias: &str, edge_col: &str) {
+    for sel in &mut q.select {
+        if let Expr::FuncCall { name, args } = &sel.expr {
+            let is_count = name.eq_ignore_ascii_case("count");
+            let refs_edge_col = args.len() == 1
+                && matches!(
+                    &args[0],
+                    Expr::Column { table, column } if table == edge_alias && column == edge_col
+                );
+            if is_count && refs_edge_col {
+                sel.expr = Expr::FuncCall {
+                    name: "count".to_string(),
+                    args: vec![],
+                };
+            }
+        }
+    }
+}
+
+/// Rewrite GROUP BY expressions that reference a node table with a denormalized
+/// property to use the edge column instead. After rewriting, the node-table
+/// join becomes unreferenced and `prune_table_joins` removes it.
+///
+/// Before:
+///   SELECT pipe.status AS pipe_status, COUNT(e0.source_id) FROM gl_edge e0
+///   JOIN gl_pipeline pipe ON ... GROUP BY pipe.status
+///
+/// After:
+///   SELECT e0.source_status AS pipe_status, COUNT() FROM gl_edge e0
+///   WHERE ... GROUP BY e0.source_status
+fn rewrite_denormalized_group_by(q: &mut Query, input: &Input) {
+    let mut nodes_to_prune: HashSet<String> = HashSet::new();
+
+    for agg in &input.aggregations {
+        let Some(group_alias) = &agg.group_by else {
+            continue;
+        };
+        let Some(node) = input.nodes.iter().find(|n| &n.id == group_alias) else {
+            continue;
+        };
+        let Some(entity) = &node.entity else {
+            continue;
+        };
+        let Some(dir_prefix) = resolve_denorm_direction(node, input) else {
+            continue;
+        };
+
+        // Check which columns in SELECT/GROUP BY reference denormalized properties.
+        let cols = match &node.columns {
+            Some(ColumnSelection::List(c)) => c,
+            _ => continue,
+        };
+
+        let mut all_denormalized = true;
+        let mut rewrites: Vec<(String, String)> = Vec::new(); // (node_col, edge_col)
+
+        for col in cols {
+            let key = (entity.clone(), col.clone(), dir_prefix.to_string());
+            if let Some((edge_column, _tag_key)) = input.compiler.denormalized_columns.get(&key) {
+                rewrites.push((col.clone(), edge_column.clone()));
+            } else {
+                all_denormalized = false;
+                break;
+            }
+        }
+
+        // Only rewrite if ALL group-by columns are denormalized. Partial
+        // rewrite would still require the node-table join.
+        if !all_denormalized || rewrites.is_empty() {
+            continue;
+        }
+
+        // Rewrite SELECT and GROUP BY expressions.
+        let edge_alias = "e0";
+        for (node_col, edge_col) in &rewrites {
+            let from_expr = Expr::col(group_alias, node_col);
+            for sel in &mut q.select {
+                if sel.expr == from_expr {
+                    sel.expr = Expr::col(edge_alias, edge_col);
+                }
+            }
+            for gb in &mut q.group_by {
+                if *gb == from_expr {
+                    *gb = Expr::col(edge_alias, edge_col);
+                }
+            }
+        }
+
+        // Also rewrite any WHERE conjuncts referencing this node's properties
+        // (filters that were placed by build_where, not in a CTE).
+        if let Some(ref mut where_clause) = q.where_clause {
+            let conjuncts = where_clause.clone().flatten_and();
+            let rewritten: Vec<Expr> = conjuncts
+                .into_iter()
+                .map(|mut c| {
+                    for (node_col, edge_col) in &rewrites {
+                        rewrite_column_refs(
+                            &mut c,
+                            group_alias,
+                            Some(node_col),
+                            edge_alias,
+                            Some(edge_col),
+                        );
+                    }
+                    c
+                })
+                .collect();
+            *where_clause = Expr::conjoin(rewritten).unwrap_or(Expr::int(1));
+        }
+
+        // Don't prune node tables that require elevated access. The security
+        // pass needs the node table alias to apply role-scoped traversal path
+        // filters (e.g. Vulnerability requires SecurityManager, not Reporter).
+        let requires_elevated_role = input
+            .entity_auth
+            .get(entity.as_str())
+            .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL);
+        if requires_elevated_role {
+            continue;
+        }
+
+        nodes_to_prune.insert(group_alias.clone());
+    }
+
+    if !nodes_to_prune.is_empty() {
+        prune_table_joins(&mut q.from, &nodes_to_prune);
     }
 }
 

@@ -131,6 +131,10 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// Maps (node_kind, property_name, direction_prefix) → (edge_column, tag_key).
+    /// Populated by normalize from ontology denormalized properties.
+    /// Example: ("Pipeline", "status", "source") → ("source_tags", "status")
+    pub denormalized_columns: HashMap<(String, String, String), (String, String)>,
     /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
     /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
     /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
@@ -152,6 +156,7 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            denormalized_columns: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
         }
