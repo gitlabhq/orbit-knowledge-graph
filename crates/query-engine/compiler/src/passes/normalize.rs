@@ -12,7 +12,7 @@ use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
 use serde_json::Value;
-use std::collections::{BTreeMap, HashMap};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 /// Build the entity auth map for every entity type in the ontology that has a
 /// redaction config. This is the single source of truth consumed by both the
@@ -79,6 +79,30 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             )
         })
         .collect();
+    input.compiler.table_columns.clear();
+    for node in ontology.nodes() {
+        input.compiler.table_columns.insert(
+            node.destination_table.clone(),
+            node.storage
+                .columns
+                .iter()
+                .map(|column| column.name.clone())
+                .collect::<HashSet<_>>(),
+        );
+    }
+    for table in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table) {
+            input.compiler.table_columns.insert(
+                table.to_string(),
+                config
+                    .storage
+                    .columns
+                    .iter()
+                    .map(|column| column.name.clone())
+                    .collect::<HashSet<_>>(),
+            );
+        }
+    }
 
     // Populate text index metadata from the ontology's StorageIndex entries.
     for node_entity in ontology.nodes() {
