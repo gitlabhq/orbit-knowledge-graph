@@ -3,8 +3,8 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edge_tags_by_target, assert_edges_have_traversal_path, assert_node_count,
+    create_namespace, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_merge_requests_with_edges(ctx: &TestContext) {
@@ -222,6 +222,15 @@ pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "REVIEWER", "User", "MergeRequest", "1/100/", 3).await;
+    assert_edge_tags_by_target(
+        ctx,
+        "REVIEWER",
+        "User",
+        "MergeRequest",
+        "target_tags",
+        &[(10, &["state:opened"]), (20, &["state:merged"])],
+    )
+    .await;
 }
 
 pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
@@ -257,6 +266,15 @@ pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "APPROVED", "User", "MergeRequest", "1/100/", 3).await;
+    assert_edge_tags_by_target(
+        ctx,
+        "APPROVED",
+        "User",
+        "MergeRequest",
+        "target_tags",
+        &[(10, &["state:merged"]), (20, &["state:merged"])],
+    )
+    .await;
 }
 
 pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
@@ -291,6 +309,15 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
         .unwrap();
 
     assert_edges_have_traversal_path(ctx, "ASSIGNED", "User", "MergeRequest", "1/100/", 2).await;
+    assert_edge_tags_by_target(
+        ctx,
+        "ASSIGNED",
+        "User",
+        "MergeRequest",
+        "target_tags",
+        &[(10, &["state:opened"]), (20, &["state:merged"])],
+    )
+    .await;
 }
 
 pub async fn processes_standalone_has_label_edges(ctx: &TestContext) {
