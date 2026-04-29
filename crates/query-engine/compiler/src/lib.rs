@@ -1129,4 +1129,37 @@ mod tests {
             "skip_dedup should still filter by _deleted, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn use_final_replaces_limit_by_with_final_modifier() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10,
+            "options": {"use_final": true}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("LIMIT 1 BY"),
+            "use_final should eliminate LIMIT 1 BY, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FINAL"),
+            "use_final should add FINAL modifier to node table scans, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_deleted"),
+            "use_final should still filter by _deleted, got:\n{sql}"
+        );
+    }
 }

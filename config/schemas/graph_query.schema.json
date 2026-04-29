@@ -687,6 +687,11 @@
           "type": "boolean",
           "description": "When true, skips ReplacingMergeTree deduplication for node tables. Rows are still filtered by _deleted = false but stale duplicates from un-merged parts may appear. Not allowed for aggregation queries. Useful for traversal queries where eventual consistency is acceptable in exchange for lower latency.",
           "default": false
+        },
+        "use_final": {
+          "type": "boolean",
+          "description": "When true, uses FINAL modifier on node table scans instead of LIMIT 1 BY dedup subqueries. ClickHouse resolves duplicates at read time via the ReplacingMergeTree engine. Can be faster for point lookups with projections. Mutually exclusive with skip_dedup. Not allowed for aggregation.",
+          "default": false
         }
       },
       "additionalProperties": false

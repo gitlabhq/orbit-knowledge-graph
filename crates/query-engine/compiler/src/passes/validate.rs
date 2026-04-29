@@ -836,6 +836,17 @@ impl<'a> Validator<'a> {
                     .to_string(),
             ));
         }
+        if input.options.use_final && input.query_type == QueryType::Aggregation {
+            return Err(QueryError::ReferenceError(
+                "use_final is not allowed for aggregation queries (would produce incorrect counts)"
+                    .to_string(),
+            ));
+        }
+        if input.options.skip_dedup && input.options.use_final {
+            return Err(QueryError::ReferenceError(
+                "skip_dedup and use_final are mutually exclusive".to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -2271,6 +2282,56 @@ mod tests {
         assert!(
             validator.check_references(&input).is_ok(),
             "skip_dedup should be allowed for traversal"
+        );
+    }
+
+    #[test]
+    fn use_final_rejected_for_aggregation() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+            "aggregations": [{"function": "count", "node": "u", "group_by": "p"}],
+            "options": {"use_final": true}
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("use_final"),
+            "should reject use_final for aggregation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn skip_dedup_and_use_final_mutually_exclusive() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+            "limit": 10,
+            "options": {"skip_dedup": true, "use_final": true}
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("mutually exclusive"),
+            "should reject both options, got: {err}"
         );
     }
 }

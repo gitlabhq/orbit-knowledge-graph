@@ -80,8 +80,8 @@ mod tests {
         let condensed = condensed_query_schema().expect("Should condense");
 
         assert!(
-            condensed.len() < 19000,
-            "Condensed schema should be under 19KB, got {} bytes",
+            condensed.len() < 20000,
+            "Condensed schema should be under 20KB, got {} bytes",
             condensed.len()
         );
     }
