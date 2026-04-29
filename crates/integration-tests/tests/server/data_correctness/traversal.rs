@@ -593,7 +593,7 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name", "fqn"]},
+                {"id": "caller", "entity": "Definition", "id_range": {"start": 12000, "end": 12999}, "columns": ["name", "fqn"]},
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -603,14 +603,11 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
     )
     .await;
 
-    // Seed data in project 1000: compile(12000) → helper(12001), helper(12001) → run_query(12002)
+    // id_range scopes callers to 12000-12999 (all seed definitions).
+    // Seed data: compile(12000) → helper(12001), helper(12001) → run_query(12002),
     // plus cross-project: helper(12001) → run_query(12102) in project 1001.
-    // Caller is filtered to project 1000 (12000, 12001, 12002). Callee is unrestricted.
     resp.assert_node_count(4);
     resp.assert_referential_integrity();
-    // Filter is on "caller" alias only — callee 12102 is in project 1001,
-    // which is correct (the filter scopes callers, not callees).
-    // Verify a caller-side node exists with the expected property.
     resp.assert_node("Definition", 12000, |n| {
         n.prop_str("name") == Some("compile")
     });
