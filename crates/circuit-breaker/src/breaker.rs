@@ -114,13 +114,13 @@ impl CircuitBreaker {
         F: FnOnce() -> Fut,
         Fut: Future<Output = Result<T, E>>,
     {
-        self.call_with(f, |_| true).await
+        self.call_with_filter(f, |_| true).await
     }
 
     /// Like [`call`](Self::call), but `classifier` decides which errors
     /// count as failures. Returns `false` → error passes through without
     /// counting toward the threshold.
-    pub async fn call_with<F, Fut, T, E, C>(
+    pub async fn call_with_filter<F, Fut, T, E, C>(
         &self,
         f: F,
         classifier: C,
@@ -318,7 +318,7 @@ mod tests {
 
         for _ in 0..5 {
             let result = db
-                .call_with(|| async { Err::<i32, _>(404) }, |e| *e >= 500)
+                .call_with_filter(|| async { Err::<i32, _>(404) }, |e| *e >= 500)
                 .await;
             assert_eq!(result.unwrap_err().into_inner().unwrap(), 404);
         }
