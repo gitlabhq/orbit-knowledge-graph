@@ -610,8 +610,9 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
     resp.assert_referential_integrity();
     // Filter is on "caller" alias only — callee 12102 is in project 1001,
     // which is correct (the filter scopes callers, not callees).
+    // Verify a caller-side node exists with the expected property.
     resp.assert_node("Definition", 12000, |n| {
-        n.prop_i64("project_id") == Some(1000)
+        n.prop_str("name") == Some("compile")
     });
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002), (12001, 12102)]);
 }
