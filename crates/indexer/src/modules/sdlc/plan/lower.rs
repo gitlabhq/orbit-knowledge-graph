@@ -310,7 +310,7 @@ fn lower_edge_select(
     for col_name in &["source_tags", "target_tags"] {
         let expr = match tag_groups.remove(*col_name) {
             Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
-            None => "CAST(list_value() AS VARCHAR[])".to_string(),
+            None => "make_array()".to_string(),
         };
         cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
     }
