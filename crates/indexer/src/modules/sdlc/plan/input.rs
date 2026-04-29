@@ -487,20 +487,20 @@ fn resolve_standalone_edge(
                 dp.relationship_kind == relationship_kind
                     && dp.direction == *direction
                     && dp.node_kind == node_kind
+                    && {
+                        let field = node.fields.iter().find(|f| f.name == dp.property_name);
+                        let src_col = field
+                            .and_then(|f| f.column_name())
+                            .unwrap_or(&dp.property_name);
+                        src_col == col_name
+                    }
             }) {
-                // Check if this column matches the property's source column.
-                let field = node.fields.iter().find(|f| f.name == dp.property_name);
-                let src_col = field
-                    .and_then(|f| f.column_name())
-                    .unwrap_or(&dp.property_name);
-                if src_col == col_name {
-                    denormalized_columns.push(DenormalizedColumnProjection {
-                        source_column: mem_col,
-                        edge_column: dp.edge_column.clone(),
-                        tag_key: dp.tag_key.clone(),
-                        enum_mapping: dp.enum_values.clone(),
-                    });
-                }
+                denormalized_columns.push(DenormalizedColumnProjection {
+                    source_column: mem_col,
+                    edge_column: dp.edge_column.clone(),
+                    tag_key: dp.tag_key.clone(),
+                    enum_mapping: dp.enum_values.clone(),
+                });
             }
         }
     }

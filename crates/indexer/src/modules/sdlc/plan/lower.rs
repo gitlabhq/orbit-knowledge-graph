@@ -304,9 +304,15 @@ fn lower_edge_select(
             .push(tag_expr);
     }
 
-    for (col_name, tag_exprs) in tag_groups {
-        let array_expr = format!("make_array({})", tag_exprs.join(", "));
-        cols.push(SelectExpr::new(Expr::raw(array_expr), &col_name));
+    // Always emit both source_tags and target_tags. If no denormalized
+    // entries exist for a direction, emit an empty array so the Arrow
+    // batch schema matches the ClickHouse edge table.
+    for col_name in &["source_tags", "target_tags"] {
+        let expr = match tag_groups.remove(*col_name) {
+            Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
+            None => "CAST(list_value() AS VARCHAR[])".to_string(),
+        };
+        cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
     }
 
     cols
@@ -539,6 +545,50 @@ mod tests {
         assert!(
             !standalone_edge_plans.is_empty(),
             "should have standalone edge plans writing to {edge_table}"
+        );
+    }
+
+    #[test]
+    fn enriched_standalone_edge_extract_sql() {
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1_000_000);
+
+        // Find a standalone edge plan whose extract SQL references siphon_issue_assignees.
+        let plan = plans
+            .namespaced
+            .iter()
+            .find(|p| p.extract_query.to_sql().contains("siphon_issue_assignees"))
+            .unwrap_or_else(|| {
+                let names: Vec<_> = plans.namespaced.iter().map(|p| &p.name).collect();
+                panic!("no plan with siphon_issue_assignees found; plans: {names:?}")
+            });
+
+        let sql = plan.extract_query.to_sql();
+        eprintln!("ASSIGNED WorkItem extract SQL:\n{sql}");
+
+        // Should use _base alias with LEFT JOIN.
+        assert!(sql.contains("AS _base"), "should alias base table: {sql}");
+        assert!(
+            sql.contains("LEFT JOIN"),
+            "should have enrichment JOIN: {sql}"
+        );
+
+        // Enrichment subquery should use argMax for dedup.
+        assert!(sql.contains("argMax("), "should use argMax dedup: {sql}");
+        assert!(sql.contains("GROUP BY id"), "should GROUP BY id: {sql}");
+
+        // Traversal path filter pushed into enrichment subquery.
+        assert!(
+            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
+            "enrichment subquery should filter by traversal_path: {sql}"
+        );
+
+        // Transform SQL should produce tag arrays.
+        let transform_sql = emit(&plan.transforms[0].query);
+        eprintln!("ASSIGNED WorkItem transform SQL:\n{transform_sql}");
+        assert!(
+            transform_sql.contains("target_tags"),
+            "transform should produce target_tags: {transform_sql}"
         );
     }
 
