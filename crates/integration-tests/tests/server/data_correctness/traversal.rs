@@ -583,3 +583,54 @@ pub(super) async fn traversal_order_by_with_node_ids_filter(ctx: &TestContext) {
     resp.assert_node_order("MergeRequest", &[2002, 2001, 2000]);
     resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001), (2, 2002)]);
 }
+
+/// Code graph traversal WITHOUT node_ids — relies on auth-scope cascade.
+/// Verifies that the optimizer's fallback cascade seed (from _nf_* CTEs)
+/// produces correct results when no node is pinned by explicit IDs.
+pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "columns": ["name", "fqn"]},
+                {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_referential_integrity();
+    // Seed data has: compile(12000) → helper(12001), helper(12001) → run_query(12002)
+    // plus cross-project: helper(12001) → run_query(12102) in project 1001.
+    // All are within authorized traversal paths, so all should appear.
+    resp.assert_node_ids("Definition", &[12000, 12001, 12002, 12102]);
+    resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002), (12001, 12102)]);
+}
+
+/// Code graph traversal WITH node_ids — the existing cascade path.
+/// Paired with the test above to verify both paths produce consistent results.
+pub(super) async fn traversal_code_graph_calls_with_node_ids(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "caller", "entity": "Definition", "node_ids": [12000], "columns": ["name", "fqn"]},
+                {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
+            ],
+            "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_referential_integrity();
+    // Pinned to compile(12000): only compile → helper edge
+    resp.assert_node_ids("Definition", &[12000, 12001]);
+    resp.assert_edge_set("CALLS", &[(12000, 12001)]);
+}
