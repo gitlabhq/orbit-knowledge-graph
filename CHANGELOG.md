@@ -1,3 +1,15 @@
+## [0.38.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.37.1...v0.38.0) (2026-04-29)
+
+### Features
+
+* **ontology:** add edge property denormalization schema and DDL ([ca32cb9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ca32cb92240c2d638202a58a8a5d680ff559378f)) by Michael Usachenko
+* **schema:** add pipeline_id FK and projections on gl_job and gl_stage ([2f08dae](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2f08dae11de87168c1fae8841f24aefcfd8dc81a)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** use id-only sort key for cascade-fed dedup subqueries ([c75bee3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c75bee3d819effa4c0a6804718e23fa16573e239)) by Michael Usachenko
+* **schema:** add _deleted to code graph RMT, projections on MR and Note, granularity 1024 ([38f1620](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/38f1620d1d34c37874124fca2351f371cfbb8c47)) by Michael Usachenko
+
 ## [0.37.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.37.0...v0.37.1) (2026-04-29)
 
 ### Fixes
