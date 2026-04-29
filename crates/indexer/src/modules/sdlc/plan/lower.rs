@@ -1,6 +1,7 @@
 use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
+use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
     ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
@@ -344,15 +345,66 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
         input.additional_where.map(Expr::raw),
     ]);
 
-    let base_query = Query {
-        select,
-        from,
-        where_clause,
-        order_by: vec![],
-        limit: None,
-    };
+    if let Some(enrichment) = input.enrichment {
+        // CTE-based enrichment: build the entire SQL as a raw template.
+        // The _batch CTE contains the base extract query with pagination.
+        // Enrichment CTEs do point lookups by FK from _batch.
+        // The outer SELECT LEFT JOINs _batch against enrichment CTEs.
 
-    ExtractQuery::new(base_query, input.order_by, batch_size)
+        // _batch CTE inner SELECT (base columns only, no enriched).
+        let base_select: Vec<String> =
+            select.iter().map(codegen::emit_select_expr).collect();
+
+        let base_where = where_clause
+            .as_ref()
+            .map(codegen::emit_expr_to_string)
+            .unwrap_or_default();
+
+        let from_sql = match &from {
+            TableRef::Scan { table, .. } => table.clone(),
+            TableRef::Raw(r) => r.clone(),
+        };
+
+        let order_by_sql = input.order_by.join(", ");
+
+        // Outer SELECT: _batch.col AS col for base, enriched as-is.
+        let outer_cols: Vec<String> = select
+            .iter()
+            .map(|s| {
+                let name = s.alias.as_deref().unwrap_or(match &s.expr {
+                    Expr::Column { column, .. } => column.as_str(),
+                    Expr::Raw(r) => r.as_str(),
+                    _ => "?",
+                });
+                format!("_batch.{name} AS {name}")
+            })
+            .chain(enrichment.select_exprs.iter().cloned())
+            .collect();
+
+        let template = format!(
+            "WITH _batch AS (\
+             SELECT {base_select} FROM {from_sql} \
+             WHERE {base_where}{{CURSOR}} \
+             ORDER BY {order_by_sql} LIMIT {batch_size}\
+             ), {cte_defs} \
+             SELECT {outer_select} FROM _batch {joins}",
+            base_select = base_select.join(", "),
+            cte_defs = enrichment.cte_defs.join(", "),
+            outer_select = outer_cols.join(", "),
+            joins = enrichment.join_clauses.join(" "),
+        );
+
+        ExtractQuery::raw(template, input.order_by, batch_size)
+    } else {
+        let base_query = Query {
+            select,
+            from,
+            where_clause,
+            order_by: vec![],
+            limit: None,
+        };
+        ExtractQuery::new(base_query, input.order_by, batch_size)
+    }
 }
 
 /// If namespaced and no custom filter, use the default `startsWith`.
@@ -566,21 +618,42 @@ mod tests {
         let sql = plan.extract_query.to_sql();
         eprintln!("ASSIGNED WorkItem extract SQL:\n{sql}");
 
-        // Should use _base alias with LEFT JOIN.
-        assert!(sql.contains("AS _base"), "should alias base table: {sql}");
+        // CTE-based: _batch CTE wraps the base query, enrichment CTE does point lookups.
         assert!(
-            sql.contains("LEFT JOIN"),
-            "should have enrichment JOIN: {sql}"
+            sql.contains("WITH _batch AS ("),
+            "should have _batch CTE: {sql}"
+        );
+        assert!(
+            sql.contains("_e0 AS ("),
+            "should have enrichment CTE: {sql}"
+        );
+        assert!(
+            sql.contains("FROM _batch"),
+            "outer query should read from _batch: {sql}"
+        );
+        assert!(
+            sql.contains("LEFT JOIN _e0"),
+            "should LEFT JOIN enrichment CTE: {sql}"
         );
 
-        // Enrichment subquery should use argMax for dedup.
+        // Enrichment CTE uses argMax + GROUP BY for dedup.
         assert!(sql.contains("argMax("), "should use argMax dedup: {sql}");
         assert!(sql.contains("GROUP BY id"), "should GROUP BY id: {sql}");
 
-        // Traversal path filter pushed into enrichment subquery.
+        // Enrichment CTE uses IN (SELECT DISTINCT fk FROM _batch) instead of namespace scan.
         assert!(
-            sql.contains("startsWith(traversal_path, {traversal_path:String})"),
-            "enrichment subquery should filter by traversal_path: {sql}"
+            sql.contains("id IN (SELECT DISTINCT issue_id FROM _batch)"),
+            "enrichment should use point lookup via IN: {sql}"
+        );
+        // No traversal_path filter on the enrichment CTE (only the _batch CTE has it).
+        let e0_body = sql
+            .split("_e0 AS (")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .unwrap_or("");
+        assert!(
+            !e0_body.contains("traversal_path"),
+            "enrichment CTE body should NOT filter by traversal_path: {e0_body}"
         );
 
         // Transform SQL should produce tag arrays.
@@ -800,6 +873,7 @@ mod tests {
             namespaced: false,
             traversal_path_filter: None,
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 1000).to_sql();
@@ -827,6 +901,7 @@ mod tests {
             namespaced: false,
             traversal_path_filter: None,
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 1000).to_sql();
@@ -859,6 +934,7 @@ mod tests {
                 "startsWith(traversal_path, {traversal_path:String})".to_string(),
             ),
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 500).to_sql();

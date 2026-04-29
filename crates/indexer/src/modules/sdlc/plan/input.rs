@@ -108,6 +108,20 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     pub namespaced: bool,
     pub traversal_path_filter: Option<String>,
     pub additional_where: Option<String>,
+    /// CTE-based enrichment for standalone edges. When set, the lowering
+    /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
+    /// that do point lookups by FK, avoiding full namespace scans.
+    pub enrichment: Option<EnrichmentSql>,
+}
+
+/// Pre-built SQL fragments for CTE-based enrichment.
+pub(in crate::modules::sdlc) struct EnrichmentSql {
+    /// CTE definitions (e.g. `_e0 AS (SELECT id, argMax(...) FROM ... WHERE id IN (...) GROUP BY id)`).
+    pub cte_defs: Vec<String>,
+    /// JOIN clauses (e.g. `LEFT JOIN _e0 ON _batch.issue_id = _e0.id`).
+    pub join_clauses: Vec<String>,
+    /// SELECT expressions for enriched columns (e.g. `_e0.state_id AS _e0_state_id`).
+    pub select_exprs: Vec<String>,
 }
 
 pub(in crate::modules::sdlc) enum ExtractColumn {
@@ -420,25 +434,29 @@ fn resolve_standalone_edge(
         );
     }
 
-    // Build LEFT JOINs for endpoint columns declared in the ETL config.
+    // Build CTE-based enrichment for endpoint columns declared in the ETL config.
     // Each endpoint can request extra columns from its node's datalake table.
+    // Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
+    // query in a _batch CTE and build enrichment CTEs that do point lookups
+    // via `id IN (SELECT DISTINCT fk FROM _batch)`.
     let endpoints_with_cols: [(&EdgeSourceEtlConfig, &str, DenormDirection); 2] = [
         (config, "from", DenormDirection::Source),
         (config, "to", DenormDirection::Target),
     ];
     let mut denormalized_columns = Vec::new();
-    let mut joins: Vec<String> = Vec::new();
-    let mut join_idx = 0usize;
+    let mut cte_defs: Vec<String> = Vec::new();
+    let mut join_clauses: Vec<String> = Vec::new();
+    let mut enriched_select_exprs: Vec<String> = Vec::new();
+    let mut enrich_idx = 0usize;
 
     for (cfg, side, direction) in &endpoints_with_cols {
         let endpoint = if *side == "from" { &cfg.from } else { &cfg.to };
         if endpoint.enrich.is_empty() {
             continue;
         }
-        // Resolve the node type to find its datalake source table.
         let node_kind = match &endpoint.node_type {
             EdgeEndpointType::Literal(t) => t.as_str(),
-            _ => continue, // Polymorphic endpoints: skip for now.
+            _ => continue,
         };
         let Some(node) = ontology.get_node(node_kind) else {
             continue;
@@ -452,8 +470,8 @@ fn resolve_standalone_edge(
         let deleted_col = etl.deleted();
         let fk_col = &endpoint.id_column;
 
-        let alias = format!("_d{join_idx}");
-        join_idx += 1;
+        let alias = format!("_e{enrich_idx}");
+        enrich_idx += 1;
 
         let agg_cols: Vec<String> = endpoint
             .enrich
@@ -465,24 +483,19 @@ fn resolve_standalone_edge(
             .collect::<Vec<_>>()
             .join(", ");
 
-        let traversal_filter = if namespaced {
-            " AND startsWith(traversal_path, {traversal_path:String})".to_string()
-        } else {
-            String::new()
-        };
-
-        joins.push(format!(
-            "LEFT JOIN (SELECT {sub_cols} FROM {node_table} \
-             WHERE {deleted_col} = false{traversal_filter} \
-             GROUP BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
+        cte_defs.push(format!(
+            "{alias} AS (SELECT {sub_cols} FROM {node_table} \
+             WHERE {deleted_col} = false \
+             AND id IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             GROUP BY id)"
         ));
+
+        join_clauses.push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));
 
         for col_name in &endpoint.enrich {
             let mem_col = format!("{alias}_{col_name}");
-            let select_expr = format!("{alias}.{col_name} AS {mem_col}");
-            extract_columns.push(ExtractColumn::Bare(select_expr));
+            enriched_select_exprs.push(format!("{alias}.{col_name} AS {mem_col}"));
 
-            // Match against denormalized properties to find the edge column.
             if let Some(dp) = ontology.denormalized_properties().iter().find(|dp| {
                 dp.relationship_kind == relationship_kind
                     && dp.direction == *direction
@@ -505,44 +518,23 @@ fn resolve_standalone_edge(
         }
     }
 
-    let has_joins = !joins.is_empty();
-    let source = if has_joins {
-        for col in &mut extract_columns {
-            if let ExtractColumn::Bare(name) = col
-                && !name.contains('.')
-            {
-                // Alias base-table columns back to their unqualified name so
-                // the DataFusion output column matches sort key expectations.
-                let qualified = format!("_base.{name} AS {name}");
-                *name = qualified;
-            }
-        }
-        ExtractSource::Raw(format!("{} AS _base {}", config.source, joins.join(" ")))
-    } else {
-        ExtractSource::Table(config.source.clone())
-    };
-    // Don't qualify order_by -- the lowering handles SQL ORDER BY separately.
-    // The order_by field is also used for batch sort key validation where
-    // column names must match the DataFusion output (unqualified).
-    let order_by = config.order_by.clone();
-    let watermark = if has_joins {
-        format!("_base.{}", config.watermark)
-    } else {
-        config.watermark.clone()
-    };
-    let deleted = if has_joins {
-        format!("_base.{}", config.deleted)
-    } else {
-        config.deleted.clone()
-    };
-    let traversal_path_filter = if has_joins && namespaced {
-        Some(format!(
-            "startsWith(_base.{}, {{traversal_path:String}})",
-            TRAVERSAL_PATH_COLUMN
-        ))
-    } else {
+    let enrichment = if cte_defs.is_empty() {
         None
+    } else {
+        // Don't add enriched columns to extract_columns -- they'll be projected
+        // in the outer SELECT by the lowering via EnrichmentSql.select_exprs.
+        Some(EnrichmentSql {
+            cte_defs,
+            join_clauses,
+            select_exprs: enriched_select_exprs,
+        })
     };
+
+    let source = ExtractSource::Table(config.source.clone());
+    let order_by = config.order_by.clone();
+    let watermark = config.watermark.clone();
+    let deleted = config.deleted.clone();
+    let traversal_path_filter = None;
 
     StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
@@ -564,6 +556,7 @@ fn resolve_standalone_edge(
             namespaced,
             traversal_path_filter,
             additional_where: None,
+            enrichment,
         },
     }
 }
@@ -646,6 +639,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: None,
                 additional_where: None,
+                enrichment: None,
             }
         }
         EtlConfig::Query {
@@ -674,6 +668,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: traversal_path_filter.clone(),
                 additional_where: where_clause.clone(),
+                enrichment: None,
             }
         }
     }
