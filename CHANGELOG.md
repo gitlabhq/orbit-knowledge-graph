@@ -1,3 +1,21 @@
+## [0.37.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.37.0...v0.37.1) (2026-04-29)
+
+### Fixes
+
+* **indexer:** use batch pull instead of no-wait fetch in NATS subscription loop ([9f7a936](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9f7a936ab07a6b19d1723578be0d7ce30e24f612)) by Jean-Gabriel Doyon
+* **query:** prune filtered path-finding frontiers ([b429a88](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b429a8810d54d51cf3f93438348a124424f12f67)) by michaelangeloio
+* **query:** prune wildcard traversal SQL shape ([b97620b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b97620b24afd21a2bc77e70782e753f2285f4436)) by Michael Angelo Rivera
+
+### Performance
+
+* **compiler:** collapse traversal paths via trie subsumption ([4817199](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/48171999631fd3568f346aa7e416839f416cc493)) by Michael Usachenko
+* **e2e:** combine license and PAT bootstrap ([4efd4d8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4efd4d868b53bb79d27fc047d561f5d0cfedf6aa)) by Bohdan Parkhomchuk
+* **ontology:** add code-edge relationship projections ([80ab470](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/80ab470c83c2451856d30fb9bb0741eedb5905ab)) by michaelangeloio
+
+### Other
+
+* **e2e:** cover role-scoped authz matrix ([a2e3c57](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a2e3c57034a43d430c39d5fb2970e5f1fa3966e1)) by Michael Angelo Rivera
+
 ## [0.37.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.36.0...v0.37.0) (2026-04-29)
 
 ### Features
