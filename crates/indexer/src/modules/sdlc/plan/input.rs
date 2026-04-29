@@ -466,7 +466,7 @@ fn resolve_standalone_edge(
             .join(", ");
 
         let traversal_filter = if namespaced {
-            format!(" AND startsWith(traversal_path, {{traversal_path:String}})")
+            " AND startsWith(traversal_path, {traversal_path:String})".to_string()
         } else {
             String::new()
         };

@@ -126,8 +126,9 @@ pub async fn assert_edge_tags(
     let expected: BTreeSet<&str> = expected_tags.iter().copied().collect();
     let batch = &result[0];
     for i in 0..batch.num_rows() {
-        let tags: BTreeSet<String> =
-            ArrowUtils::get_string_list(batch, tag_column, i).into_iter().collect();
+        let tags: BTreeSet<String> = ArrowUtils::get_string_list(batch, tag_column, i)
+            .into_iter()
+            .collect();
         let tags_ref: BTreeSet<&str> = tags.iter().map(|s| s.as_str()).collect();
         assert_eq!(
             tags_ref, expected,
@@ -160,17 +161,16 @@ pub async fn assert_edge_tags_by_target(
     );
 
     let batch = &result[0];
-    let target_ids =
-        ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(batch, "target_id")
-            .expect("target_id column");
+    let target_ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(batch, "target_id")
+        .expect("target_id column");
 
     for &(tid, tags) in expected {
         let row = (0..batch.num_rows()).find(|&i| target_ids.value(i) == tid);
-        let row = row.unwrap_or_else(|| {
-            panic!("{relationship_kind} edge with target_id={tid} not found")
-        });
-        let actual: BTreeSet<String> =
-            ArrowUtils::get_string_list(batch, tag_column, row).into_iter().collect();
+        let row = row
+            .unwrap_or_else(|| panic!("{relationship_kind} edge with target_id={tid} not found"));
+        let actual: BTreeSet<String> = ArrowUtils::get_string_list(batch, tag_column, row)
+            .into_iter()
+            .collect();
         let expected_set: BTreeSet<&str> = tags.iter().copied().collect();
         let actual_ref: BTreeSet<&str> = actual.iter().map(|s| s.as_str()).collect();
         assert_eq!(
