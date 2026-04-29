@@ -51,6 +51,8 @@ pub(super) struct SettingsYaml {
     pub default_edge_table: String,
     pub default_entity_sort_key: Vec<String>,
     pub edge_tables: BTreeMap<String, EdgeTableYaml>,
+    #[serde(default)]
+    pub denormalization: Vec<DenormalizationEntryYaml>,
     pub internal_column_prefix: String,
     #[serde(default)]
     pub skip_security_filter_for_entities: Vec<String>,
@@ -59,6 +61,16 @@ pub(super) struct SettingsYaml {
     pub etl: EtlSettingsYaml,
     #[serde(default)]
     pub auxiliary_tables: Vec<AuxiliaryTableYaml>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub(super) struct DenormalizationEntryYaml {
+    pub node: String,
+    pub property: String,
+    /// Edge column suffix. Defaults to `property` if omitted.
+    /// The full column name is `{direction}_{as}`, e.g. `source_status`.
+    #[serde(rename = "as", default)]
+    pub column_alias: Option<String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]

@@ -53,6 +53,8 @@ pub enum ColumnType {
     Nullable(Box<ColumnType>),
     /// Dictionary-encoded / low-cardinality wrapper.
     LowCardinality(Box<ColumnType>),
+    /// ClickHouse `Array(T)`.
+    Array(Box<ColumnType>),
 }
 
 /// Compression codec applied to a column's on-disk representation.

@@ -109,6 +109,16 @@ settings:
             name: agg_counts_by_target
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
             group_by: [relationship_kind, source_kind, target_id, traversal_path]
+  denormalization:
+    - {node: Pipeline, property: status}
+    - {node: MergeRequest, property: state}
+    - {node: WorkItem, property: state}
+    - {node: WorkItem, property: work_item_type, as: wi_type}
+    - {node: Vulnerability, property: state}
+    - {node: Vulnerability, property: severity}
+    - {node: Job, property: status}
+    - {node: Deployment, property: status}
+    - {node: Finding, property: severity}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User, Runner]
   local_db:

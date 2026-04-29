@@ -29,10 +29,10 @@ pub use constants::{
     NODE_RESERVED_COLUMNS, TRAVERSAL_PATH_COLUMN, VERSION_COLUMN,
 };
 pub use entities::{
-    AuxiliaryColumn, AuxiliaryTable, DataType, DomainInfo, EdgeColumn, EdgeEndpoint,
-    EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage, EnumType, Field,
-    FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig, RequiredRole, StorageColumn,
-    StorageIndex, StorageProjection, VirtualSource,
+    AuxiliaryColumn, AuxiliaryTable, DataType, DenormDirection, DenormalizedProperty, DomainInfo,
+    EdgeColumn, EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig, EdgeTableStorage,
+    EnumType, Field, FieldSource, NodeEntity, NodeStorage, NodeStyle, RedactionConfig,
+    RequiredRole, StorageColumn, StorageIndex, StorageProjection, VirtualSource,
 };
 pub use etl::{EdgeDirection, EdgeMapping, EdgeTarget, EtlConfig, EtlScope};
 
@@ -122,6 +122,8 @@ pub struct Ontology {
     pub(crate) local_edge_columns: Vec<EdgeColumn>,
     /// Non-ontology graph tables (checkpoint, code_indexing_checkpoint, etc.).
     pub(crate) auxiliary_tables: Vec<AuxiliaryTable>,
+    /// Node properties denormalized onto edge tables for query optimization.
+    pub(crate) denormalized_properties: Vec<DenormalizedProperty>,
 }
 
 impl Default for Ontology {
@@ -171,6 +173,7 @@ impl Ontology {
             local_edge_table_name: None,
             local_edge_columns: Vec::new(),
             auxiliary_tables: Vec::new(),
+            denormalized_properties: Vec::new(),
         }
     }
 
@@ -835,6 +838,12 @@ impl Ontology {
     #[must_use]
     pub fn auxiliary_tables(&self) -> &[AuxiliaryTable] {
         &self.auxiliary_tables
+    }
+
+    /// Returns all denormalized property declarations.
+    #[must_use]
+    pub fn denormalized_properties(&self) -> &[DenormalizedProperty] {
+        &self.denormalized_properties
     }
 
     /// Returns the text index tokenizer for a column on a node entity, if one exists.
