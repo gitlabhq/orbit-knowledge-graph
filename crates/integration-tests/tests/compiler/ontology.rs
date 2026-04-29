@@ -957,7 +957,8 @@ fn like_rejects_short_contains_pattern() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }
@@ -976,7 +977,8 @@ fn like_rejects_single_char_starts_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }
@@ -995,7 +997,8 @@ fn like_rejects_empty_ends_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }

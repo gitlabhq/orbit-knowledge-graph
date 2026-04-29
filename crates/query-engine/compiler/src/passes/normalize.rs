@@ -7,7 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType};
+use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
@@ -79,6 +79,20 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             )
         })
         .collect();
+
+    // Populate text index metadata from the ontology's StorageIndex entries.
+    for node_entity in ontology.nodes() {
+        for idx in &node_entity.storage.indexes {
+            if let Some(tokenizer) = ontology.text_index_tokenizer(&node_entity.name, &idx.column) {
+                input.compiler.text_indexes.insert(
+                    (node_entity.destination_table.clone(), idx.column.clone()),
+                    TextIndexMeta {
+                        tokenizer: tokenizer.to_string(),
+                    },
+                );
+            }
+        }
+    }
 
     for node in &mut input.nodes {
         let Some(entity) = node.entity.as_deref() else {
