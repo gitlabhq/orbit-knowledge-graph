@@ -3,10 +3,10 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edge_tags, assert_edge_tags_by_target, assert_edges_have_traversal_path,
-    assert_node_count, create_namespace, create_project, create_runner, create_runner_namespace,
-    create_runner_project, create_user, global_envelope, global_handler, handler_context,
-    namespace_envelope, namespace_handler,
+    TestContext, assert_edge_tags_by_source, assert_edge_tags_by_target,
+    assert_edges_have_traversal_path, assert_node_count, create_namespace, create_project,
+    create_runner, create_runner_namespace, create_runner_project, create_user, global_envelope,
+    global_handler, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_pipelines(ctx: &TestContext) {
