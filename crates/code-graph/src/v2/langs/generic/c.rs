@@ -1,12 +1,8 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::types::{self, *};
 use crate::v2::types::{BindingKind, DefKind};
-use treesitter_visit::Axis::*;
-use treesitter_visit::Match::*;
-use treesitter_visit::extract::{Extract, field, text};
+use treesitter_visit::extract::{Extract, field};
 use treesitter_visit::predicate::*;
-use treesitter_visit::tree_sitter::StrDoc;
-use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
     ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
@@ -17,8 +13,6 @@ use crate::v2::linker::{HasRules, ResolveSettings};
 
 #[derive(Default)]
 pub struct CDsl;
-
-type N<'a> = Node<'a, StrDoc<SupportLang>>;
 
 impl DslLanguage for CDsl {
     fn name() -> &'static str {

@@ -312,7 +312,7 @@ impl<'a> ImportResolver<'a> {
         while let Some(current_path) = queue.pop_front() {
             let inc_paths = includes_for(&current_path);
             for inc in &inc_paths {
-                for &(file_idx, ref file) in &files {
+                for &(file_idx, file) in &files {
                     // Match the include path against file paths
                     if !file.path.ends_with(inc.as_str()) {
                         continue;
@@ -327,7 +327,7 @@ impl<'a> ImportResolver<'a> {
                     {
                         for ext in SOURCE_EXTENSIONS {
                             let paired = format!("{stem}{ext}");
-                            for &(src_idx, ref src_file) in &files {
+                            for &(src_idx, src_file) in &files {
                                 if src_file.path.ends_with(&paired)
                                     && visited_paths.insert(src_file.path.clone())
                                 {
