@@ -69,7 +69,6 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
-
         }
     }
 }
@@ -3512,5 +3511,4 @@ mod tests {
         assert!(has_kind_filter(w2, "e1", "target_kind", "Project"));
         assert!(has_kind_filter(w2, "e2", "source_kind", "Group"));
     }
-
 }

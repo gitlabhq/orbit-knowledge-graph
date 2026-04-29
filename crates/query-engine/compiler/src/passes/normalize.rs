@@ -83,13 +83,9 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
     // Populate text index metadata from the ontology's StorageIndex entries.
     for node_entity in ontology.nodes() {
         for idx in &node_entity.storage.indexes {
-            if let Some(tokenizer) = ontology.text_index_tokenizer(&node_entity.name, &idx.column)
-            {
+            if let Some(tokenizer) = ontology.text_index_tokenizer(&node_entity.name, &idx.column) {
                 input.compiler.text_indexes.insert(
-                    (
-                        node_entity.destination_table.clone(),
-                        idx.column.clone(),
-                    ),
+                    (node_entity.destination_table.clone(), idx.column.clone()),
                     TextIndexMeta {
                         tokenizer: tokenizer.to_string(),
                     },

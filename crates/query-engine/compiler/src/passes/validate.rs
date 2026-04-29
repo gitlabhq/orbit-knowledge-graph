@@ -441,12 +441,7 @@ impl<'a> Validator<'a> {
         }
 
         // Token operators require a text index on the column.
-        if is_token_op
-            && self
-                .ontology
-                .text_index_tokenizer(entity, prop)
-                .is_none()
-        {
+        if is_token_op && self.ontology.text_index_tokenizer(entity, prop).is_none() {
             return Err(QueryError::Validation(format!(
                 "filter on \"{prop}\" for {entity}: \
                  token operators (token_match/all_tokens/any_tokens) require a text index on the field"

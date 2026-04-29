@@ -390,11 +390,11 @@
       "properties": {
         "op": {
           "type": "string",
-          "description": "Filter operator. is_null and is_not_null do not require a value; all others do.",
+          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring search: contains (LIKE '%v%'), starts_with, ends_with. Nullability: is_null, is_not_null (no value). Text index search: token_match (exact word match via hasToken), all_tokens (all words present via hasAllTokens), any_tokens (any word present via hasAnyTokens) — these require a text index on the column and use ClickHouse direct-read for best performance.",
           "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
         },
         "value": {
-          "description": "Filter value. Required for all operators except is_null and is_not_null. Type depends on operator: array for 'in', string for contains/starts_with/ends_with, FilterValue for comparison operators."
+          "description": "Filter value. Required for all operators except is_null/is_not_null. Type: array for 'in', string for contains/starts_with/ends_with/token_match/all_tokens/any_tokens, scalar for comparison operators."
         }
       },
       "additionalProperties": false,
