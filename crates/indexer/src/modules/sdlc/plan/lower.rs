@@ -352,8 +352,7 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
         // The outer SELECT LEFT JOINs _batch against enrichment CTEs.
 
         // _batch CTE inner SELECT (base columns only, no enriched).
-        let base_select: Vec<String> =
-            select.iter().map(codegen::emit_select_expr).collect();
+        let base_select: Vec<String> = select.iter().map(codegen::emit_select_expr).collect();
 
         let base_where = where_clause
             .as_ref()
