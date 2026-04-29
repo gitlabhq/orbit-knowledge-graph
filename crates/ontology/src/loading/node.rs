@@ -156,6 +156,8 @@ struct NodeStorageYaml {
     indexes: Vec<StorageIndexYaml>,
     #[serde(default)]
     projections: Vec<StorageProjectionYaml>,
+    #[serde(default)]
+    settings: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -495,6 +497,7 @@ fn convert_node_storage(yaml: NodeStorageYaml) -> NodeStorage {
             .into_iter()
             .map(convert_storage_projection)
             .collect(),
+        settings: yaml.settings,
     }
 }
 

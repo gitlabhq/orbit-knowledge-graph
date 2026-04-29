@@ -46,6 +46,8 @@ pub struct NodeStorage {
     pub indexes: Vec<StorageIndex>,
     /// Complete list of projections (no auto-generation).
     pub projections: Vec<StorageProjection>,
+    /// Raw ClickHouse MergeTree table settings emitted into CREATE TABLE.
+    pub settings: BTreeMap<String, String>,
 }
 
 /// An index definition from storage metadata.
@@ -80,6 +82,7 @@ pub struct EdgeTableStorage {
     pub columns: Vec<StorageColumn>,
     pub indexes: Vec<StorageIndex>,
     pub projections: Vec<StorageProjection>,
+    pub settings: BTreeMap<String, String>,
 }
 
 /// A non-ontology auxiliary table definition (checkpoint, etc.).

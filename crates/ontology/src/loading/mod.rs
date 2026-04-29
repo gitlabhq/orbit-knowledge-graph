@@ -116,6 +116,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .into_iter()
                     .map(node::convert_storage_projection)
                     .collect(),
+                settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
                 sort_key: cfg.sort_key,
