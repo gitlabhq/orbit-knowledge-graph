@@ -2,6 +2,7 @@ pub(crate) mod input;
 pub(crate) mod lower;
 
 pub(crate) use crate::llqm_v1::ast;
+use crate::llqm_v1::ast::TableRef;
 pub(crate) use crate::llqm_v1::codegen;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
@@ -21,6 +22,9 @@ pub(in crate::modules::sdlc) struct ExtractQuery {
     sort_key_columns: Vec<String>,
     cursor_values: Vec<String>,
     batch_size: u64,
+    /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
+    /// that gets replaced with the keyset pagination WHERE clause at emit time.
+    raw_template: Option<String>,
 }
 
 impl ExtractQuery {
@@ -30,10 +34,35 @@ impl ExtractQuery {
             sort_key_columns,
             cursor_values: Vec::new(),
             batch_size,
+            raw_template: None,
+        }
+    }
+
+    pub fn raw(template: String, sort_key_columns: Vec<String>, batch_size: u64) -> Self {
+        Self {
+            base_query: Query {
+                select: vec![],
+                from: TableRef::Raw(String::new()),
+                where_clause: None,
+                order_by: vec![],
+                limit: None,
+            },
+            sort_key_columns,
+            cursor_values: Vec::new(),
+            batch_size,
+            raw_template: Some(template),
         }
     }
 
     pub fn to_sql(&self) -> String {
+        if let Some(template) = &self.raw_template {
+            let cursor_sql = match self.build_cursor_expr() {
+                Some(expr) => format!(" AND {}", codegen::emit_expr_to_string(&expr)),
+                None => String::new(),
+            };
+            return template.replace("{CURSOR}", &cursor_sql);
+        }
+
         let mut query = self.base_query.clone();
 
         if let Some(cursor_expr) = self.build_cursor_expr() {
