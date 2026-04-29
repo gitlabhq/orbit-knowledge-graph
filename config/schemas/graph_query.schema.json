@@ -390,7 +390,7 @@
       "properties": {
         "op": {
           "type": "string",
-          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring search: contains (LIKE '%v%'), starts_with, ends_with. Nullability: is_null, is_not_null (no value). Text index search: token_match (exact word match via hasToken), all_tokens (all words present via hasAllTokens), any_tokens (any word present via hasAnyTokens) — these require a text index on the column and use ClickHouse direct-read for best performance.",
+          "description": "Filter operator. Comparison: eq, gt, lt, gte, lte. Set membership: in (array value). Substring search: contains, starts_with, ends_with. Nullability: is_null, is_not_null (no value). Word search: token_match (exact word match), all_tokens (all words present), any_tokens (any word present) — only on fields that support word search.",
           "enum": ["eq", "gt", "lt", "gte", "lte", "in", "contains", "starts_with", "ends_with", "is_null", "is_not_null", "token_match", "all_tokens", "any_tokens"]
         },
         "value": {
