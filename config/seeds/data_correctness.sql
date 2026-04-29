@@ -190,10 +190,10 @@ INSERT INTO gl_vulnerability (id, title, state, severity, report_type, resolved_
     (8001, 'XSS in comments', 'detected', 'high', 'sast', false, true, '1/101/1001/'),
     (8002, 'Exposed secret in CI', 'detected', 'critical', 'secret_detection', false, true, '1/102/1004/');
 
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('1/100/1000/', 8000, 'Vulnerability', 'IN_PROJECT', 1000, 'Project', ['severity:critical', 'state:detected'], []),
-    ('1/101/1001/', 8001, 'Vulnerability', 'IN_PROJECT', 1001, 'Project', ['severity:high', 'state:detected'], []),
-    ('1/102/1004/', 8002, 'Vulnerability', 'IN_PROJECT', 1004, 'Project', ['severity:critical', 'state:detected'], []);
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/1000/', 8000, 'Vulnerability', 'IN_PROJECT', 1000, 'Project'),
+    ('1/101/1001/', 8001, 'Vulnerability', 'IN_PROJECT', 1001, 'Project'),
+    ('1/102/1004/', 8002, 'Vulnerability', 'IN_PROJECT', 1004, 'Project');
 
 INSERT INTO gl_definition (
     id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name,
@@ -217,64 +217,64 @@ INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, w
     (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, '1/102/'),
     (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, '1/100/200/1010/');
 
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group', [], []),
-    ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group', [], []),
-    ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/100/', 6, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/101/', 6, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/100/200/', 100, 'Group', 'CONTAINS', 200, 'Group', [], []),
-    ('1/100/200/300/', 200, 'Group', 'CONTAINS', 300, 'Group', [], []),
-    ('1/100/1000/', 100, 'Group', 'CONTAINS', 1000, 'Project', [], []),
-    ('1/100/1002/', 100, 'Group', 'CONTAINS', 1002, 'Project', [], []),
-    ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project', [], []),
-    ('1/101/1003/', 101, 'Group', 'CONTAINS', 1003, 'Project', [], []),
-    ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project', [], []),
-    ('1/100/200/1010/', 200, 'Group', 'CONTAINS', 1010, 'Project', [], []),
-    ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest', [], ['state:opened']),
-    ('1/100/1000/', 1, 'User', 'AUTHORED', 2001, 'MergeRequest', [], ['state:opened']),
-    ('1/101/1001/', 2, 'User', 'AUTHORED', 2002, 'MergeRequest', [], ['state:merged']),
-    ('1/102/1004/', 3, 'User', 'AUTHORED', 2003, 'MergeRequest', [], ['state:closed']),
-    ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note', [], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note', ['state:opened'], []),
-    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff', ['state:opened'], []),
-    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff', ['state:opened'], []),
-    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff', ['state:opened'], []),
-    ('1/100/', 1, 'User', 'AUTHORED', 4000, 'WorkItem', [], ['state:opened', 'wi_type:issue']),
-    ('1/100/', 2, 'User', 'AUTHORED', 4001, 'WorkItem', [], ['state:closed', 'wi_type:incident']),
-    ('1/101/', 1, 'User', 'AUTHORED', 4002, 'WorkItem', [], ['state:opened', 'wi_type:task']),
-    ('1/102/', 3, 'User', 'AUTHORED', 4003, 'WorkItem', [], ['state:opened', 'wi_type:epic']),
-    ('1/100/', 4000, 'WorkItem', 'IN_GROUP', 100, 'Group', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/', 4001, 'WorkItem', 'IN_GROUP', 100, 'Group', ['state:closed', 'wi_type:incident'], []),
-    ('1/101/', 4002, 'WorkItem', 'IN_GROUP', 101, 'Group', ['state:opened', 'wi_type:task'], []),
-    ('1/102/', 4003, 'WorkItem', 'IN_GROUP', 102, 'Group', ['state:opened', 'wi_type:epic'], []),
-    ('1/100/', 4000, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/', 4001, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone', ['state:closed', 'wi_type:incident'], []),
-    ('1/100/', 1, 'User', 'ASSIGNED', 4000, 'WorkItem', [], ['state:opened', 'wi_type:issue']),
-    ('1/100/', 2, 'User', 'ASSIGNED', 4000, 'WorkItem', [], ['state:opened', 'wi_type:issue']),
-    ('1/100/', 3, 'User', 'ASSIGNED', 4001, 'WorkItem', [], ['state:closed', 'wi_type:incident']),
-    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label', ['state:closed', 'wi_type:incident'], []);
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
+    ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group'),
+    ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group'),
+    ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group'),
+    ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group'),
+    ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group'),
+    ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group'),
+    ('1/100/', 6, 'User', 'MEMBER_OF', 100, 'Group'),
+    ('1/101/', 6, 'User', 'MEMBER_OF', 101, 'Group'),
+    ('1/100/200/', 100, 'Group', 'CONTAINS', 200, 'Group'),
+    ('1/100/200/300/', 200, 'Group', 'CONTAINS', 300, 'Group'),
+    ('1/100/1000/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
+    ('1/100/1002/', 100, 'Group', 'CONTAINS', 1002, 'Project'),
+    ('1/101/1001/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
+    ('1/101/1003/', 101, 'Group', 'CONTAINS', 1003, 'Project'),
+    ('1/102/1004/', 102, 'Group', 'CONTAINS', 1004, 'Project'),
+    ('1/100/200/1010/', 200, 'Group', 'CONTAINS', 1010, 'Project'),
+    ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
+    ('1/100/1000/', 1, 'User', 'AUTHORED', 2001, 'MergeRequest'),
+    ('1/101/1001/', 2, 'User', 'AUTHORED', 2002, 'MergeRequest'),
+    ('1/102/1004/', 3, 'User', 'AUTHORED', 2003, 'MergeRequest'),
+    ('1/100/1000/', 1, 'User', 'AUTHORED', 3000, 'Note'),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note'),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note'),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note'),
+    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note'),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5000, 'MergeRequestDiff'),
+    ('1/100/1000/', 2000, 'MergeRequest', 'HAS_DIFF', 5001, 'MergeRequestDiff'),
+    ('1/100/1000/', 2001, 'MergeRequest', 'HAS_DIFF', 5002, 'MergeRequestDiff'),
+    ('1/100/', 1, 'User', 'AUTHORED', 4000, 'WorkItem'),
+    ('1/100/', 2, 'User', 'AUTHORED', 4001, 'WorkItem'),
+    ('1/101/', 1, 'User', 'AUTHORED', 4002, 'WorkItem'),
+    ('1/102/', 3, 'User', 'AUTHORED', 4003, 'WorkItem'),
+    ('1/100/', 4000, 'WorkItem', 'IN_GROUP', 100, 'Group'),
+    ('1/100/', 4001, 'WorkItem', 'IN_GROUP', 100, 'Group'),
+    ('1/101/', 4002, 'WorkItem', 'IN_GROUP', 101, 'Group'),
+    ('1/102/', 4003, 'WorkItem', 'IN_GROUP', 102, 'Group'),
+    ('1/100/', 4000, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone'),
+    ('1/100/', 4001, 'WorkItem', 'IN_MILESTONE', 6000, 'Milestone'),
+    ('1/100/', 1, 'User', 'ASSIGNED', 4000, 'WorkItem'),
+    ('1/100/', 2, 'User', 'ASSIGNED', 4000, 'WorkItem'),
+    ('1/100/', 3, 'User', 'ASSIGNED', 4001, 'WorkItem'),
+    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7000, 'Label'),
+    ('1/100/', 4000, 'WorkItem', 'HAS_LABEL', 7001, 'Label'),
+    ('1/100/', 4001, 'WorkItem', 'HAS_LABEL', 7002, 'Label');
 
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project', ['state:closed', 'wi_type:incident'], []),
-    ('1/100/200/1010/', 4010, 'WorkItem', 'IN_PROJECT', 1010, 'Project', ['state:opened', 'wi_type:issue'], []),
-    ('1/100/200/1010/', 7, 'User', 'AUTHORED', 4010, 'WorkItem', [], ['state:opened', 'wi_type:issue']),
-    ('1/100/', 2, 'User', 'CLOSED', 4001, 'WorkItem', [], ['state:closed', 'wi_type:incident']);
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/', 4000, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
+    ('1/100/', 4001, 'WorkItem', 'IN_PROJECT', 1000, 'Project'),
+    ('1/100/200/1010/', 4010, 'WorkItem', 'IN_PROJECT', 1010, 'Project'),
+    ('1/100/200/1010/', 7, 'User', 'AUTHORED', 4010, 'WorkItem'),
+    ('1/100/', 2, 'User', 'CLOSED', 4001, 'WorkItem');
 
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('1/100/1000/', 2, 'User', 'APPROVED', 2000, 'MergeRequest', [], ['state:opened']),
-    ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest', [], ['state:opened']),
-    ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest', [], ['state:merged']);
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/1000/', 2, 'User', 'APPROVED', 2000, 'MergeRequest'),
+    ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest'),
+    ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest');
 
 -- Organization 2: cross-org isolation test data.
 -- User 1 (alice) exists in both orgs — her User row is global (gl_user has
@@ -289,7 +289,7 @@ INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) V
 INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
     (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', '2/900/9000/');
 
-INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group', [], []),
-    ('2/900/9000/', 900, 'Group', 'CONTAINS', 9000, 'Project', [], []),
-    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest', [], ['state:opened']);
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group'),
+    ('2/900/9000/', 900, 'Group', 'CONTAINS', 9000, 'Project'),
+    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest');
