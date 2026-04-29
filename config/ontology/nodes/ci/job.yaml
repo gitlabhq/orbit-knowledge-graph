@@ -213,6 +213,12 @@ properties:
       0: stage
       1: dag
 
+  pipeline_id:
+    type: int64
+    source: commit_id
+    nullable: true
+    description: "Pipeline this job belongs to. Source column is commit_id (legacy Rails naming in ci_builds)."
+
   auto_canceled_by_id:
     type: int64
     source: auto_canceled_by_id
@@ -286,6 +292,7 @@ storage:
     - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
     - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: scheduling_type, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: pipeline_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
@@ -298,4 +305,5 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}
+    - {type: reorder, name: by_pipeline_status, order_by: [traversal_path, pipeline_id, status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
