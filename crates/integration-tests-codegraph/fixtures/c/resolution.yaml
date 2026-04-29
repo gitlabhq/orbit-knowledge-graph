@@ -123,7 +123,11 @@ tests:
       - { row_count: 1 }
       - { row: { fqn: "shapes::Shape", type: Typedef } }
 
-  - name: "Same-file call: vec_normalize calls vec_length"
+  # ══════════════════════════════════════════════════════════════
+  # INTRA-FILE CALLS (same .c file)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Intra-file: vec_normalize calls vec_length (both in math.c)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'math::vec_normalize'
@@ -133,7 +137,11 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "math::vec_normalize", callee: "math::vec_length", kind: Calls } }
 
-  - name: "Cross-file via include: main calls vec_add"
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-FILE CALLS (via #include)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Cross-file: main calls vec_add (main.c -> math.h -> math.c)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
@@ -143,7 +151,27 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "math::vec_add", kind: Calls } }
 
-  - name: "Cross-file via include: main calls create_circle"
+  - name: "Cross-file: main calls vec_normalize (main.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'math::vec_normalize'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "math::vec_normalize", kind: Calls } }
+
+  - name: "Cross-file: main calls vec_length (main.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'math::vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "math::vec_length", kind: Calls } }
+
+  - name: "Cross-file: main calls create_circle (main.c -> shapes.h -> shapes.c)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
@@ -153,7 +181,7 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "shapes::create_circle", kind: Calls } }
 
-  - name: "Cross-file via include: main calls get_area"
+  - name: "Cross-file: main calls get_area (main.c -> shapes.h -> shapes.c)"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'main::main'
@@ -162,6 +190,25 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "main::main", callee: "shapes::get_area", kind: Calls } }
+
+  - name: "Cross-file: shapes.c calls vec_length (shapes.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn STARTS WITH 'shapes::'
+        AND callee.fqn = 'math::vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { no_nulls: caller }
+
+  - name: "Exact cross-file call count from main"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 5 }
+      - { unique: callee }
 
   - name: "All files discovered"
     query: |

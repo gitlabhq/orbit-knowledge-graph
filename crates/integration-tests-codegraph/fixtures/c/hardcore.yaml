@@ -103,6 +103,42 @@ fixtures:
       typedef struct { int id; Callback on_done; } Task;
       void run_task(Task *t) {}
 
+  - path: generic/list.h
+    content: |
+      #ifndef LIST_H
+      #define LIST_H
+      struct ListNode { int data; struct ListNode *next; };
+      struct List { struct ListNode *head; int count; };
+      void list_init(struct List *l);
+      void list_push(struct List *l, int item);
+      int list_pop(struct List *l);
+      int list_count(struct List *l);
+      int list_empty(struct List *l);
+      #endif
+
+  - path: generic/list.c
+    content: |
+      #include "list.h"
+      void list_init(struct List *l) { l->head = 0; l->count = 0; }
+      void list_push(struct List *l, int item) { l->count++; }
+      int list_pop(struct List *l) { l->count--; return 0; }
+      int list_count(struct List *l) { return l->count; }
+      int list_empty(struct List *l) { return l->count == 0; }
+
+  - path: generic/user.c
+    content: |
+      #include "list.h"
+      #include "../common/error.h"
+
+      void process_users() {
+          struct List users;
+          list_init(&users);
+          list_push(&users, 1);
+          int count = list_count(&users);
+          int val = list_pop(&users);
+          if (list_empty(&users)) panic(ERR_MEM);
+      }
+
 tests:
   # ══════════════════════════════════════════════════════════════
   # EXACT TOTAL COUNTS
@@ -114,7 +150,7 @@ tests:
       WHERE d.definition_type = 'Function'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 14 }
+      - { row_count: 20 }
       - { unique: fqn }
       - { no_nulls: fqn }
 
@@ -124,12 +160,14 @@ tests:
       WHERE d.definition_type = 'Struct'
       RETURN d.fqn AS fqn
     assert:
-      - { row_count: 4 }
+      - { row_count: 6 }
       - { unique: fqn }
       - { row: { fqn: "reader::Reader" } }
       - { row: { fqn: "writer::Writer" } }
       - { row: { fqn: "nested::Outer" } }
       - { row: { fqn: "nested::Outer::Inner" } }
+      - { row: { fqn: "list::ListNode" } }
+      - { row: { fqn: "list::List" } }
 
   - name: "Exact typedef count"
     query: |
@@ -149,7 +187,7 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path
     assert:
-      - { row_count: 10 }
+      - { row_count: 13 }
       - { unique: path }
 
   # ══════════════════════════════════════════════════════════════
@@ -367,3 +405,177 @@ tests:
       - { unique: fqn }
       - { row: { fqn: "app::copy_file" } }
       - { row: { fqn: "app::main" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # INTRA-FILE CALLS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Intra-file: internal_seek calls internal_flush (both in reader.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'reader::internal_seek'
+        AND callee.fqn = 'reader::internal_flush'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush", kind: Calls } }
+
+  - name: "Intra-file: main calls copy_file (both in app.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'app::copy_file'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+
+  - name: "Intra-file: unrelated_func calls helper (both in unrelated.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'unrelated::unrelated_func'
+        AND callee.fqn = 'unrelated::helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "unrelated::unrelated_func", callee: "unrelated::helper", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-FILE CALLS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Cross-file: copy_file calls all 6 IO functions via include"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 6 }
+      - { unique: callee }
+      - { row: { callee: "reader::reader_open" } }
+      - { row: { callee: "reader::reader_read" } }
+      - { row: { callee: "reader::reader_close" } }
+      - { row: { callee: "writer::writer_open" } }
+      - { row: { callee: "writer::writer_write" } }
+      - { row: { callee: "writer::writer_close" } }
+
+  - name: "Cross-file: main calls panic via transitive include chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'error::panic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "error::panic", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # GENERIC (void*) DATA STRUCTURES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Generic list API functions exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.fqn STARTS WITH 'list::list_'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+      - { row: { fqn: "list::list_init" } }
+      - { row: { fqn: "list::list_push" } }
+      - { row: { fqn: "list::list_pop" } }
+      - { row: { fqn: "list::list_count" } }
+      - { row: { fqn: "list::list_empty" } }
+
+  - name: "Generic list structs exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Struct'
+        AND d.fqn STARTS WITH 'list::'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "list::ListNode" } }
+      - { row: { fqn: "list::List" } }
+
+  - name: "list.c defines exactly 5 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'generic/list.c'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+
+  - name: "Cross-file: process_users calls list_init (user.c -> list.h -> list.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_init'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_init", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_push"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_push'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_push", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_count'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_count", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_pop"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_pop'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_pop", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_empty"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_empty'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_empty", kind: Calls } }
+
+  - name: "Cross-file: process_users calls panic via transitive include"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'error::panic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "error::panic", kind: Calls } }
+
+  - name: "process_users total call count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 6 }
+      - { unique: callee }
