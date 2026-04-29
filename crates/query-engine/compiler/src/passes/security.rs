@@ -5,7 +5,7 @@
 //!
 //! Path filtering strategy:
 //! - 1 path: `startsWith(path)`
-//! - 2+ paths: `startsWith(LCP) AND (startsWith(p1) OR startsWith(p2) OR ...)`
+//! - 2+ paths: `startsWith(LCP) AND arrayExists(p -> startsWith(path, p), paths)`
 //!
 //! # Per-entity role scoping
 //!
@@ -108,10 +108,8 @@ fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
             }
             let lcp = lowest_common_prefix(&collapsed);
             let lcp_filter = starts_with_expr(alias, &lcp);
-            match Expr::or_all(collapsed.iter().map(|p| Some(starts_with_expr(alias, p)))) {
-                Some(or_filters) => Expr::and(lcp_filter, or_filters),
-                None => lcp_filter,
-            }
+            let collapsed_refs: Vec<&str> = collapsed.iter().map(String::as_str).collect();
+            Expr::and(lcp_filter, path_array_filter(alias, &collapsed_refs))
         }
     }
 }
@@ -216,9 +214,35 @@ fn lowest_common_prefix(paths: &[String]) -> String {
 }
 
 fn starts_with_expr(alias: &str, path: &str) -> Expr {
+    starts_with_value_expr(alias, Expr::string(path))
+}
+
+fn starts_with_value_expr(alias: &str, path: Expr) -> Expr {
     Expr::func(
         "startsWith",
-        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), path],
+    )
+}
+
+fn path_array_filter(alias: &str, paths: &[&str]) -> Expr {
+    let lambda_param = "_gkg_path";
+    Expr::func(
+        "arrayExists",
+        vec![
+            Expr::lambda(
+                lambda_param,
+                starts_with_value_expr(alias, Expr::ident(lambda_param)),
+            ),
+            Expr::param(
+                ChType::String.to_array(),
+                serde_json::Value::Array(
+                    paths
+                        .iter()
+                        .map(|path| serde_json::Value::String((*path).to_string()))
+                        .collect(),
+                ),
+            ),
+        ],
     )
 }
 
@@ -445,7 +469,12 @@ mod tests {
             }
             Expr::UnaryOp { expr, .. } => collect_starts_with_paths(expr, alias, paths),
             Expr::InSubquery { expr, .. } => collect_starts_with_paths(expr, alias, paths),
-            Expr::Column { .. } | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
+            Expr::Lambda { body, .. } => collect_starts_with_paths(body, alias, paths),
+            Expr::Identifier(_)
+            | Expr::Column { .. }
+            | Expr::Literal(_)
+            | Expr::Param { .. }
+            | Expr::Star => {}
         }
     }
 

@@ -104,6 +104,7 @@ async fn data_correctness() {
         path_finding::path_finding_step_indices_are_sequential,
         path_finding::path_finding_target_entity_constrains_results,
         path_finding::path_finding_entity_filter_excludes_wrong_types,
+        path_finding::path_finding_code_filtered_endpoints_stay_on_same_traversal_path,
         // neighbors
         neighbors::neighbors_outgoing_returns_correct_targets,
         neighbors::neighbors_incoming_returns_correct_sources,

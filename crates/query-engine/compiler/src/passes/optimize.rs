@@ -25,7 +25,7 @@ use std::collections::{HashMap, HashSet};
 use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
-    cascade_cte, node_filter_cte, skip_security_filter_tables,
+    TRAVERSAL_PATH_COLUMN, cascade_cte, node_filter_cte, skip_security_filter_tables,
 };
 use crate::input::{Direction, Input, InputNode, QueryType};
 
@@ -35,6 +35,7 @@ use ontology::constants::{
 };
 
 const ROOT_SIP_CTE: &str = "_root_ids";
+const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
 
 /// Apply all optimization passes to the AST.
 pub fn optimize(node: &mut Node, input: &mut Input) {
@@ -1710,6 +1711,13 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
         (Some(s), Some(e)) => (path_hop_anchor_source(q, s), path_hop_anchor_source(q, e)),
         _ => return,
     };
+    let start_entity = start.and_then(|n| n.entity.as_deref());
+    let end_entity = end.and_then(|n| n.entity.as_deref());
+    let path_scope_cte = q
+        .ctes
+        .iter()
+        .any(|cte| cte.name == PATH_SCOPE_CTE)
+        .then_some(PATH_SCOPE_CTE);
 
     let max_depth = path.max_depth;
     let forward_depth = max_depth.div_ceil(2);
@@ -1717,25 +1725,41 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
 
     // Build hop frontier CTEs and inject SIP into frontier arms.
     let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
+    let rel_type_filter =
+        if path.rel_types.is_empty() || (path.rel_types.len() == 1 && path.rel_types[0] == "*") {
+            None
+        } else {
+            Some(path.rel_types.as_slice())
+        };
     let mut new_ctes = Vec::new();
     inject_hop_frontiers(
         q,
-        FORWARD_CTE,
-        start_anchor,
-        forward_depth,
-        true,
         &mut new_ctes,
-        &edge_tables,
+        HopFrontierOptions {
+            cte_name: FORWARD_CTE,
+            anchor_source: start_anchor,
+            max_depth: forward_depth,
+            is_forward: true,
+            edge_tables: &edge_tables,
+            rel_type_filter,
+            path_scope_cte,
+            anchor_entity: start_entity,
+        },
     );
     if backward_depth > 0 {
         inject_hop_frontiers(
             q,
-            BACKWARD_CTE,
-            end_anchor,
-            backward_depth,
-            false,
             &mut new_ctes,
-            &edge_tables,
+            HopFrontierOptions {
+                cte_name: BACKWARD_CTE,
+                anchor_source: end_anchor,
+                max_depth: backward_depth,
+                is_forward: false,
+                edge_tables: &edge_tables,
+                rel_type_filter,
+                path_scope_cte,
+                anchor_entity: end_entity,
+            },
         );
     }
 
@@ -1765,28 +1789,35 @@ fn path_hop_anchor_source(q: &Query, node: &InputNode) -> Option<HopAnchorSource
     None
 }
 
-/// Build hop frontier CTEs for one direction and inject SIP filters into
-/// the corresponding frontier CTE's UNION ALL arms.
-fn inject_hop_frontiers(
-    q: &mut Query,
-    cte_name: &str,
+struct HopFrontierOptions<'a> {
+    cte_name: &'a str,
     anchor_source: Option<HopAnchorSource>,
     max_depth: u32,
     is_forward: bool,
-    new_ctes: &mut Vec<Cte>,
-    edge_tables: &[String],
-) {
-    let Some(anchor_source) = anchor_source else {
+    edge_tables: &'a [String],
+    rel_type_filter: Option<&'a [String]>,
+    path_scope_cte: Option<&'a str>,
+    anchor_entity: Option<&'a str>,
+}
+
+/// Build hop frontier CTEs for one direction and inject SIP filters into
+/// the corresponding frontier CTE's UNION ALL arms.
+fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFrontierOptions<'_>) {
+    let Some(anchor_source) = options.anchor_source else {
         return;
     };
 
-    let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
-    let anchor_col = if is_forward {
+    let prefix = if options.is_forward {
+        "_fwd_hop"
+    } else {
+        "_bwd_hop"
+    };
+    let anchor_col = if options.is_forward {
         SOURCE_ID_COLUMN
     } else {
         TARGET_ID_COLUMN
     };
-    let next_col = if is_forward {
+    let next_col = if options.is_forward {
         TARGET_ID_COLUMN
     } else {
         SOURCE_ID_COLUMN
@@ -1794,7 +1825,7 @@ fn inject_hop_frontiers(
 
     // Build hop frontier CTEs: _fwd_hop1 chains from anchor IDs,
     // _fwd_hop2 chains from _fwd_hop1, etc.
-    for hop in 1..max_depth {
+    for hop in 1..options.max_depth {
         let hop_name = format!("{prefix}{hop}");
         let parent = if hop == 1 {
             None
@@ -1827,11 +1858,40 @@ fn inject_hop_frontiers(
                 }),
             }
         };
+        let rel_filter = options.rel_type_filter.and_then(|types| {
+            Expr::col_in(
+                alias,
+                RELATIONSHIP_KIND_COLUMN,
+                ChType::String,
+                types
+                    .iter()
+                    .map(|t| serde_json::Value::String(t.clone()))
+                    .collect(),
+            )
+        });
+        let scope_filter = options.path_scope_cte.map(|cte_name| Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, TRAVERSAL_PATH_COLUMN)),
+            cte_name: cte_name.to_string(),
+            column: TRAVERSAL_PATH_COLUMN.to_string(),
+        });
+        let anchor_kind_filter = (hop == 1)
+            .then(|| {
+                options.anchor_entity.map(|entity| {
+                    let kind_col = if options.is_forward {
+                        SOURCE_KIND_COLUMN
+                    } else {
+                        TARGET_KIND_COLUMN
+                    };
+                    Expr::eq(Expr::col(alias, kind_col), Expr::string(entity))
+                })
+            })
+            .flatten();
 
-        let from = if edge_tables.len() == 1 {
-            TableRef::scan(&edge_tables[0], alias)
+        let from = if options.edge_tables.len() == 1 {
+            TableRef::scan(&options.edge_tables[0], alias)
         } else {
-            let queries = edge_tables
+            let queries = options
+                .edge_tables
                 .iter()
                 .map(|t| Query {
                     select: vec![SelectExpr::star()],
@@ -1849,7 +1909,12 @@ fn inject_hop_frontiers(
                     DEFAULT_PRIMARY_KEY,
                 )],
                 from,
-                where_clause: anchor_filter,
+                where_clause: Expr::and_all([
+                    anchor_filter,
+                    rel_filter,
+                    scope_filter,
+                    anchor_kind_filter,
+                ]),
                 ..Default::default()
             },
         ));
@@ -1857,7 +1922,7 @@ fn inject_hop_frontiers(
 
     // Inject SIP filters into the UNION ALL arms of the frontier CTE.
     // Arms at depth >= 2 get: e{depth}.anchor_col IN (SELECT id FROM hop{depth-1})
-    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == cte_name) {
+    let frontier_cte = match q.ctes.iter_mut().find(|c| c.name == options.cte_name) {
         Some(c) => c,
         None => return,
     };
@@ -1867,7 +1932,7 @@ fn inject_hop_frontiers(
     // Only depth >= 2 gets a SIP filter, so we only touch union_all entries.
     for (i, arm) in frontier_cte.query.union_all.iter_mut().enumerate() {
         let depth = (i + 2) as u32; // union_all[0] = depth 2
-        if depth > max_depth {
+        if depth > options.max_depth {
             continue;
         }
         let hop_cte_name = format!("{prefix}{}", depth - 1);

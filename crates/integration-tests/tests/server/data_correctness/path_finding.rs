@@ -1,4 +1,5 @@
 use super::helpers::*;
+use crate::common::compile_and_execute;
 
 pub(super) async fn path_finding_returns_valid_complete_paths(ctx: &TestContext) {
     let resp = run_query(
@@ -463,4 +464,39 @@ pub(super) async fn path_finding_entity_filter_excludes_wrong_types(ctx: &TestCo
             );
         }
     }
+}
+
+pub(super) async fn path_finding_code_filtered_endpoints_stay_on_same_traversal_path(
+    ctx: &TestContext,
+) {
+    let (_compiled, result) = compile_and_execute(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "compile"}}},
+                {"id": "end", "entity": "Definition", "filters": {"name": {"op": "eq", "value": "run_query"}}}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["CALLS"]},
+            "limit": 10
+        }"#,
+    )
+    .await;
+
+    let paths: Vec<Vec<i64>> = result
+        .rows()
+        .iter()
+        .map(|row| row.path_nodes().iter().map(|node| node.id).collect())
+        .collect();
+
+    assert_eq!(
+        paths,
+        vec![vec![12000, 12001, 12002]],
+        "filtered Definition path finding must not join CALLS hops across traversal_path"
+    );
+    assert!(
+        paths.iter().all(|path| path.last() != Some(&12102)),
+        "cross-project decoy run_query must not be reachable: {paths:?}"
+    );
 }

@@ -22,7 +22,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
-use crate::constants::node_filter_cte;
+use crate::constants::{TRAVERSAL_PATH_COLUMN, node_filter_cte};
 use crate::input::{Input, QueryType};
 use ontology::Ontology;
 use ontology::constants::{DEFAULT_PRIMARY_KEY, DELETED_COLUMN, VERSION_COLUMN};
@@ -61,8 +61,9 @@ pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     }
 }
 
-/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs select `id`
-/// for edge semi-joins. Using LIMIT 1 BY with the sort key prefix lets
+/// Deduplicate a `_nf_*` CTE using LIMIT 1 BY. These CTEs always select `id`
+/// for edge semi-joins and may carry extra stable columns for optimizer CTEs.
+/// Using LIMIT 1 BY with the sort key prefix lets
 /// ClickHouse stream in primary key order instead of hash-aggregating
 /// the entire table.
 fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
@@ -71,10 +72,27 @@ fn dedup_nf_cte(q: &mut Query, input: &Input, ontology: &Ontology) {
     {
         let table = table.clone();
         let alias = alias.clone();
-        apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
-        // The CTE only needs `id`, but the LIMIT 1 BY subquery selects *.
-        // Narrow the outer select back to just `id`.
-        q.select = vec![SelectExpr::new(Expr::col(&alias, "id"), "id")];
+        let select = std::mem::take(&mut q.select);
+        let selects_traversal_path = select
+            .iter()
+            .any(|expr| expr.alias.as_deref() == Some(TRAVERSAL_PATH_COLUMN));
+        if selects_traversal_path {
+            apply_limit_by_dedup_with_inner_filters(
+                &mut q.from,
+                &mut q.where_clause,
+                &table,
+                ontology,
+            );
+        } else {
+            apply_limit_by_dedup(&mut q.from, &mut q.where_clause, &table, ontology);
+        }
+        // The LIMIT 1 BY subquery selects *. Narrow the outer select back to
+        // the lowerer's requested CTE columns.
+        q.select = if select.is_empty() {
+            vec![SelectExpr::new(Expr::col(&alias, "id"), "id")]
+        } else {
+            select
+        };
     }
 }
 
@@ -356,6 +374,20 @@ fn apply_limit_by_dedup(
     wrap_scan_with_limit_by(from, where_clause, table_name, alias, None, sort_key);
 }
 
+fn apply_limit_by_dedup_with_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table: &str,
+    ontology: &Ontology,
+) {
+    let (table_name, alias) = match from {
+        TableRef::Scan { table, alias, .. } => (table.clone(), alias.clone()),
+        _ => return,
+    };
+    let sort_key = ontology.sort_key_for_table(table).unwrap_or_default();
+    wrap_scan_with_limit_by_inner_filters(from, where_clause, table_name, alias, sort_key);
+}
+
 fn wrap_scan_with_limit_by(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
@@ -370,6 +402,21 @@ fn wrap_scan_with_limit_by(
 
     outer_filters.insert(0, not_deleted(&alias));
     *where_clause = Expr::conjoin(outer_filters);
+    *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
+}
+
+fn wrap_scan_with_limit_by_inner_filters(
+    from: &mut TableRef,
+    where_clause: &mut Option<Expr>,
+    table_name: String,
+    alias: String,
+    sort_key: &[String],
+) {
+    let inner_filters = where_clause
+        .take()
+        .map(Expr::flatten_and)
+        .unwrap_or_default();
+    *where_clause = Some(not_deleted(&alias));
     *from = make_dedup_subquery(table_name, &alias, inner_filters, sort_key);
 }
 

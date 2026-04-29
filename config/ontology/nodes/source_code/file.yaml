@@ -83,7 +83,8 @@ properties:
     description: "Raw source text of the file. Resolved from Gitaly at query time."
 
 storage:
-  version_only_engine: true
+  settings:
+    index_granularity: "1024"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
