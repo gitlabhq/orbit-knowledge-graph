@@ -289,6 +289,7 @@ impl NatsBroker {
             None => "ephemeral".to_string(),
         };
         let batch_size = self.config.batch_size();
+        let fetch_expires = self.config.fetch_expires();
         info!(
             topic = %format!("{}.{}", subscription.stream, subscription.subject),
             consumer_type,
@@ -307,7 +308,7 @@ impl NatsBroker {
                 }
 
                 let fetch_start = std::time::Instant::now();
-                let batch = match consumer.fetch().max_messages(batch_size).messages().await {
+                let batch = match consumer.batch().max_messages(batch_size).expires(fetch_expires).messages().await {
                     Ok(batch) => batch,
                     Err(e) => {
                         warn!(error = %e, "fetch batch error");
