@@ -308,7 +308,13 @@ impl NatsBroker {
                 }
 
                 let fetch_start = std::time::Instant::now();
-                let batch = match consumer.batch().max_messages(batch_size).expires(fetch_expires).messages().await {
+                let batch = match consumer
+                    .batch()
+                    .max_messages(batch_size)
+                    .expires(fetch_expires)
+                    .messages()
+                    .await
+                {
                     Ok(batch) => batch,
                     Err(e) => {
                         warn!(error = %e, "fetch batch error");
