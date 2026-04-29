@@ -169,4 +169,5 @@ storage:
     - {name: idx_discussion_id, column: discussion_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_noteable, order_by: [traversal_path, noteable_type, noteable_id, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
