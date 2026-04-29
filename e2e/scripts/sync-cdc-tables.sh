@@ -61,23 +61,28 @@ curl -sfL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 120 -o "$ARC
 gzip -t "$ARCHIVE" 2>/dev/null || { echo "downloaded archive is not gzip (bad ref?)"; exit 1; }
 tar -xzf "$ARCHIVE" --strip-components=4 -C "$TABLES_RAW"
 
-# --- 2. Filter to database: main --------------------------------------------
-# Layout below only declares a `main` producer; siphon's helm generator hard-fails
-# on any SSOT table whose `database:` is not in the layout.
-SKIPPED_DB=0
+# --- 2. Coalesce all databases into `main` ----------------------------------
+# Production GitLab decomposes its schema across `main`, `ci`, and `sec` PG
+# databases; SSOT YAMLs annotate each table with its target database. The e2e
+# stack runs a single bitnami-postgresql with every Rails migration applied,
+# so every table physically lives in the same DB regardless of its annotated
+# `database:` value. Rewrite each fetched YAML to claim `database: main` so
+# siphon's schema generator (which keys producers off the layout's `main`
+# entry) routes every CDC table through the single producer we declare.
+COALESCED=0
 KEPT=0
 for f in "$TABLES_RAW"/*.yml "$TABLES_RAW"/*.yaml; do
   [[ -f "$f" ]] || continue
   db="$(yq -r '.database // "main"' "$f")"
   if [[ "$db" != "main" ]]; then
-    SKIPPED_DB=$((SKIPPED_DB+1))
-  else
-    cp "$f" "$TABLES/"
-    KEPT=$((KEPT+1))
+    yq -i '.database = "main"' "$f"
+    COALESCED=$((COALESCED+1))
   fi
+  cp "$f" "$TABLES/"
+  KEPT=$((KEPT+1))
 done
-log "tables kept: $KEPT, skipped (other dbs): $SKIPPED_DB"
-[[ "$KEPT" -gt 0 ]] || { echo "no main-database tables found in SSOT"; exit 1; }
+log "tables kept: $KEPT (coalesced from non-main: $COALESCED)"
+[[ "$KEPT" -gt 0 ]] || { echo "no tables found in SSOT"; exit 1; }
 
 # --- 3. Generate fragments via siphon schema binary --------------------------
 RAW="$TMP/raw.yaml"
