@@ -6,7 +6,7 @@ global:
   # subscription/activation client at the staging portal. Applied to every Rails
   # component (webservice, sidekiq, toolbox, migrations) so the license is
   # decryptable from first boot. The activation itself is performed by
-  # scripts/activate-license.sh after gitlab is Ready.
+  # scripts/bootstrap-instance.sh after gitlab is Ready.
   extraEnv:
     GITLAB_LICENSE_MODE: "test"
     CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"

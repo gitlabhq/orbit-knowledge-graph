@@ -76,15 +76,12 @@ log "Deploying via helmfile"
 cd "$E2E_DIR"
 helmfile --file helmfile.yaml.gotmpl sync
 
-# Activate GitLab with the cloud license from the staging customer portal so
-# EE-gated features (epics, work item hierarchies, etc.) are available in the
-# test suite. Runs after helmfile sync because it requires a Ready toolbox pod.
-"$E2E_DIR/scripts/activate-license.sh"
-
-# Create a root PAT via rails-runner. Replaces the OAuth password grant (ROPC)
-# flow that GitLab 19.0 removed. Robot runner reads the PAT from the
-# `gitlab-root-pat` secret as the GITLAB_ROOT_PAT env var.
-"$E2E_DIR/scripts/create-root-pat.sh"
+# Activate GitLab with the cloud license from the staging customer portal and
+# create a root PAT in a single rails-runner call (each call cold-boots Rails,
+# so combining halves the boot cost). The license unlocks EE-gated features
+# (epics, work item hierarchies); the PAT replaces the ROPC flow that GitLab
+# 19.0 removed and is read by robot runner as GITLAB_ROOT_PAT.
+"$E2E_DIR/scripts/bootstrap-instance.sh"
 
 # Shrink CACHE-layout LIFETIME on traversal-path dictionaries so the routes-
 # vs-namespaces race window for new namespaces is sub-second instead of the
