@@ -593,7 +593,7 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "filters": [{"column": "project_id", "operator": "eq", "value": 1000}], "columns": ["name", "fqn"]},
+                {"id": "caller", "entity": "Definition", "filters": {"project_id": 1000}, "columns": ["name", "fqn"]},
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
