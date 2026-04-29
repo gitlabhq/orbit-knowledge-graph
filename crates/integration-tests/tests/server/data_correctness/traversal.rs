@@ -608,7 +608,9 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
     // Caller is filtered to project 1000 (12000, 12001, 12002). Callee is unrestricted.
     resp.assert_node_count(4);
     resp.assert_referential_integrity();
-    resp.assert_filter("Definition", "project_id", |n| {
+    // Filter is on "caller" alias only — callee 12102 is in project 1001,
+    // which is correct (the filter scopes callers, not callees).
+    resp.assert_node("Definition", 12000, |n| {
         n.prop_i64("project_id") == Some(1000)
     });
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002), (12001, 12102)]);
