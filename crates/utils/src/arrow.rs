@@ -292,6 +292,8 @@ pub enum ColumnType {
     Bool,
     /// Microsecond-precision UTC timestamp.
     TimestampMicros,
+    /// `Array(String)` — variable-length list of strings.
+    StrList,
 }
 
 /// Column definition for [`NodeBatch`] builder.
@@ -311,6 +313,7 @@ enum Col {
     Int(Int64Builder, bool),
     Bool(BooleanBuilder, bool),
     Timestamp(TimestampMicrosecondBuilder, bool),
+    StrList(arrow::array::ListBuilder<StringBuilder>, bool),
 }
 
 impl std::fmt::Debug for Col {
@@ -327,6 +330,7 @@ impl Col {
             Self::Int(b, _) => b.len(),
             Self::Bool(b, _) => b.len(),
             Self::Timestamp(b, _) => b.len(),
+            Self::StrList(b, _) => b.len(),
         }
     }
 
@@ -337,6 +341,7 @@ impl Col {
             Self::Int(..) => "Int",
             Self::Bool(..) => "Bool",
             Self::Timestamp(..) => "Timestamp",
+            Self::StrList(..) => "StrList",
         }
     }
 
@@ -355,6 +360,10 @@ impl Col {
                 nullable,
                 Arc::new(b.finish().with_timezone("UTC")),
             ),
+            Self::StrList(mut b, nullable) => {
+                let arr = b.finish();
+                (arr.data_type().clone(), nullable, Arc::new(arr))
+            }
         }
     }
 }
@@ -439,6 +448,21 @@ impl ColRef<'_> {
         }
     }
 
+    /// Push an empty `[]` to a `StrList` column.
+    pub fn push_empty_str_list(&mut self) -> BatchResult<()> {
+        match &mut *self.col {
+            Col::StrList(b, _) => {
+                b.append(true);
+                Ok(())
+            }
+            other => Err(batch_err(format!(
+                "push_empty_str_list on {} column '{}'",
+                other.kind(),
+                self.name
+            ))),
+        }
+    }
+
     pub fn push_opt_str<S: AsRef<str>>(&mut self, v: Option<S>) -> BatchResult<()> {
         match &mut *self.col {
             Col::Str(b, _) => {
@@ -516,6 +540,10 @@ impl BatchBuilder {
                 ColumnType::Bool => Col::Bool(BooleanBuilder::with_capacity(cap), spec.nullable),
                 ColumnType::TimestampMicros => Col::Timestamp(
                     TimestampMicrosecondBuilder::with_capacity(cap),
+                    spec.nullable,
+                ),
+                ColumnType::StrList => Col::StrList(
+                    arrow::array::ListBuilder::new(StringBuilder::with_capacity(cap, cap * 8)),
                     spec.nullable,
                 ),
             };

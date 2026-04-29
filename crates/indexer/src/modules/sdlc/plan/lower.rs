@@ -2,8 +2,8 @@ use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
 use super::input::{
-    EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform,
-    NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
+    DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
+    ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
 };
 use super::{ExtractQuery, PipelinePlan, Plans, SOURCE_DATA_TABLE, Transformation};
 const VERSION_ALIAS: &str = "_version";
@@ -84,6 +84,7 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
             lower_edge_id(&fk_edge.target_id),
             lower_edge_kind(&fk_edge.target_kind),
             fk_edge.namespaced,
+            &fk_edge.denormalized_columns,
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&fk_edge.filters),
@@ -147,6 +148,7 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
             lower_edge_id(&input.target_id),
             lower_edge_kind(&input.target_kind),
             input.namespaced,
+            &input.denormalized_columns,
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&input.filters),
@@ -244,6 +246,7 @@ fn lower_edge_select(
     target_id: Expr,
     target_kind: Expr,
     namespaced: bool,
+    denormalized: &[DenormalizedColumnProjection],
 ) -> Vec<SelectExpr> {
     let traversal_path = if namespaced {
         SelectExpr::bare(Expr::col("", "traversal_path"))
@@ -251,7 +254,7 @@ fn lower_edge_select(
         SelectExpr::new(Expr::raw("'0/'"), "traversal_path")
     };
 
-    vec![
+    let mut cols = vec![
         traversal_path,
         SelectExpr::new(source_id, "source_id"),
         SelectExpr::new(source_kind, "source_kind"),
@@ -263,7 +266,50 @@ fn lower_edge_select(
         SelectExpr::new(target_kind, "target_kind"),
         SelectExpr::bare(Expr::col("", VERSION_ALIAS)),
         SelectExpr::bare(Expr::col("", DELETED_ALIAS)),
-    ]
+    ];
+
+    // Group denormalized columns by edge_column (source_tags / target_tags)
+    // and build a single array expression per direction.
+    let mut tag_groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for d in denormalized {
+        let tag_expr = match &d.enum_mapping {
+            Some(mapping) => {
+                let cases: Vec<String> = mapping
+                    .iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "WHEN {} = {} THEN '{}'",
+                            d.source_column,
+                            key,
+                            value.replace('\'', "\\'")
+                        )
+                    })
+                    .collect();
+                format!(
+                    "concat('{}:', CASE {} ELSE CAST({} AS VARCHAR) END)",
+                    d.tag_key,
+                    cases.join(" "),
+                    d.source_column
+                )
+            }
+            None => format!(
+                "concat('{}:', CAST({} AS VARCHAR))",
+                d.tag_key, d.source_column
+            ),
+        };
+        tag_groups
+            .entry(d.edge_column.clone())
+            .or_default()
+            .push(tag_expr);
+    }
+
+    for (col_name, tag_exprs) in tag_groups {
+        let array_expr = format!("make_array({})", tag_exprs.join(", "));
+        cols.push(SelectExpr::new(Expr::raw(array_expr), &col_name));
+    }
+
+    cols
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
@@ -544,6 +590,7 @@ mod tests {
             filters: vec![EdgeFilter::IsNotNull("owner_id".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
         let transform = lower_fk_edge_transform(&fk_edge);
@@ -566,6 +613,7 @@ mod tests {
             filters: vec![EdgeFilter::IsNotNull("author_id".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
         let transform = lower_fk_edge_transform(&fk_edge);
@@ -607,6 +655,7 @@ mod tests {
             ],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
         let transform = lower_fk_edge_transform(&fk_edge);
@@ -644,6 +693,7 @@ mod tests {
             ],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
         let transform = lower_fk_edge_transform(&fk_edge);
@@ -672,6 +722,7 @@ mod tests {
             filters: vec![EdgeFilter::ArrayNotEmpty("assignees".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
         let transform = lower_fk_edge_transform(&fk_edge);

@@ -2,6 +2,9 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arrow::array::ArrayRef;
+use arrow::compute;
+use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
@@ -289,6 +292,11 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
+            // DataFusion may produce StringView (utf8_view) arrays which
+            // ClickHouse 26.x doesn't support in Arrow IPC ingestion.
+            // Cast them to Utf8 before writing.
+            let result_batches = downcast_string_views(&result_batches);
+
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
                 continue;
@@ -367,6 +375,62 @@ impl Pipeline {
         }
         Value::Object(params)
     }
+}
+
+/// Cast StringView / List<StringView> columns to Utf8 / List<Utf8>.
+/// DataFusion 53+ produces StringView for `make_array(concat(...))` results,
+/// but ClickHouse 26.x rejects the `utf8_view` Arrow type during IPC ingestion.
+fn downcast_string_views(batches: &[RecordBatch]) -> Vec<RecordBatch> {
+    batches
+        .iter()
+        .map(|batch| {
+            let schema = batch.schema();
+            let mut new_fields: Vec<Field> = Vec::new();
+            let mut new_columns: Vec<ArrayRef> = Vec::new();
+            let mut changed = false;
+
+            for (i, field) in schema.fields().iter().enumerate() {
+                let col = batch.column(i);
+                match field.data_type() {
+                    DataType::Utf8View => {
+                        let casted = compute::cast(col, &DataType::Utf8)
+                            .expect("StringView -> Utf8 cast should not fail");
+                        new_fields.push(Field::new(
+                            field.name(),
+                            DataType::Utf8,
+                            field.is_nullable(),
+                        ));
+                        new_columns.push(casted);
+                        changed = true;
+                    }
+                    DataType::List(inner) if *inner.data_type() == DataType::Utf8View => {
+                        let target = DataType::List(Arc::new(Field::new(
+                            inner.name(),
+                            DataType::Utf8,
+                            inner.is_nullable(),
+                        )));
+                        let casted = compute::cast(col, &target)
+                            .expect("List<StringView> -> List<Utf8> cast should not fail");
+                        new_fields.push(Field::new(field.name(), target, field.is_nullable()));
+                        new_columns.push(casted);
+                        changed = true;
+                    }
+                    _ => {
+                        new_fields.push(field.as_ref().clone());
+                        new_columns.push(Arc::clone(col));
+                    }
+                }
+            }
+
+            if changed {
+                let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+                RecordBatch::try_new(new_schema, new_columns)
+                    .expect("schema/column mismatch in downcast_string_views")
+            } else {
+                batch.clone()
+            }
+        })
+        .collect()
 }
 
 #[cfg(test)]
