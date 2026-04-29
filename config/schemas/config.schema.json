@@ -207,8 +207,7 @@
       "default": {
         "default": {
           "max_execution_time": 30,
-          "query_cache_ttl": 60,
-          "use_text_index_like_evaluation_by_dictionary_scan": true
+          "query_cache_ttl": 60
         }
       }
     },
@@ -1306,14 +1305,6 @@
             "boolean",
             "null"
           ]
-        },
-        "use_text_index_like_evaluation_by_dictionary_scan": {
-          "description": "ClickHouse `use_text_index_like_evaluation_by_dictionary_scan`.\nWhen enabled, `LIKE '%word%'` patterns on text-indexed columns scan\nthe inverted index dictionary instead of the full column. Off by\ndefault in ClickHouse; we enable it to accelerate LIKE patterns that\ncan't be rewritten to `hasToken`/`hasAllTokens`.",
-          "type": [
-            "boolean",
-            "null"
-          ],
-          "default": true
         }
       },
       "additionalProperties": false
@@ -1326,8 +1317,7 @@
           "$ref": "#/$defs/QueryConfig",
           "default": {
             "max_execution_time": 30,
-            "query_cache_ttl": 60,
-            "use_text_index_like_evaluation_by_dictionary_scan": true
+            "query_cache_ttl": 60
           }
         }
       },

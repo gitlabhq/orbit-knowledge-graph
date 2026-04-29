@@ -72,17 +72,6 @@ pub struct QueryConfig {
     )]
     pub query_cache_ttl: Option<u32>,
 
-    /// ClickHouse `use_text_index_like_evaluation_by_dictionary_scan`.
-    /// When enabled, `LIKE '%word%'` patterns on text-indexed columns scan
-    /// the inverted index dictionary instead of the full column. Off by
-    /// default in ClickHouse; we enable it to accelerate LIKE patterns that
-    /// can't be rewritten to `hasToken`/`hasAllTokens`.
-    #[serde(
-        default = "default_text_index_like_dict_scan",
-        skip_serializing_if = "Option::is_none"
-    )]
-    pub use_text_index_like_evaluation_by_dictionary_scan: Option<bool>,
-
     /// NATS KV cache for graph query results (webserver).
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
@@ -100,9 +89,6 @@ fn default_max_execution_time() -> Option<u64> {
 fn default_query_cache_ttl() -> Option<u32> {
     Some(DEFAULT_QUERY_CACHE_TTL)
 }
-fn default_text_index_like_dict_scan() -> Option<bool> {
-    Some(true)
-}
 
 impl Default for QueryConfig {
     fn default() -> Self {
@@ -114,7 +100,6 @@ impl Default for QueryConfig {
             max_rows_in_set: None,
             use_query_cache: None,
             query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
-            use_text_index_like_evaluation_by_dictionary_scan: Some(true),
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
         }
@@ -132,7 +117,6 @@ impl QueryConfig {
             max_rows_in_set: None,
             use_query_cache: None,
             query_cache_ttl: None,
-            use_text_index_like_evaluation_by_dictionary_scan: None,
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
         }
@@ -149,9 +133,6 @@ impl QueryConfig {
             max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
-            use_text_index_like_evaluation_by_dictionary_scan: overrides
-                .use_text_index_like_evaluation_by_dictionary_scan
-                .or(self.use_text_index_like_evaluation_by_dictionary_scan),
             graph_query_cache_enabled: overrides
                 .graph_query_cache_enabled
                 .or(self.graph_query_cache_enabled),
@@ -293,17 +274,10 @@ mod tests {
         };
         let mut settings = cfg.to_clickhouse_settings()?;
         settings.sort_by(|a, b| a.0.cmp(&b.0));
-        assert_eq!(settings.len(), 4);
+        assert_eq!(settings.len(), 3);
         assert_eq!(settings[0], ("max_execution_time".into(), "30".into()));
         assert_eq!(settings[1], ("query_cache_ttl".into(), "60".into()));
         assert_eq!(settings[2], ("use_query_cache".into(), "1".into()));
-        assert_eq!(
-            settings[3],
-            (
-                "use_text_index_like_evaluation_by_dictionary_scan".into(),
-                "1".into()
-            )
-        );
         Ok(())
     }
 
