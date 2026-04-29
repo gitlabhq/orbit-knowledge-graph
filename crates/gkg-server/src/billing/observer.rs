@@ -2,14 +2,30 @@ use std::cell::Cell;
 use std::sync::Arc;
 use std::time::Duration;
 
+use gkg_observability::billing::events as spec;
 use labkit_events::BillingEvent;
+use opentelemetry::KeyValue;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
 use crate::auth::Claims;
 
 use super::constants::{CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, normalize_realm};
+use super::metrics::METRICS;
 use super::tracker::BillingTracker;
+use super::{REASON_EVENT_BUILD_FAILED, REASON_REALM_MISSING, REASON_REALM_UNRECOGNIZED};
+
+fn record_dropped(reason: &'static str) {
+    METRICS
+        .dropped
+        .add(1, &[KeyValue::new(spec::labels::REASON, reason)]);
+}
+
+fn correlation_id_string() -> String {
+    labkit::correlation::current()
+        .map(|id| id.as_str().to_string())
+        .unwrap_or_default()
+}
 
 pub(crate) struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
@@ -29,19 +45,24 @@ impl BillingObserver {
     }
 
     fn build_event(&self) -> Option<BillingEvent> {
+        let correlation_id = correlation_id_string();
         let Some(raw_realm) = self.claims.realm.as_deref() else {
             tracing::warn!(
                 user_id = self.claims.user_id,
+                correlation_id = %correlation_id,
                 "billing event skipped: realm missing from JWT claims"
             );
+            record_dropped(REASON_REALM_MISSING);
             return None;
         };
         let Some(realm) = normalize_realm(raw_realm) else {
             tracing::warn!(
                 user_id = self.claims.user_id,
                 raw_realm = raw_realm,
+                correlation_id = %correlation_id,
                 "billing event skipped: unrecognized realm value"
             );
+            record_dropped(REASON_REALM_UNRECOGNIZED);
             return None;
         };
 
@@ -87,7 +108,13 @@ impl BillingObserver {
         match builder.build() {
             Ok(event) => Some(event),
             Err(e) => {
-                tracing::error!(error = %e, "failed to build billing event");
+                tracing::error!(
+                    error = %e,
+                    user_id = self.claims.user_id,
+                    correlation_id = %correlation_id,
+                    "failed to build billing event"
+                );
+                record_dropped(REASON_EVENT_BUILD_FAILED);
                 None
             }
         }
@@ -120,7 +147,10 @@ impl PipelineObserver for BillingObserver {
         if let Some(ref tracker) = self.tracker
             && let Some(event) = self.build_event()
         {
+            let _span = tracing::info_span!("billing.track", query_type = self.query_type)
+                .entered();
             tracker.track(event);
+            METRICS.emitted.add(1, &[]);
         }
     }
 }

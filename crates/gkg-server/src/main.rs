@@ -207,6 +207,7 @@ async fn run_webserver(
         grpc_server = grpc_server.with_cache_broker(nats);
     }
 
+    gkg_server::billing::register_metrics();
     if config.billing.enabled {
         if config.billing.collector_url.trim().is_empty() {
             return Err(anyhow::anyhow!(

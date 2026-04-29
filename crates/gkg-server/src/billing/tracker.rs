@@ -4,6 +4,7 @@ use gkg_server_config::BillingConfig;
 use labkit_events::BillingEvent;
 
 use super::constants::APP_ID;
+use super::metrics::METRICS;
 
 pub trait BillingTracker: Send + Sync {
     fn track(&self, event: BillingEvent);
@@ -35,7 +36,15 @@ impl SnowplowBillingTracker {
 impl BillingTracker for SnowplowBillingTracker {
     fn track(&self, event: BillingEvent) {
         if let Err(e) = self.tracker.track_billing_event(event) {
-            tracing::error!(error = %e, "failed to track billing event");
+            let correlation_id = labkit::correlation::current()
+                .map(|id| id.as_str().to_string())
+                .unwrap_or_default();
+            tracing::error!(
+                error = %e,
+                correlation_id = %correlation_id,
+                "failed to track billing event"
+            );
+            METRICS.track_errors.add(1, &[]);
         }
     }
 }

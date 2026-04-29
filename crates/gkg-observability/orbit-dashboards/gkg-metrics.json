@@ -2,6 +2,35 @@
   "$generated_by": "cargo xtask metrics-catalog - do not edit",
   "metrics": [
     {
+      "otel_name": "gkg.billing.events.dropped",
+      "prom_name": "gkg_billing_events_dropped_total",
+      "description": "Billing events not emitted because event construction failed (realm missing, realm unrecognized, or builder error).",
+      "kind": "counter",
+      "labels": [
+        "reason"
+      ],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.events.emitted",
+      "prom_name": "gkg_billing_events_emitted_total",
+      "description": "Billing events handed to the Snowplow tracker after a successful query.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
+      "otel_name": "gkg.billing.track.errors",
+      "prom_name": "gkg_billing_track_errors_total",
+      "description": "Errors returned by the Snowplow tracker when handing off a billing event.",
+      "kind": "counter",
+      "labels": [],
+      "stability": "stable",
+      "domain": "billing.events"
+    },
+    {
       "otel_name": "gkg.content.blob.size",
       "prom_name": "gkg_content_blob_size_bytes",
       "description": "Size of resolved blob content in bytes.",

@@ -10,6 +10,7 @@
 //! their existing `Metrics::with_meter` constructors so that metric names,
 //! descriptions, units, and histogram buckets live in exactly one place.
 
+pub mod billing;
 pub mod buckets;
 pub mod indexer;
 pub mod query;
@@ -45,6 +46,7 @@ pub fn catalog() -> Vec<&'static MetricSpec> {
     v.extend(query::engine::CATALOG);
     v.extend(server::content::CATALOG);
     v.extend(server::schema_watcher::CATALOG);
+    v.extend(billing::events::CATALOG);
     v
 }
 
@@ -56,7 +58,7 @@ mod tests {
     #[test]
     fn catalog_is_nonempty() {
         assert!(
-            catalog().len() >= 55,
+            catalog().len() >= 58,
             "catalog shrank unexpectedly; did a module fail to register?"
         );
     }
