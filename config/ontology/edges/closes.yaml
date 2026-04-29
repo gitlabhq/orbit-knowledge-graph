@@ -14,8 +14,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      # enrich: [state_id]  # denorm: MR state
+      enrich: [state_id]
     to:
       id: issue_id
       type: WorkItem
-      # enrich: [state_id, work_item_type_id]  # denorm: WorkItem state + type
+      enrich: [state_id, work_item_type_id]

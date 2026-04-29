@@ -14,8 +14,8 @@ etl:
     from:
       id: pipeline_id
       type: Pipeline
-      # enrich: [status]  # denorm: pipeline status
+      enrich: [status]
     to:
       id: source_pipeline_id
       type: Pipeline
-      # enrich: [status]  # denorm: pipeline status
+      enrich: [status]

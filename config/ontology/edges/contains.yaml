@@ -38,8 +38,8 @@ etl:
     from:
       id: work_item_parent_id
       type: WorkItem
-      # enrich: [state_id, work_item_type_id]  # denorm: WorkItem state + type
+      enrich: [state_id, work_item_type_id]
     to:
       id: work_item_id
       type: WorkItem
-      # enrich: [state_id, work_item_type_id]  # denorm: WorkItem state + type
+      enrich: [state_id, work_item_type_id]

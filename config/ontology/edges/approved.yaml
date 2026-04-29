@@ -15,4 +15,4 @@ etl:
     to:
       id: merge_request_id
       type: MergeRequest
-      # enrich: [state_id]  # denorm: MR state
+      enrich: [state_id]
