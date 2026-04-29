@@ -81,6 +81,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
     let schema_content = reader.read("schema.yaml")?;
     let schema: SchemaYaml = parse_yaml(&schema_content, "schema.yaml")?;
 
+    let denormalization_entries = schema.settings.denormalization.clone();
+
     let mut ontology = Ontology::new();
     ontology.schema_version = schema.schema_version.unwrap_or_default();
     ontology.table_prefix = schema.settings.table_prefix.clone();
@@ -116,6 +118,8 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .into_iter()
                     .map(node::convert_storage_projection)
                     .collect(),
+                denormalized_columns: vec![],
+                denormalized_indexes: vec![],
                 settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
@@ -278,6 +282,115 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 .edge_etl_configs
                 .insert(edge_name.clone(), etl_configs);
         }
+    }
+
+    // Auto-derive denormalized properties from central denormalization list.
+    let has_denorm = !denormalization_entries.is_empty();
+
+    for entry in &denormalization_entries {
+        let node = ontology.nodes.get(&entry.node).ok_or_else(|| {
+            OntologyError::Validation(format!("denormalization: unknown node '{}'", entry.node))
+        })?;
+        let field = node
+            .fields
+            .iter()
+            .find(|f| f.name == entry.property)
+            .ok_or_else(|| {
+                OntologyError::Validation(format!(
+                    "denormalization: unknown property '{}' on node '{}'",
+                    entry.property, entry.node
+                ))
+            })?;
+        let enum_values = field.enum_values.clone();
+
+        let tag_key = entry
+            .column_alias
+            .as_deref()
+            .unwrap_or(&entry.property)
+            .to_string();
+
+        for (edge_name, variants) in &ontology.edges {
+            for variant in variants {
+                let mut directions = Vec::new();
+                if variant.source_kind == entry.node {
+                    directions.push(crate::entities::DenormDirection::Source);
+                }
+                if variant.target_kind == entry.node {
+                    directions.push(crate::entities::DenormDirection::Target);
+                }
+                for direction in directions {
+                    let edge_column = match direction {
+                        crate::entities::DenormDirection::Source => "source_tags",
+                        crate::entities::DenormDirection::Target => "target_tags",
+                    }
+                    .to_string();
+
+                    let already_exists = ontology.denormalized_properties.iter().any(|dp| {
+                        dp.relationship_kind == *edge_name
+                            && dp.node_kind == entry.node
+                            && dp.property_name == entry.property
+                            && dp.direction == direction
+                    });
+                    if !already_exists {
+                        ontology.denormalized_properties.push(
+                            crate::entities::DenormalizedProperty {
+                                relationship_kind: edge_name.clone(),
+                                node_kind: entry.node.clone(),
+                                property_name: entry.property.clone(),
+                                direction,
+                                edge_column,
+                                tag_key: tag_key.clone(),
+                                enum_values: enum_values.clone(),
+                            },
+                        );
+                    }
+                }
+            }
+        }
+    }
+
+    // Auto-populate denormalized Array columns and text indexes on all edge tables.
+    let auto_columns: Vec<crate::entities::StorageColumn> = if has_denorm {
+        vec![
+            crate::entities::StorageColumn {
+                name: "source_tags".to_string(),
+                ch_type: "Array(LowCardinality(String))".to_string(),
+                default: None,
+                codec: None,
+            },
+            crate::entities::StorageColumn {
+                name: "target_tags".to_string(),
+                ch_type: "Array(LowCardinality(String))".to_string(),
+                default: None,
+                codec: None,
+            },
+        ]
+    } else {
+        vec![]
+    };
+
+    let auto_indexes: Vec<crate::entities::StorageIndex> = if has_denorm {
+        vec![
+            crate::entities::StorageIndex {
+                name: "source_tags_idx".to_string(),
+                column: "source_tags".to_string(),
+                index_type: "text(tokenizer = 'array')".to_string(),
+                granularity: 64,
+            },
+            crate::entities::StorageIndex {
+                name: "target_tags_idx".to_string(),
+                column: "target_tags".to_string(),
+                index_type: "text(tokenizer = 'array')".to_string(),
+                granularity: 64,
+            },
+        ]
+    } else {
+        vec![]
+    };
+
+    for config in ontology.edge_table_configs.values_mut() {
+        config.storage.denormalized_columns = auto_columns.clone();
+        config.storage.denormalized_indexes = auto_indexes.clone();
     }
 
     // Resolve skip_security_filter_for_entities → physical table names.

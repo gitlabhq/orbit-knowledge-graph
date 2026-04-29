@@ -24,6 +24,8 @@ etl:
     from:
       id: source_id
       type: WorkItem
+      enrich: [state_id, work_item_type_id]
     to:
       id: target_id
       type: WorkItem
+      enrich: [state_id, work_item_type_id]
