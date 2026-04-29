@@ -119,6 +119,12 @@
 --     IN_MILESTONE:  WI 4000 -> Milestone 6000, WI 4001 -> Milestone 6000
 --     ASSIGNED:      User 1 -> WI 4000, User 2 -> WI 4000, User 3 -> WI 4001
 --     HAS_LABEL:     WI 4000 -> Label 7000, WI 4000 -> Label 7001, WI 4001 -> Label 7002
+--
+--   Code definitions:
+--     Project 1000: compile -> helper -> run_query via CALLS
+--     Project 1001: compile and run_query endpoints, plus a decoy CALLS edge
+--                   sharing helper ID 12001 from a different traversal_path.
+--                   This catches path-finding joins that connect only by node ID.
 
 INSERT INTO gl_user (id, username, name, state, user_type, email) VALUES
     (1, 'alice', 'Alice Admin', 'active', 'human', 'alice@example.com'),
@@ -188,6 +194,21 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 8000, 'Vulnerability', 'IN_PROJECT', 1000, 'Project'),
     ('1/101/1001/', 8001, 'Vulnerability', 'IN_PROJECT', 1001, 'Project'),
     ('1/102/1004/', 8002, 'Vulnerability', 'IN_PROJECT', 1004, 'Project');
+
+INSERT INTO gl_definition (
+    id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name,
+    definition_type, start_line, end_line, start_byte, end_byte
+) VALUES
+    (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
+    (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300),
+    (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550),
+    (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
+    (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550);
+
+INSERT INTO gl_code_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
+    ('1/100/1000/', 12000, 'Definition', 'CALLS', 12001, 'Definition'),
+    ('1/100/1000/', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
+    ('1/101/1001/', 12001, 'Definition', 'CALLS', 12102, 'Definition');
 
 INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, traversal_path) VALUES
     (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, '1/100/'),

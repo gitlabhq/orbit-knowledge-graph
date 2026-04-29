@@ -141,6 +141,9 @@ pub struct CompilerMetadata {
     /// normalize from the ontology's `StorageIndex` entries. Used by the
     /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
     pub text_indexes: HashMap<(String, String), TextIndexMeta>,
+    /// Physical table columns from the ontology. Used by lowering to emit
+    /// internal predicates only when a table is known to carry that column.
+    pub table_columns: HashMap<String, HashSet<String>>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -154,11 +157,18 @@ impl Default for CompilerMetadata {
             edge_table_for_rel: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
+            table_columns: HashMap::new(),
         }
     }
 }
 
 impl CompilerMetadata {
+    pub fn table_has_column(&self, table: &str, column: &str) -> bool {
+        self.table_columns
+            .get(table)
+            .is_some_and(|columns| columns.contains(column))
+    }
+
     /// Resolve the edge table(s) for a relationship's type list.
     ///
     /// Returns a deduplicated list of physical tables that need to be scanned.
