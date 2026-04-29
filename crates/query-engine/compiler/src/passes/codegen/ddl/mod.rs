@@ -511,6 +511,49 @@ mod tests {
     }
 
     #[test]
+    fn code_edge_has_relationship_kind_reorder_projections() {
+        let tables = generate_graph_tables(&ontology());
+        let code_edge = tables
+            .iter()
+            .find(|table| table.name == "gl_code_edge")
+            .expect("gl_code_edge table should be generated");
+
+        let has_projection = |name: &str, expected: &[&str]| {
+            code_edge.projections.iter().any(|projection| {
+                matches!(
+                    projection,
+                    ProjectionDef::Reorder { name: projection_name, order_by }
+                        if projection_name == name
+                            && order_by.iter().map(String::as_str).eq(expected.iter().copied())
+                )
+            })
+        };
+
+        assert!(has_projection(
+            "by_rel_source_kind",
+            &[
+                "relationship_kind",
+                "source_kind",
+                "source_id",
+                "target_id",
+                "traversal_path",
+                "target_kind",
+            ],
+        ));
+        assert!(has_projection(
+            "by_rel_target_kind",
+            &[
+                "relationship_kind",
+                "target_kind",
+                "target_id",
+                "source_id",
+                "traversal_path",
+                "source_kind",
+            ],
+        ));
+    }
+
+    #[test]
     fn every_table_has_system_columns() {
         for table in &generate_graph_tables(&ontology()) {
             let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
