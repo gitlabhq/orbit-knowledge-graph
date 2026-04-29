@@ -1341,6 +1341,24 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
         .map(|n| n.id.clone())
         .collect();
 
+    // When no node has explicit node_ids, seed from the first node that has
+    // an _nf_* CTE (created by the lowerer for auth-scoped nodes). This
+    // enables cascades for code graph queries like File → DEFINES → Definition
+    // where no node is pinned by ID but the auth scope on the source still
+    // provides meaningful narrowing through edge reachability.
+    if narrowed.is_empty()
+        && let Some(seed) = input.relationships.first().and_then(|rel| {
+            let nf = node_filter_cte(&rel.from);
+            if q.ctes.iter().any(|c| c.name == nf) {
+                Some(rel.from.clone())
+            } else {
+                let nf = node_filter_cte(&rel.to);
+                q.ctes.iter().any(|c| c.name == nf).then(|| rel.to.clone())
+            }
+        })
+    {
+        narrowed.insert(seed);
+    }
     if narrowed.is_empty() {
         return;
     }
@@ -1453,6 +1471,23 @@ fn narrow_joined_nodes_via_pinned_neighbors(q: &mut Query, input: &Input) {
         .filter(|n| !n.node_ids.is_empty())
         .map(|n| n.id.clone())
         .collect();
+
+    // Fallback: when no node has explicit node_ids, seed from the first node
+    // with an existing _nf_* CTE. This enables cascades for queries where all
+    // narrowing comes from auth scope (traversal_path) rather than pinned IDs.
+    if narrowed.is_empty()
+        && let Some(seed) = input.relationships.first().and_then(|rel| {
+            let nf = node_filter_cte(&rel.from);
+            if q.ctes.iter().any(|c| c.name == nf) {
+                Some(rel.from.clone())
+            } else {
+                let nf = node_filter_cte(&rel.to);
+                q.ctes.iter().any(|c| c.name == nf).then(|| rel.to.clone())
+            }
+        })
+    {
+        narrowed.insert(seed);
+    }
     if narrowed.is_empty() {
         return;
     }
