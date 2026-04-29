@@ -812,6 +812,24 @@ impl Ontology {
         &self.auxiliary_tables
     }
 
+    /// Returns the text index tokenizer for a column on a node entity, if one exists.
+    ///
+    /// Looks up `StorageIndex` entries whose `index_type` starts with `text(`.
+    /// Returns the full tokenizer parameter string (e.g. `"tokenizer = splitByNonAlpha"`).
+    #[must_use]
+    pub fn text_index_tokenizer(&self, entity_name: &str, column_name: &str) -> Option<&str> {
+        let node = self.nodes.get(entity_name)?;
+        node.storage
+            .indexes
+            .iter()
+            .find(|idx| idx.column == column_name && idx.index_type.starts_with("text("))
+            .map(|idx| {
+                // Extract the inner params: "text(tokenizer = splitByNonAlpha)" -> "tokenizer = splitByNonAlpha"
+                let s = idx.index_type.as_str();
+                &s[5..s.len() - 1]
+            })
+    }
+
     /// Default ORDER BY / dedup key columns for node tables.
     #[must_use]
     pub fn default_entity_sort_key(&self) -> &[String] {

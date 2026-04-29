@@ -1975,8 +1975,8 @@ fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::Lte) => Expr::binary(Op::Le, col, val()),
         Some(FilterOp::In) => Expr::binary(Op::In, col, val()),
         Some(FilterOp::Contains) => like_pattern(col, filter, "%", "%"),
-        Some(FilterOp::StartsWith) => like_pattern(col, filter, "", "%"),
-        Some(FilterOp::EndsWith) => like_pattern(col, filter, "%", ""),
+        Some(FilterOp::StartsWith) => Expr::func("startsWith", vec![col, val()]),
+        Some(FilterOp::EndsWith) => Expr::func("endsWith", vec![col, val()]),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
     }

@@ -103,6 +103,14 @@ pub struct Input {
     pub compiler: CompilerMetadata,
 }
 
+/// Text index metadata for a column, used by the optimizer to rewrite
+/// LIKE patterns to ClickHouse text-index-aware functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextIndexMeta {
+    /// The tokenizer strategy, e.g. `"splitByNonAlpha"`, `"splitByString(['/'])"`.
+    pub tokenizer: String,
+}
+
 /// Metadata accumulated across compiler passes.
 ///
 /// Written by normalize/lowering, read by downstream passes (deduplicate,
@@ -129,6 +137,10 @@ pub struct CompilerMetadata {
     /// The hop frontier optimizer uses this to decide whether a CTE is safe
     /// to forward-chain from.
     pub lowerer_nf_ctes: HashSet<String>,
+    /// Maps (table_name, column_name) → text index metadata. Populated by
+    /// normalize from the ontology's `StorageIndex` entries. Used by the
+    /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
+    pub text_indexes: HashMap<(String, String), TextIndexMeta>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -141,6 +153,7 @@ impl Default for CompilerMetadata {
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
+            text_indexes: HashMap::new(),
         }
     }
 }
