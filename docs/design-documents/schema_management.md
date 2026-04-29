@@ -10,7 +10,9 @@ table-prefix-aware migration orchestrator.
 
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
 materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
-(one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database.
+(one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
+storage metadata also owns table-level MergeTree settings, such as indexes, projections, primary
+keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL.
 
 ## Schema Version Tracking
 
@@ -37,6 +39,8 @@ Bump `config/SCHEMA_VERSION` for any ontology or DDL change that affects what is
 ClickHouse, not just table structure:
 
 - **DDL shape changes**: new columns, type changes, index additions, engine changes.
+- **Storage setting changes**: primary keys, sort keys, projections, index granularity, or
+  table-level ClickHouse settings emitted into `CREATE TABLE ... SETTINGS`.
 - **Edge type renames**: e.g. `MERGED_BY` → `MERGED`. The `gl_edge.relationship_kind` column
   stores these as string values, so old rows remain with the old name while the compiler emits
   the new name. Without a bump, affected edges are silently missing from query results.
@@ -93,7 +97,7 @@ flows through the query pipeline once and never changes for the lifetime of the 
 upgrade is the only way to switch to a new prefix. The active version recorded in
 `gkg_schema_version` is consulted only by the readiness gate (see below), not by the query path.
 
-```text
+```plaintext
 startup
   → schema_version::table_prefix(SCHEMA_VERSION)   # "" for v0, "v1_" for v1, …
   → GrpcServer::new(…, table_prefix)
@@ -273,7 +277,7 @@ their readiness check.
 After completion detection, the checker enforces the `max_retained_versions` setting (default: 2).
 Versions outside this window with status `retired` are cleaned up:
 
-```text
+```plaintext
 Example with max_retained_versions=2, after migrating to v2:
   v2 → active  (keep)
   v1 → retired (keep — within window, rollback target)
