@@ -1,10 +1,22 @@
 use ontology::{
-    DataType, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget, EnumType,
-    EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
+    DataType, DenormDirection, EdgeDirection, EdgeEndpointType, EdgeSourceEtlConfig, EdgeTarget,
+    EnumType, EtlConfig, EtlScope, NodeEntity, Ontology, constants::TRAVERSAL_PATH_COLUMN,
 };
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
+
+/// A node property to project onto the edge row during transform.
+pub(in crate::modules::sdlc) struct DenormalizedColumnProjection {
+    /// Column in the source MemTable (e.g. "status").
+    pub source_column: String,
+    /// Array column on the edge table (e.g. "source_tags").
+    pub edge_column: String,
+    /// Tag key prefix (e.g. "status"). Values become `"status:failed"` tokens.
+    pub tag_key: String,
+    /// For int-based enums: integer → string mapping.
+    pub enum_mapping: Option<BTreeMap<i64, String>>,
+}
 
 pub(in crate::modules::sdlc) struct PlanInput {
     pub node_plans: Vec<NodePlan>,
@@ -44,6 +56,8 @@ pub(in crate::modules::sdlc) struct FkEdgeTransform {
     pub namespaced: bool,
     /// Resolved edge table for this relationship kind (prefixed).
     pub destination_table: String,
+    /// Node properties projected onto the edge row (denormalized).
+    pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
 /// A standalone edge has its own dedicated source table and extraction.
@@ -57,6 +71,9 @@ pub(in crate::modules::sdlc) struct StandaloneEdgePlan {
     pub filters: Vec<EdgeFilter>,
     pub namespaced: bool,
     pub extract: ExtractPlan,
+    /// Node properties projected onto the edge row (denormalized).
+    /// Empty for standalone edges (join table lacks node properties).
+    pub denormalized_columns: Vec<DenormalizedColumnProjection>,
 }
 
 pub(in crate::modules::sdlc) enum EdgeId {
@@ -91,6 +108,20 @@ pub(in crate::modules::sdlc) struct ExtractPlan {
     pub namespaced: bool,
     pub traversal_path_filter: Option<String>,
     pub additional_where: Option<String>,
+    /// CTE-based enrichment for standalone edges. When set, the lowering
+    /// wraps the base query in a `_batch` CTE and appends enrichment CTEs
+    /// that do point lookups by FK, avoiding full namespace scans.
+    pub enrichment: Option<EnrichmentSql>,
+}
+
+/// Pre-built SQL fragments for CTE-based enrichment.
+pub(in crate::modules::sdlc) struct EnrichmentSql {
+    /// CTE definitions (e.g. `_e0 AS (SELECT id, argMax(...) FROM ... WHERE id IN (...) GROUP BY id)`).
+    pub cte_defs: Vec<String>,
+    /// JOIN clauses (e.g. `LEFT JOIN _e0 ON _batch.issue_id = _e0.id`).
+    pub join_clauses: Vec<String>,
+    /// SELECT expressions for enriched columns (e.g. `_e0.state_id AS _e0_state_id`).
+    pub select_exprs: Vec<String>,
 }
 
 pub(in crate::modules::sdlc) enum ExtractColumn {
@@ -310,6 +341,36 @@ fn resolve_fk_edges(
                 ontology.edge_table_for_relationship(&mapping.relationship_kind),
                 *SCHEMA_VERSION,
             );
+
+            let denormalized_columns = ontology
+                .denormalized_properties()
+                .iter()
+                .filter(|dp| {
+                    dp.relationship_kind == mapping.relationship_kind
+                        && dp.node_kind == node_name
+                        && matches!(
+                            (&dp.direction, &mapping.direction),
+                            (DenormDirection::Source, EdgeDirection::Outgoing)
+                                | (DenormDirection::Target, EdgeDirection::Incoming)
+                        )
+                })
+                .map(|dp| {
+                    let field = ontology
+                        .get_node(&dp.node_kind)
+                        .and_then(|n| n.fields.iter().find(|f| f.name == dp.property_name));
+                    let source_column = field
+                        .and_then(|f| f.column_name())
+                        .unwrap_or(&dp.property_name)
+                        .to_string();
+                    DenormalizedColumnProjection {
+                        source_column,
+                        edge_column: dp.edge_column.clone(),
+                        tag_key: dp.tag_key.clone(),
+                        enum_mapping: dp.enum_values.clone(),
+                    }
+                })
+                .collect();
+
             FkEdgeTransform {
                 relationship_kind: mapping.relationship_kind.clone(),
                 source_id,
@@ -319,6 +380,7 @@ fn resolve_fk_edges(
                 filters,
                 namespaced,
                 destination_table: edge_dest,
+                denormalized_columns,
             }
         })
         .collect()
@@ -372,6 +434,108 @@ fn resolve_standalone_edge(
         );
     }
 
+    // Build CTE-based enrichment for endpoint columns declared in the ETL config.
+    // Each endpoint can request extra columns from its node's datalake table.
+    // Instead of a LEFT JOIN that scans the entire namespace, we wrap the base
+    // query in a _batch CTE and build enrichment CTEs that do point lookups
+    // via `id IN (SELECT DISTINCT fk FROM _batch)`.
+    let endpoints_with_cols: [(&EdgeSourceEtlConfig, &str, DenormDirection); 2] = [
+        (config, "from", DenormDirection::Source),
+        (config, "to", DenormDirection::Target),
+    ];
+    let mut denormalized_columns = Vec::new();
+    let mut cte_defs: Vec<String> = Vec::new();
+    let mut join_clauses: Vec<String> = Vec::new();
+    let mut enriched_select_exprs: Vec<String> = Vec::new();
+    let mut enrich_idx = 0usize;
+
+    for (cfg, side, direction) in &endpoints_with_cols {
+        let endpoint = if *side == "from" { &cfg.from } else { &cfg.to };
+        if endpoint.enrich.is_empty() {
+            continue;
+        }
+        let node_kind = match &endpoint.node_type {
+            EdgeEndpointType::Literal(t) => t.as_str(),
+            _ => continue,
+        };
+        let Some(node) = ontology.get_node(node_kind) else {
+            continue;
+        };
+        let Some(etl) = &node.etl else { continue };
+        let node_table = match etl {
+            EtlConfig::Table { source, .. } => source.as_str(),
+            EtlConfig::Query { from, .. } => from.as_str(),
+        };
+        let watermark_col = etl.watermark();
+        let deleted_col = etl.deleted();
+        let fk_col = &endpoint.id_column;
+
+        let alias = format!("_e{enrich_idx}");
+        enrich_idx += 1;
+
+        let agg_cols: Vec<String> = endpoint
+            .enrich
+            .iter()
+            .map(|c| format!("argMax({c}, {watermark_col}) AS {c}"))
+            .collect();
+        let sub_cols = std::iter::once("id".to_string())
+            .chain(agg_cols)
+            .collect::<Vec<_>>()
+            .join(", ");
+
+        cte_defs.push(format!(
+            "{alias} AS (SELECT {sub_cols} FROM {node_table} \
+             WHERE {deleted_col} = false \
+             AND id IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             GROUP BY id)"
+        ));
+
+        join_clauses.push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));
+
+        for col_name in &endpoint.enrich {
+            let mem_col = format!("{alias}_{col_name}");
+            enriched_select_exprs.push(format!("{alias}.{col_name} AS {mem_col}"));
+
+            if let Some(dp) = ontology.denormalized_properties().iter().find(|dp| {
+                dp.relationship_kind == relationship_kind
+                    && dp.direction == *direction
+                    && dp.node_kind == node_kind
+                    && {
+                        let field = node.fields.iter().find(|f| f.name == dp.property_name);
+                        let src_col = field
+                            .and_then(|f| f.column_name())
+                            .unwrap_or(&dp.property_name);
+                        src_col == col_name
+                    }
+            }) {
+                denormalized_columns.push(DenormalizedColumnProjection {
+                    source_column: mem_col,
+                    edge_column: dp.edge_column.clone(),
+                    tag_key: dp.tag_key.clone(),
+                    enum_mapping: dp.enum_values.clone(),
+                });
+            }
+        }
+    }
+
+    let enrichment = if cte_defs.is_empty() {
+        None
+    } else {
+        // Don't add enriched columns to extract_columns -- they'll be projected
+        // in the outer SELECT by the lowering via EnrichmentSql.select_exprs.
+        Some(EnrichmentSql {
+            cte_defs,
+            join_clauses,
+            select_exprs: enriched_select_exprs,
+        })
+    };
+
+    let source = ExtractSource::Table(config.source.clone());
+    let order_by = config.order_by.clone();
+    let watermark = config.watermark.clone();
+    let deleted = config.deleted.clone();
+    let traversal_path_filter = None;
+
     StandaloneEdgePlan {
         relationship_kind: relationship_kind.to_string(),
         scope,
@@ -381,16 +545,18 @@ fn resolve_standalone_edge(
         target_kind,
         filters,
         namespaced,
+        denormalized_columns,
         extract: ExtractPlan {
             destination_table: edge_table,
             columns: extract_columns,
-            source: ExtractSource::Table(config.source.clone()),
-            watermark: config.watermark.clone(),
-            deleted: config.deleted.clone(),
-            order_by: config.order_by.clone(),
+            source,
+            watermark,
+            deleted,
+            order_by,
             namespaced,
-            traversal_path_filter: None,
+            traversal_path_filter,
             additional_where: None,
+            enrichment,
         },
     }
 }
@@ -473,6 +639,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: None,
                 additional_where: None,
+                enrichment: None,
             }
         }
         EtlConfig::Query {
@@ -501,6 +668,7 @@ fn build_extract_plan(
                 namespaced,
                 traversal_path_filter: traversal_path_filter.clone(),
                 additional_where: where_clause.clone(),
+                enrichment: None,
             }
         }
     }
