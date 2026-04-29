@@ -3,9 +3,10 @@ use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, create_runner, create_runner_namespace, create_runner_project, create_user,
-    global_envelope, global_handler, handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edge_tags, assert_edge_tags_by_target, assert_edges_have_traversal_path,
+    assert_node_count, create_namespace, create_project, create_runner, create_runner_namespace,
+    create_runner_project, create_user, global_envelope, global_handler, handler_context,
+    namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_pipelines(ctx: &TestContext) {
@@ -43,6 +44,17 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Pipeline", "Project", "1/100/1000/", 2)
         .await;
     assert_edges_have_traversal_path(ctx, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 2).await;
+
+    // FK edge: Pipeline source_tags carry status from the MemTable (no JOIN needed).
+    assert_edge_tags_by_source(
+        ctx,
+        "IN_PROJECT",
+        "Pipeline",
+        "Project",
+        "source_tags",
+        &[(5001, &["status:success"]), (5002, &["status:failed"])],
+    )
+    .await;
 }
 
 pub async fn processes_stages(ctx: &TestContext) {
@@ -314,6 +326,27 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         "Pipeline",
         "1/100/1000/",
         1,
+    )
+    .await;
+
+    // Standalone edge with both sides enriched: CHILD_OF Pipeline → Pipeline.
+    // Source (child pipeline 5002, status=success) and target (parent pipeline 5001, status=success).
+    assert_edge_tags_by_source(
+        ctx,
+        "CHILD_OF",
+        "Pipeline",
+        "Pipeline",
+        "source_tags",
+        &[(5002, &["status:success"])],
+    )
+    .await;
+    assert_edge_tags_by_target(
+        ctx,
+        "CHILD_OF",
+        "Pipeline",
+        "Pipeline",
+        "target_tags",
+        &[(5001, &["status:success"])],
     )
     .await;
 }

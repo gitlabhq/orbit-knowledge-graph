@@ -138,6 +138,49 @@ pub async fn assert_edge_tags(
 }
 
 /// Assert that edges matching the given criteria have the expected tags per
+/// source_id. `expected` maps source_id → expected tag set.
+pub async fn assert_edge_tags_by_source(
+    ctx: &TestContext,
+    relationship_kind: &str,
+    source_kind: &str,
+    target_kind: &str,
+    tag_column: &str,
+    expected: &[(i64, &[&str])],
+) {
+    let edge_table = t("gl_edge");
+    let query = format!(
+        "SELECT source_id, {tag_column} FROM {edge_table} FINAL \
+         WHERE relationship_kind = '{relationship_kind}' \
+         AND source_kind = '{source_kind}' AND target_kind = '{target_kind}' \
+         ORDER BY source_id"
+    );
+    let result = ctx.query(&query).await;
+    assert!(
+        !result.is_empty(),
+        "{relationship_kind} edges from {source_kind} to {target_kind} should exist"
+    );
+
+    let batch = &result[0];
+    let source_ids = ArrowUtils::get_column_by_name::<arrow::array::Int64Array>(batch, "source_id")
+        .expect("source_id column");
+
+    for &(sid, tags) in expected {
+        let row = (0..batch.num_rows()).find(|&i| source_ids.value(i) == sid);
+        let row = row
+            .unwrap_or_else(|| panic!("{relationship_kind} edge with source_id={sid} not found"));
+        let actual: BTreeSet<String> = ArrowUtils::get_string_list(batch, tag_column, row)
+            .into_iter()
+            .collect();
+        let expected_set: BTreeSet<&str> = tags.iter().copied().collect();
+        let actual_ref: BTreeSet<&str> = actual.iter().map(|s| s.as_str()).collect();
+        assert_eq!(
+            actual_ref, expected_set,
+            "{relationship_kind} edge source_id={sid}: expected {tag_column} = {expected_set:?}, got {actual_ref:?}"
+        );
+    }
+}
+
+/// Assert that edges matching the given criteria have the expected tags per
 /// target_id. `expected` maps target_id → expected tag set.
 pub async fn assert_edge_tags_by_target(
     ctx: &TestContext,
