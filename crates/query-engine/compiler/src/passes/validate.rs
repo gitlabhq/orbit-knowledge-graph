@@ -191,6 +191,7 @@ impl<'a> Validator<'a> {
         self.check_depth(input)?;
         self.check_selectivity(input)?;
         self.check_filter_types(input)?;
+        self.check_skip_dedup(input)?;
         // Run after individual reference checks so "undefined node X" errors
         // take priority over "node Y is unreferenced".
         self.check_unreferenced_nodes(input)?;
@@ -824,6 +825,16 @@ impl<'a> Validator<'a> {
                     node.id
                 )));
             }
+        }
+        Ok(())
+    }
+
+    fn check_skip_dedup(&self, input: &Input) -> Result<()> {
+        if input.options.skip_dedup && input.query_type == QueryType::Aggregation {
+            return Err(QueryError::ReferenceError(
+                "skip_dedup is not allowed for aggregation queries (would produce incorrect counts)"
+                    .to_string(),
+            ));
         }
         Ok(())
     }
@@ -2211,6 +2222,55 @@ mod tests {
         assert!(
             validator.check_references(&input).is_ok(),
             "filter on filterable:true field should pass"
+        );
+    }
+
+    #[test]
+    fn skip_dedup_rejected_for_aggregation() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+            "aggregations": [{"function": "count", "node": "u", "group_by": "p"}],
+            "options": {"skip_dedup": true}
+        }"#,
+        )
+        .unwrap();
+
+        let err = validator.check_references(&input).unwrap_err();
+        assert!(
+            err.to_string().contains("skip_dedup"),
+            "should reject skip_dedup for aggregation, got: {err}"
+        );
+    }
+
+    #[test]
+    fn skip_dedup_allowed_for_traversal() {
+        let ont = test_ontology();
+        let validator = Validator::new(&ont);
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User"},
+                {"id": "p", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "p"}],
+            "limit": 10,
+            "options": {"skip_dedup": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(
+            validator.check_references(&input).is_ok(),
+            "skip_dedup should be allowed for traversal"
         );
     }
 }

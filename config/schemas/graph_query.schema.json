@@ -682,6 +682,11 @@
           "type": "boolean",
           "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
           "default": false
+        },
+        "skip_dedup": {
+          "type": "boolean",
+          "description": "When true, skips ReplacingMergeTree deduplication for node tables. Rows are still filtered by _deleted = false but stale duplicates from un-merged parts may appear. Not allowed for aggregation queries. Useful for traversal queries where eventual consistency is acceptable in exchange for lower latency.",
+          "default": false
         }
       },
       "additionalProperties": false
