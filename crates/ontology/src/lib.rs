@@ -594,6 +594,31 @@ impl Ontology {
             .collect()
     }
 
+    /// Get relationship kinds whose variants match any of the supplied endpoint pairs.
+    ///
+    /// Passing `None` for an endpoint leaves that side unconstrained.
+    pub fn relationship_kinds_matching<'a>(
+        &self,
+        endpoints: impl IntoIterator<Item = (Option<&'a str>, Option<&'a str>)>,
+    ) -> Vec<String> {
+        let endpoints: Vec<_> = endpoints.into_iter().collect();
+        self.edges()
+            .filter(|edge| {
+                endpoints.iter().any(|(source_kind, target_kind)| {
+                    source_kind
+                        .as_ref()
+                        .is_none_or(|kind| edge.source_kind == *kind)
+                        && target_kind
+                            .as_ref()
+                            .is_none_or(|kind| edge.target_kind == *kind)
+                })
+            })
+            .map(|edge| edge.relationship_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Check if a node exists.
     #[must_use]
     pub fn has_node(&self, name: &str) -> bool {

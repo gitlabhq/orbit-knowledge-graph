@@ -933,6 +933,8 @@ mod tests {
                 to: "end".to_string(),
                 max_depth: 3,
                 rel_types: vec![],
+                forward_first_hop_rel_types: vec![],
+                backward_first_hop_rel_types: vec![],
             }),
             ..Input::default()
         };

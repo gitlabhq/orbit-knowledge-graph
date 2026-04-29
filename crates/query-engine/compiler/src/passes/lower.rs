@@ -778,7 +778,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let start = find_node(&input.nodes, &path.from)?;
     let end = find_node(&input.nodes, &path.to)?;
-
     let start_entity = start
         .entity
         .as_deref()
@@ -791,12 +790,12 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     let wildcard_path = is_wildcard_type_list(&path.rel_types);
     let rel_type_filter = type_filter(&path.rel_types);
     let forward_first_hop_types = if wildcard_path {
-        input.compiler.relationship_kinds_for_source(start_entity)
+        path.forward_first_hop_rel_types.clone()
     } else {
         path.rel_types.clone()
     };
     let backward_first_hop_types = if wildcard_path {
-        input.compiler.relationship_kinds_for_target(end_entity)
+        path.backward_first_hop_rel_types.clone()
     } else {
         path.rel_types.clone()
     };

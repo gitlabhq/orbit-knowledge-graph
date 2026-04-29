@@ -7,10 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{
-    ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, RelationshipVariant,
-    TextIndexMeta,
-};
+use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
@@ -80,14 +77,6 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
                 name.to_string(),
                 ontology.edge_table_for_relationship(name).to_string(),
             )
-        })
-        .collect();
-    input.compiler.relationship_variants = ontology
-        .edges()
-        .map(|edge| RelationshipVariant {
-            relationship_kind: edge.relationship_kind.clone(),
-            source_kind: edge.source_kind.clone(),
-            target_kind: edge.target_kind.clone(),
         })
         .collect();
 
@@ -195,7 +184,7 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
-    infer_wildcard_relationship_kinds(&mut input);
+    infer_wildcard_relationship_kinds(&mut input, ontology);
     Ok(input)
 }
 
@@ -203,77 +192,66 @@ fn is_wildcard(types: &[String]) -> bool {
     types.is_empty() || (types.len() == 1 && types[0] == "*")
 }
 
-fn infer_wildcard_relationship_kinds(input: &mut Input) {
-    let entity_for: HashMap<String, String> = input
+fn infer_wildcard_relationship_kinds(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
         .nodes
         .iter()
-        .filter_map(|n| {
-            n.entity
-                .as_ref()
-                .map(|entity| (n.id.clone(), entity.clone()))
-        })
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
         .collect();
+    let infer = |direction, outgoing, incoming| match direction {
+        Direction::Outgoing => ontology.relationship_kinds_matching([outgoing]),
+        Direction::Incoming => ontology.relationship_kinds_matching([incoming]),
+        Direction::Both => ontology.relationship_kinds_matching([outgoing, incoming]),
+    };
 
     for rel in &mut input.relationships {
-        if !is_wildcard(&rel.types) {
-            continue;
-        }
-        let Some(from_entity) = entity_for.get(&rel.from) else {
-            continue;
-        };
-        let Some(to_entity) = entity_for.get(&rel.to) else {
+        let Some((from_entity, to_entity)) = entity_for
+            .get(rel.from.as_str())
+            .copied()
+            .zip(entity_for.get(rel.to.as_str()).copied())
+        else {
             continue;
         };
-
-        let mut inferred = match rel.direction {
-            Direction::Outgoing => input
-                .compiler
-                .relationship_kinds_between(from_entity, to_entity),
-            Direction::Incoming => input
-                .compiler
-                .relationship_kinds_between(to_entity, from_entity),
-            Direction::Both => {
-                let mut kinds = input
-                    .compiler
-                    .relationship_kinds_between(from_entity, to_entity);
-                kinds.extend(
-                    input
-                        .compiler
-                        .relationship_kinds_between(to_entity, from_entity),
-                );
-                kinds.sort();
-                kinds.dedup();
-                kinds
-            }
-        };
-        if !inferred.is_empty() {
-            rel.types = std::mem::take(&mut inferred);
-        }
+        specialize_wildcard(
+            &mut rel.types,
+            infer(
+                rel.direction,
+                (Some(from_entity), Some(to_entity)),
+                (Some(to_entity), Some(from_entity)),
+            ),
+        );
     }
 
-    let Some(neighbors) = input.neighbors.as_mut() else {
-        return;
-    };
-    if !is_wildcard(&neighbors.rel_types) {
-        return;
+    if let Some(neighbors) = input.neighbors.as_mut()
+        && let Some(center_entity) = entity_for.get(neighbors.node.as_str()).copied()
+    {
+        specialize_wildcard(
+            &mut neighbors.rel_types,
+            infer(
+                neighbors.direction,
+                (Some(center_entity), None),
+                (None, Some(center_entity)),
+            ),
+        );
     }
-    let Some(center_entity) = entity_for.get(&neighbors.node) else {
-        return;
-    };
 
-    let mut inferred = match neighbors.direction {
-        Direction::Outgoing => input.compiler.relationship_kinds_for_source(center_entity),
-        Direction::Incoming => input.compiler.relationship_kinds_for_target(center_entity),
-        Direction::Both => {
-            let mut kinds = input.compiler.relationship_kinds_for_source(center_entity);
-            kinds.extend(input.compiler.relationship_kinds_for_target(center_entity));
-            kinds.sort();
-            kinds.dedup();
-            kinds
+    if let Some(path) = input.path.as_mut()
+        && is_wildcard(&path.rel_types)
+    {
+        if let Some(start_entity) = entity_for.get(path.from.as_str()).copied() {
+            path.forward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(Some(start_entity), None)]);
         }
-    };
-    if !inferred.is_empty() {
-        neighbors.rel_types = std::mem::take(&mut inferred);
+        if let Some(end_entity) = entity_for.get(path.to.as_str()).copied() {
+            path.backward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(None, Some(end_entity))]);
+        }
+    }
+}
+
+fn specialize_wildcard(types: &mut Vec<String>, inferred: Vec<String>) {
+    if is_wildcard(types) && !inferred.is_empty() {
+        *types = inferred;
     }
 }
 

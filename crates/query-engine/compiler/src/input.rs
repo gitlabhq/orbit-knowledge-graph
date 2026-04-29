@@ -5,7 +5,6 @@
 use ontology::constants::{DEFAULT_PRIMARY_KEY, SOURCE_ID_COLUMN, TARGET_ID_COLUMN};
 use serde::{Deserialize, Deserializer};
 use serde_json::Value;
-use std::collections::BTreeSet;
 use std::collections::{HashMap, HashSet};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -142,17 +141,6 @@ pub struct CompilerMetadata {
     /// normalize from the ontology's `StorageIndex` entries. Used by the
     /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
     pub text_indexes: HashMap<(String, String), TextIndexMeta>,
-    /// Relationship endpoint variants from the ontology. Used to infer
-    /// concrete relationship kinds for wildcard queries when node kinds make
-    /// the valid relationship set known.
-    pub relationship_variants: Vec<RelationshipVariant>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct RelationshipVariant {
-    pub relationship_kind: String,
-    pub source_kind: String,
-    pub target_kind: String,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -166,7 +154,6 @@ impl Default for CompilerMetadata {
             edge_table_for_rel: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
-            relationship_variants: Vec::new(),
         }
     }
 }
@@ -195,36 +182,6 @@ impl CompilerMetadata {
             seen.insert(table.to_string());
         }
         seen.into_iter().collect()
-    }
-
-    pub fn relationship_kinds_between(&self, source_kind: &str, target_kind: &str) -> Vec<String> {
-        self.relationship_variants
-            .iter()
-            .filter(|v| v.source_kind == source_kind && v.target_kind == target_kind)
-            .map(|v| v.relationship_kind.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn relationship_kinds_for_source(&self, source_kind: &str) -> Vec<String> {
-        self.relationship_variants
-            .iter()
-            .filter(|v| v.source_kind == source_kind)
-            .map(|v| v.relationship_kind.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
-    }
-
-    pub fn relationship_kinds_for_target(&self, target_kind: &str) -> Vec<String> {
-        self.relationship_variants
-            .iter()
-            .filter(|v| v.target_kind == target_kind)
-            .map(|v| v.relationship_kind.clone())
-            .collect::<BTreeSet<_>>()
-            .into_iter()
-            .collect()
     }
 }
 
@@ -651,6 +608,10 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
+    #[serde(skip)]
+    pub forward_first_hop_rel_types: Vec<String>,
+    #[serde(skip)]
+    pub backward_first_hop_rel_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
