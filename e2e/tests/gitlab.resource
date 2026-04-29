@@ -199,10 +199,14 @@ Create Vulnerability
     [Documentation]    Create a manually-reported Vulnerability via the GraphQL `vulnerabilityCreate`
     ...                mutation. Requires Ultimate license (e2e/scripts/activate-license.sh) and
     ...                Maintainer+ on the project; the e2e-bot is admin so this works on any project.
-    ...                `report_type` is always `generic` for manually-created vulns; `created_at` is
-    ...                stamped by the server (only `detected_at` is settable). Returns a dict with
-    ...                numeric id (parsed from gid://gitlab/Vulnerability/N), title, severity, state,
-    ...                report_type, and createdAt.
+    ...                `report_type` is always `generic` for manually-created vulns. The
+    ...                Vulnerability GraphQL type does not expose `createdAt`; capture
+    ...                `detectedAt` instead — for manually-created vulns Rails defaults
+    ...                detected_at to the same instant as created_at, so the value is
+    ...                still usable as the lte/gte oracle reference timestamp. Returns a
+    ...                dict with numeric id (parsed from gid://gitlab/Vulnerability/N),
+    ...                title, severity, state, report_type, and createdAt (sourced from
+    ...                detectedAt).
     [Arguments]    ${project_id}    ${title}    ${severity}=critical    ${state}=DETECTED
     ...    ${description}=role scoped authz fixture
     ${headers}=    GitLab Auth Headers
@@ -217,7 +221,7 @@ Create Vulnerability
     ${query}=    Catenate    SEPARATOR=
     ...    mutation($input: VulnerabilityCreateInput!) {
     ...    \ \ vulnerabilityCreate(input: $input) {
-    ...    \ \ \ \ vulnerability { id title severity state reportType createdAt }
+    ...    \ \ \ \ vulnerability { id title severity state reportType detectedAt }
     ...    \ \ \ \ errors
     ...    \ \ }
     ...    \ }
@@ -235,5 +239,5 @@ Create Vulnerability
     ${numeric_id}=    Evaluate    int($vuln["id"].rsplit("/", 1)[-1])
     ${result}=    Create Dictionary    id=${numeric_id}    title=${vuln["title"]}
     ...    severity=${vuln["severity"]}    state=${vuln["state"]}
-    ...    report_type=${vuln["reportType"]}    createdAt=${vuln["createdAt"]}
+    ...    report_type=${vuln["reportType"]}    createdAt=${vuln["detectedAt"]}
     RETURN    ${result}
