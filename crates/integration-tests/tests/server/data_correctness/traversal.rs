@@ -593,7 +593,7 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
         r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "caller", "entity": "Definition", "columns": ["name", "fqn"]},
+                {"id": "caller", "entity": "Definition", "filters": [{"column": "project_id", "operator": "eq", "value": 1000}], "columns": ["name", "fqn"]},
                 {"id": "callee", "entity": "Definition", "columns": ["name", "fqn"]}
             ],
             "relationships": [{"type": "CALLS", "from": "caller", "to": "callee"}],
@@ -603,11 +603,11 @@ pub(super) async fn traversal_code_graph_calls_without_node_ids(ctx: &TestContex
     )
     .await;
 
-    resp.assert_referential_integrity();
-    // Seed data has: compile(12000) → helper(12001), helper(12001) → run_query(12002)
+    // Seed data in project 1000: compile(12000) → helper(12001), helper(12001) → run_query(12002)
     // plus cross-project: helper(12001) → run_query(12102) in project 1001.
-    // All are within authorized traversal paths, so all should appear.
-    resp.assert_node_ids("Definition", &[12000, 12001, 12002, 12102]);
+    // Caller is filtered to project 1000 (12000, 12001, 12002). Callee is unrestricted.
+    resp.assert_node_count(4);
+    resp.assert_referential_integrity();
     resp.assert_edge_set("CALLS", &[(12000, 12001), (12001, 12002), (12001, 12102)]);
 }
 
@@ -629,8 +629,9 @@ pub(super) async fn traversal_code_graph_calls_with_node_ids(ctx: &TestContext) 
     )
     .await;
 
-    resp.assert_referential_integrity();
     // Pinned to compile(12000): only compile → helper edge
+    resp.assert_node_count(2);
+    resp.assert_referential_integrity();
     resp.assert_node_ids("Definition", &[12000, 12001]);
     resp.assert_edge_set("CALLS", &[(12000, 12001)]);
 }
