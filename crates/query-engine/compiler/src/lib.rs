@@ -488,6 +488,192 @@ mod tests {
             "CTE should contain range lower bound, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn path_finding_filtered_endpoint_seeds_hop_frontier_from_anchor_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "root"}}},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_fwd_hop1"),
+            "filtered endpoint should create a forward hop frontier, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("FROM _nf_start"),
+            "forward hop frontier should seed from _nf_start, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn path_finding_without_cursor_orders_only_by_depth() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("toString(paths._gkg_path)")
+                && !sql.contains("toString(paths._gkg_edge_kinds)"),
+            "path array tie-break sorting should only be emitted for cursor pagination, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn path_finding_with_cursor_keeps_path_tie_break_order() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]},
+            "cursor": {"offset": 0, "page_size": 10},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("toString(paths._gkg_path)")
+                && sql.contains("toString(paths._gkg_edge_kinds)"),
+            "cursor pagination should keep deterministic path tie-break sorting, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn wildcard_path_finding_filters_only_endpoint_hops_by_relationship_kind() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [100]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["*"]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("e1.relationship_kind"),
+            "first endpoint hops should carry relationship_kind filters, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("e2.relationship_kind =") && !sql.contains("e2.relationship_kind IN"),
+            "intermediate wildcard path hops should stay relationship-kind unconstrained, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn wildcard_traversal_infers_relationship_kinds_from_endpoint_entities() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
+            "wildcard traversal should infer concrete User to MergeRequest relationship kinds, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_code_edge"),
+            "inferred SDLC relationship kinds should avoid scanning code edge table, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn wildcard_neighbors_infers_relationship_kinds_from_center_entity() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "neighbors",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "neighbors": {"node": "u", "direction": "outgoing"},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
+            "wildcard neighbors should infer concrete outgoing User relationship kinds, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_code_edge"),
+            "inferred User relationship kinds should avoid scanning code edge table, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn wildcard_aggregation_infers_relationship_kinds_from_endpoint_entities() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u", "alias": "mrs"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("relationship_kind") && sql.contains("'AUTHORED'"),
+            "wildcard aggregation should infer concrete User to MergeRequest relationship kinds, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("gl_code_edge"),
+            "inferred aggregation relationship kinds should avoid scanning code edge table, got:\n{sql}"
+        );
+    }
     /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
     /// EVERY edge it touches, not just whichever side `node_edge_col`
     /// happens to map first. Without this, `User AUTHORED MR` joined to

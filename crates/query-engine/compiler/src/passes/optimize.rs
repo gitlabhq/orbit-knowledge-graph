@@ -2269,8 +2269,8 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
 
     let start = input.nodes.iter().find(|n| n.id == path.from);
     let end = input.nodes.iter().find(|n| n.id == path.to);
-    let (start_ids, end_ids) = match (start, end) {
-        (Some(s), Some(e)) => (&s.node_ids, &e.node_ids),
+    let (start_anchor, end_anchor) = match (start, end) {
+        (Some(s), Some(e)) => (path_hop_anchor_source(q, s), path_hop_anchor_source(q, e)),
         _ => return,
     };
 
@@ -2284,7 +2284,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     inject_hop_frontiers(
         q,
         FORWARD_CTE,
-        start_ids,
+        start_anchor,
         forward_depth,
         true,
         &mut new_ctes,
@@ -2294,7 +2294,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
         inject_hop_frontiers(
             q,
             BACKWARD_CTE,
-            end_ids,
+            end_anchor,
             backward_depth,
             false,
             &mut new_ctes,
@@ -2307,17 +2307,42 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
     q.ctes = new_ctes;
 }
 
+#[derive(Debug, Clone)]
+enum HopAnchorSource {
+    Literal(Vec<i64>),
+    Cte(String),
+}
+
+fn path_hop_anchor_source(q: &Query, node: &InputNode) -> Option<HopAnchorSource> {
+    if !node.node_ids.is_empty() {
+        return Some(HopAnchorSource::Literal(node.node_ids.clone()));
+    }
+
+    if !node.filters.is_empty() || node.id_range.is_some() {
+        let cte_name = node_filter_cte(&node.id);
+        if q.ctes.iter().any(|c| c.name == cte_name) {
+            return Some(HopAnchorSource::Cte(cte_name));
+        }
+    }
+
+    None
+}
+
 /// Build hop frontier CTEs for one direction and inject SIP filters into
 /// the corresponding frontier CTE's UNION ALL arms.
 fn inject_hop_frontiers(
     q: &mut Query,
     cte_name: &str,
-    anchor_ids: &[i64],
+    anchor_source: Option<HopAnchorSource>,
     max_depth: u32,
     is_forward: bool,
     new_ctes: &mut Vec<Cte>,
     edge_tables: &[String],
 ) {
+    let Some(anchor_source) = anchor_source else {
+        return;
+    };
+
     let prefix = if is_forward { "_fwd_hop" } else { "_bwd_hop" };
     let anchor_col = if is_forward {
         SOURCE_ID_COLUMN
@@ -2348,15 +2373,22 @@ fn inject_hop_frontiers(
                 column: DEFAULT_PRIMARY_KEY.to_string(),
             })
         } else {
-            Expr::col_in(
-                alias,
-                anchor_col,
-                ChType::Int64,
-                anchor_ids
-                    .iter()
-                    .map(|id| serde_json::Value::from(*id))
-                    .collect(),
-            )
+            match &anchor_source {
+                HopAnchorSource::Literal(anchor_ids) => Expr::col_in(
+                    alias,
+                    anchor_col,
+                    ChType::Int64,
+                    anchor_ids
+                        .iter()
+                        .map(|id| serde_json::Value::from(*id))
+                        .collect(),
+                ),
+                HopAnchorSource::Cte(cte_name) => Some(Expr::InSubquery {
+                    expr: Box::new(Expr::col(alias, anchor_col)),
+                    cte_name: cte_name.clone(),
+                    column: DEFAULT_PRIMARY_KEY.to_string(),
+                }),
+            }
         };
 
         let from = if edge_tables.len() == 1 {

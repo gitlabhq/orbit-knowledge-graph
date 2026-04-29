@@ -1,4 +1,4 @@
-use crate::v2::config::{Language, detect_language_from_extension};
+use crate::v2::config::{Language, parsable_language};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
@@ -659,32 +659,25 @@ impl Pipeline {
                 continue;
             }
 
-            let Some(ext) = path.extension().and_then(|e| e.to_str()) else {
+            let rel_path = path.strip_prefix(root).unwrap_or(path);
+            let Some(lang) = parsable_language(rel_path) else {
                 continue;
             };
 
-            let rel_path = path.strip_prefix(root).unwrap_or(path).to_string_lossy();
-            if let Some(lang) = detect_language_from_extension(ext) {
-                if config.max_files > 0 && accepted_files >= config.max_files {
-                    break;
-                }
-
-                if lang
-                    .exclude_extensions()
-                    .iter()
-                    .any(|excl| rel_path.ends_with(excl))
-                {
-                    continue;
-                }
-
-                // Verify file is readable, but don't load yet.
-                if !path.is_file() {
-                    continue;
-                }
-
-                accepted_files += 1;
-                groups.entry(lang).or_default().push(rel_path.to_string());
+            if config.max_files > 0 && accepted_files >= config.max_files {
+                break;
             }
+
+            // Verify file is readable, but don't load yet.
+            if !path.is_file() {
+                continue;
+            }
+
+            accepted_files += 1;
+            groups
+                .entry(lang)
+                .or_default()
+                .push(rel_path.to_string_lossy().to_string());
         }
 
         groups

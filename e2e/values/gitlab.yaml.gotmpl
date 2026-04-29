@@ -6,7 +6,7 @@ global:
   # subscription/activation client at the staging portal. Applied to every Rails
   # component (webservice, sidekiq, toolbox, migrations) so the license is
   # decryptable from first boot. The activation itself is performed by
-  # scripts/activate-license.sh after gitlab is Ready.
+  # scripts/bootstrap-instance.sh after gitlab is Ready.
   extraEnv:
     GITLAB_LICENSE_MODE: "test"
     CUSTOMER_PORTAL_URL: "https://customers.staging.gitlab.com"
@@ -15,6 +15,12 @@ global:
     # regular migrations but left PDMs for the async background runner. Only
     # safe in ephemeral test environments; production must leave this unset.
     BYPASS_POST_DEPLOYMENT: "true"
+    # Enable the Security Manager built-in role (access_level=25). Gated by
+    # Gitlab::Security::SecurityManagerConfig.enabled? -> reads this env var.
+    # Without it, POST /api/v4/groups/:id/members rejects access_level=25 with
+    # "is not included in the list", which the role-scoped authz e2e suite
+    # exercises as the threshold case below Developer (=30).
+    GITLAB_SECURITY_MANAGER_ROLE: "true"
   hosts:
     domain: e2e.local
     https: false
@@ -109,6 +115,12 @@ installCertmanager: false
 certmanager:
   install: false
 
+# Required by chart 9.11.2+ even when certmanager.install=false: the
+# certmanager-issuer subchart's configmap template asserts email is set
+# regardless of install gates, so a placeholder unblocks the helm install.
+certmanager-issuer:
+  email: e2e@gitlab-knowledge-graph.invalid
+
 nginx-ingress:
   enabled: false
 
@@ -144,7 +156,7 @@ gitlab:
     resources:
       requests:
         cpu: 300m
-        memory: 2Gi
+        memory: 1Gi
       limits:
         cpu: 4
         memory: 6Gi
@@ -178,8 +190,8 @@ gitlab:
         cpu: 100m
         memory: 1Gi
       limits:
-        cpu: 1
-        memory: 3Gi
+        cpu: 2
+        memory: 4Gi
     # Backups are never run in e2e but the chart's _checkConfig requires a
     # backup target when bundled MinIO is disabled. Setting backend=gcs is the
     # one path that satisfies the check without requiring a real secret

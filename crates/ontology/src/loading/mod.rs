@@ -120,6 +120,7 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                     .collect(),
                 denormalized_columns: vec![],
                 denormalized_indexes: vec![],
+                settings: s.settings,
             });
             let config = crate::EdgeTableConfig {
                 sort_key: cfg.sort_key,

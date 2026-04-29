@@ -18,7 +18,7 @@
 //! dedup effective, and wrapping them would kill LIMIT pushdown.
 //!
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
 use crate::ast::{Expr, Node, OrderExpr, Query, SelectExpr, TableRef};
@@ -154,11 +154,15 @@ fn dispatch(q: &mut Query, input: &Input, ontology: &Ontology) {
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { .. } => {
-            let nf_cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+            let cte_filters: HashMap<String, Option<Expr>> = q
+                .ctes
+                .iter()
+                .map(|c| (c.name.clone(), c.query.where_clause.clone()))
+                .collect();
             wrap_join_scans(
                 &mut q.from,
                 &mut q.where_clause,
-                &nf_cte_names,
+                &cte_filters,
                 input,
                 ontology,
             );
@@ -370,12 +374,14 @@ fn wrap_scan_with_limit_by(
 }
 
 /// Recurse into join children, wrapping node table scans with LIMIT 1 BY.
-/// When a `_nf_{alias}` CTE exists, its filter is pushed into the dedup
-/// subquery so ClickHouse sorts only the filtered subset.
+/// When a `_nf_{alias}` CTE exists, its WHERE conditions are inlined into
+/// the dedup subquery instead of referencing the CTE via InSubquery. This
+/// avoids ClickHouse re-evaluating the CTE body (which scans the same node
+/// table again) since ClickHouse inlines CTEs rather than materializing them.
 fn wrap_join_scans(
     from: &mut TableRef,
     where_clause: &mut Option<Expr>,
-    cte_names: &HashSet<String>,
+    cte_filters: &HashMap<String, Option<Expr>>,
     input: &Input,
     ontology: &Ontology,
 ) {
@@ -387,11 +393,28 @@ fn wrap_join_scans(
             let alias_str = alias.clone();
             let sort_key = ontology.sort_key_for_table(&table_name).unwrap_or_default();
             let nf_cte = node_filter_cte(&alias_str);
-            let nf_filter = cte_names.contains(&nf_cte).then(|| Expr::InSubquery {
-                expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
-                cte_name: nf_cte,
-                column: DEFAULT_PRIMARY_KEY.to_string(),
+
+            // Prefer inlining the _nf_* CTE's WHERE conditions directly
+            // into the dedup subquery. Falls back to InSubquery when the
+            // CTE is cascade-derived (WHERE references edge aliases like
+            // _ce.source_id that don't exist in the dedup subquery scope).
+            // Cascade-derived CTEs are identified by containing InSubquery
+            // anywhere in their WHERE tree.
+            let nf_filter = cte_filters.get(&nf_cte).and_then(|cte_where| {
+                let cte_where = cte_where.as_ref()?;
+                if cte_where.contains_in_subquery() {
+                    // Cascade-derived: fall back to CTE reference
+                    Some(Expr::InSubquery {
+                        expr: Box::new(Expr::col(&alias_str, DEFAULT_PRIMARY_KEY)),
+                        cte_name: nf_cte,
+                        column: DEFAULT_PRIMARY_KEY.to_string(),
+                    })
+                } else {
+                    // Lowerer-created: inline the WHERE conditions
+                    Some(cte_where.clone())
+                }
             });
+
             wrap_scan_with_limit_by(
                 from,
                 where_clause,
@@ -403,8 +426,8 @@ fn wrap_join_scans(
         }
         TableRef::Scan { .. } => {}
         TableRef::Join { left, right, .. } => {
-            wrap_join_scans(left, where_clause, cte_names, input, ontology);
-            wrap_join_scans(right, where_clause, cte_names, input, ontology);
+            wrap_join_scans(left, where_clause, cte_filters, input, ontology);
+            wrap_join_scans(right, where_clause, cte_filters, input, ontology);
         }
         TableRef::Union { .. } | TableRef::Subquery { .. } => {}
     }

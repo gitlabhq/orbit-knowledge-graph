@@ -41,6 +41,8 @@ pub(super) struct EdgeTableStorageYaml {
     pub indexes: Vec<StorageIndexYaml>,
     #[serde(default)]
     pub projections: Vec<StorageProjectionYaml>,
+    #[serde(default)]
+    pub settings: BTreeMap<String, String>,
 }
 
 #[derive(Debug, Deserialize)]

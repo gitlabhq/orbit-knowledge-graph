@@ -597,6 +597,31 @@ impl Ontology {
             .collect()
     }
 
+    /// Get relationship kinds whose variants match any of the supplied endpoint pairs.
+    ///
+    /// Passing `None` for an endpoint leaves that side unconstrained.
+    pub fn relationship_kinds_matching<'a>(
+        &self,
+        endpoints: impl IntoIterator<Item = (Option<&'a str>, Option<&'a str>)>,
+    ) -> Vec<String> {
+        let endpoints: Vec<_> = endpoints.into_iter().collect();
+        self.edges()
+            .filter(|edge| {
+                endpoints.iter().any(|(source_kind, target_kind)| {
+                    source_kind
+                        .as_ref()
+                        .is_none_or(|kind| edge.source_kind == *kind)
+                        && target_kind
+                            .as_ref()
+                            .is_none_or(|kind| edge.target_kind == *kind)
+                })
+            })
+            .map(|edge| edge.relationship_kind.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .into_iter()
+            .collect()
+    }
+
     /// Check if a node exists.
     #[must_use]
     pub fn has_node(&self, name: &str) -> bool {
@@ -819,6 +844,24 @@ impl Ontology {
     #[must_use]
     pub fn denormalized_properties(&self) -> &[DenormalizedProperty] {
         &self.denormalized_properties
+    }
+
+    /// Returns the text index tokenizer for a column on a node entity, if one exists.
+    ///
+    /// Looks up `StorageIndex` entries whose `index_type` starts with `text(`.
+    /// Returns the full tokenizer parameter string (e.g. `"tokenizer = splitByNonAlpha"`).
+    #[must_use]
+    pub fn text_index_tokenizer(&self, entity_name: &str, column_name: &str) -> Option<&str> {
+        let node = self.nodes.get(entity_name)?;
+        node.storage
+            .indexes
+            .iter()
+            .find(|idx| idx.column == column_name && idx.index_type.starts_with("text("))
+            .map(|idx| {
+                // Extract the inner params: "text(tokenizer = splitByNonAlpha)" -> "tokenizer = splitByNonAlpha"
+                let s = idx.index_type.as_str();
+                &s[5..s.len() - 1]
+            })
     }
 
     /// Default ORDER BY / dedup key columns for node tables.

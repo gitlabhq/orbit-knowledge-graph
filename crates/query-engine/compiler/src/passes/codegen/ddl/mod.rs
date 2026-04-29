@@ -12,6 +12,8 @@
 pub mod clickhouse;
 pub mod duckdb;
 
+use std::collections::BTreeMap;
+
 use ontology::{AuxiliaryTable, Ontology, StorageColumn, StorageIndex, StorageProjection};
 
 use crate::ast::ddl::*;
@@ -196,25 +198,41 @@ fn strip_wrapper<'a>(s: &'a str, prefix: &str) -> Option<&'a str> {
 // Settings builder
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn table_settings(index_granularity: Option<u32>, has_projections: bool) -> Vec<TableSetting> {
+fn table_settings(
+    index_granularity: Option<u32>,
+    has_projections: bool,
+    explicit_settings: &BTreeMap<String, String>,
+) -> Vec<TableSetting> {
     let mut s = Vec::new();
     if let Some(g) = index_granularity {
-        s.push(TableSetting {
-            key: "index_granularity".into(),
-            value: g.to_string(),
-        });
+        upsert_setting(&mut s, "index_granularity", g.to_string());
     }
     if has_projections {
-        s.push(TableSetting {
-            key: "deduplicate_merge_projection_mode".into(),
-            value: "'rebuild'".into(),
-        });
+        upsert_setting(&mut s, "deduplicate_merge_projection_mode", "'rebuild'");
     }
-    s.push(TableSetting {
-        key: "allow_experimental_replacing_merge_with_cleanup".into(),
-        value: "1".into(),
-    });
+    upsert_setting(
+        &mut s,
+        "allow_experimental_replacing_merge_with_cleanup",
+        "1",
+    );
+    for (key, value) in explicit_settings {
+        upsert_setting(&mut s, key, value);
+    }
     s
+}
+
+fn upsert_setting(
+    settings: &mut Vec<TableSetting>,
+    key: impl Into<String>,
+    value: impl Into<String>,
+) {
+    let key = key.into();
+    let value = value.into();
+    if let Some(existing) = settings.iter_mut().find(|s| s.key == key) {
+        existing.value = value;
+    } else {
+        settings.push(TableSetting { key, value });
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -287,7 +305,7 @@ fn build_node_table(node: &ontology::NodeEntity) -> CreateTable {
         engine,
         order_by: node.sort_key.clone(),
         primary_key: node.storage.primary_key.clone(),
-        settings: table_settings(Some(2048), !projections.is_empty()),
+        settings: table_settings(Some(2048), !projections.is_empty(), &node.storage.settings),
     }
 }
 
@@ -338,6 +356,7 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
         settings: table_settings(
             Some(config.storage.index_granularity.unwrap_or(1024)),
             !projections.is_empty(),
+            &config.storage.settings,
         ),
     }
 }
@@ -372,6 +391,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
     };
 
     let projections: Vec<ProjectionDef> = aux.projections.iter().map(convert_projection).collect();
+    let empty_settings = BTreeMap::new();
 
     CreateTable {
         name: aux.name.clone(),
@@ -381,7 +401,7 @@ fn build_auxiliary_table(aux: &AuxiliaryTable) -> CreateTable {
         engine,
         order_by: aux.order_by.clone(),
         primary_key: None,
-        settings: table_settings(None, !projections.is_empty()),
+        settings: table_settings(None, !projections.is_empty(), &empty_settings),
     }
 }
 
@@ -509,6 +529,49 @@ mod tests {
     }
 
     #[test]
+    fn code_edge_has_relationship_kind_reorder_projections() {
+        let tables = generate_graph_tables(&ontology());
+        let code_edge = tables
+            .iter()
+            .find(|table| table.name == "gl_code_edge")
+            .expect("gl_code_edge table should be generated");
+
+        let has_projection = |name: &str, expected: &[&str]| {
+            code_edge.projections.iter().any(|projection| {
+                matches!(
+                    projection,
+                    ProjectionDef::Reorder { name: projection_name, order_by }
+                        if projection_name == name
+                            && order_by.iter().map(String::as_str).eq(expected.iter().copied())
+                )
+            })
+        };
+
+        assert!(has_projection(
+            "by_rel_source_kind",
+            &[
+                "relationship_kind",
+                "source_kind",
+                "source_id",
+                "target_id",
+                "traversal_path",
+                "target_kind",
+            ],
+        ));
+        assert!(has_projection(
+            "by_rel_target_kind",
+            &[
+                "relationship_kind",
+                "target_kind",
+                "target_id",
+                "source_id",
+                "traversal_path",
+                "source_kind",
+            ],
+        ));
+    }
+
+    #[test]
     fn every_table_has_system_columns() {
         for table in &generate_graph_tables(&ontology()) {
             let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
@@ -552,6 +615,19 @@ mod tests {
             assert!(!table.columns.is_empty(), "{}: no columns", table.name);
             assert!(!table.order_by.is_empty(), "{}: no ORDER BY", table.name);
         }
+    }
+
+    #[test]
+    fn forwards_explicit_table_settings_from_ontology() {
+        let tables = generate_graph_tables(&ontology());
+        let merge_request = tables
+            .iter()
+            .find(|table| table.name == "gl_merge_request")
+            .expect("gl_merge_request table should be generated");
+
+        assert!(merge_request.settings.iter().any(|setting| {
+            setting.key == "add_minmax_index_for_temporal_columns" && setting.value == "1"
+        }));
     }
 
     // ─── Local table generation tests ────────────────────────────────────

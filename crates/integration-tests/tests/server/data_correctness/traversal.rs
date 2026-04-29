@@ -151,6 +151,36 @@ pub(super) async fn traversal_user_approved_mr_returns_correct_edges(ctx: &TestC
     });
 }
 
+pub(super) async fn traversal_wildcard_user_to_mr_infers_relationship_kinds(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [1], "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+            ],
+            "relationships": [{"type": "*", "from": "u", "to": "mr"}],
+            "limit": 20
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node_count(4);
+    resp.assert_node_ids("User", &[1]);
+    resp.assert_node_ids("MergeRequest", &[2000, 2001, 2002]);
+    resp.assert_edge_set("AUTHORED", &[(1, 2000), (1, 2001)]);
+    resp.assert_edge_set("APPROVED", &[(1, 2002)]);
+    resp.assert_edge_count("ASSIGNED", 0);
+    resp.assert_edge_count("CLOSED", 0);
+    resp.assert_edge_count("LAST_EDITED_BY", 0);
+    resp.assert_edge_count("MERGED", 0);
+    resp.assert_edge_count("REVIEWER", 0);
+    resp.assert_edge_count("UPDATED_BY", 0);
+    resp.assert_referential_integrity();
+}
+
 pub(super) async fn traversal_redaction_removes_unauthorized_data(ctx: &TestContext) {
     let mut svc = MockRedactionService::new();
     svc.allow("user", &[1]);

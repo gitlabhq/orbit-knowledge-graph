@@ -40,8 +40,6 @@ impl ArrowClickHouseClient {
             .with_user(username)
             .with_setting("output_format_arrow_string_as_string", "1")
             .with_setting("output_format_arrow_fixed_string_as_fixed_byte_array", "1")
-            .with_setting("join_algorithm", "hash")
-            .with_setting("query_plan_join_swap_table", "true")
             .with_setting("use_query_condition_cache", "true")
             .with_setting("join_use_nulls", "0");
 

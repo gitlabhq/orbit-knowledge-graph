@@ -88,6 +88,12 @@ settings:
           - type: reorder
             name: by_target
             order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_rel_source_kind
+            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
+          - type: reorder
+            name: by_rel_target_kind
+            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
           # `count(target) GROUP BY source` — e.g. definitions per file via
           # DEFINES. Without this, the wildcard scan over vendored JS bundles
           # (`echarts.js` ≈ 13K defs, `pdf.worker.js` ≈ 12K defs) materializes

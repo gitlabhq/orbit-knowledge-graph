@@ -396,7 +396,8 @@
                   "primary_key": { "type": "array", "items": { "type": "string" } },
                   "columns": { "type": "array", "items": { "$ref": "#/definitions/storageColumn" } },
                   "indexes": { "type": "array", "items": { "$ref": "#/definitions/storageIndex" } },
-                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } }
+                  "projections": { "type": "array", "items": { "$ref": "#/definitions/storageProjection" } },
+                  "settings": { "$ref": "#/definitions/tableSettings" }
                 },
                 "additionalProperties": false
               }
@@ -821,9 +822,24 @@
           "type": "array",
           "description": "Materialized projections.",
           "items": { "$ref": "#/definitions/storageProjection" }
+        },
+        "settings": {
+          "$ref": "#/definitions/tableSettings"
         }
       },
       "additionalProperties": false
+    },
+
+    "tableSettings": {
+      "type": "object",
+      "description": "ClickHouse MergeTree table settings emitted in the CREATE TABLE SETTINGS clause.",
+      "propertyNames": {
+        "pattern": "^[a-z][a-z0-9_]*$"
+      },
+      "additionalProperties": {
+        "type": "string",
+        "pattern": "^[A-Za-z0-9_.'() -]+$"
+      }
     },
 
     "storageColumn": {

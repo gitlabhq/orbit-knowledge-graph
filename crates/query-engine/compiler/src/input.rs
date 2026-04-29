@@ -103,6 +103,14 @@ pub struct Input {
     pub compiler: CompilerMetadata,
 }
 
+/// Text index metadata for a column, used by the optimizer to rewrite
+/// LIKE patterns to ClickHouse text-index-aware functions.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TextIndexMeta {
+    /// The tokenizer strategy, e.g. `"splitByNonAlpha"`, `"splitByString(['/'])"`.
+    pub tokenizer: String,
+}
+
 /// Metadata accumulated across compiler passes.
 ///
 /// Written by normalize/lowering, read by downstream passes (deduplicate,
@@ -133,6 +141,10 @@ pub struct CompilerMetadata {
     /// The hop frontier optimizer uses this to decide whether a CTE is safe
     /// to forward-chain from.
     pub lowerer_nf_ctes: HashSet<String>,
+    /// Maps (table_name, column_name) → text index metadata. Populated by
+    /// normalize from the ontology's `StorageIndex` entries. Used by the
+    /// optimizer to rewrite `LIKE` patterns to `hasToken`/`hasAllTokens`.
+    pub text_indexes: HashMap<(String, String), TextIndexMeta>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -146,6 +158,7 @@ impl Default for CompilerMetadata {
             edge_table_for_rel: HashMap::new(),
             denormalized_columns: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
+            text_indexes: HashMap::new(),
         }
     }
 }
@@ -428,6 +441,12 @@ pub enum FilterOp {
     EndsWith,
     IsNull,
     IsNotNull,
+    /// Token-boundary match via `hasToken()`. Requires a text index on the column.
+    TokenMatch,
+    /// All tokens present via `hasAllTokens()`. Requires a text index on the column.
+    AllTokens,
+    /// Any token present via `hasAnyTokens()`. Requires a text index on the column.
+    AnyTokens,
 }
 
 fn deserialize_filters<'de, D>(deserializer: D) -> Result<HashMap<String, InputFilter>, D::Error>
@@ -594,6 +613,10 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
+    #[serde(skip)]
+    pub forward_first_hop_rel_types: Vec<String>,
+    #[serde(skip)]
+    pub backward_first_hop_rel_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]

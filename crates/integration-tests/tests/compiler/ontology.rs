@@ -290,9 +290,9 @@ fn path_finding_uses_gkg_path_not_node_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_column_ref("_gkg_path"));
+    assert!(rendered.contains("_gkg_path"));
     assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
 }
 
@@ -960,7 +960,8 @@ fn like_rejects_short_contains_pattern() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }
@@ -979,7 +980,8 @@ fn like_rejects_single_char_starts_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }
@@ -998,7 +1000,8 @@ fn like_rejects_empty_ends_with() {
     )
     .unwrap_err();
     assert!(
-        err.to_string().contains("LIKE pattern must be at least 3"),
+        err.to_string()
+            .contains("search pattern must be at least 3"),
         "expected min length error, got: {err}"
     );
 }
