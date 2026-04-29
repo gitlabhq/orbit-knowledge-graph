@@ -51,6 +51,75 @@ pub(super) async fn path_finding_returns_valid_complete_paths(ctx: &TestContext)
     resp.assert_node_exists("Project", 1000);
 }
 
+pub(super) async fn path_finding_filtered_start_endpoint_reaches_project(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+                {"id": "end", "entity": "Project", "node_ids": [1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["MEMBER_OF", "CONTAINS"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert_eq!(
+        pids.len(),
+        1,
+        "filtered start endpoint should find alice's path to Project 1004"
+    );
+
+    let path = resp.path(pids[0]);
+    assert_eq!(path.len(), 2);
+    assert_eq!((path[0].from.as_str(), path[0].from_id), ("User", 1));
+    assert_eq!(path[0].edge_type, "MEMBER_OF");
+    assert_eq!((path[1].to.as_str(), path[1].to_id), ("Project", 1004));
+    assert_eq!(path[1].edge_type, "CONTAINS");
+    resp.assert_filter("User", "username", |n| {
+        n.prop_str("username") == Some("alice")
+    });
+    resp.assert_referential_integrity();
+}
+
+pub(super) async fn path_finding_wildcard_keeps_intermediate_hops_unconstrained(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "path_finding",
+            "nodes": [
+                {"id": "start", "entity": "User", "node_ids": [1]},
+                {"id": "end", "entity": "Project", "node_ids": [1004]}
+            ],
+            "path": {"type": "shortest", "from": "start", "to": "end", "max_depth": 3,
+                     "rel_types": ["*"]}
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let pids = resp.path_ids();
+    assert_eq!(
+        pids.len(),
+        1,
+        "wildcard path should traverse User -> Group -> Project"
+    );
+
+    let path = resp.path(pids[0]);
+    assert_eq!(path.len(), 2);
+    assert_eq!((path[0].from.as_str(), path[0].from_id), ("User", 1));
+    assert_eq!((path[0].to.as_str(), path[0].to_id), ("Group", 102));
+    assert_eq!(path[0].edge_type, "MEMBER_OF");
+    assert_eq!((path[1].from.as_str(), path[1].from_id), ("Group", 102));
+    assert_eq!((path[1].to.as_str(), path[1].to_id), ("Project", 1004));
+    assert_eq!(path[1].edge_type, "CONTAINS");
+    resp.assert_referential_integrity();
+}
+
 pub(super) async fn path_finding_multiple_destinations_returns_distinct_paths(ctx: &TestContext) {
     let resp = run_query(
         ctx,

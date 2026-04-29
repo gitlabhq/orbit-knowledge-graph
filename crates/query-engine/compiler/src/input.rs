@@ -608,6 +608,10 @@ pub struct InputPath {
     pub max_depth: u32,
     #[serde(default)]
     pub rel_types: Vec<String>,
+    #[serde(skip)]
+    pub forward_first_hop_rel_types: Vec<String>,
+    #[serde(skip)]
+    pub backward_first_hop_rel_types: Vec<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
