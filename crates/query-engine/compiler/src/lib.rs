@@ -1135,6 +1135,66 @@ mod tests {
     }
 
     #[test]
+    fn denorm_in_list_filter_rewrites_to_has_any() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed", "canceled"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan for IN filter, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("hasAny(e0.source_tags"),
+            "IN-list filter should rewrite to hasAny, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("'status:failed'") && sql.contains("'status:canceled'"),
+            "hasAny should contain both tag values, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_in_list_single_value_rewrites_to_has() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan for single-value IN, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "single-value IN should rewrite to has(), got:\n{sql}"
+        );
+    }
+
+    #[test]
     fn denorm_partial_filters_keeps_nf_cte() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         // Pipeline has 'status' denormalized but 'source' is not.

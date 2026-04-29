@@ -381,44 +381,115 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         };
 
         let mut all_rewritable = true;
-        // Collect tag values per edge column for hasAll batching.
-        let mut tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
+        // Collect per-filter rewrites: each filter becomes either a has(), hasAny(), or
+        // contributes to a hasAll() batch when multiple eq filters target the same column.
+        // We track (edge_column, tag_values, is_any) per filter.
+        struct TagFilter {
+            edge_column: String,
+            tags: Vec<String>,
+            /// true for IN-list filters (OR / hasAny semantics).
+            is_any: bool,
+        }
+        let mut tag_filters: Vec<TagFilter> = Vec::new();
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
             if let Some((edge_column, tag_key)) = input.compiler.denormalized_columns.get(&key) {
-                if !matches!(filter.op, None | Some(crate::input::FilterOp::Eq)) {
-                    all_rewritable = false;
-                    break;
+                match filter.op {
+                    None | Some(crate::input::FilterOp::Eq) => {
+                        let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                        tag_filters.push(TagFilter {
+                            edge_column: edge_column.clone(),
+                            tags: vec![format!("{tag_key}:{val}")],
+                            is_any: false,
+                        });
+                    }
+                    Some(crate::input::FilterOp::In) => {
+                        let vals: Vec<String> = filter
+                            .value
+                            .as_ref()
+                            .and_then(|v| v.as_array())
+                            .map(|arr| {
+                                arr.iter()
+                                    .filter_map(|v| v.as_str())
+                                    .map(|v| format!("{tag_key}:{v}"))
+                                    .collect()
+                            })
+                            .unwrap_or_default();
+                        if vals.is_empty() {
+                            all_rewritable = false;
+                            break;
+                        }
+                        tag_filters.push(TagFilter {
+                            edge_column: edge_column.clone(),
+                            tags: vals,
+                            is_any: true,
+                        });
+                    }
+                    _ => {
+                        all_rewritable = false;
+                        break;
+                    }
                 }
-                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                tags_per_column
-                    .entry(edge_column.clone())
-                    .or_default()
-                    .push(format!("{tag_key}:{val}"));
             } else {
                 all_rewritable = false;
                 break;
             }
         }
 
-        // Build filter expressions: has() for single tag, hasAll() for multiple.
-        let edge_filters: Vec<Expr> = tags_per_column
-            .into_iter()
-            .map(|(col, tags)| {
-                if tags.len() == 1 {
-                    Expr::func("has", vec![Expr::col("EDGE", &col), Expr::string(&tags[0])])
-                } else {
-                    Expr::func(
-                        "hasAll",
+        // Build filter expressions:
+        //   - Single eq:  has(col, 'tag')
+        //   - IN-list:    hasAny(col, array('tag1', 'tag2'))
+        //   - Multiple eq on same column (from different properties): hasAll(col, array(...))
+        // First, group eq filters by column for hasAll batching.
+        let mut eq_tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
+        let mut edge_filters: Vec<Expr> = Vec::new();
+
+        for tf in &tag_filters {
+            if tf.is_any {
+                // IN-list → hasAny (OR semantics)
+                if tf.tags.len() == 1 {
+                    edge_filters.push(Expr::func(
+                        "has",
                         vec![
-                            Expr::col("EDGE", &col),
-                            Expr::func("array", tags.iter().map(Expr::string).collect()),
+                            Expr::col("EDGE", &tf.edge_column),
+                            Expr::string(&tf.tags[0]),
                         ],
-                    )
+                    ));
+                } else {
+                    edge_filters.push(Expr::func(
+                        "hasAny",
+                        vec![
+                            Expr::col("EDGE", &tf.edge_column),
+                            Expr::func("array", tf.tags.iter().map(Expr::string).collect()),
+                        ],
+                    ));
                 }
-            })
-            .collect();
+            } else {
+                // eq → accumulate for hasAll batching
+                eq_tags_per_column
+                    .entry(tf.edge_column.clone())
+                    .or_default()
+                    .extend(tf.tags.iter().cloned());
+            }
+        }
+
+        for (col, tags) in eq_tags_per_column {
+            if tags.len() == 1 {
+                edge_filters.push(Expr::func(
+                    "has",
+                    vec![Expr::col("EDGE", &col), Expr::string(&tags[0])],
+                ));
+            } else {
+                edge_filters.push(Expr::func(
+                    "hasAll",
+                    vec![
+                        Expr::col("EDGE", &col),
+                        Expr::func("array", tags.iter().map(Expr::string).collect()),
+                    ],
+                ));
+            }
+        }
 
         if !all_rewritable {
             continue;
