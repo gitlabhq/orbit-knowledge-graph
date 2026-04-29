@@ -4,6 +4,7 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 members = [
+  "crates/circuit-breaker",
   "crates/code-graph",
   "crates/code-graph/treesitter-visit",
   "crates/clickhouse-client",
@@ -89,6 +90,7 @@ walkdir = "2.5.0"
 criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
+circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
