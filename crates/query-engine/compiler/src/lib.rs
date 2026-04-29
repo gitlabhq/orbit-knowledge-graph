@@ -1100,4 +1100,33 @@ mod tests {
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
         );
     }
+
+    #[test]
+    fn skip_dedup_removes_limit_by_but_keeps_deleted_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10,
+            "options": {"skip_dedup": true}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("LIMIT 1 BY"),
+            "skip_dedup should eliminate LIMIT 1 BY, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_deleted"),
+            "skip_dedup should still filter by _deleted, got:\n{sql}"
+        );
+    }
 }

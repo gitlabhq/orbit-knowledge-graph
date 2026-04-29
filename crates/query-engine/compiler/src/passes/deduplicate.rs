@@ -45,19 +45,63 @@ fn is_edge_table(table: &str, edge_tables: &HashSet<String>) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Apply row deduplication to all node table scans in the AST.
+///
+/// When `input.options.skip_dedup` is true, skips the `LIMIT 1 BY` wrapping
+/// for node tables but still applies `_deleted = false` filters on all tables.
+/// This trades correctness (stale duplicates may appear) for lower latency.
 pub fn deduplicate(node: &mut Node, input: &Input, ontology: &Ontology) {
     match node {
         Node::Insert(_) => {}
         Node::Query(q) => {
-            for cte in &mut q.ctes {
-                if cte.name.starts_with("_nf_") {
-                    dedup_nf_cte(&mut cte.query, input, ontology);
-                } else {
-                    dedup_query(&mut cte.query, input, ontology);
+            if input.options.skip_dedup {
+                // Only apply soft-delete filters, no dedup subqueries.
+                add_deleted_filters_recursive(q);
+            } else {
+                for cte in &mut q.ctes {
+                    if cte.name.starts_with("_nf_") {
+                        dedup_nf_cte(&mut cte.query, input, ontology);
+                    } else {
+                        dedup_query(&mut cte.query, input, ontology);
+                    }
                 }
+                dedup_query(q, input, ontology);
             }
-            dedup_query(q, input, ontology);
         }
+    }
+}
+
+/// When skip_dedup is set, add `_deleted = false` to all node and edge table
+/// scans without wrapping them in LIMIT 1 BY subqueries.
+fn add_deleted_filters_recursive(q: &mut Query) {
+    for cte in &mut q.ctes {
+        add_deleted_filters_recursive(&mut cte.query);
+    }
+    for arm in &mut q.union_all {
+        add_deleted_filters_recursive(arm);
+    }
+    visit_from_for_deleted(&mut q.from, &mut q.where_clause);
+}
+
+/// Walk the FROM tree and add `_deleted = false` for every gl_* table scan.
+fn visit_from_for_deleted(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+    match from {
+        TableRef::Scan { table, alias, .. } => {
+            if GL_TABLE_RE.is_match(table) {
+                let deleted_filter =
+                    Expr::eq(Expr::col(alias.as_str(), DELETED_COLUMN), Expr::lit(false));
+                *where_clause = Some(match where_clause.take() {
+                    Some(existing) => Expr::and(existing, deleted_filter),
+                    None => deleted_filter,
+                });
+            }
+        }
+        TableRef::Join {
+            left, right, on: _, ..
+        } => {
+            visit_from_for_deleted(left, where_clause);
+            visit_from_for_deleted(right, where_clause);
+        }
+        TableRef::Subquery { .. } | TableRef::Union { .. } => {}
     }
 }
 
