@@ -156,7 +156,7 @@ gitlab:
     resources:
       requests:
         cpu: 300m
-        memory: 2Gi
+        memory: 1Gi
       limits:
         cpu: 4
         memory: 6Gi
@@ -190,8 +190,8 @@ gitlab:
         cpu: 100m
         memory: 1Gi
       limits:
-        cpu: 1
-        memory: 3Gi
+        cpu: 2
+        memory: 4Gi
     # Backups are never run in e2e but the chart's _checkConfig requires a
     # backup target when bundled MinIO is disabled. Setting backend=gcs is the
     # one path that satisfies the check without requiring a real secret
