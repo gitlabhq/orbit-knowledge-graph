@@ -15,6 +15,12 @@ global:
     # regular migrations but left PDMs for the async background runner. Only
     # safe in ephemeral test environments; production must leave this unset.
     BYPASS_POST_DEPLOYMENT: "true"
+    # Enable the Security Manager built-in role (access_level=25). Gated by
+    # Gitlab::Security::SecurityManagerConfig.enabled? -> reads this env var.
+    # Without it, POST /api/v4/groups/:id/members rejects access_level=25 with
+    # "is not included in the list", which the role-scoped authz e2e suite
+    # exercises as the threshold case below Developer (=30).
+    GITLAB_SECURITY_MANAGER_ROLE: "true"
   hosts:
     domain: e2e.local
     https: false
