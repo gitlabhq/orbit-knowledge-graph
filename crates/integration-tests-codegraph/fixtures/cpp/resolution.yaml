@@ -1,0 +1,159 @@
+name: "C++ resolution — classes, namespaces, methods, includes, inheritance"
+
+fixtures:
+  - path: math/vec.hpp
+    content: |
+      #ifndef VEC_HPP
+      #define VEC_HPP
+      namespace math {
+          class Vec3 {
+          public:
+              double x, y, z;
+              Vec3(double x, double y, double z);
+              double length() const;
+              Vec3 normalized() const;
+              Vec3 operator+(const Vec3& other) const;
+          };
+          Vec3 cross(const Vec3& a, const Vec3& b);
+      }
+      #endif
+
+  - path: math/vec.cpp
+    content: |
+      #include "vec.hpp"
+      namespace math {
+          Vec3::Vec3(double x, double y, double z) {}
+          double Vec3::length() const { return 0.0; }
+          Vec3 Vec3::normalized() const {
+              double len = length();
+              return Vec3(x / len, y / len, z / len);
+          }
+          Vec3 Vec3::operator+(const Vec3& other) const {
+              return Vec3(x + other.x, y + other.y, z + other.z);
+          }
+          Vec3 cross(const Vec3& a, const Vec3& b) {
+              return Vec3(0, 0, 0);
+          }
+      }
+
+  - path: shapes/shape.hpp
+    content: |
+      #ifndef SHAPE_HPP
+      #define SHAPE_HPP
+      namespace shapes {
+          enum ShapeKind { CIRCLE, RECTANGLE, TRIANGLE };
+          class Shape {
+          public:
+              virtual double area() const = 0;
+              virtual ShapeKind kind() const = 0;
+          };
+      }
+      #endif
+
+  - path: shapes/circle.hpp
+    content: |
+      #ifndef CIRCLE_HPP
+      #define CIRCLE_HPP
+      #include "shape.hpp"
+      namespace shapes {
+          class Circle : public Shape {
+          public:
+              double radius;
+              Circle(double r);
+              double area() const override;
+              ShapeKind kind() const override;
+          };
+      }
+      #endif
+
+  - path: shapes/circle.cpp
+    content: |
+      #include "circle.hpp"
+      namespace shapes {
+          Circle::Circle(double r) {}
+          double Circle::area() const { return 3.14159 * radius * radius; }
+          ShapeKind Circle::kind() const { return CIRCLE; }
+      }
+
+  - path: main.cpp
+    content: |
+      #include "math/vec.hpp"
+      #include "shapes/circle.hpp"
+
+      int main() {
+          math::Vec3 a(1, 0, 0);
+          math::Vec3 b(0, 1, 0);
+          math::Vec3 c = cross(a, b);
+          double len = c.length();
+
+          shapes::Circle circle(5.0);
+          double area = circle.area();
+          return 0;
+      }
+
+tests:
+  - name: "Function definitions with namespaced FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { no_nulls: fqn }
+      - { row: { fqn: "vec::math::Vec3::Vec3" } }
+      - { row: { fqn: "vec::math::Vec3::length" } }
+      - { row: { fqn: "vec::math::Vec3::normalized" } }
+      - { row: { fqn: "vec::math::Vec3::operator+" } }
+      - { row: { fqn: "vec::math::cross" } }
+      - { row: { fqn: "circle::shapes::Circle::Circle" } }
+      - { row: { fqn: "circle::shapes::Circle::area" } }
+      - { row: { fqn: "circle::shapes::Circle::kind" } }
+      - { row: { fqn: "main::main" } }
+
+  - name: "Class definitions with namespace scoping"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "vec::math::Vec3" } }
+      - { row: { fqn: "shape::shapes::Shape" } }
+      - { row: { fqn: "circle::shapes::Circle" } }
+
+  - name: "Namespace definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Namespace'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row: { fqn: "vec::math" } }
+      - { row: { fqn: "shape::shapes" } }
+      - { row: { fqn: "circle::shapes" } }
+
+  - name: "Enum constants with full scope"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumConstant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "shape::shapes::ShapeKind::CIRCLE" } }
+      - { row: { fqn: "shape::shapes::ShapeKind::RECTANGLE" } }
+      - { row: { fqn: "shape::shapes::ShapeKind::TRIANGLE" } }
+
+  - name: "Same-file call: normalized calls length"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'vec::math::Vec3::normalized'
+        AND callee.fqn = 'vec::math::Vec3::length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "vec::math::Vec3::normalized", callee: "vec::math::Vec3::length", kind: Calls } }
+
+  - name: "All files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 6 }
+      - { unique: path }

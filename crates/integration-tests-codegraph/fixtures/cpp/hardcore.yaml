@@ -1,0 +1,373 @@
+name: "C++ hardcore — negative tests, exact counts, templates, include chains, static visibility"
+
+fixtures:
+  - path: core/types.hpp
+    content: |
+      #ifndef TYPES_HPP
+      #define TYPES_HPP
+      namespace core {
+          using uint32 = unsigned int;
+          using byte = unsigned char;
+          enum ErrorCode { ERR_NONE, ERR_IO, ERR_MEM };
+          void panic(ErrorCode code);
+      }
+      #endif
+
+  - path: core/types.cpp
+    content: |
+      #include "types.hpp"
+      namespace core {
+          void panic(ErrorCode code) {}
+      }
+
+  - path: io/reader.hpp
+    content: |
+      #ifndef READER_HPP
+      #define READER_HPP
+      #include "../core/types.hpp"
+      namespace io {
+          class Reader {
+          public:
+              Reader(const char* path);
+              int read(char* buf, int len);
+              void close();
+          private:
+              int fd;
+              int pos;
+          };
+      }
+      #endif
+
+  - path: io/reader.cpp
+    content: |
+      #include "reader.hpp"
+      namespace io {
+          Reader::Reader(const char* path) {}
+          int Reader::read(char* buf, int len) { return 0; }
+          void Reader::close() {}
+
+          static void internal_flush() {}
+          static int internal_seek(int offset) {
+              internal_flush();
+              return 0;
+          }
+      }
+
+  - path: io/writer.hpp
+    content: |
+      #ifndef WRITER_HPP
+      #define WRITER_HPP
+      #include "../core/types.hpp"
+      namespace io {
+          class Writer {
+          public:
+              Writer(const char* path);
+              int write(const char* data, int len);
+              void close();
+          private:
+              int fd;
+          };
+      }
+      #endif
+
+  - path: io/writer.cpp
+    content: |
+      #include "writer.hpp"
+      namespace io {
+          Writer::Writer(const char* path) {}
+          int Writer::write(const char* data, int len) { return 0; }
+          void Writer::close() {}
+      }
+
+  - path: app.cpp
+    content: |
+      #include "io/reader.hpp"
+      #include "io/writer.hpp"
+
+      int copy_file(const char* src, const char* dst) {
+          io::Reader r(src);
+          io::Writer w(dst);
+          char buf[1024];
+          int n = r.read(buf, 1024);
+          w.write(buf, n);
+          r.close();
+          w.close();
+          return 0;
+      }
+
+      int main() {
+          copy_file("in.txt", "out.txt");
+          core::panic(core::ERR_IO);
+          return 0;
+      }
+
+  - path: unrelated.cpp
+    content: |
+      static void helper() {}
+      void unrelated_func() { helper(); }
+
+  - path: templates.hpp
+    content: |
+      #ifndef TEMPLATES_HPP
+      #define TEMPLATES_HPP
+      namespace tmpl {
+          template<typename T>
+          class Container {
+          public:
+              void push(const T& item);
+              T pop();
+              int size() const;
+          };
+
+          template<typename T>
+          void swap(T& a, T& b) {
+              T tmp = a;
+              a = b;
+              b = tmp;
+          }
+      }
+      #endif
+
+  - path: nested.cpp
+    content: |
+      namespace outer {
+          namespace inner {
+              class Widget {
+              public:
+                  void draw() {}
+              };
+          }
+          void create_widget() {
+              inner::Widget w;
+              w.draw();
+          }
+      }
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # EXACT TOTAL COUNTS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Exact file count"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 10 }
+      - { unique: path }
+
+  - name: "Class definitions — exact count"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Class'
+      RETURN d.fqn AS fqn
+    assert:
+      - { unique: fqn }
+      - { row: { fqn: "reader::io::Reader" } }
+      - { row: { fqn: "writer::io::Writer" } }
+      - { row: { fqn: "templates::tmpl::Container" } }
+      - { row: { fqn: "nested::outer::inner::Widget" } }
+
+  - name: "Namespace definitions found"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Namespace'
+      RETURN d.fqn AS fqn
+    assert:
+      - { no_nulls: fqn }
+      - { row: { fqn: "types::core" } }
+      - { row: { fqn: "reader::io" } }
+      - { row: { fqn: "writer::io" } }
+      - { row: { fqn: "templates::tmpl" } }
+      - { row: { fqn: "nested::outer" } }
+      - { row: { fqn: "nested::outer::inner" } }
+
+  - name: "Enum constants scoped"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumConstant'
+        AND d.fqn STARTS WITH 'types::core::ErrorCode::'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "types::core::ErrorCode::ERR_NONE" } }
+      - { row: { fqn: "types::core::ErrorCode::ERR_IO" } }
+      - { row: { fqn: "types::core::ErrorCode::ERR_MEM" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # STATIC FUNCTION VISIBILITY
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Static functions exist as definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['reader::io::internal_flush', 'reader::io::internal_seek']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+
+  - name: "Static internal_seek calls internal_flush (same file)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'reader::io::internal_seek'
+        AND callee.fqn = 'reader::io::internal_flush'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "reader::io::internal_seek", callee: "reader::io::internal_flush", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE ASSERTIONS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "NO edge from app to static internal_flush"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND callee.fqn = 'reader::io::internal_flush'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  - name: "NO edge from app to unrelated_func (not included)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn IN ['app::copy_file', 'app::main']
+        AND callee.fqn = 'unrelated::unrelated_func'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  - name: "NO edge from app to static helper"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn IN ['app::copy_file', 'app::main']
+        AND callee.fqn = 'unrelated::helper'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  # ══════════════════════════════════════════════════════════════
+  # INCLUDE CHAIN RESOLUTION
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "main calls copy_file (same file)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'app::copy_file'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # DUPLICATE EDGE CHECK
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "copy_file CALLS edges have no duplicates"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { unique: callee }
+
+  # ══════════════════════════════════════════════════════════════
+  # NESTED NAMESPACES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Nested namespace scoping"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'nested::outer::inner::Widget'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "nested::outer::inner::Widget", type: Class } }
+
+  - name: "Nested namespace defines inner namespace"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'nested::outer'
+        AND child.fqn = 'nested::outer::inner'
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "nested::outer", child: "nested::outer::inner", kind: Defines } }
+
+  - name: "Inner namespace defines Widget"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'nested::outer::inner'
+        AND child.fqn = 'nested::outer::inner::Widget'
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "nested::outer::inner", child: "nested::outer::inner::Widget", kind: Defines } }
+
+  # ══════════════════════════════════════════════════════════════
+  # TEMPLATE DEFINITIONS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Template class Container exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'templates::tmpl::Container'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "templates::tmpl::Container", type: Class } }
+
+  - name: "Template free function swap exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'templates::tmpl::swap'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "templates::tmpl::swap", type: Function } }
+
+  # ══════════════════════════════════════════════════════════════
+  # FILE CONTAINMENT
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "reader.cpp defines correct functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'io/reader.cpp'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+      - { row: { fqn: "reader::io::Reader::Reader" } }
+      - { row: { fqn: "reader::io::Reader::read" } }
+      - { row: { fqn: "reader::io::Reader::close" } }
+      - { row: { fqn: "reader::io::internal_flush" } }
+      - { row: { fqn: "reader::io::internal_seek" } }
+
+  - name: "unrelated.cpp defines exactly 2 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'unrelated.cpp'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: "unrelated::helper" } }
+      - { row: { fqn: "unrelated::unrelated_func" } }
+
+  - name: "app.cpp defines exactly 2 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'app.cpp'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: "app::copy_file" } }
+      - { row: { fqn: "app::main" } }

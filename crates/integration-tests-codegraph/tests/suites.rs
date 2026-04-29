@@ -206,6 +206,10 @@ yaml_test!(
 yaml_test!(kotlin_v1_enum_methods, "kotlin/v1_enum_methods.yaml");
 yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 
+// C++
+yaml_test!(cpp_resolution, "cpp/resolution.yaml");
+yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(
