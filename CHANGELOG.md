@@ -1,3 +1,13 @@
+## [0.37.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.36.0...v0.37.0) (2026-04-29)
+
+### Features
+
+* **compiler:** text index query lowering and token search operators ([5e8e234](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5e8e234f6a9299358ccb8209eba2fe9b911c6fb9)) by Michael Usachenko
+
+### Performance
+
+* **clickhouse:** use planner defaults and temporal minmax ([714bda5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/714bda50c1611f0945d12c97d01116f125d8d822)) by michaelangeloio
+
 ## [0.36.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.35.0...v0.36.0) (2026-04-28)
 
 ### Features
