@@ -61,27 +61,52 @@ curl -sfL --retry 3 --retry-delay 2 --connect-timeout 15 --max-time 120 -o "$ARC
 gzip -t "$ARCHIVE" 2>/dev/null || { echo "downloaded archive is not gzip (bad ref?)"; exit 1; }
 tar -xzf "$ARCHIVE" --strip-components=4 -C "$TABLES_RAW"
 
-# --- 2. Coalesce all databases into `main` ----------------------------------
+# --- 2. Filter to database: main + selectively coalesce vulnerability domain
 # Production GitLab decomposes its schema across `main`, `ci`, and `sec` PG
 # databases; SSOT YAMLs annotate each table with its target database. The e2e
 # stack runs a single bitnami-postgresql with every Rails migration applied,
 # so every table physically lives in the same DB regardless of its annotated
-# `database:` value. Rewrite each fetched YAML to claim `database: main` so
-# siphon's schema generator (which keys producers off the layout's `main`
-# entry) routes every CDC table through the single producer we declare.
+# `database:` value. Coalescing every non-main YAML into main works but more
+# than doubles the indexer's per-namespace pipeline_count, which slows the
+# code-backfill suite past its 1-minute wait budget. Keep the producer narrow:
+# allow `main` plus the vulnerability domain (six tables) which 05_role_scoped_authz
+# requires.
+ALLOW_NON_MAIN=(
+  vulnerabilities
+  vulnerability_identifiers
+  vulnerability_merge_request_links
+  vulnerability_occurrence_identifiers
+  vulnerability_occurrences
+  vulnerability_scanners
+)
+is_allowed_non_main() {
+  local stem="$1"
+  local allowed
+  for allowed in "${ALLOW_NON_MAIN[@]}"; do
+    [[ "$stem" == "$allowed" ]] && return 0
+  done
+  return 1
+}
+SKIPPED_DB=0
 COALESCED=0
 KEPT=0
 for f in "$TABLES_RAW"/*.yml "$TABLES_RAW"/*.yaml; do
   [[ -f "$f" ]] || continue
   db="$(yq -r '.database // "main"' "$f")"
+  stem="$(basename "$f" | sed -E 's/\.(yml|yaml)$//')"
   if [[ "$db" != "main" ]]; then
-    yq -i '.database = "main"' "$f"
-    COALESCED=$((COALESCED+1))
+    if is_allowed_non_main "$stem"; then
+      yq -i '.database = "main"' "$f"
+      COALESCED=$((COALESCED+1))
+    else
+      SKIPPED_DB=$((SKIPPED_DB+1))
+      continue
+    fi
   fi
   cp "$f" "$TABLES/"
   KEPT=$((KEPT+1))
 done
-log "tables kept: $KEPT (coalesced from non-main: $COALESCED)"
+log "tables kept: $KEPT (coalesced vulnerability domain: $COALESCED, skipped other dbs: $SKIPPED_DB)"
 [[ "$KEPT" -gt 0 ]] || { echo "no tables found in SSOT"; exit 1; }
 
 # --- 3. Generate fragments via siphon schema binary --------------------------
