@@ -778,7 +778,6 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
 
     let start = find_node(&input.nodes, &path.from)?;
     let end = find_node(&input.nodes, &path.to)?;
-
     let start_entity = start
         .entity
         .as_deref()
@@ -788,7 +787,20 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("end node has no entity".into()))?;
 
+    let wildcard_path = is_wildcard_type_list(&path.rel_types);
     let rel_type_filter = type_filter(&path.rel_types);
+    let forward_first_hop_types = if wildcard_path {
+        path.forward_first_hop_rel_types.clone()
+    } else {
+        path.rel_types.clone()
+    };
+    let backward_first_hop_types = if wildcard_path {
+        path.backward_first_hop_rel_types.clone()
+    } else {
+        path.rel_types.clone()
+    };
+    let forward_first_hop_rel_type_filter = type_filter(&forward_first_hop_types);
+    let backward_first_hop_rel_type_filter = type_filter(&backward_first_hop_types);
     let max_depth = path.max_depth;
     let forward_depth = max_depth.div_ceil(2); // ceil(max_depth / 2)
     let backward_depth = max_depth / 2; // floor(max_depth / 2)
@@ -808,6 +820,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             start_anchor_cond,
             forward_depth,
             &rel_type_filter,
+            &forward_first_hop_rel_type_filter,
             true,
             Some(start_entity),
             &et,
@@ -820,6 +833,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
                 end_anchor_cond.clone(),
                 backward_depth,
                 &rel_type_filter,
+                &backward_first_hop_rel_type_filter,
                 false,
                 Some(end_entity),
                 &et,
@@ -956,6 +970,26 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
     // Security filters are applied by the security pass to every gl_edge scan
     // inside the forward/backward CTEs. No separate start/end table join
     // is needed: the edge anchors already filter by start/end node IDs.
+    let mut order_by = vec![OrderExpr {
+        expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
+        desc: false,
+    }];
+    if input.cursor.is_some() {
+        order_by.extend([
+            OrderExpr {
+                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
+                desc: false,
+            },
+            OrderExpr {
+                expr: Expr::func(
+                    "toString",
+                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
+                ),
+                desc: false,
+            },
+        ]);
+    }
+
     Ok(Node::Query(Box::new(Query {
         ctes: {
             // Anchor CTEs must come before frontier CTEs that reference them.
@@ -975,26 +1009,7 @@ fn lower_path_finding(input: &Input) -> Result<Node> {
             SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
         ],
         from: paths_union,
-        order_by: vec![
-            OrderExpr {
-                expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
-                desc: false,
-            },
-            // toString() forces a deterministic string comparison on the
-            // Array(Tuple(Int64, String)) path column, avoiding flaky
-            // ordering from ClickHouse parallel merge on complex types.
-            OrderExpr {
-                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
-                desc: false,
-            },
-            OrderExpr {
-                expr: Expr::func(
-                    "toString",
-                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
-                ),
-                desc: false,
-            },
-        ],
+        order_by,
         limit,
         ..Default::default()
     })))
@@ -1096,6 +1111,7 @@ fn build_frontier(
     anchor_cond: Option<Expr>,
     max_depth: u32,
     rel_type_filter: &Option<Vec<String>>,
+    first_hop_rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
     anchor_entity: Option<&str>,
     edge_tables: &[String],
@@ -1106,6 +1122,7 @@ fn build_frontier(
                 anchor_cond.clone(),
                 depth,
                 rel_type_filter,
+                first_hop_rel_type_filter,
                 is_forward,
                 anchor_entity,
                 edge_tables,
@@ -1141,6 +1158,7 @@ fn build_frontier_arm(
     anchor_cond: Option<Expr>,
     depth: u32,
     rel_type_filter: &Option<Vec<String>>,
+    first_hop_rel_type_filter: &Option<Vec<String>>,
     is_forward: bool,
     anchor_entity: Option<&str>,
     edge_tables: &[String],
@@ -1155,7 +1173,7 @@ fn build_frontier_arm(
     let last = format!("e{depth}");
 
     // Build join chain: e1 JOIN e2 ON e1.next = e2.anchor JOIN e3 ...
-    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", rel_type_filter);
+    let (mut from, first_type_cond) = multi_edge_scan(edge_tables, "e1", first_hop_rel_type_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
@@ -1620,11 +1638,15 @@ fn edge_scan(
 }
 
 fn type_filter(types: &[String]) -> Option<Vec<String>> {
-    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+    if is_wildcard_type_list(types) {
         None
     } else {
         Some(types.to_vec())
     }
+}
+
+fn is_wildcard_type_list(types: &[String]) -> bool {
+    types.is_empty() || (types.len() == 1 && types[0] == "*")
 }
 
 /// Build an edge scan that may span multiple physical tables.
@@ -2264,7 +2286,7 @@ mod tests {
     }
 
     #[test]
-    fn path_finding_order_by_depth_path_edge_kinds() {
+    fn path_finding_without_cursor_orders_by_depth_only() {
         let mut input = validated_input(
             r#"{
             "query_type": "path_finding",
@@ -2282,8 +2304,8 @@ mod tests {
 
         assert_eq!(
             q.order_by.len(),
-            3,
-            "path finding should ORDER BY depth, path, edge_kinds"
+            1,
+            "path finding should only ORDER BY depth unless cursor pagination needs tie-breakers"
         );
         // depth ASC
         if let Expr::Column { column, .. } = &q.order_by[0].expr {
@@ -2292,32 +2314,6 @@ mod tests {
             panic!("expected depth column");
         }
         assert!(!q.order_by[0].desc);
-        // toString(_gkg_path) ASC
-        if let Expr::FuncCall { name, args } = &q.order_by[1].expr {
-            assert_eq!(name, "toString");
-            assert_eq!(args.len(), 1);
-            if let Expr::Column { column, .. } = &args[0] {
-                assert_eq!(column, &path_column());
-            } else {
-                panic!("expected path column inside toString");
-            }
-        } else {
-            panic!("expected toString(path) function");
-        }
-        assert!(!q.order_by[1].desc);
-        // toString(_gkg_edge_kinds) ASC
-        if let Expr::FuncCall { name, args } = &q.order_by[2].expr {
-            assert_eq!(name, "toString");
-            assert_eq!(args.len(), 1);
-            if let Expr::Column { column, .. } = &args[0] {
-                assert_eq!(column, &edge_kinds_column());
-            } else {
-                panic!("expected edge_kinds column inside toString");
-            }
-        } else {
-            panic!("expected toString(edge_kinds) function");
-        }
-        assert!(!q.order_by[2].desc);
     }
 
     #[test]

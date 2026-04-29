@@ -290,9 +290,9 @@ fn path_finding_uses_gkg_path_not_node_columns() {
     }"#;
 
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
-    let sql = ParsedSql::from_query(&result.base);
+    let rendered = result.base.render();
 
-    assert!(sql.has_column_ref("_gkg_path"));
+    assert!(rendered.contains("_gkg_path"));
     assert!(result.base.result_context.query_type == Some(QueryType::PathFinding));
 }
 

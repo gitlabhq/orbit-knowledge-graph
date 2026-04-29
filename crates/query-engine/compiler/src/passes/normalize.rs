@@ -7,7 +7,7 @@
 //! - Wildcard column selections are expanded to explicit column lists
 
 use crate::error::{QueryError, Result};
-use crate::input::{ColumnSelection, EntityAuthConfig, Input, QueryType, TextIndexMeta};
+use crate::input::{ColumnSelection, Direction, EntityAuthConfig, Input, QueryType, TextIndexMeta};
 use crate::passes::hydrate::VirtualColumnRequest;
 use ontology::constants::DEFAULT_PRIMARY_KEY;
 use ontology::{EnumType, Ontology};
@@ -184,7 +184,75 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             filter.value = Some(coerce_value(value, enum_values));
         }
     }
+    infer_wildcard_relationship_kinds(&mut input, ontology);
     Ok(input)
+}
+
+fn is_wildcard(types: &[String]) -> bool {
+    types.is_empty() || (types.len() == 1 && types[0] == "*")
+}
+
+fn infer_wildcard_relationship_kinds(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
+        .collect();
+    let infer = |direction, outgoing, incoming| match direction {
+        Direction::Outgoing => ontology.relationship_kinds_matching([outgoing]),
+        Direction::Incoming => ontology.relationship_kinds_matching([incoming]),
+        Direction::Both => ontology.relationship_kinds_matching([outgoing, incoming]),
+    };
+
+    for rel in &mut input.relationships {
+        let Some((from_entity, to_entity)) = entity_for
+            .get(rel.from.as_str())
+            .copied()
+            .zip(entity_for.get(rel.to.as_str()).copied())
+        else {
+            continue;
+        };
+        specialize_wildcard(
+            &mut rel.types,
+            infer(
+                rel.direction,
+                (Some(from_entity), Some(to_entity)),
+                (Some(to_entity), Some(from_entity)),
+            ),
+        );
+    }
+
+    if let Some(neighbors) = input.neighbors.as_mut()
+        && let Some(center_entity) = entity_for.get(neighbors.node.as_str()).copied()
+    {
+        specialize_wildcard(
+            &mut neighbors.rel_types,
+            infer(
+                neighbors.direction,
+                (Some(center_entity), None),
+                (None, Some(center_entity)),
+            ),
+        );
+    }
+
+    if let Some(path) = input.path.as_mut()
+        && is_wildcard(&path.rel_types)
+    {
+        if let Some(start_entity) = entity_for.get(path.from.as_str()).copied() {
+            path.forward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(Some(start_entity), None)]);
+        }
+        if let Some(end_entity) = entity_for.get(path.to.as_str()).copied() {
+            path.backward_first_hop_rel_types =
+                ontology.relationship_kinds_matching([(None, Some(end_entity))]);
+        }
+    }
+}
+
+fn specialize_wildcard(types: &mut Vec<String>, inferred: Vec<String>) {
+    if is_wildcard(types) && !inferred.is_empty() {
+        *types = inferred;
+    }
 }
 
 fn coerce_value(value: &Value, enum_values: &BTreeMap<i64, String>) -> Value {
