@@ -48,9 +48,11 @@ E2E_SHA=abc1234 e2e/scripts/test.sh
 
 | Suite | What it tests |
 |---|---|
-| `connectivity.robot` | NATS, ClickHouse, GitLab readiness, GKG liveness/readiness |
-| `api.robot` | GitLab API, Orbit status (full gRPC TLS pipeline) |
-| `indexing.robot` | Create group → enable KG → verify indexed via Orbit query API |
+| `01_setup_and_smoke.robot` | Bootstrap e2e-bot, enable KG flags, provision the shared namespace, smoke-test the pipeline |
+| `02_indexing.robot` | Create projects, issues, notes, epics; assert SDLC nodes and edges land in Orbit |
+| `03_code_indexing.robot` | Push fixture repos; assert File/Definition/IMPORTS/DEFINES via Orbit |
+| `04_code_backfill.robot` | Enable KG on a populated namespace and verify backfill dispatches code indexing |
+| `05_role_scoped_authz.robot` | Issue #347 — aggregation queries enforce per-entity authz on the target node. Seeds a victim user with Reporter/Security Manager/Developer/Maintainer/nested-subgroup memberships and replays the original oracle matrix per role. Requires Ultimate (activated by setup) and a GitLab image past `gitlab-org/gitlab@7e57f842dada` (publishes role-tagged traversal IDs). |
 
 ## Setup phases
 
