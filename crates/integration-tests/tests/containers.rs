@@ -6,6 +6,7 @@ mod canary {
 }
 
 mod server {
+    pub mod analytics;
     pub mod data_correctness;
     pub mod denormalization;
     pub mod graph_formatter;

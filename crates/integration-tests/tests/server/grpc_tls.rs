@@ -6,7 +6,7 @@ use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::grpc::GrpcServer;
 use gkg_server::proto::GetClusterHealthRequest;
 use gkg_server::proto::knowledge_graph_service_client::KnowledgeGraphServiceClient;
-use gkg_server_config::{ClickHouseConfiguration, GrpcConfig};
+use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use tonic::transport::server::ServerTlsConfig;
 use tonic::transport::{Certificate, ClientTlsConfig, Endpoint, Identity};
 
@@ -43,6 +43,7 @@ fn build_grpc_server(addr: SocketAddr, tls_config: Option<ServerTlsConfig>) -> G
         cluster_health,
         tls_config,
         GrpcConfig::default(),
+        Arc::new(AnalyticsConfig::default()),
     )
 }
 

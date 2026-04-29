@@ -1,10 +1,11 @@
 use std::sync::Arc;
 
+use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::Claims;
 use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
-use gkg_server_config::ProfilingConfig;
+use gkg_server_config::{AnalyticsConfig, ProfilingConfig};
 use nats_client::NatsClient;
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -29,6 +30,8 @@ pub struct QueryPipelineService {
     resolver_registry: Option<Arc<ColumnResolverRegistry>>,
     cache_broker: Option<Arc<NatsClient>>,
     billing_tracker: Option<Arc<dyn BillingTracker>>,
+    analytics_tracker: Option<Arc<dyn AnalyticsTracker>>,
+    analytics_config: Arc<AnalyticsConfig>,
 }
 
 impl QueryPipelineService {
@@ -36,6 +39,7 @@ impl QueryPipelineService {
         ontology: Arc<Ontology>,
         client: Arc<ArrowClickHouseClient>,
         profiling: ProfilingConfig,
+        analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         Self {
             ontology,
@@ -44,6 +48,8 @@ impl QueryPipelineService {
             resolver_registry: None,
             cache_broker: None,
             billing_tracker: None,
+            analytics_tracker: None,
+            analytics_config,
         }
     }
 
@@ -62,6 +68,11 @@ impl QueryPipelineService {
         self
     }
 
+    pub fn with_analytics(mut self, tracker: Arc<dyn AnalyticsTracker>) -> Self {
+        self.analytics_tracker = Some(tracker);
+        self
+    }
+
     pub async fn run_query(
         &self,
         claims: Claims,
@@ -73,6 +84,11 @@ impl QueryPipelineService {
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
+                claims.clone(),
+            )),
+            Box::new(AnalyticsObserver::new(
+                self.analytics_tracker.clone(),
+                Arc::clone(&self.analytics_config),
                 claims.clone(),
             )),
         ]);

@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_server_config::ClickHouseConfiguration;
+use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
+use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
@@ -57,6 +58,7 @@ impl KnowledgeGraphServiceImpl {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         stream_timeout_secs: u64,
+        analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
@@ -64,6 +66,7 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
+            analytics_config,
         );
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
         Self {
@@ -89,6 +92,11 @@ impl KnowledgeGraphServiceImpl {
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.pipeline = self.pipeline.with_billing(tracker);
+        self
+    }
+
+    pub fn with_analytics(mut self, tracker: Arc<dyn AnalyticsTracker>) -> Self {
+        self.pipeline = self.pipeline.with_analytics(tracker);
         self
     }
 
@@ -493,6 +501,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let plan = service
@@ -520,6 +529,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -549,6 +559,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -584,6 +595,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -607,6 +619,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -624,6 +637,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -652,6 +666,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -675,6 +690,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -702,6 +718,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response =
@@ -821,6 +838,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

@@ -39,8 +39,8 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "7697ce4d" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "7697ce4d" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "9c4bfbf5" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "9c4bfbf5" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"

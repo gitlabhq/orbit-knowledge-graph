@@ -5179,6 +5179,7 @@ dependencies = [
  "nats-client",
  "ontology",
  "opentelemetry",
+ "parking_lot",
  "prost 0.14.3",
  "prost-build 0.14.3",
  "query-engine",
@@ -6134,6 +6135,7 @@ dependencies = [
  "integration-testkit",
  "jsonschema",
  "labkit",
+ "labkit-events",
  "nats-client",
  "ontology",
  "opentelemetry",
@@ -6674,7 +6676,7 @@ checksum = "3752f229dcc5a481d60f385fa479ff46818033d881d2d801aa27dffcfb5e8306"
 [[package]]
 name = "labkit"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9c4bfbf5#9c4bfbf5e5b4c5a865981902a927677f34a4d53e"
 dependencies = [
  "axum",
  "futures-util",
@@ -6705,7 +6707,7 @@ dependencies = [
 [[package]]
 name = "labkit-events"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9c4bfbf5#9c4bfbf5e5b4c5a865981902a927677f34a4d53e"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -6723,7 +6725,7 @@ dependencies = [
 [[package]]
 name = "labkit-fields"
 version = "0.1.0"
-source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=7697ce4d#7697ce4dd7dce16d509bdd27d15eac358a1fcef8"
+source = "git+https://gitlab.com/gitlab-org/rust/labkit-rs.git?rev=9c4bfbf5#9c4bfbf5e5b4c5a865981902a927677f34a4d53e"
 
 [[package]]
 name = "lance"

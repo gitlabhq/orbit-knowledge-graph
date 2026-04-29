@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
+use gkg_server::analytics::SnowplowAnalyticsTracker;
 use gkg_server::auth::JwtValidator;
 use gkg_server::billing::SnowplowBillingTracker;
 use gkg_server::cli::{Args, Mode};
@@ -187,6 +188,7 @@ async fn run_webserver(
         cluster_health,
         tls_config,
         config.grpc.clone(),
+        Arc::new(config.analytics.clone()),
     )
     .with_resolver_registry(Arc::new(resolver_registry));
 
@@ -218,6 +220,24 @@ async fn run_webserver(
         let tracker = SnowplowBillingTracker::from_config(&config.billing)
             .map_err(|e| anyhow::anyhow!("billing tracker initialization failed: {e}"))?;
         grpc_server = grpc_server.with_billing(Arc::new(tracker));
+    }
+
+    if config.analytics.enabled {
+        if config.analytics.collector_url.trim().is_empty() {
+            return Err(anyhow::anyhow!(
+                "analytics.enabled=true but analytics.collector_url is empty — \
+                 set GKG_ANALYTICS__COLLECTOR_URL"
+            ));
+        }
+        info!(
+            collector_url = %config.analytics.collector_url,
+            deployment = ?config.analytics.deployment.kind,
+            environment = ?config.analytics.deployment.environment,
+            "initializing analytics event tracker"
+        );
+        let tracker = SnowplowAnalyticsTracker::from_config(&config.analytics)
+            .map_err(|e| anyhow::anyhow!("analytics tracker initialization failed: {e}"))?;
+        grpc_server = grpc_server.with_analytics(Arc::new(tracker));
     }
 
     info!(addr = %config.grpc_bind_address, "gRPC server starting");
