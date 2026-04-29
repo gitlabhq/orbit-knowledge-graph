@@ -455,16 +455,26 @@ fn resolve_standalone_edge(
         let alias = format!("_d{join_idx}");
         join_idx += 1;
 
+        let agg_cols: Vec<String> = endpoint
+            .enrich
+            .iter()
+            .map(|c| format!("argMax({c}, {watermark_col}) AS {c}"))
+            .collect();
         let sub_cols = std::iter::once("id".to_string())
-            .chain(endpoint.enrich.iter().cloned())
+            .chain(agg_cols)
             .collect::<Vec<_>>()
             .join(", ");
 
+        let traversal_filter = if namespaced {
+            format!(" AND startsWith(traversal_path, {{traversal_path:String}})")
+        } else {
+            String::new()
+        };
+
         joins.push(format!(
             "LEFT JOIN (SELECT {sub_cols} FROM {node_table} \
-             WHERE {deleted_col} = false \
-             ORDER BY id, {watermark_col} DESC \
-             LIMIT 1 BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
+             WHERE {deleted_col} = false{traversal_filter} \
+             GROUP BY id) AS {alias} ON _base.{fk_col} = {alias}.id"
         ));
 
         for col_name in &endpoint.enrich {
