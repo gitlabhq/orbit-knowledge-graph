@@ -38,6 +38,7 @@ gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 labkit-events = { workspace = true }
+parking_lot = { workspace = true }
 serde = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }
