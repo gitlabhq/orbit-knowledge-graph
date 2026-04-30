@@ -15,9 +15,8 @@ use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
 
 const ENABLED_NAMESPACE_QUERY: &str = r#"
-SELECT root_namespace_id, organization_id
+SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
-INNER JOIN siphon_namespaces on siphon_knowledge_graph_enabled_namespaces.root_namespace_id = siphon_namespaces.id
 WHERE _siphon_deleted = false
 "#;
 
@@ -83,7 +82,7 @@ impl NamespaceDispatcher {
             .record_query_duration("enabled_namespaces", query_start.elapsed().as_secs_f64());
 
         let namespace_ids = i64::extract_column(&arrow_batches, 0).map_err(TaskError::new)?;
-        let organization_ids = i64::extract_column(&arrow_batches, 1).map_err(TaskError::new)?;
+        let traversal_paths = String::extract_column(&arrow_batches, 1).map_err(TaskError::new)?;
 
         debug!(
             enabled_namespaces = namespace_ids.len(),
@@ -94,10 +93,10 @@ impl NamespaceDispatcher {
         let mut dispatched: u64 = 0;
         let mut skipped: u64 = 0;
 
-        for (namespace_id, organization_id) in namespace_ids.iter().zip(organization_ids.iter()) {
+        for (namespace_id, traversal_path) in namespace_ids.iter().zip(traversal_paths.iter()) {
             let request = NamespaceIndexingRequest {
-                organization: *organization_id,
                 namespace: *namespace_id,
+                traversal_path: traversal_path.clone(),
                 watermark,
             };
 
@@ -112,7 +111,7 @@ impl NamespaceDispatcher {
                     dispatched += 1;
                     debug!(
                         namespace_id = *namespace_id,
-                        organization_id = *organization_id,
+                        traversal_path = %traversal_path,
                         "dispatched namespace indexing request"
                     );
                 }
@@ -120,7 +119,7 @@ impl NamespaceDispatcher {
                     skipped += 1;
                     debug!(
                         namespace_id = *namespace_id,
-                        organization_id = *organization_id,
+                        traversal_path = %traversal_path,
                         "skipped namespace indexing request, already in-flight"
                     );
                 }
