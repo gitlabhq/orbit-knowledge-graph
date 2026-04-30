@@ -53,7 +53,7 @@ If no data appears after five minutes, see [troubleshooting Orbit](../orbit_trou
 
 Orbit exposes the knowledge graph through two integration paths. Choose the best path for your team:
 
-### Option 1: GitLab Duo Agentic Chat
+### Option 1: With GitLab Duo Agentic Chat
 
 Agentic Chat automatically uses Orbit when it's enabled for a group. No additional setup is required.
 
@@ -66,7 +66,7 @@ Duo can now answer questions that span your entire group. For example:
 - "Which services depend on `payments-service`?"
 - "Show me issues linked to merge requests that introduced a critical vulnerability."
 
-### Option 2: MCP-compatible AI agents
+### Option 2: With MCP-compatible AI agents
 
 Connect Claude Code, Codex, or any other MCP-compatible agent to Orbit using the GitLab CLI.
 
