@@ -15,7 +15,7 @@ args=(cargo nextest run --workspace \
   --exclude integration-tests-codegraph \
   --exclude gkg-fuzz \
   --exclude query-profiler \
-  --lib --bins)
+  --lib --bin xtask)
 
 # Append caller's arguments last (e.g. --profile ci) so they can
 # override defaults.

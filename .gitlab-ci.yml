@@ -398,6 +398,8 @@ unit-test:
   extends:
     - .test-template
     - .mr-and-main-rules
+  tags:
+    - saas-linux-large-amd64
   needs: []
   script:
     - ./scripts/run-unit-tests.sh --profile ci
