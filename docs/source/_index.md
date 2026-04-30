@@ -28,9 +28,7 @@ title: Orbit
 Orbit is an AI-queryable knowledge graph of your software development
 lifecycle. It indexes your groups, projects, and repositories, then
 analyzes the relationships between them to build a structured map of
-your entire GitLab instance. You can use the knowledge graph to
-understand how your work is organized and how its parts relate to each
-other.
+your entire GitLab instance.
 
 Orbit exposes the knowledge graph through a unified context API.
 Explore the graph in the GitLab UI or query it with GitLab Duo or
@@ -45,36 +43,7 @@ You can use Orbit to get answers to questions like:
 - What work items are assigned to this user in these projects?
 - Which projects do most pipeline failures come from?
 
-## Turn Orbit on or off
-
-Turn Orbit on for a top-level group to start indexing its data and add it to the knowledge graph.
-
-Turn Orbit off to stop indexing and remove the group's data from the graph.
-
-Prerequisites:
-
-- The Owner role for the group.
-
-To turn Orbit on or off:
-
-1. In the top bar, select **Search or go to** > **Your work**.
-1. Select **Orbit** > **Configuration**.
-1. Next to the top-level group you want to index, turn **Enable** on or off.
-
-## View the knowledge graph
-
-Use the data explorer to visualize your instance and verify that Orbit indexed your groups correctly.
-
-Prerequisites:
-
-- Turn on Orbit for a group or project.
-- The Reporter, Developer, Maintainer, or Owner role for the group or project.
-
-To view the knowledge graph:
-
-1. In the top bar, select **Search or go to** > **Your work**.
-1. Select **Orbit** > **Data explorer**.
-1. Double-click a node to view its details, including its nearest neighbors.
+<!--- To get started with Orbit ... --->
 
 ## Performance
 
@@ -84,6 +53,8 @@ seconds, even for large groups.
 
 Changes to a group, project, or repository are reindexed automatically.
 Reindexing typically completes a few minutes after a change.
+
+<!--- ## Billing and usage --->
 
 ## Coverage
 
@@ -146,8 +117,6 @@ Orbit supports code indexing for the following languages:
 - Rust
 - C#
 - Go
-
-<!--- ## Billing and usage --->
 
 ## Feedback
 
