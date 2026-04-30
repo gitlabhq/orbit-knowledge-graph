@@ -51,7 +51,7 @@ If no data appears after five minutes, see [troubleshooting Orbit](../orbit_trou
 
 ## Step 3: Query the knowledge graph
 
-Orbit exposes the knowledge graph through two integration paths. Choose the best path for your team:
+Orbit exposes the knowledge graph through two integration paths. Choose the best path for your team.
 
 ### Option 1: With GitLab Duo Agentic Chat
 
