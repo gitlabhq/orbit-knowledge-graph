@@ -18,6 +18,7 @@ members = [
   "crates/query-engine/compiler-pipeline-macros",
   "crates/cli",
 
+  "crates/gkg-analytics",
   "crates/gkg-observability",
   "crates/gkg-server-config",
   "crates/gkg-server",

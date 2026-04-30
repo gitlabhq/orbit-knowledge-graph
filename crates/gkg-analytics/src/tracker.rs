@@ -3,6 +3,9 @@ use std::sync::Arc;
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::gkg::GkgEvent;
 
+/// Snowplow `app_id` stamped on every event. The same value is used across
+/// all GKG runtime modes (Webserver, Indexer, …) — they all run in the
+/// `gkg-server` binary.
 const APP_ID: &str = "gkg-server";
 
 pub trait AnalyticsTracker: Send + Sync {
@@ -32,12 +35,12 @@ impl AnalyticsTracker for SnowplowAnalyticsTracker {
     }
 }
 
-#[cfg(any(test, feature = "testkit"))]
+#[cfg(feature = "testkit")]
 pub struct InMemoryAnalyticsTracker {
     events: parking_lot::Mutex<Vec<GkgEvent>>,
 }
 
-#[cfg(any(test, feature = "testkit"))]
+#[cfg(feature = "testkit")]
 impl InMemoryAnalyticsTracker {
     pub fn new() -> Self {
         Self {
@@ -54,14 +57,14 @@ impl InMemoryAnalyticsTracker {
     }
 }
 
-#[cfg(any(test, feature = "testkit"))]
+#[cfg(feature = "testkit")]
 impl Default for InMemoryAnalyticsTracker {
     fn default() -> Self {
         Self::new()
     }
 }
 
-#[cfg(any(test, feature = "testkit"))]
+#[cfg(feature = "testkit")]
 impl AnalyticsTracker for InMemoryAnalyticsTracker {
     fn track(&self, event: GkgEvent) {
         self.events.lock().push(event);

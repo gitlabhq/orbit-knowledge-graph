@@ -8,8 +8,9 @@ use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
 
+use gkg_analytics::AnalyticsTracker;
+
 use super::context::{build_common, build_query};
-use super::tracker::AnalyticsTracker;
 
 pub(crate) struct AnalyticsObserver {
     tracker: Option<Arc<dyn AnalyticsTracker>>,
@@ -69,8 +70,9 @@ mod tests {
     use gkg_server_config::AnalyticsConfig;
     use query_engine::pipeline::{PipelineError, PipelineObserver};
 
+    use gkg_analytics::InMemoryAnalyticsTracker;
+
     use super::*;
-    use crate::analytics::tracker::InMemoryAnalyticsTracker;
 
     fn test_claims() -> Claims {
         Claims {

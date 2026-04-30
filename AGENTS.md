@@ -82,6 +82,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`) |
 | `gkg-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
+| `gkg-analytics` | Cross-crate Snowplow analytics primitives: `AnalyticsTracker` trait, `SnowplowAnalyticsTracker` (wraps `labkit_events::Tracker`), `InMemoryAnalyticsTracker` (testkit), shared `OrbitCommonContext` builder. Domain-specific contexts (Claims → `OrbitQueryContext`, indexer state → `OrbitSdlcIndexingContext`) are built in the consuming crate. |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |
