@@ -31,10 +31,10 @@ gitlab:
     toolbox:
       digest: "sha256:72da7ebc1b6978b43134b4c0b2cbfcb905c628e7260ac90ace7b9fc10868a561"
 gkg:
-  chart: "0.19.0"
+  chart: "0.22.0"
   image:
     repository: registry.gitlab.com/gitlab-org/orbit/knowledge-graph/gkg
-    tag: "0.26.1"
+    tag: "0.39.0"
 nats:
   chart: "2.12.6"
 postgresql:
