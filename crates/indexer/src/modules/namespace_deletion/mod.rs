@@ -10,6 +10,8 @@ pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 
 use std::sync::Arc;
 
+use circuit_breaker::CircuitBreaker;
+
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
@@ -18,15 +20,16 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    datalake_breaker: CircuitBreaker,
+    graph_breaker: CircuitBreaker,
 ) -> Result<(), HandlerInitError> {
     let graph_client = Arc::new(config.graph.build_client());
     let datalake_client = Arc::new(config.datalake.build_client());
 
-    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(ClickHouseNamespaceDeletionStore::new(
-        datalake_client,
-        graph_client,
-        ontology,
-    ));
+    let store: Arc<dyn NamespaceDeletionStore> = Arc::new(
+        ClickHouseNamespaceDeletionStore::new(datalake_client, graph_client, ontology)
+            .with_circuit_breakers(datalake_breaker, graph_breaker),
+    );
 
     let handler =
         NamespaceDeletionHandler::new(store, config.engine.handlers.namespace_deletion.clone());

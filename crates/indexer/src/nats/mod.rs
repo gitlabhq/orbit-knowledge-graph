@@ -44,4 +44,4 @@ pub use message::{
     DlqResult, MessageAcker, NatsMessage, NatsSubscription, NoopAcker, ProgressNotifier,
 };
 pub use nats_client::{KvBucketConfig, KvEntry, KvPutOptions, KvPutResult, NatsError};
-pub use services::{NatsServices, NatsServicesImpl};
+pub use services::{CircuitBreakingNatsServices, NatsServices, NatsServicesImpl};

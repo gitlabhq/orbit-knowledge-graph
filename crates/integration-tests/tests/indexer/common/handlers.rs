@@ -27,13 +27,26 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
     )
 }
 
+fn noop_circuit_breaker() -> circuit_breaker::CircuitBreaker {
+    let registry = indexer::circuit_breaker::build_registry(
+        &gkg_server_config::CircuitBreakerSettings::default(),
+        Arc::new(circuit_breaker::NoopObserver),
+    );
+    registry.circuit_breaker(indexer::circuit_breaker::IndexerService::ClickHouseDatalake)
+}
+
 pub async fn namespace_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        noop_circuit_breaker(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
     registry
         .find_by_name("namespace_handler")
         .expect("namespace_handler not found")
@@ -43,9 +56,14 @@ pub async fn global_handler(ctx: &TestContext) -> Arc<dyn Handler> {
     let config = create_test_indexer_config(&ctx.config);
     let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
     let registry = HandlerRegistry::default();
-    indexer::modules::sdlc::register_handlers(&registry, &config, &ontology)
-        .await
-        .expect("failed to register SDLC handlers");
+    indexer::modules::sdlc::register_handlers(
+        &registry,
+        &config,
+        &ontology,
+        noop_circuit_breaker(),
+    )
+    .await
+    .expect("failed to register SDLC handlers");
     registry
         .find_by_name("global_handler")
         .expect("global_handler not found")

@@ -11,6 +11,7 @@
 //! descriptions, units, and histogram buckets live in exactly one place.
 
 pub mod buckets;
+pub mod circuit_breaker;
 pub mod indexer;
 pub mod query;
 pub mod server;
@@ -35,6 +36,7 @@ pub fn meter() -> opentelemetry::metrics::Meter {
 /// is read directly.
 pub fn catalog() -> Vec<&'static MetricSpec> {
     let mut v: Vec<&'static MetricSpec> = Vec::new();
+    v.extend(circuit_breaker::CATALOG);
     v.extend(indexer::etl::CATALOG);
     v.extend(indexer::scheduler::CATALOG);
     v.extend(indexer::code::CATALOG);
@@ -56,7 +58,7 @@ mod tests {
     #[test]
     fn catalog_is_nonempty() {
         assert!(
-            catalog().len() >= 55,
+            catalog().len() >= 60,
             "catalog shrank unexpectedly; did a module fail to register?"
         );
     }

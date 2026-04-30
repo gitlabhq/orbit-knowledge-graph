@@ -8,5 +8,6 @@ license = "MIT"
 workspace = true
 
 [dependencies]
+circuit-breaker = { path = "../circuit-breaker" }
 opentelemetry = { workspace = true }
 serde = { workspace = true }

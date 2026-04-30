@@ -1,4 +1,4 @@
-mod datalake;
+pub(crate) mod datalake;
 pub mod dispatch;
 mod handler;
 mod metrics;
@@ -7,10 +7,13 @@ mod plan;
 
 use std::sync::Arc;
 
+use circuit_breaker::CircuitBreaker;
+
 use crate::IndexerConfig;
 use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
+use datalake::CircuitBreakingDatalake;
 use datalake::{Datalake, DatalakeQuery};
 use handler::global::GlobalHandler;
 use handler::namespace::NamespaceHandler;
@@ -23,6 +26,7 @@ pub async fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    datalake_breaker: CircuitBreaker,
 ) -> Result<(), HandlerInitError> {
     let global_handler_config = config.engine.handlers.global_handler.clone();
     let namespace_handler_config = config.engine.handlers.namespace_handler.clone();
@@ -30,9 +34,9 @@ pub async fn register_handlers(
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
-    let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
-        datalake_client,
-        global_handler_config.datalake_batch_size,
+    let datalake: Arc<dyn DatalakeQuery> = Arc::new(CircuitBreakingDatalake::new(
+        Datalake::new(datalake_client, global_handler_config.datalake_batch_size),
+        datalake_breaker,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));

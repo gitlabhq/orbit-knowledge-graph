@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crate::clickhouse::ArrowClickHouseClient;
 use arrow::record_batch::RecordBatch;
 use async_trait::async_trait;
+use circuit_breaker::CircuitBreaker;
 use futures::StreamExt;
 use futures::stream::BoxStream;
 use serde_json::Value;
@@ -102,5 +103,63 @@ impl DatalakeQuery for Datalake {
         }
 
         Ok(batches)
+    }
+}
+
+pub(crate) struct CircuitBreakingDatalake<D> {
+    inner: D,
+    breaker: CircuitBreaker,
+}
+
+impl<D> CircuitBreakingDatalake<D> {
+    pub fn new(inner: D, breaker: CircuitBreaker) -> Self {
+        Self { inner, breaker }
+    }
+}
+
+fn is_service_error(error: &DatalakeError) -> bool {
+    matches!(error, DatalakeError::Query(_))
+}
+
+#[async_trait]
+impl<D: DatalakeQuery> DatalakeQuery for CircuitBreakingDatalake<D> {
+    async fn query_arrow(
+        &self,
+        sql: &str,
+        params: Value,
+        max_block_size: Option<u64>,
+    ) -> Result<RecordBatchStream<'_>, DatalakeError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.query_arrow(sql, params, max_block_size),
+                is_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => {
+                    DatalakeError::Query(format!("circuit breaker open for {service}"))
+                }
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn query_batches(
+        &self,
+        sql: &str,
+        params: Value,
+        max_block_size: Option<u64>,
+    ) -> Result<Vec<RecordBatch>, DatalakeError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.query_batches(sql, params, max_block_size),
+                is_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => {
+                    DatalakeError::Query(format!("circuit breaker open for {service}"))
+                }
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
     }
 }

@@ -27,6 +27,7 @@
 //! - [`modules::code`] - Code indexing (call graphs, definitions, references)
 //!
 pub mod checkpoint;
+pub mod circuit_breaker;
 pub mod clickhouse;
 pub mod dead_letter;
 pub mod destination;
@@ -100,6 +101,8 @@ pub struct IndexerConfig {
     pub health_bind_address: SocketAddr,
     #[serde(default)]
     pub schema: SchemaConfig,
+    #[serde(default)]
+    pub circuit_breaker: gkg_server_config::CircuitBreakerSettings,
 }
 
 impl Default for IndexerConfig {
@@ -113,6 +116,7 @@ impl Default for IndexerConfig {
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),
+            circuit_breaker: gkg_server_config::CircuitBreakerSettings::default(),
         }
     }
 }
@@ -218,24 +222,38 @@ pub async fn run(
 
     let metrics = Arc::new(metrics::EngineMetrics::new());
 
+    info!("initializing circuit breaker registry");
+    let cb_observer = Arc::new(gkg_observability::circuit_breaker::MetricsObserver::new());
+    let cb_registry = circuit_breaker::build_registry(&config.circuit_breaker, cb_observer);
+    let datalake_breaker =
+        cb_registry.circuit_breaker(circuit_breaker::IndexerService::ClickHouseDatalake);
+    let graph_breaker =
+        cb_registry.circuit_breaker(circuit_breaker::IndexerService::ClickHouseGraph);
+    let nats_breaker = cb_registry.circuit_breaker(circuit_breaker::IndexerService::Nats);
+    let rails_breaker = cb_registry.circuit_breaker(circuit_breaker::IndexerService::Rails);
+
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
-    let destination = Arc::new(ClickHouseDestination::new(
+    let raw_destination: Arc<dyn destination::Destination> = Arc::new(ClickHouseDestination::new(
         config.graph.clone(),
         metrics.clone(),
     )?);
+    let destination: Arc<dyn destination::Destination> = Arc::new(
+        destination::CircuitBreakingDestination::new(raw_destination, graph_breaker.clone()),
+    );
 
     let registry = Arc::new(HandlerRegistry::default());
 
     if config.engine.is_module_enabled(IndexerModule::Sdlc) {
         info!("initializing SDLC handlers");
-        modules::sdlc::register_handlers(&registry, config, &ontology).await?;
+        modules::sdlc::register_handlers(&registry, config, &ontology, datalake_breaker.clone())
+            .await?;
     } else {
         info!("SDLC handlers disabled by engine.modules");
     }
 
     if config.engine.is_module_enabled(IndexerModule::Code) {
         info!("initializing Code handlers");
-        modules::code::register_handlers(&registry, config, &ontology)?;
+        modules::code::register_handlers(&registry, config, &ontology, rails_breaker)?;
     } else {
         info!("Code handlers disabled by engine.modules");
     }
@@ -245,7 +263,13 @@ pub async fn run(
         .is_module_enabled(IndexerModule::NamespaceDeletion)
     {
         info!("initializing Namespace Deletion handler");
-        modules::namespace_deletion::register_handlers(&registry, config, &ontology)?;
+        modules::namespace_deletion::register_handlers(
+            &registry,
+            config,
+            &ontology,
+            datalake_breaker,
+            graph_breaker,
+        )?;
     } else {
         info!("Namespace Deletion handler disabled by engine.modules");
     }
@@ -270,8 +294,13 @@ pub async fn run(
         gitlab_client,
     };
 
+    let nats_services: Arc<dyn nats::NatsServices> = Arc::new(
+        nats::CircuitBreakingNatsServices::new(nats_services, nats_breaker),
+    );
+
     let engine = Arc::new(
         EngineBuilder::new(broker, registry, destination, indexing_status)
+            .nats_services(nats_services)
             .metrics(metrics)
             .build(),
     );

@@ -5156,6 +5156,7 @@ dependencies = [
 name = "gkg-observability"
 version = "0.1.0"
 dependencies = [
+ "circuit-breaker",
  "opentelemetry",
  "serde",
 ]
@@ -5983,6 +5984,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "circuit-breaker",
  "clickhouse",
  "clickhouse-client",
  "code-graph",
@@ -6127,6 +6129,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "circuit-breaker",
  "clickhouse-client",
  "compiler",
  "flate2",

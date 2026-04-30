@@ -134,6 +134,24 @@ analytics:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production
 
+circuit_breaker:
+  clickhouse_datalake:
+    failure_threshold: 5
+    window_secs: 30
+    cooldown_secs: 60
+  clickhouse_graph:
+    failure_threshold: 5
+    window_secs: 30
+    cooldown_secs: 60
+  nats:
+    failure_threshold: 5
+    window_secs: 30
+    cooldown_secs: 60
+  rails:
+    failure_threshold: 3
+    window_secs: 30
+    cooldown_secs: 60
+
 billing:
   enabled: false
   collector_url: "http://localhost:9090"

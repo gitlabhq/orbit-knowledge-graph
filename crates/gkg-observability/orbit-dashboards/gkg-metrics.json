@@ -2,6 +2,62 @@
   "$generated_by": "cargo xtask metrics-catalog - do not edit",
   "metrics": [
     {
+      "otel_name": "gkg.circuit_breaker.calls.failure",
+      "prom_name": "gkg_circuit_breaker_calls_failure_total",
+      "description": "Failed calls that counted toward the circuit breaker threshold.",
+      "kind": "counter",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.calls.rejected",
+      "prom_name": "gkg_circuit_breaker_calls_rejected_total",
+      "description": "Calls rejected because the circuit was open.",
+      "kind": "counter",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.calls.success",
+      "prom_name": "gkg_circuit_breaker_calls_success_total",
+      "description": "Successful calls through the circuit breaker.",
+      "kind": "counter",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.state.current",
+      "prom_name": "gkg_circuit_breaker_state_current",
+      "description": "Current circuit breaker state per service (0=closed, 1=half_open, 2=open).",
+      "kind": "gauge",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.state.transitions",
+      "prom_name": "gkg_circuit_breaker_state_transitions_total",
+      "description": "Circuit breaker state transitions, labelled by service and target state.",
+      "kind": "counter",
+      "labels": [
+        "service",
+        "state"
+      ],
+      "stability": "stable",
+      "domain": "circuit_breaker"
+    },
+    {
       "otel_name": "gkg.content.blob.size",
       "prom_name": "gkg_content_blob_size_bytes",
       "description": "Size of resolved blob content in bytes.",

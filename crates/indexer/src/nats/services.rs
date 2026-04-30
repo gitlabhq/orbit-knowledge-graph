@@ -46,8 +46,11 @@
 //! assert_eq!(mock_nats.get_published().len(), 1);
 //! ```
 
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use bytes::Bytes;
+use circuit_breaker::CircuitBreaker;
 use nats_client::{KvEntry, KvPutOptions, KvPutResult};
 
 use crate::types::{Envelope, Subscription};
@@ -132,5 +135,110 @@ impl NatsServices for NatsServicesImpl {
         batch_size: usize,
     ) -> Result<Vec<NatsMessage>, NatsError> {
         self.broker.consume_pending(subscription, batch_size).await
+    }
+}
+
+pub struct CircuitBreakingNatsServices {
+    inner: Arc<dyn NatsServices>,
+    breaker: CircuitBreaker,
+}
+
+impl CircuitBreakingNatsServices {
+    pub fn new(inner: Arc<dyn NatsServices>, breaker: CircuitBreaker) -> Self {
+        Self { inner, breaker }
+    }
+}
+
+fn is_nats_service_error(error: &NatsError) -> bool {
+    !matches!(error, NatsError::PublishDuplicate)
+}
+
+fn map_open_error(service: &'static str) -> NatsError {
+    NatsError::Connection(format!("circuit breaker open for {service}"))
+}
+
+#[async_trait]
+impl NatsServices for CircuitBreakingNatsServices {
+    async fn publish(
+        &self,
+        subscription: &Subscription,
+        envelope: &Envelope,
+    ) -> Result<(), NatsError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.publish(subscription, envelope),
+                is_nats_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
+        self.breaker
+            .call_with_filter(|| self.inner.kv_get(bucket, key), is_nats_service_error)
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn kv_put(
+        &self,
+        bucket: &str,
+        key: &str,
+        value: Bytes,
+        options: KvPutOptions,
+    ) -> Result<KvPutResult, NatsError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.kv_put(bucket, key, value, options),
+                is_nats_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
+        self.breaker
+            .call_with_filter(|| self.inner.kv_delete(bucket, key), is_nats_service_error)
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
+        self.breaker
+            .call_with_filter(|| self.inner.kv_keys(bucket), is_nats_service_error)
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn consume_pending(
+        &self,
+        subscription: &Subscription,
+        batch_size: usize,
+    ) -> Result<Vec<NatsMessage>, NatsError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.consume_pending(subscription, batch_size),
+                is_nats_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => map_open_error(service),
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
     }
 }

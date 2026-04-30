@@ -22,6 +22,8 @@ mod test_helpers;
 
 use std::sync::Arc;
 
+use circuit_breaker::CircuitBreaker;
+
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
@@ -31,6 +33,7 @@ use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
 pub use namespace_backfill_dispatcher::NamespaceCodeBackfillDispatcher;
 use repository::RepositoryResolver;
+use repository::service::CircuitBreakingRepositoryService;
 pub use siphon_code_indexing_task_dispatcher::SiphonCodeIndexingTaskDispatcher;
 
 pub use checkpoint_store::ClickHouseCodeCheckpointStore;
@@ -45,6 +48,7 @@ pub fn register_handlers(
     registry: &HandlerRegistry,
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
+    rails_breaker: CircuitBreaker,
 ) -> Result<(), HandlerInitError> {
     let Some(gitlab_config) = &config.gitlab else {
         tracing::info!("Code handlers disabled (GitLab client not configured)");
@@ -60,8 +64,10 @@ pub fn register_handlers(
         Arc::new(GitlabClient::new(gitlab_config.clone()).map_err(HandlerInitError::new)?);
     let client = Arc::new(config.graph.build_client());
 
-    let repository_service: Arc<dyn RepositoryService> =
-        CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
+    let repository_service: Arc<dyn RepositoryService> = CircuitBreakingRepositoryService::create(
+        CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client)),
+        rails_breaker,
+    );
     let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(

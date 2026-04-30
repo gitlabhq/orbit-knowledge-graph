@@ -5,6 +5,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use async_trait::async_trait;
+use circuit_breaker::CircuitBreaker;
 use futures::Stream;
 use gitlab_client::{GitlabClient, GitlabClientError, ProjectInfo};
 use moka::future::Cache;
@@ -106,6 +107,70 @@ impl RepositoryService for CachingRepositoryService {
                 Err(error)
             }
         }
+    }
+}
+
+pub(crate) struct CircuitBreakingRepositoryService {
+    inner: Arc<dyn RepositoryService>,
+    breaker: CircuitBreaker,
+}
+
+impl CircuitBreakingRepositoryService {
+    pub fn create(
+        inner: Arc<dyn RepositoryService>,
+        breaker: CircuitBreaker,
+    ) -> Arc<dyn RepositoryService> {
+        Arc::new(Self { inner, breaker })
+    }
+}
+
+fn is_repository_service_error(error: &RepositoryServiceError) -> bool {
+    match error {
+        RepositoryServiceError::GitlabApi(gitlab_error) => {
+            !matches!(gitlab_error, GitlabClientError::NotFound(_))
+        }
+        RepositoryServiceError::Archive(_) => false,
+    }
+}
+
+#[async_trait]
+impl RepositoryService for CircuitBreakingRepositoryService {
+    async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, RepositoryServiceError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.project_info(project_id),
+                is_repository_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => {
+                    RepositoryServiceError::GitlabApi(GitlabClientError::Unexpected(format!(
+                        "circuit breaker open for {service}"
+                    )))
+                }
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
+    }
+
+    async fn download_archive(
+        &self,
+        project_id: i64,
+        ref_name: &str,
+    ) -> Result<ByteStream, RepositoryServiceError> {
+        self.breaker
+            .call_with_filter(
+                || self.inner.download_archive(project_id, ref_name),
+                is_repository_service_error,
+            )
+            .await
+            .map_err(|e| match e {
+                circuit_breaker::CircuitBreakerError::Open { service } => {
+                    RepositoryServiceError::GitlabApi(GitlabClientError::Unexpected(format!(
+                        "circuit breaker open for {service}"
+                    )))
+                }
+                circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
+            })
     }
 }
 
