@@ -5143,6 +5143,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-analytics"
+version = "0.1.0"
+dependencies = [
+ "gkg-server-config",
+ "labkit-events",
+ "parking_lot",
+ "tracing",
+]
+
+[[package]]
 name = "gkg-fuzz"
 version = "0.1.0"
 dependencies = [
@@ -5177,6 +5187,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitlab-client",
+ "gkg-analytics",
  "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
@@ -5190,7 +5201,6 @@ dependencies = [
  "nats-client",
  "ontology",
  "opentelemetry",
- "parking_lot",
  "prost 0.14.3",
  "prost-build 0.14.3",
  "query-engine",

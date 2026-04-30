@@ -1,7 +1,5 @@
-use gkg_server_config::{AnalyticsConfig, DeploymentKind};
-use labkit_events::orbit::{
-    DeploymentType, OrbitCommonContext, OrbitQueryContext, SourceType, ToolName,
-};
+use gkg_server_config::AnalyticsConfig;
+use labkit_events::orbit::{OrbitCommonContext, OrbitQueryContext, SourceType, ToolName};
 
 use crate::auth::Claims;
 
@@ -9,10 +7,7 @@ pub(crate) fn build_common(
     config: &AnalyticsConfig,
     claims: &Claims,
 ) -> Option<OrbitCommonContext> {
-    let mut b = OrbitCommonContext::builder(
-        map_deployment(config.deployment.kind),
-        config.deployment.environment.as_str(),
-    );
+    let mut b = gkg_analytics::common_builder(config);
     if let Some(id) = labkit::correlation::current() {
         b = b.correlation_id(id.as_str());
     }
@@ -51,14 +46,6 @@ pub(crate) fn build_query(claims: &Claims) -> Option<OrbitQueryContext> {
     b.build()
         .map_err(|e| tracing::warn!(error = %e, "drop analytics event: orbit_query build failed"))
         .ok()
-}
-
-fn map_deployment(kind: DeploymentKind) -> DeploymentType {
-    match kind {
-        DeploymentKind::Com => DeploymentType::Com,
-        DeploymentKind::Dedicated => DeploymentType::Dedicated,
-        DeploymentKind::SelfManaged => DeploymentType::SelfManaged,
-    }
 }
 
 fn map_source(s: &str) -> SourceType {

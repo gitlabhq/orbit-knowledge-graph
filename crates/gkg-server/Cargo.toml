@@ -11,7 +11,7 @@ path = "src/main.rs"
 [features]
 default = []
 regenerate-protos = []
-testkit = ["clickhouse-client/testkit"]
+testkit = ["clickhouse-client/testkit", "gkg-analytics/testkit"]
 
 [dependencies]
 mimalloc = { workspace = true, features = ["secure"] }
@@ -22,6 +22,7 @@ async-trait = { workspace = true }
 axum = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+gkg-analytics = { path = "../gkg-analytics" }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
@@ -38,7 +39,6 @@ gitlab-client = { workspace = true }
 jsonwebtoken = { workspace = true }
 labkit = { workspace = true, features = ["http", "grpc", "otel", "prometheus"] }
 labkit-events = { workspace = true }
-parking_lot = { workspace = true }
 serde = { workspace = true }
 strum = { workspace = true }
 serde_json = { workspace = true }
@@ -59,6 +59,7 @@ tonic-prost-build = { workspace = true }
 prost-build = { workspace = true }
 
 [dev-dependencies]
+gkg-analytics = { path = "../gkg-analytics", features = ["testkit"] }
 jsonschema = { workspace = true }
 tokio = { workspace = true }
 
