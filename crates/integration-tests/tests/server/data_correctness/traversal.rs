@@ -176,6 +176,7 @@ pub(super) async fn traversal_wildcard_user_to_mr_infers_relationship_kinds(ctx:
     resp.assert_edge_count("CLOSED", 0);
     resp.assert_edge_count("LAST_EDITED_BY", 0);
     resp.assert_edge_count("MERGED", 0);
+    resp.assert_edge_count("REOPENED", 0);
     resp.assert_edge_count("REVIEWER", 0);
     resp.assert_edge_count("UPDATED_BY", 0);
     resp.assert_referential_integrity();
