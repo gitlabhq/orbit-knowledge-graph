@@ -196,4 +196,3 @@ The following relationships are available by default:
 |                    | `Definition`               | `ImportedSymbol`             |
 |                    | `File`                     | `Definition`                 |
 |                    | `File`                     | `ImportedSymbol`             |
-{.condensed}
