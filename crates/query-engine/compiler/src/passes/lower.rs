@@ -2138,7 +2138,7 @@ fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     )
 }
 
-fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
+pub(crate) fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || {
         let v = filter.value.clone().unwrap_or(Value::Null);

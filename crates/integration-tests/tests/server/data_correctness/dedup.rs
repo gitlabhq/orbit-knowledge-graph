@@ -103,8 +103,8 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9100, 'MergeRequest', 'IN_PROJECT', 1000, 'Project')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 9100, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], [])",
         t("gl_edge")
     ))
     .await;
@@ -224,9 +224,9 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1002/', 9200, 'MergeRequest', 'IN_PROJECT', 1002, 'Project'),
-         ('1/100/1002/', 9201, 'MergeRequest', 'IN_PROJECT', 1002, 'Project')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1002/', 9200, 'MergeRequest', 'IN_PROJECT', 1002, 'Project', ['state:opened'], []),
+         ('1/100/1002/', 9201, 'MergeRequest', 'IN_PROJECT', 1002, 'Project', ['state:merged'], [])",
         t("gl_edge")
     ))
     .await;
@@ -276,8 +276,8 @@ pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9003, 'User', 'AUTHORED', 9101, 'MergeRequest')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 9003, 'User', 'AUTHORED', 9101, 'MergeRequest', [], ['state:opened'])",
         t("gl_edge")
     ))
     .await;
@@ -318,11 +318,11 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1003/', 9400, 'MergeRequest', 'IN_PROJECT', 1003, 'Project'),
-         ('1/100/1003/', 9401, 'MergeRequest', 'IN_PROJECT', 1003, 'Project'),
-         ('1/100/1003/', 1, 'User', 'AUTHORED', 9400, 'MergeRequest'),
-         ('1/100/1003/', 1, 'User', 'AUTHORED', 9401, 'MergeRequest')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1003/', 9400, 'MergeRequest', 'IN_PROJECT', 1003, 'Project', ['state:opened'], []),
+         ('1/100/1003/', 9401, 'MergeRequest', 'IN_PROJECT', 1003, 'Project', ['state:merged'], []),
+         ('1/100/1003/', 1, 'User', 'AUTHORED', 9400, 'MergeRequest', [], ['state:opened']),
+         ('1/100/1003/', 1, 'User', 'AUTHORED', 9401, 'MergeRequest', [], ['state:merged'])",
         t("gl_edge")
     ))
     .await;
@@ -373,9 +373,9 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1004/', 9500, 'MergeRequest', 'IN_PROJECT', 1004, 'Project'),
-         ('1/100/1004/', 9501, 'MergeRequest', 'IN_PROJECT', 1004, 'Project')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1004/', 9500, 'MergeRequest', 'IN_PROJECT', 1004, 'Project', ['state:merged'], []),
+         ('1/100/1004/', 9501, 'MergeRequest', 'IN_PROJECT', 1004, 'Project', ['state:merged'], [])",
         t("gl_edge")
     ))
     .await;
@@ -422,8 +422,8 @@ pub(super) async fn neighbors_dedup_returns_unique_edges(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9300, 'User', 'AUTHORED', 9310, 'MergeRequest')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 9300, 'User', 'AUTHORED', 9310, 'MergeRequest', [], ['state:opened'])",
         t("gl_edge")
     ))
     .await;
@@ -466,8 +466,8 @@ pub(super) async fn neighbors_deleted_node_visible_via_edge(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9301, 'User', 'AUTHORED', 9311, 'MergeRequest')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 9301, 'User', 'AUTHORED', 9311, 'MergeRequest', [], ['state:opened'])",
         t("gl_edge")
     ))
     .await;
@@ -506,8 +506,8 @@ pub(super) async fn hydration_returns_latest_properties(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1000/', 9600, 'User', 'MEMBER_OF', 100, 'Group')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1000/', 9600, 'User', 'MEMBER_OF', 100, 'Group', [], [])",
         t("gl_edge")
     ))
     .await;
@@ -550,9 +550,9 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, _deleted) VALUES
-         ('1/100/1000/', 9700, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', true),
-         ('1/100/1000/', 9701, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', false)",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags, _deleted) VALUES
+         ('1/100/1000/', 9700, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], [], true),
+         ('1/100/1000/', 9701, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], [], false)",
         t("gl_edge")
     ))
     .await;
@@ -635,9 +635,9 @@ pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/1002/', 9900, 'MergeRequest', 'IN_PROJECT', 1002, 'Project'),
-         ('1/100/1002/', 9901, 'MergeRequest', 'IN_PROJECT', 1002, 'Project')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/1002/', 9900, 'MergeRequest', 'IN_PROJECT', 1002, 'Project', ['state:merged'], []),
+         ('1/100/1002/', 9901, 'MergeRequest', 'IN_PROJECT', 1002, 'Project', ['state:merged'], [])",
         t("gl_edge")
     ))
     .await;
