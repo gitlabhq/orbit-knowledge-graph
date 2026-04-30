@@ -74,7 +74,7 @@ Use the [GitLab CLI](https://docs.gitlab.com/cli/) to configure Orbit in one com
 
   To run the command without applying settings, you can apply the `--dry-run` option.
 
-For a list of available MCP tools, see [Orbit MCP tools](tools.md).
+For a list of available MCP tools, see [Orbit MCP tools](mcp_tools.md).
 
 ## Example prompts
 
