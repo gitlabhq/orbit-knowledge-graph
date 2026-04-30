@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     TRAVERSAL_PATH_COLUMN, cascade_cte, node_filter_cte, skip_security_filter_tables,
@@ -74,7 +74,117 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.options.materialize_ctes {
                 materialize_multi_ref_ctes(q);
             }
+            rewrite_in_subquery_to_semi_join(q);
         }
+    }
+}
+
+/// Rewrite `WHERE ... AND col IN (SELECT id FROM cte) AND ...` patterns into
+/// `LEFT SEMI JOIN cte ON col = cte.id`, removing the conjunct from WHERE.
+///
+/// ClickHouse can sometimes optimize `IN (subquery)` into a hash semi-join
+/// automatically, but an explicit `LEFT SEMI JOIN` gives the planner a
+/// stronger guarantee: it can stop scanning the right side as soon as a
+/// match is found (early termination) and avoids materializing the full
+/// hash set when the left side is much smaller than the right.
+fn rewrite_in_subquery_to_semi_join(q: &mut Query) {
+    let where_clause = match q.where_clause.take() {
+        Some(w) => w,
+        None => return,
+    };
+
+    let conjuncts = where_clause.flatten_and();
+    let mut kept: Vec<Expr> = Vec::new();
+    for conj in conjuncts {
+        if let Expr::InSubquery {
+            ref expr,
+            ref cte_name,
+            ref column,
+        } = conj
+        {
+            // Only rewrite when the expression is a simple column reference
+            // (e.g., `e0.source_id`) so we can locate the table in the FROM tree.
+            if let Expr::Column { table, column: col } = expr.as_ref() {
+                let semi_alias = format!("_sj_{cte_name}");
+                let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
+                let semi_scan = TableRef::scan(cte_name, &semi_alias);
+
+                if wrap_alias_with_semi_join(&mut q.from, table, semi_scan, on) {
+                    continue;
+                }
+            }
+        }
+        kept.push(conj);
+    }
+
+    q.where_clause = Expr::conjoin(kept);
+}
+
+/// Walk the FROM tree to find the node that defines `target_alias` and wrap
+/// it in a LEFT SEMI JOIN. Returns true if the alias was found and wrapped.
+fn wrap_alias_with_semi_join(
+    from: &mut TableRef,
+    target_alias: &str,
+    semi_rhs: TableRef,
+    on: Expr,
+) -> bool {
+    match from {
+        TableRef::Scan { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        TableRef::Join { left, right, .. } => {
+            wrap_alias_with_semi_join(left, target_alias, semi_rhs.clone(), on.clone())
+                || wrap_alias_with_semi_join(right, target_alias, semi_rhs, on)
+        }
+        TableRef::Union { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        TableRef::Subquery { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        _ => false,
     }
 }
 
