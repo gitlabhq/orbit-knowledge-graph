@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-title: Query language fields
+title: Orbit query language
 ---
 
 {{< details >}}
@@ -23,6 +23,36 @@ title: Query language fields
 > The availability of this feature is controlled by a feature flag.
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
+
+Use the Orbit query language to get data from the knowledge graph.
+
+You can use the query language:
+
+- In an AI prompt.
+- In the UI, with the query editor.
+- With the [Orbit API](https://docs.gitlab.com/api/orbit/).
+
+Orbit queries are JSON objects. Each query must include:
+
+- `query_type`: The type of query to run.
+- Either:
+  - `node`: The graph object to return.
+  - `nodes`: An array of graph objects to return.
+
+For example:
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "u",
+    "entity": "User",
+    "filters": { "username": "sidneyjones" }
+  }
+}
+```
+
+## Fields
 
 Queries support the following fields:
 
@@ -46,7 +76,7 @@ Queries support the following fields:
 
 1. You cannot specify both `node` and `nodes` in the same query.
 
-## `query_type`
+### `query_type`
 
 The type of query to run:
 
@@ -75,7 +105,7 @@ Find all users who have authored open merge requests and return up to 10 results
 }
 ```
 
-## `node`
+### `node`
 
 A single graph node. Use with `traversal` and `neighbors` queries.
 
@@ -108,7 +138,7 @@ Search for users whose username starts with `admin` and return their username an
 }
 ```
 
-## `nodes`
+### `nodes`
 
 An array of graph nodes. Use with `traversal`, `aggregation`, and `path_finding` queries.
 
@@ -135,7 +165,7 @@ Find all users who have authored merged merge requests and return up to 25 resul
 }
 ```
 
-## `relationships`
+### `relationships`
 
 An array of relationships. Required when `query_type` is `traversal`.
 
@@ -167,7 +197,7 @@ Retrieve merge requests and their authors. Return up to 25 results.
 }
 ```
 
-## `filters`
+### `filters`
 
 Use `filters` to filter results by their values or properties. The `filters` field is available only for the `node`, `nodes`, and `relationships` fields.
 
@@ -231,7 +261,7 @@ Filter vulnerabilities with high or critical severity:
 }
 ```
 
-## `aggregations`
+### `aggregations`
 
 An array of aggregation specifications. Required when `query_type` is `aggregation`.
 
@@ -265,7 +295,7 @@ Count the number of merge requests authored by each user and return up to 10 res
 }
 ```
 
-## `path`
+### `path`
 
 Path finding configuration. Required when `query_type` is `path_finding`.
 
@@ -304,7 +334,7 @@ Find the shortest path between project ID 100 and project ID 200 by following on
 }
 ```
 
-## `neighbors`
+### `neighbors`
 
 Neighbors configuration. Required when `query_type` is `neighbors`.
 
@@ -333,7 +363,7 @@ Retrieve all nodes directly connected to user ID 100 by `AUTHORED` or `MEMBER_OF
 }
 ```
 
-## `limit`
+### `limit`
 
 The maximum number of results to return. Range is `1`-`1000`. Default is `30`.
 
@@ -353,7 +383,7 @@ Search for all projects in the graph and return the name and full path of up to 
 }
 ```
 
-## `order_by`
+### `order_by`
 
 Result ordering for `traversal` queries.
 
@@ -382,7 +412,7 @@ Retrieve merge requests and their authors. Return results sorted by `updated_at`
 }
 ```
 
-## `cursor`
+### `cursor`
 
 Options for paginating query results.
 
@@ -411,7 +441,7 @@ Return usernames for up to 20 users at a time, starting at the 21st user.
 }
 ```
 
-## `aggregation_sort`
+### `aggregation_sort`
 
 Result ordering for `aggregation` queries.
 
@@ -442,7 +472,7 @@ Count vulnerabilities in each project and return results in descending order.
 }
 ```
 
-## `options`
+### `options`
 
 Presentation preferences that do not affect query semantics.
 

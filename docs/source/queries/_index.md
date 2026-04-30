@@ -38,40 +38,8 @@ have an AI agent like GitLab Duo write and run queries for you.
 
 ## Prerequisites
 
-- Orbit must be turned on for a group or project.
-- You must have the Reporter, Developer, Maintainer, or Owner role for the group or project.
-
-## Query language
-
-Use the Orbit query language to get data from the knowledge graph manually.
-
-You can use the query language:
-
-- In an AI prompt.
-- In the UI, with the query editor.
-- With the [Orbit API](https://docs.gitlab.com/api/orbit/).
-
-Orbit queries are JSON objects. Each query must include:
-
-- `query_type`: The type of query to run.
-- Either:
-  - `node`: The graph object to return.
-  - `nodes`: An array of graph objects to return.
-
-For example:
-
-```json
-{
-  "query_type": "traversal",
-  "node": {
-    "id": "u",
-    "entity": "User",
-    "filters": { "username": "sidneyjones" }
-  }
-}
-```
-
-For a list of available fields, see [query language fields](query_language.md).
+- Turn on Orbit for a group or project.
+- The Reporter, Developer, Maintainer, or Owner role for the group or project.
 
 ## Run a query in the UI
 
@@ -80,11 +48,9 @@ Use the query editor to write and run queries in the UI.
 To run a query:
 
 1. In the top bar, select **Search or go to** > **Your work**.
-1. Select **Orbit** > **Data explorer**.
-1. In the query editor, enter a query.
+1. Select **Orbit**, then select the **Explore** tab.
+1. In the query editor, enter a query. For information about query syntax, see [Orbit query language](query_language.md).
 1. Select **Execute query**.
-
-Orbit displays the results of the query in the **Node explorer** and **Table** views.
 
 ## GitLab Duo Agentic Chat
 
@@ -98,81 +64,17 @@ See [use GitLab Duo Chat](https://docs.gitlab.com/user/gitlab_duo_chat/agentic_c
 Use the Model Context Protocol (MCP) server to integrate external AI
 tools like Claude Code with Orbit.
 
-GitLab uses `mcp-remote` to establish secure connections between Orbit
-and AI tools running on your local computer. A known issue can cause
-the connection to fail with a `403 incorrect_scope` error. To resolve
-this issue, you must manually register the client before establishing
-the connection.
+Use the [GitLab CLI](https://docs.gitlab.com/cli/) to configure Orbit in one command:
 
-### Step 1: Manually register the client
+- In the command line, run:
 
-To register the client:
+  ```shell
+  glab orbit setup
+  ```
 
-1. From the command line, run:
+  To run the command without applying settings, you can apply the `--dry-run` option.
 
-   ```shell
-   npx mcp-remote "https://gitlab.com/api/v4/orbit/mcp"
-   ```
-
-1. In your browser, review and approve the authorization request.
-   The `mcp-remote` command fails to establish a connection and displays a `403 incorrect_scope` error. It creates a cache directory at `~/.mcp-auth/mcp-remote-<version>/` with two files:
-   - `<hash>-_client_info.json`
-   - `<hash>_tokens.json`
-
-   Save the file names for the next steps.
-
-1. Register a client:
-
-   ```shell
-   curl --request POST \
-     --header "Content-Type: application/json" \
-     --data '{"redirect_uris": ["http://localhost:42826/oauth/callback"], "client_name": "MCP CLI Proxy", "resource": "https://gitlab.com/api/v4/orbit/mcp"}' \
-     --url "https://gitlab.com/oauth/register"
-   ```
-
-1. In the response, verify that `scope` is set to `mcp_orbit` and save the values of:
-   - `client_id`
-   - `client_id_issued_at`
-
-1. Replace the content of `<hash>_client_info.json` with:
-
-   ```json
-   {
-     "redirect_uris": ["http://localhost:42826/oauth/callback"],
-     "token_endpoint_auth_method": "none",
-     "grant_types": ["authorization_code"],
-     "client_name": "[Unverified Dynamic Application] MCP CLI Proxy",
-     "scope": "mcp_orbit",
-     "client_id": "<client_id_from_response>",
-     "client_id_issued_at": <client_id_issued_at_from_response>
-   }
-   ```
-
-1. Replace the content of `<hash>_tokens.json` with:
-
-   ```json
-   {}
-   ```
-
-1. From the command line, run `mcp-remote` again:
-
-   ```shell
-   npx mcp-remote "https://gitlab.com/api/v4/orbit/mcp"
-   ```
-
-1. In your browser, review and approve the authorization request.
-   The connection should now succeed.
-
-### Step 2: Configure MCP
-
-To connect to the Orbit MCP server:
-
-- Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
-  Use the URL `https://gitlab.com/api/v4/orbit/mcp`.
-
-You can now start a chat with your AI agent.
-
-For a list of available MCP tools, see [Orbit MCP tools](mcp_tools.md).
+For a list of available MCP tools, see [Orbit MCP tools](tools.md).
 
 ## Example prompts
 
