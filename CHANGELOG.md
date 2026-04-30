@@ -1,3 +1,20 @@
+## [0.39.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.38.0...v0.39.0) (2026-04-30)
+
+### Features
+
+* **compiler:** optimize queries using denormalized edge tags ([c2fc219](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c2fc219eed2e762be7d0933ff4afd2af4178e2de)) by Michael Usachenko
+* **config:** add analytics enabled + collector_url fields ([fb5ad25](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fb5ad25e0bb15907178af7355ecd4a4743fb887a)) by Bohdan Parkhomchuk
+* **indexer:** populate denormalized edge tags at index time ([269bfd6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/269bfd67ecfa5b98c054d441675a92ec9d9383a8)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** cascade from auth-scoped nodes when no node_ids exist ([ae7fa6f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ae7fa6f3fff049d6465d3a7eae515c9b5bad23d0)) by Michael Usachenko
+
+### Other
+
+* add gitleaks secrets detection to pre-commit hook ([ea7d5f9](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ea7d5f9b9c10979a52c24fcba2c6ff9396df1ad0)) by Dmitry Gruzd
+* **compiler:** add skip_dedup query option ([23945e5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23945e5887bfc8dff832c13f4c74d07cf4cb6d7d)) by Michael Usachenko
+
 ## [0.38.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.37.1...v0.38.0) (2026-04-29)
 
 ### Features
