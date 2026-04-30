@@ -1,3 +1,17 @@
+## [0.41.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.40.0...v0.41.0) (2026-04-30)
+
+### Features
+
+* **compiler:** materialize multi-referenced CTEs for ClickHouse ([fba4392](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/fba4392b236839257d6911698c9fb828a5ca4955)) by Michael Usachenko
+
+### Performance
+
+* **compiler:** deduplicate cascade and hop frontier CTE outputs ([ff0a6a8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ff0a6a81099f663aec01f249f718625bd9b56910)) by Michael Usachenko
+
+### Other
+
+* **schema:** bump SCHEMA_VERSION to 24 ([79db0f6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/79db0f66a94efc20569fbbc51317a364cad9b11a)) by Michael Usachenko
+
 ## [0.40.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.39.0...v0.40.0) (2026-04-30)
 
 ### Features
