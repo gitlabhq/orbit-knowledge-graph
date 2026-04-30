@@ -72,6 +72,13 @@ pub struct QueryConfig {
     )]
     pub query_cache_ttl: Option<u32>,
 
+    /// Compiler-derived ClickHouse settings. Set by the compiler's settings
+    /// pass based on AST inspection (e.g. materialized CTEs). Invisible to
+    /// serde and the JSON schema — never loaded from YAML or user input.
+    #[serde(skip)]
+    #[schemars(skip)]
+    pub compiler_derived: CompilerDerivedSettings,
+
     /// NATS KV cache for graph query results (webserver).
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
@@ -81,6 +88,27 @@ pub struct QueryConfig {
     /// Excluded from ClickHouse SETTINGS (app-level only).
     #[serde(default, skip_serializing)]
     pub graph_query_cache_ttl: Option<u32>,
+}
+
+/// ClickHouse settings derived from compiler AST inspection. Not
+/// user-configurable — set by the compiler's settings pass and appended
+/// to the SETTINGS clause by codegen.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct CompilerDerivedSettings {
+    /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
+    /// the `MATERIALIZED` keyword (ClickHouse 26.2+).
+    pub enable_materialized_cte: bool,
+}
+
+impl CompilerDerivedSettings {
+    /// Render as ClickHouse SETTINGS key-value pairs.
+    pub fn to_clickhouse_settings(&self) -> Vec<(String, String)> {
+        let mut out = Vec::new();
+        if self.enable_materialized_cte {
+            out.push(("enable_materialized_cte".into(), "1".into()));
+        }
+        out
+    }
 }
 
 fn default_max_execution_time() -> Option<u64> {
@@ -100,6 +128,7 @@ impl Default for QueryConfig {
             max_rows_in_set: None,
             use_query_cache: None,
             query_cache_ttl: Some(DEFAULT_QUERY_CACHE_TTL),
+            compiler_derived: CompilerDerivedSettings::default(),
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
         }
@@ -117,6 +146,7 @@ impl QueryConfig {
             max_rows_in_set: None,
             use_query_cache: None,
             query_cache_ttl: None,
+            compiler_derived: CompilerDerivedSettings::default(),
             graph_query_cache_enabled: None,
             graph_query_cache_ttl: None,
         }
@@ -133,6 +163,9 @@ impl QueryConfig {
             max_rows_in_set: overrides.max_rows_in_set.or(self.max_rows_in_set),
             use_query_cache: overrides.use_query_cache.or(self.use_query_cache),
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
+            // compiler_derived is never merged from YAML overrides — it's
+            // set by the compiler after merge() runs.
+            compiler_derived: self.compiler_derived,
             graph_query_cache_enabled: overrides
                 .graph_query_cache_enabled
                 .or(self.graph_query_cache_enabled),

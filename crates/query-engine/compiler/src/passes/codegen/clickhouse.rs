@@ -32,14 +32,7 @@ pub fn codegen(
             .to_clickhouse_settings()
             .map_err(crate::error::QueryError::Codegen)?;
 
-        // ClickHouse 26.2+ requires `enable_materialized_cte = 1` when any
-        // CTE uses the MATERIALIZED keyword (also needs enable_analyzer = 1,
-        // which is the default in 26.x).
-        if let Node::Query(q) = ast
-            && q.ctes.iter().any(|c| c.materialized)
-        {
-            settings.push(("enable_materialized_cte".into(), "1".into()));
-        }
+        settings.extend(query_config.compiler_derived.to_clickhouse_settings());
 
         if !settings.is_empty() {
             let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();

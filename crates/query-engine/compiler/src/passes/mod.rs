@@ -13,6 +13,7 @@ pub mod security;
 pub mod settings;
 pub mod validate;
 
+use crate::ast::Node;
 use crate::error::Result;
 use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
@@ -199,7 +200,7 @@ pub struct SettingsPass;
 impl<E, S> CompilerPass<E, S> for SettingsPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasInput + HasQueryConfig,
+    S: PipelineState + HasInput + HasNode + HasQueryConfig,
 {
     const NAME: &'static str = "settings";
 
@@ -207,7 +208,17 @@ where
         let input = state.input()?;
         let query_type: &str = input.query_type.into();
         let has_cursor = input.cursor.is_some();
-        let config = settings::resolve(query_type, has_cursor);
+        let mut config = settings::resolve(query_type, has_cursor);
+
+        // ClickHouse 26.2+ requires `enable_materialized_cte = 1` when any
+        // CTE uses the MATERIALIZED keyword (also needs enable_analyzer = 1,
+        // which is the default in 26.x).
+        if let Node::Query(q) = state.node()?
+            && q.ctes.iter().any(|c| c.materialized)
+        {
+            config.compiler_derived.enable_materialized_cte = true;
+        }
+
         state.set_query_config(config);
         Ok(())
     }
