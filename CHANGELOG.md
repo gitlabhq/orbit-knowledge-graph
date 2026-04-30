@@ -1,3 +1,14 @@
+## [0.40.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.39.0...v0.40.0) (2026-04-30)
+
+### Features
+
+* **resilience:** add circuit-breaker crate ([a8c1f9c](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a8c1f9c52bd5b12a579f101583e8219e96d9678c)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** drop siphon_namespaces join from namespace dispatcher query ([8f3ba26](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8f3ba2692c2c163b0f68c5b0e061280a49642f64)) by Jean-Gabriel Doyon
+* **mise:** switch go-jsonnet from aqua to github backend ([356a696](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/356a696dc30b135bd478fe494de170633904f954)) by Thiago Figueiró
+
 ## [0.39.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.38.0...v0.39.0) (2026-04-30)
 
 ### Features
