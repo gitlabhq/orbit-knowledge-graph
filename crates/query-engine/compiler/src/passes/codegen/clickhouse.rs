@@ -28,9 +28,12 @@ pub fn codegen(
     // Values are pre-formatted as SQL-safe literals by to_clickhouse_settings()
     // (bare integers, 0/1 bools, escaped quoted strings).
     if matches!(ast, Node::Query(_)) {
-        let settings = query_config
+        let mut settings = query_config
             .to_clickhouse_settings()
             .map_err(crate::error::QueryError::Codegen)?;
+
+        settings.extend(query_config.compiler_derived.to_clickhouse_settings());
+
         if !settings.is_empty() {
             let clause: Vec<String> = settings.iter().map(|(k, v)| format!("{k} = {v}")).collect();
             sql.push_str(&format!(" SETTINGS {}", clause.join(", ")));
@@ -119,7 +122,11 @@ impl Context {
             .iter()
             .map(|cte| {
                 let inner = self.emit_query_body(&cte.query)?;
-                Ok(format!("{} AS ({})", cte.name, inner))
+                if cte.materialized {
+                    Ok(format!("{} AS MATERIALIZED ({})", cte.name, inner))
+                } else {
+                    Ok(format!("{} AS ({})", cte.name, inner))
+                }
             })
             .collect::<Result<Vec<_>>>()?;
 
@@ -743,6 +750,7 @@ mod tests {
                     ..Default::default()
                 }),
                 recursive: true,
+                materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
             from: TableRef::scan("path_cte", "r"),

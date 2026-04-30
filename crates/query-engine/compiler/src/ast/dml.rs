@@ -175,6 +175,11 @@ pub struct Cte {
     pub name: String,
     pub query: Box<Query>,
     pub recursive: bool,
+    /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
+    /// the CTE body once and caches the result. Without this, ClickHouse
+    /// inlines non-recursive CTEs at every reference site, re-executing the
+    /// scan for each `IN (SELECT ... FROM cte)`.
+    pub materialized: bool,
 }
 
 impl Cte {
@@ -183,6 +188,7 @@ impl Cte {
             name: name.into(),
             query: Box::new(query),
             recursive: false,
+            materialized: false,
         }
     }
 }

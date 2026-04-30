@@ -71,7 +71,278 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
+            if input.options.materialize_ctes {
+                materialize_multi_ref_ctes(q);
+            }
         }
+    }
+}
+
+/// Mark CTEs as `materialized` when they are referenced more than once in the
+/// query tree. ClickHouse inlines non-recursive, non-materialized CTEs at
+/// every reference site, re-executing the scan each time. Marking a CTE as
+/// `MATERIALIZED` forces ClickHouse to evaluate it once and cache the result,
+/// which eliminates redundant scans for CTEs used in multiple `IN (SELECT ...
+/// FROM cte)` filters or as both a cascade source and a node-table SIP.
+///
+/// Constraints (ClickHouse 26.2+):
+/// - Recursive CTEs: `MATERIALIZED` cannot combine with `RECURSIVE`.
+/// - Correlated CTEs: a materialized CTE cannot reference columns from the
+///   outer query scope. We detect this by checking whether the CTE body's
+///   column references include aliases that belong to the outer FROM tree
+///   (not other CTEs).
+fn materialize_multi_ref_ctes(q: &mut Query) {
+    if q.ctes.is_empty() {
+        return;
+    }
+
+    let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+
+    // Collect table aliases defined in the outer FROM tree. A CTE whose body
+    // references any of these is correlated and cannot be materialized.
+    let mut outer_aliases: HashSet<String> = HashSet::new();
+    collect_from_aliases(&q.from, &mut outer_aliases);
+
+    // Count how many times each CTE name is referenced across:
+    // - the main query body (FROM, WHERE, HAVING, ORDER BY, UNION ALL arms)
+    // - other CTE bodies (a CTE can reference a sibling defined before it)
+    let mut ref_counts: HashMap<String, usize> = HashMap::new();
+
+    // Count refs in CTE bodies (a later CTE can reference an earlier one).
+    for cte in &q.ctes {
+        count_cte_refs_in_query(&cte.query, &cte_names, &mut ref_counts);
+    }
+
+    // Count refs in the main query body (FROM tree, WHERE, HAVING, etc.).
+    count_cte_refs_in_from(&q.from, &cte_names, &mut ref_counts);
+    if let Some(w) = &q.where_clause {
+        count_cte_refs_in_expr(w, &cte_names, &mut ref_counts);
+    }
+    if let Some(h) = &q.having {
+        count_cte_refs_in_expr(h, &cte_names, &mut ref_counts);
+    }
+    for sel in &q.select {
+        count_cte_refs_in_expr(&sel.expr, &cte_names, &mut ref_counts);
+    }
+    for ord in &q.order_by {
+        count_cte_refs_in_expr(&ord.expr, &cte_names, &mut ref_counts);
+    }
+    if let Some((_, limit_by_cols)) = &q.limit_by {
+        for col in limit_by_cols {
+            count_cte_refs_in_expr(col, &cte_names, &mut ref_counts);
+        }
+    }
+    for arm in &q.union_all {
+        count_cte_refs_in_query(arm, &cte_names, &mut ref_counts);
+    }
+
+    // Mark CTEs with 2+ references as materialized, unless they are
+    // recursive or correlated with the outer query.
+    for cte in &mut q.ctes {
+        if cte.recursive {
+            continue;
+        }
+        let count = ref_counts.get(cte.name.as_str()).copied().unwrap_or(0);
+        if count < 2 {
+            continue;
+        }
+        if is_correlated_cte(&cte.query, &outer_aliases, &cte_names) {
+            continue;
+        }
+        cte.materialized = true;
+    }
+}
+
+/// Check whether a CTE body references column aliases from the outer query
+/// scope, making it a correlated subquery that ClickHouse cannot materialize.
+///
+/// A CTE is correlated if its expression tree contains `Column { table, .. }`
+/// nodes where `table` matches an alias defined in the outer FROM tree and
+/// is NOT the name of another CTE (since CTE-to-CTE references are fine).
+fn is_correlated_cte(
+    cte_query: &Query,
+    outer_aliases: &HashSet<String>,
+    cte_names: &HashSet<String>,
+) -> bool {
+    let mut cte_column_aliases: HashSet<String> = HashSet::new();
+    collect_all_column_aliases_in_query(cte_query, &mut cte_column_aliases);
+
+    // If any column alias in the CTE body matches an outer FROM alias
+    // and is NOT a CTE name, the CTE is correlated.
+    cte_column_aliases
+        .iter()
+        .any(|alias| outer_aliases.contains(alias) && !cte_names.contains(alias.as_str()))
+}
+
+/// Collect all table aliases defined in a `TableRef` tree (FROM clause).
+fn collect_from_aliases(from: &TableRef, aliases: &mut HashSet<String>) {
+    match from {
+        TableRef::Scan { alias, .. } => {
+            aliases.insert(alias.clone());
+        }
+        TableRef::Join { left, right, .. } => {
+            collect_from_aliases(left, aliases);
+            collect_from_aliases(right, aliases);
+        }
+        TableRef::Union { .. } | TableRef::Subquery { .. } => {
+            // Union/Subquery aliases are scoped to the derived table,
+            // not visible as outer references.
+        }
+    }
+}
+
+/// Collect all column aliases referenced in all expressions within a query.
+fn collect_all_column_aliases_in_query(q: &Query, aliases: &mut HashSet<String>) {
+    collect_all_column_aliases_in_from(&q.from, aliases);
+    if let Some(w) = &q.where_clause {
+        aliases.extend(w.column_aliases());
+    }
+    if let Some(h) = &q.having {
+        aliases.extend(h.column_aliases());
+    }
+    for sel in &q.select {
+        aliases.extend(sel.expr.column_aliases());
+    }
+    for ord in &q.order_by {
+        aliases.extend(ord.expr.column_aliases());
+    }
+    if let Some((_, limit_by_cols)) = &q.limit_by {
+        for col in limit_by_cols {
+            aliases.extend(col.column_aliases());
+        }
+    }
+    for arm in &q.union_all {
+        collect_all_column_aliases_in_query(arm, aliases);
+    }
+    for cte in &q.ctes {
+        collect_all_column_aliases_in_query(&cte.query, aliases);
+    }
+}
+
+/// Collect column aliases referenced in a `TableRef` tree's expressions
+/// (JOIN ON conditions, subquery bodies).
+fn collect_all_column_aliases_in_from(from: &TableRef, aliases: &mut HashSet<String>) {
+    match from {
+        TableRef::Scan { .. } => {}
+        TableRef::Join {
+            left, right, on, ..
+        } => {
+            collect_all_column_aliases_in_from(left, aliases);
+            collect_all_column_aliases_in_from(right, aliases);
+            aliases.extend(on.column_aliases());
+        }
+        TableRef::Union { queries, .. } => {
+            for q in queries {
+                collect_all_column_aliases_in_query(q, aliases);
+            }
+        }
+        TableRef::Subquery { query, .. } => {
+            collect_all_column_aliases_in_query(query, aliases);
+        }
+    }
+}
+
+/// Count CTE name references in all parts of a `Query`.
+fn count_cte_refs_in_query(
+    q: &Query,
+    cte_names: &HashSet<String>,
+    counts: &mut HashMap<String, usize>,
+) {
+    count_cte_refs_in_from(&q.from, cte_names, counts);
+    if let Some(w) = &q.where_clause {
+        count_cte_refs_in_expr(w, cte_names, counts);
+    }
+    if let Some(h) = &q.having {
+        count_cte_refs_in_expr(h, cte_names, counts);
+    }
+    for sel in &q.select {
+        count_cte_refs_in_expr(&sel.expr, cte_names, counts);
+    }
+    for ord in &q.order_by {
+        count_cte_refs_in_expr(&ord.expr, cte_names, counts);
+    }
+    if let Some((_, limit_by_cols)) = &q.limit_by {
+        for col in limit_by_cols {
+            count_cte_refs_in_expr(col, cte_names, counts);
+        }
+    }
+    // Recurse into UNION ALL arms.
+    for arm in &q.union_all {
+        count_cte_refs_in_query(arm, cte_names, counts);
+    }
+    // Recurse into nested CTEs (shouldn't happen often but be correct).
+    for cte in &q.ctes {
+        count_cte_refs_in_query(&cte.query, cte_names, counts);
+    }
+}
+
+/// Count CTE references in a `TableRef` tree (FROM clause).
+fn count_cte_refs_in_from(
+    from: &TableRef,
+    cte_names: &HashSet<String>,
+    counts: &mut HashMap<String, usize>,
+) {
+    match from {
+        TableRef::Scan { table, .. } => {
+            if cte_names.contains(table.as_str()) {
+                *counts.entry(table.clone()).or_insert(0) += 1;
+            }
+        }
+        TableRef::Join {
+            left, right, on, ..
+        } => {
+            count_cte_refs_in_from(left, cte_names, counts);
+            count_cte_refs_in_from(right, cte_names, counts);
+            count_cte_refs_in_expr(on, cte_names, counts);
+        }
+        TableRef::Union { queries, .. } => {
+            for q in queries {
+                count_cte_refs_in_query(q, cte_names, counts);
+            }
+        }
+        TableRef::Subquery { query, .. } => {
+            count_cte_refs_in_query(query, cte_names, counts);
+        }
+    }
+}
+
+/// Count CTE references in an `Expr` tree (WHERE, HAVING, ON, SELECT, etc.).
+fn count_cte_refs_in_expr(
+    expr: &Expr,
+    cte_names: &HashSet<String>,
+    counts: &mut HashMap<String, usize>,
+) {
+    match expr {
+        Expr::InSubquery {
+            expr: inner,
+            cte_name,
+            ..
+        } => {
+            if cte_names.contains(cte_name.as_str()) {
+                *counts.entry(cte_name.clone()).or_insert(0) += 1;
+            }
+            count_cte_refs_in_expr(inner, cte_names, counts);
+        }
+        Expr::BinaryOp { left, right, .. } => {
+            count_cte_refs_in_expr(left, cte_names, counts);
+            count_cte_refs_in_expr(right, cte_names, counts);
+        }
+        Expr::UnaryOp { expr: inner, .. } => {
+            count_cte_refs_in_expr(inner, cte_names, counts);
+        }
+        Expr::FuncCall { args, .. } => {
+            for a in args {
+                count_cte_refs_in_expr(a, cte_names, counts);
+            }
+        }
+        Expr::Lambda { body, .. } => {
+            count_cte_refs_in_expr(body, cte_names, counts);
+        }
+        Expr::Column { .. }
+        | Expr::Identifier(_)
+        | Expr::Literal(_)
+        | Expr::Param { .. }
+        | Expr::Star => {}
     }
 }
 
