@@ -57,42 +57,6 @@ impl Ontology {
             node_selector.insert("allOf".to_string(), Value::Array(entity_conditions));
         }
 
-        // Inject compiler performance options into QueryOptions. These are
-        // kept out of the base schema to reduce token usage for LLM consumers
-        // that only need the structural query surface.
-        if let Some(query_options) = defs.get_mut("QueryOptions").and_then(Value::as_object_mut) {
-            if let Some(props) = query_options
-                .get_mut("properties")
-                .and_then(Value::as_object_mut)
-            {
-                props.insert(
-                    "skip_dedup".to_string(),
-                    serde_json::json!({
-                        "type": "boolean",
-                        "description": "Skip ReplacingMergeTree deduplication. Not allowed for aggregation queries.",
-                        "default": false
-                    }),
-                );
-                props.insert(
-                    "materialize_ctes".to_string(),
-                    serde_json::json!({
-                        "type": "boolean",
-                        "description": "Materialize multi-referenced CTEs for reduced redundant scans.",
-                        "default": false
-                    }),
-                );
-                props.insert(
-                    "use_semi_join".to_string(),
-                    serde_json::json!({
-                        "type": "boolean",
-                        "description": "Rewrite IN-subquery SIP patterns to LEFT SEMI JOIN.",
-                        "default": false
-                    }),
-                );
-            }
-            query_options.insert("additionalProperties".to_string(), Value::Bool(false));
-        }
-
         Ok(schema)
     }
 

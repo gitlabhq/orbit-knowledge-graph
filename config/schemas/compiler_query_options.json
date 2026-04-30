@@ -1,0 +1,18 @@
+{
+  "$comment": "Compiler performance options injected into QueryOptions at runtime. Kept separate from the base graph_query.schema.json to reduce token usage for LLM consumers.",
+  "skip_dedup": {
+    "type": "boolean",
+    "description": "Skip ReplacingMergeTree deduplication. Not allowed for aggregation queries.",
+    "default": false
+  },
+  "materialize_ctes": {
+    "type": "boolean",
+    "description": "Materialize multi-referenced CTEs for reduced redundant scans.",
+    "default": false
+  },
+  "use_semi_join": {
+    "type": "boolean",
+    "description": "Rewrite IN-subquery SIP patterns to LEFT SEMI JOIN.",
+    "default": false
+  }
+}
