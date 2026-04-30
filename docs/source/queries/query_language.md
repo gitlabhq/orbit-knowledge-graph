@@ -32,6 +32,8 @@ You can use the query language:
 - In the UI, with the query editor.
 - With the [Orbit API](https://docs.gitlab.com/api/orbit/).
 
+## Syntax
+
 Orbit queries are JSON objects. Each query must include:
 
 - `query_type`: The type of query to run.
