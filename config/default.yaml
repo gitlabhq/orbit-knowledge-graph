@@ -128,6 +128,8 @@ schema:
   version_poll_interval_secs: 5
 
 analytics:
+  enabled: false                         # opt-in. Helm flips on for .com / Dedicated.
+  collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
   deployment:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production

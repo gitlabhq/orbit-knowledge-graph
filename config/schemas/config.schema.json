@@ -6,10 +6,12 @@
     "analytics": {
       "$ref": "#/$defs/AnalyticsConfig",
       "default": {
+        "collector_url": "",
         "deployment": {
           "environment": "development",
           "type": "self_managed"
-        }
+        },
+        "enabled": false
       }
     },
     "billing": {
@@ -263,12 +265,20 @@
     "AnalyticsConfig": {
       "type": "object",
       "properties": {
+        "collector_url": {
+          "type": "string",
+          "default": ""
+        },
         "deployment": {
           "$ref": "#/$defs/DeploymentConfig",
           "default": {
             "environment": "development",
             "type": "self_managed"
           }
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
