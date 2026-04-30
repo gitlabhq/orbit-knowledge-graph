@@ -69,6 +69,21 @@ $KC logs job/"$JOB_NAME" -n "$NS_GKG" 2>/dev/null | \
   sed '/---XUNIT_REPORT_/d' \
   > "$DIAG_DIR/junit.xml" || true
 
+# Always capture GKG pod logs (success + failure) so we keep observability over
+# the analytics tracker, ClickHouse client errors, and other warn/error paths
+# that surface only at runtime. The fuller per-namespace dump below stays gated
+# to failures since it's expensive (CH table dumps, NATS state, every namespace).
+log "Capturing GKG pod logs"
+GKG_NS_SHORT="${NS_GKG#e2e-${E2E_SHA}-}"
+$KC get pods -n "$NS_GKG" --no-headers 2>/dev/null \
+  | tee "$DIAG_DIR/${GKG_NS_SHORT}-pods.txt" || true
+$KC get events -n "$NS_GKG" --sort-by=.lastTimestamp 2>/dev/null \
+  > "$DIAG_DIR/${GKG_NS_SHORT}-events.txt" || true
+for pod in $($KC get pods -n "$NS_GKG" -o jsonpath='{.items[*].metadata.name}' 2>/dev/null); do
+  $KC logs "$pod" -n "$NS_GKG" --all-containers --prefix 2>/dev/null \
+    > "$DIAG_DIR/${GKG_NS_SHORT}-${pod}.log" || true
+done
+
 if [ "$result" = "pass" ]; then
   log "Tests passed"
   exit 0
