@@ -71,7 +71,9 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
-            materialize_multi_ref_ctes(q);
+            if input.options.materialize_ctes {
+                materialize_multi_ref_ctes(q);
+            }
         }
     }
 }

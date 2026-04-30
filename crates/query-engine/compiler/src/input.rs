@@ -45,6 +45,12 @@ pub struct QueryOptions {
     /// eventual consistency in exchange for lower latency.
     #[serde(default)]
     pub skip_dedup: bool,
+    /// When true, marks multi-referenced CTEs as `MATERIALIZED` so
+    /// ClickHouse evaluates them once instead of inlining at every
+    /// reference site. Reduces redundant scans for cascade and hop
+    /// frontier CTEs in multi-relationship queries.
+    #[serde(default)]
+    pub materialize_ctes: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried

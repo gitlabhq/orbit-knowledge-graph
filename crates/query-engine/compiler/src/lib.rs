@@ -1027,21 +1027,22 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "u", "entity": "User", "node_ids": [116]},
                 {"id": "mr", "entity": "MergeRequest"},
-                {"id": "n", "entity": "Note"}
+                {"id": "p", "entity": "Project"}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
             "aggregations": [{
                 "function": "count",
-                "target": "n",
-                "group_by": "u",
-                "alias": "note_count"
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
             }],
-            "limit": 5
+            "limit": 5,
+            "options": {"materialize_ctes": true}
         }"#;
 
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
@@ -1362,7 +1363,8 @@ mod tests {
                 "group_by": "p",
                 "alias": "user_mrs"
             }],
-            "limit": 5
+            "limit": 5,
+            "options": {"materialize_ctes": true}
         }"#;
 
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
