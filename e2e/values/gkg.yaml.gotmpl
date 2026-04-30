@@ -79,7 +79,7 @@ healthCheck:
     enabled: true
   targets:
     - deployments:
-        - gkg-indexer
+        - gkg-indexer-default
         - gkg-webserver
         - gkg-dispatcher
     - namespace: e2e-{{ $sha }}-siphon
