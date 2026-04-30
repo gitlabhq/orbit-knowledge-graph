@@ -8,7 +8,7 @@ title: Orbit
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
@@ -25,26 +25,22 @@ title: Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit is a data analysis and observability engine for GitLab.
-It indexes your groups, projects, and repositories, then analyzes
-the relationships between them to build a knowledge graph of your
-instance.
-
-<!--- add a picture of the node explorer here --->
-
-The knowledge graph is a structured, queryable map of your
-entire software development lifecycle. Use it to understand how your
-work is organized and how its parts relate to each other.
+Orbit is an AI-queryable knowledge graph of your software development
+lifecycle. It indexes your groups, projects, and repositories, then
+analyzes the relationships between them to build a structured map of
+your entire GitLab instance. You can use the knowledge graph to
+understand how your work is organized and how its parts relate to each
+other.
 
 Orbit exposes the knowledge graph through a unified context API.
-Explore the graph in the GitLab UI or query it with an AI tool like
-GitLab Duo to bring full workspace context into your agentic AI
-sessions.
+Explore the graph in the GitLab UI or query it with GitLab Duo or
+other MCP-enabled AI tools to bring full workspace context into your
+agentic AI sessions.
 
 You can use Orbit to get answers to questions like:
 
 - Based on past reviews and file ownership, who should review this change?
-- Have any vulnerabilities been found in this project, and are any unresolved?
+- Which MRs introduced vulnerabilities in these projects?
 - Which projects depend on this module or library?
 - What work items are assigned to this user in these projects?
 - Which projects do most pipeline failures come from?
@@ -57,7 +53,7 @@ Turn Orbit off to stop indexing and remove the group's data from the graph.
 
 Prerequisites:
 
-- You must have the Owner role for the group.
+- The Owner role for the group.
 
 To turn Orbit on or off:
 
@@ -71,16 +67,14 @@ Use the data explorer to visualize your instance and verify that Orbit indexed y
 
 Prerequisites:
 
-- Orbit must be turned on for a group or project.
-- You must have the Reporter, Developer, Maintainer, or Owner role for the group or project.
+- Turn on Orbit for a group or project.
+- The Reporter, Developer, Maintainer, or Owner role for the group or project.
 
 To view the knowledge graph:
 
 1. In the top bar, select **Search or go to** > **Your work**.
 1. Select **Orbit** > **Data explorer**.
-1. Explore the knowledge graph:
-   - In the **Node explorer** view, for details about a graph node, double-click the node.
-   - In the **Table** view, to download your data as a CSV file, select **Download CSV**.
+1. Double-click a node to view its details, including its nearest neighbors.
 
 ## Performance
 
@@ -115,7 +109,29 @@ Orbit indexes two types of data:
 
    Code is indexed from only the default branch.
 
-<!--- Re-add diagram --->
+The following diagram shows how Orbit builds the knowledge graph:
+
+```mermaid
+flowchart LR
+    accTitle: Orbit architecture overview
+    accDescr: SDLC data from GitLab is replicated via CDC to the Data Insights Platform, which writes to ClickHouse. Orbit reads and writes graph tables in ClickHouse, and indexes code through an internal API.
+
+    subgraph GitLab
+        SDLC[SDLC data]
+        Code[Code]
+    end
+
+    SDLC -- CDC replication --> DIP[Data Insights Platform]
+    DIP --> CH[(ClickHouse)]
+    CH <--> GKG[Orbit]
+    Code -- Rails API --> GKG
+```
+
+GitLab data is streamed through change data capture (CDC) events to
+the GitLab Data Insights Platform, which writes to ClickHouse. Code
+is served to Orbit over the Rails internal API. To build the graph,
+Orbit combines SDLC data and code into a graph table, then writes the
+result to ClickHouse.
 
 ### Supported languages
 
@@ -129,6 +145,7 @@ Orbit supports code indexing for the following languages:
 - JavaScript
 - Rust
 - C#
+- Go
 
 <!--- ## Billing and usage --->
 
