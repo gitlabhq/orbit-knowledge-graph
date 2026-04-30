@@ -31,19 +31,21 @@ impl Event for GlobalIndexingRequest {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NamespaceIndexingRequest {
-    pub organization: i64,
     pub namespace: i64,
+    pub traversal_path: String,
     pub watermark: DateTime<Utc>,
 }
 
 impl NamespaceIndexingRequest {
     pub fn publish_subscription(&self) -> Subscription {
+        let suffix = self
+            .traversal_path
+            .replace('/', ".")
+            .trim_end_matches('.')
+            .to_string();
         Subscription::new(
             INDEXER_STREAM,
-            format!(
-                "{}.{}.{}",
-                NAMESPACE_INDEXING_SUBJECT_PREFIX, self.organization, self.namespace
-            ),
+            format!("{NAMESPACE_INDEXING_SUBJECT_PREFIX}.{suffix}"),
         )
     }
 }
