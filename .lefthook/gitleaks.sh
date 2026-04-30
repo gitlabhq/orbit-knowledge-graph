@@ -15,7 +15,8 @@ fi
 if [ "$HOOK_TYPE" == "pre-commit" ]; then
   mise exec -- gitleaks git --pre-commit --staged --no-banner --redact --verbose
 elif [ "$HOOK_TYPE" == "pre-push" ]; then
-  BASE_COMMIT=$(git merge-base origin/main HEAD)
+  DEFAULT_BRANCH=$(git symbolic-ref refs/remotes/origin/HEAD 2>/dev/null | sed 's@^refs/remotes/@@' || echo "origin/main")
+  BASE_COMMIT=$(git merge-base "$DEFAULT_BRANCH" HEAD)
   mise exec -- gitleaks git --log-opts="$BASE_COMMIT..HEAD" --no-banner --redact --verbose
 else
   cat >&2 <<EOF
