@@ -169,11 +169,7 @@ async fn main() -> Result<()> {
     let ontology =
         Arc::new(Ontology::load_from_dir(&cli.ontology).context("failed to load ontology")?);
 
-    let org_id = cli.traversal_paths[0]
-        .trim_start_matches('/')
-        .split('/')
-        .next()
-        .and_then(|s| s.parse::<i64>().ok())
+    let org_id = gkg_utils::traversal_path::org_id(&cli.traversal_paths[0])
         .context("failed to parse org_id from first traversal path")?;
 
     let security_ctx = SecurityContext::new(org_id, cli.traversal_paths.clone())

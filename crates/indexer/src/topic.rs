@@ -38,11 +38,7 @@ pub struct NamespaceIndexingRequest {
 
 impl NamespaceIndexingRequest {
     pub fn publish_subscription(&self) -> Subscription {
-        let suffix = self
-            .traversal_path
-            .replace('/', ".")
-            .trim_end_matches('.')
-            .to_string();
+        let suffix = gkg_utils::traversal_path::to_dotted(&self.traversal_path);
         Subscription::new(
             INDEXER_STREAM,
             format!("{NAMESPACE_INDEXING_SUBJECT_PREFIX}.{suffix}"),

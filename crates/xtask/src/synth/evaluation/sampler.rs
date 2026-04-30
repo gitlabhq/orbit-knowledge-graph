@@ -233,7 +233,7 @@ impl ParameterSampler {
             .into_iter()
             .filter_map(|r| {
                 // First segment is org_id
-                let org_id: i64 = r.traversal_path.split('/').next()?.parse().ok()?;
+                let org_id: i64 = gkg_utils::traversal_path::org_id(&r.traversal_path)?;
                 // Append trailing slash for SecurityContext format
                 let path = if r.traversal_path.ends_with('/') {
                     r.traversal_path
