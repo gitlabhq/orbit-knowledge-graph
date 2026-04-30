@@ -29,7 +29,7 @@ pub fn handler_context(ctx: &TestContext) -> HandlerContext {
 
 fn noop_circuit_breaker() -> circuit_breaker::CircuitBreaker {
     let registry = indexer::circuit_breaker::build_registry(
-        &gkg_server_config::CircuitBreakerSettings::default(),
+        &gkg_server_config::CircuitBreakerConfig::default(),
         Arc::new(circuit_breaker::NoopObserver),
     );
     registry.circuit_breaker(indexer::circuit_breaker::IndexerService::ClickHouseDatalake)

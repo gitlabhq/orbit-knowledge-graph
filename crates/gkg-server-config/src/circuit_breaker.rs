@@ -38,7 +38,7 @@ impl Default for ServiceCircuitBreakerConfig {
 
 #[derive(Clone, Debug, Default, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
-pub struct CircuitBreakerSettings {
+pub struct CircuitBreakerConfig {
     #[serde(default)]
     pub clickhouse_datalake: ServiceCircuitBreakerConfig,
 

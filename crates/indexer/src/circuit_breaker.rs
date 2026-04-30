@@ -3,7 +3,7 @@ use std::sync::Arc;
 use std::time::Duration;
 
 use circuit_breaker::{CircuitBreakerObserver, CircuitBreakerRegistry, CircuitConfig, ServiceName};
-use gkg_server_config::{CircuitBreakerSettings, ServiceCircuitBreakerConfig};
+use gkg_server_config::{CircuitBreakerConfig, ServiceCircuitBreakerConfig};
 
 #[derive(Debug, Clone, Copy)]
 pub enum IndexerService {
@@ -33,7 +33,7 @@ fn to_circuit_config(config: &ServiceCircuitBreakerConfig) -> CircuitConfig {
 }
 
 pub fn build_registry(
-    settings: &CircuitBreakerSettings,
+    settings: &CircuitBreakerConfig,
     observer: Arc<dyn CircuitBreakerObserver>,
 ) -> CircuitBreakerRegistry {
     let configs: HashMap<&'static str, CircuitConfig> = HashMap::from([
@@ -64,7 +64,7 @@ mod tests {
 
     #[test]
     fn build_registry_creates_all_services() {
-        let settings = CircuitBreakerSettings::default();
+        let settings = CircuitBreakerConfig::default();
         let registry = build_registry(&settings, Arc::new(circuit_breaker::NoopObserver));
 
         assert!(registry.is_available(IndexerService::ClickHouseDatalake));

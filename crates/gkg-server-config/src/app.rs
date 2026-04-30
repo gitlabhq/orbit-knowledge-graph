@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::analytics::AnalyticsConfig;
 use crate::billing::BillingConfig;
-use crate::circuit_breaker::CircuitBreakerSettings;
+use crate::circuit_breaker::CircuitBreakerConfig;
 use crate::clickhouse::ClickHouseConfiguration;
 use crate::engine::{EngineConfiguration, ScheduleConfig};
 use crate::gitlab::{GitlabClientConfiguration, GitlabConfig};
@@ -83,7 +83,7 @@ pub struct AppConfig {
     #[serde(default)]
     pub schema: SchemaConfig,
     #[serde(default)]
-    pub circuit_breaker: CircuitBreakerSettings,
+    pub circuit_breaker: CircuitBreakerConfig,
     #[serde(default)]
     pub analytics: AnalyticsConfig,
     #[serde(default)]

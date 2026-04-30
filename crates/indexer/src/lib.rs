@@ -102,7 +102,7 @@ pub struct IndexerConfig {
     #[serde(default)]
     pub schema: SchemaConfig,
     #[serde(default)]
-    pub circuit_breaker: gkg_server_config::CircuitBreakerSettings,
+    pub circuit_breaker: gkg_server_config::CircuitBreakerConfig,
 }
 
 impl Default for IndexerConfig {
@@ -116,7 +116,7 @@ impl Default for IndexerConfig {
             schedule: ScheduleConfig::default(),
             health_bind_address: default_health_bind_address(),
             schema: SchemaConfig::default(),
-            circuit_breaker: gkg_server_config::CircuitBreakerSettings::default(),
+            circuit_breaker: gkg_server_config::CircuitBreakerConfig::default(),
         }
     }
 }
