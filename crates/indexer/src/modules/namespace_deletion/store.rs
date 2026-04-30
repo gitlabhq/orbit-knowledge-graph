@@ -206,37 +206,16 @@ impl ClickHouseNamespaceDeletionStore {
         self.graph_breaker = Some(graph_breaker);
         self
     }
+}
 
-    async fn guarded_datalake<F, Fut, T>(&self, f: F) -> Result<T, NamespaceDeletionStoreError>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, NamespaceDeletionStoreError>>,
-    {
-        let Some(breaker) = &self.datalake_breaker else {
-            return f().await;
-        };
-        breaker.call(f).await.map_err(|e| match e {
-            circuit_breaker::CircuitBreakerError::Open { service } => {
-                NamespaceDeletionStoreError::Query(format!("circuit breaker open for {service}"))
-            }
-            circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
-        })
-    }
-
-    async fn guarded_graph<F, Fut, T>(&self, f: F) -> Result<T, NamespaceDeletionStoreError>
-    where
-        F: FnOnce() -> Fut,
-        Fut: std::future::Future<Output = Result<T, NamespaceDeletionStoreError>>,
-    {
-        let Some(breaker) = &self.graph_breaker else {
-            return f().await;
-        };
-        breaker.call(f).await.map_err(|e| match e {
-            circuit_breaker::CircuitBreakerError::Open { service } => {
-                NamespaceDeletionStoreError::Query(format!("circuit breaker open for {service}"))
-            }
-            circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
-        })
+fn map_breaker_error(
+    error: circuit_breaker::CircuitBreakerError<NamespaceDeletionStoreError>,
+) -> NamespaceDeletionStoreError {
+    match error {
+        circuit_breaker::CircuitBreakerError::Open { service } => {
+            NamespaceDeletionStoreError::Query(format!("circuit breaker open for {service}"))
+        }
+        circuit_breaker::CircuitBreakerError::Inner(inner) => inner,
     }
 }
 
@@ -246,7 +225,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         namespace_id: i64,
     ) -> Result<bool, NamespaceDeletionStoreError> {
-        self.guarded_datalake(|| async {
+        let query = || async {
             let batches = self
                 .datalake
                 .query(IS_NAMESPACE_STILL_DELETED)
@@ -259,8 +238,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                 .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
             Ok(deleted_flags.first().copied().unwrap_or(true))
-        })
-        .await
+        };
+
+        match &self.datalake_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 
     async fn delete_namespace_checkpoints(
@@ -268,7 +251,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &str,
         namespace_id: i64,
     ) -> Result<(), NamespaceDeletionStoreError> {
-        self.guarded_graph(|| async {
+        let query = || async {
             let key_prefix = format!("{}.", namespace_position_key(namespace_id));
 
             self.graph
@@ -284,8 +267,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                 .execute()
                 .await
                 .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))
-        })
-        .await
+        };
+
+        match &self.graph_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 
     async fn delete_namespace_data(&self, traversal_path: &str) -> Vec<TableDeletionOutcome> {
@@ -325,7 +312,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         namespace_id: i64,
         traversal_path: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
-        self.guarded_graph(|| async {
+        let query = || async {
             self.graph
                 .query(&mark_deletion_complete_sql())
                 .param("namespace_id", namespace_id)
@@ -336,8 +323,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                     namespace_id,
                     reason: error.to_string(),
                 })
-        })
-        .await
+        };
+
+        match &self.graph_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 
     async fn find_newly_deleted_namespaces(
@@ -345,7 +336,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         last_watermark: &str,
         watermark: &str,
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
-        self.guarded_datalake(|| async {
+        let query = || async {
             let batches = self
                 .datalake
                 .query(DELETED_NAMESPACES_QUERY)
@@ -356,8 +347,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                 .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
             extract_schedule_entries(&batches)
-        })
-        .await
+        };
+
+        match &self.datalake_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 
     async fn schedule_deletion(
@@ -366,7 +361,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         traversal_path: &str,
         scheduled_deletion_date: &str,
     ) -> Result<(), NamespaceDeletionStoreError> {
-        self.guarded_graph(|| async {
+        let query = || async {
             self.graph
                 .query(&schedule_deletion_insert_sql())
                 .param("namespace_id", namespace_id)
@@ -378,14 +373,18 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                     namespace_id,
                     reason: error.to_string(),
                 })
-        })
-        .await
+        };
+
+        match &self.graph_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 
     async fn find_due_deletions(
         &self,
     ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
-        self.guarded_graph(|| async {
+        let query = || async {
             let batches = self
                 .graph
                 .query(&due_namespaces_query_sql())
@@ -394,8 +393,12 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
                 .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
             extract_schedule_entries(&batches)
-        })
-        .await
+        };
+
+        match &self.graph_breaker {
+            Some(breaker) => breaker.call(query).await.map_err(map_breaker_error),
+            None => query().await,
+        }
     }
 }
 

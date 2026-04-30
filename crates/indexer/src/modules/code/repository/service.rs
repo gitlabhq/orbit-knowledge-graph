@@ -126,10 +126,11 @@ impl CircuitBreakingRepositoryService {
 
 fn is_repository_service_error(error: &RepositoryServiceError) -> bool {
     match error {
-        RepositoryServiceError::GitlabApi(gitlab_error) => {
-            !matches!(gitlab_error, GitlabClientError::NotFound(_))
+        RepositoryServiceError::GitlabApi(GitlabClientError::Request(_)) => true,
+        RepositoryServiceError::GitlabApi(GitlabClientError::ServerError { status, .. }) => {
+            *status >= 500
         }
-        RepositoryServiceError::Archive(_) => false,
+        _ => false,
     }
 }
 
