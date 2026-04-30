@@ -9783,6 +9783,7 @@ dependencies = [
  "compiler",
  "gkg-server",
  "gkg-server-config",
+ "gkg-utils",
  "ontology",
  "pipeline",
  "rustls",

@@ -22,7 +22,7 @@ use testcontainers_modules::nats::{Nats, NatsServerCmd};
 
 struct Namespace {
     id: i64,
-    organization_id: i64,
+    traversal_path: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -32,8 +32,8 @@ struct GlobalRequest {
 
 #[derive(Debug, Deserialize)]
 struct NamespaceRequest {
-    organization: i64,
     namespace: i64,
+    traversal_path: String,
     watermark: DateTime<Utc>,
 }
 
@@ -63,26 +63,16 @@ impl TestContext {
         }
     }
 
-    async fn given_namespaces(&self, namespaces: impl IntoIterator<Item = Namespace>) {
-        for ns in namespaces {
-            self.clickhouse
-                .execute(&format!(
-                    "INSERT INTO siphon_namespaces (id, name, path, organization_id) \
-                     VALUES ({}, 'ns-{}', 'path-{}', {})",
-                    ns.id, ns.id, ns.id, ns.organization_id
-                ))
-                .await;
-        }
-    }
-
-    async fn given_enabled_namespaces(&self, namespace_ids: impl IntoIterator<Item = i64>) {
-        for (i, ns_id) in namespace_ids.into_iter().enumerate() {
+    async fn given_enabled_namespaces(&self, namespaces: impl IntoIterator<Item = Namespace>) {
+        for (i, ns) in namespaces.into_iter().enumerate() {
             self.clickhouse
                 .execute(&format!(
                     "INSERT INTO siphon_knowledge_graph_enabled_namespaces \
                      (id, root_namespace_id, traversal_path, created_at, updated_at) \
-                     VALUES ({}, {ns_id}, '1/{ns_id}/', now(), now())",
-                    i + 1
+                     VALUES ({}, {}, '{}', now(), now())",
+                    i + 1,
+                    ns.id,
+                    ns.traversal_path
                 ))
                 .await;
         }
@@ -170,23 +160,21 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
     let context = TestContext::new().await;
 
     context
-        .given_namespaces([
+        .given_enabled_namespaces([
             Namespace {
                 id: 100,
-                organization_id: 1,
+                traversal_path: "1/100/".to_string(),
             },
             Namespace {
                 id: 200,
-                organization_id: 2,
+                traversal_path: "2/200/".to_string(),
             },
             Namespace {
                 id: 300,
-                organization_id: 3,
+                traversal_path: "3/300/".to_string(),
             },
         ])
         .await;
-
-    context.given_enabled_namespaces([100, 200, 300]).await;
 
     let services = indexer::scheduler::connect(&context.nats_config())
         .await
@@ -225,9 +213,9 @@ async fn dispatcher_publishes_global_and_namespace_requests() {
 
     let actual: HashSet<_> = namespaces
         .iter()
-        .map(|r| (r.namespace, r.organization))
+        .map(|r| (r.namespace, r.traversal_path.as_str()))
         .collect();
-    let expected: HashSet<_> = [(100, 1), (200, 2), (300, 3)].into();
+    let expected: HashSet<_> = [(100, "1/100/"), (200, "2/200/"), (300, "3/300/")].into();
     assert_eq!(actual, expected);
 
     assert!(
