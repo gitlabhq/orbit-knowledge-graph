@@ -1335,4 +1335,73 @@ mod tests {
             "skip_dedup should still filter by _deleted, got:\n{sql}"
         );
     }
+
+    /// Multi-relationship aggregation produces cascade CTEs that are
+    /// referenced from both edge filters and node filters. CTEs with 2+
+    /// references must be emitted as `AS MATERIALIZED (...)` so ClickHouse
+    /// evaluates them once instead of re-executing at every reference site.
+    /// The `enable_materialized_cte = 1` setting must also be present.
+    #[test]
+    fn multi_ref_cte_emits_materialized_keyword_and_setting() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // _cascade_mr is referenced from both an edge scan filter and a
+        // node table filter — it must be materialized.
+        assert!(
+            sql.contains("_cascade_mr AS MATERIALIZED"),
+            "multi-referenced _cascade_mr CTE must use MATERIALIZED, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("enable_materialized_cte = 1"),
+            "SETTINGS must include enable_materialized_cte = 1, got:\n{sql}"
+        );
+    }
+
+    /// Single-reference CTEs must NOT be materialized — inlining lets
+    /// ClickHouse push predicates through and is the default behavior.
+    #[test]
+    fn single_ref_cte_is_not_materialized() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("MATERIALIZED"),
+            "single-ref CTE must not use MATERIALIZED, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("enable_materialized_cte"),
+            "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
+        );
+    }
 }
