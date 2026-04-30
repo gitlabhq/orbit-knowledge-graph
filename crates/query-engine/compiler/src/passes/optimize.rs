@@ -90,13 +90,52 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
 /// match is found (early termination) and avoids materializing the full
 /// hash set when the left side is much smaller than the right.
 fn rewrite_in_subquery_to_semi_join(q: &mut Query) {
-    let where_clause = match q.where_clause.take() {
+    rewrite_where_in_to_semi_join(&mut q.from, &mut q.where_clause);
+
+    // Recurse into CTE bodies.
+    for cte in &mut q.ctes {
+        rewrite_in_subquery_to_semi_join(&mut cte.query);
+    }
+
+    // Recurse into UNION ALL arms.
+    for arm in &mut q.union_all {
+        rewrite_in_subquery_to_semi_join(arm);
+    }
+
+    // Recurse into subqueries and unions in the FROM tree.
+    rewrite_in_subquery_in_from(&mut q.from);
+}
+
+/// Walk the FROM tree and apply the rewrite to any nested subqueries or unions.
+fn rewrite_in_subquery_in_from(from: &mut TableRef) {
+    match from {
+        TableRef::Join { left, right, .. } => {
+            rewrite_in_subquery_in_from(left);
+            rewrite_in_subquery_in_from(right);
+        }
+        TableRef::Subquery { query, .. } => {
+            rewrite_in_subquery_to_semi_join(query);
+        }
+        TableRef::Union { queries, .. } => {
+            for q in queries {
+                rewrite_in_subquery_to_semi_join(q);
+            }
+        }
+        TableRef::Scan { .. } => {}
+    }
+}
+
+/// Extract `InSubquery` conjuncts from a WHERE clause and rewrite them into
+/// LEFT SEMI JOINs on the FROM tree.
+fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+    let w = match where_clause.take() {
         Some(w) => w,
         None => return,
     };
 
-    let conjuncts = where_clause.flatten_and();
+    let conjuncts = w.flatten_and();
     let mut kept: Vec<Expr> = Vec::new();
+
     for conj in conjuncts {
         if let Expr::InSubquery {
             ref expr,
@@ -111,7 +150,7 @@ fn rewrite_in_subquery_to_semi_join(q: &mut Query) {
                 let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
                 let semi_scan = TableRef::scan(cte_name, &semi_alias);
 
-                if wrap_alias_with_semi_join(&mut q.from, table, semi_scan, on) {
+                if wrap_alias_with_semi_join(from, table, semi_scan, on) {
                     continue;
                 }
             }
@@ -119,7 +158,7 @@ fn rewrite_in_subquery_to_semi_join(q: &mut Query) {
         kept.push(conj);
     }
 
-    q.where_clause = Expr::conjoin(kept);
+    *where_clause = Expr::conjoin(kept);
 }
 
 /// Walk the FROM tree to find the node that defines `target_alias` and wrap
