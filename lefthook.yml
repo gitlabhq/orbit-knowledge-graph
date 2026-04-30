@@ -56,3 +56,5 @@ pre-commit:
         - "dashboards/orbit/*.dashboard.json"
         - "crates/gkg-observability/orbit-dashboards/gkg-metrics.json"
         - "crates/xtask/src/dashboards.rs"
+    - name: secrets-detection
+      run: .lefthook/gitleaks.sh pre-commit
