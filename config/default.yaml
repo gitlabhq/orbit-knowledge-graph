@@ -18,7 +18,7 @@ nats:
   # batch_size: 10
   # auto_create_streams: true
   # stream_replicas: 1
-  # stream_max_age_secs: null
+  stream_max_age_secs: 14400
   # stream_max_bytes: null
   # stream_max_messages: null
 
@@ -27,6 +27,8 @@ datalake:
   database: default
   username: default
   # password: ""
+  query_settings:
+    max_execution_time: "900"
 
 graph:
   url: "http://127.0.0.1:8123"
