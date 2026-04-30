@@ -381,20 +381,20 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Filter is captured via SIP CTE (`_nf_mr` filtered by state='opened',
-        // edge `source_id IN _nf_mr`). The COUNT must reference the edge column
-        // so that filtered edges are what's counted; emitting bare `count()`
-        // here would not be wrong (the IN-filter still bounds rows) but would
-        // suppress the projection-routing decision based on filter presence.
+        // The MR state filter is denormalized onto the edge as source_state.
+        // The denorm pass rewrites the _nf_mr CTE into a direct edge-column
+        // filter (e0.source_state = 'opened'), and the COUNT becomes bare
+        // count() since the WHERE clause already bounds rows correctly.
         assert!(
             sql.contains("COUNT(e0.source_id)")
                 || sql.contains("countIf")
-                || sql.contains("COUNTIF"),
-            "filtered count must reference edge column or use countIf, got:\n{sql}"
+                || sql.contains("COUNTIF")
+                || sql.contains("count()"),
+            "count must reference edge column, use countIf, or be bare count(), got:\n{sql}"
         );
         assert!(
-            sql.contains("state = 'opened'"),
-            "state filter must reach the SQL (in _nf_* or WHERE), got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'state:opened')"),
+            "state filter must reach the SQL as has on source_tags, got:\n{sql}"
         );
     }
 
@@ -1098,6 +1098,212 @@ mod tests {
         assert!(
             !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
+        );
+    }
+
+    // ── Denormalization pass tests ──────────────────────────────────────
+
+    #[test]
+    fn denorm_single_hop_removes_nf_cte_and_injects_edge_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "denorm pass should inject has edge filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_in_list_filter_rewrites_to_has_any() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed", "canceled"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan for IN filter, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("hasAny(e0.source_tags"),
+            "IN-list filter should rewrite to hasAny, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("'status:failed'") && sql.contains("'status:canceled'"),
+            "hasAny should contain both tag values, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_in_list_single_value_rewrites_to_has() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("gl_pipeline"),
+            "denorm pass should eliminate gl_pipeline scan for single-value IN, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "single-value IN should rewrite to has(), got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_partial_filters_keeps_nf_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"},
+                    "source": {"op": "eq", "value": "push"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("_nf_pipe"),
+            "partial denorm must keep _nf_pipe CTE when not all filters are denormalized, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("has"),
+            "partial denorm must not inject has edge filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_skips_rewrite_when_node_ids_present() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "node_ids": [1, 2, 3],
+                 "filters": {"status": {"op": "eq", "value": "failed"}}},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("has"),
+            "denorm pass must skip rewrite when node_ids are present, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_aggregation_count_with_filter_uses_edge_column() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "pipe",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "filter on denormalized property must use has edge filter, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("pipe.status"),
+            "node-table status filter should be eliminated by denorm rewrite, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_preserves_role_gated_node_table_for_security() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability", "filters": {
+                    "state": {"op": "eq", "value": "detected"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "v",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "role-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
         );
     }
 
