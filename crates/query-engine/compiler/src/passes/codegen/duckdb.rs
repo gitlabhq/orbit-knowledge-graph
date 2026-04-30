@@ -505,6 +505,7 @@ mod tests {
                     ..Default::default()
                 }),
                 recursive: true,
+                materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
             from: TableRef::scan("path_cte", "r"),

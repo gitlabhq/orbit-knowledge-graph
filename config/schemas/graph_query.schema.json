@@ -687,6 +687,11 @@
           "type": "boolean",
           "description": "When true, skips ReplacingMergeTree deduplication for node tables. Rows are still filtered by _deleted = false but stale duplicates from un-merged parts may appear. Not allowed for aggregation queries. Useful for traversal queries where eventual consistency is acceptable in exchange for lower latency.",
           "default": false
+        },
+        "materialize_ctes": {
+          "type": "boolean",
+          "description": "When true, marks multi-referenced CTEs as MATERIALIZED so ClickHouse evaluates them once instead of inlining at every reference site. Reduces redundant scans for cascade and hop frontier CTEs in multi-relationship queries.",
+          "default": false
         }
       },
       "additionalProperties": false
