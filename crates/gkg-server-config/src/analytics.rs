@@ -1,6 +1,6 @@
-//! Analytics configuration: deployment identity today, with room for
-//! opt-in/opt-out, transport, and auth settings as the `gkg-analytics` crate
-//! grows.
+//! Analytics configuration. `enabled` is false by default — operators must
+//! opt in (Helm values). Self-managed never phones home unless explicitly
+//! switched on.
 
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 #[schemars(deny_unknown_fields)]
 pub struct AnalyticsConfig {
+    pub enabled: bool,
+    pub collector_url: String,
     pub deployment: DeploymentConfig,
 }
 
@@ -39,13 +41,25 @@ pub enum DeploymentEnvironment {
     Production,
 }
 
+impl DeploymentEnvironment {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Development => "development",
+            Self::Staging => "staging",
+            Self::Production => "production",
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn defaults_to_self_managed_development() {
+    fn defaults_are_disabled_and_empty_url() {
         let cfg = AnalyticsConfig::default();
+        assert!(!cfg.enabled);
+        assert_eq!(cfg.collector_url, "");
         assert_eq!(cfg.deployment.kind, DeploymentKind::SelfManaged);
         assert_eq!(
             cfg.deployment.environment,
@@ -54,10 +68,19 @@ mod tests {
     }
 
     #[test]
-    fn parses_nested_yaml() {
-        let cfg: AnalyticsConfig =
-            serde_yaml::from_str("deployment:\n  type: com\n  environment: staging\n").unwrap();
+    fn parses_full_yaml() {
+        let cfg: AnalyticsConfig = serde_yaml::from_str(
+            "enabled: true\n\
+             collector_url: https://snowplow.trx.gitlab.net\n\
+             deployment:\n  type: com\n  environment: production\n",
+        )
+        .unwrap();
+        assert!(cfg.enabled);
+        assert_eq!(cfg.collector_url, "https://snowplow.trx.gitlab.net");
         assert_eq!(cfg.deployment.kind, DeploymentKind::Com);
-        assert_eq!(cfg.deployment.environment, DeploymentEnvironment::Staging);
+        assert_eq!(
+            cfg.deployment.environment,
+            DeploymentEnvironment::Production
+        );
     }
 }
