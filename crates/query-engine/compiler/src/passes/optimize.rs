@@ -74,7 +74,9 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.options.materialize_ctes {
                 materialize_multi_ref_ctes(q);
             }
-            rewrite_in_subquery_to_semi_join(q);
+            if input.options.use_semi_join {
+                rewrite_in_subquery_to_semi_join(q);
+            }
         }
     }
 }

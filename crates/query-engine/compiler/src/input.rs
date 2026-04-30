@@ -51,6 +51,11 @@ pub struct QueryOptions {
     /// frontier CTEs in multi-relationship queries.
     #[serde(default)]
     pub materialize_ctes: bool,
+    /// When true, rewrites `IN (SELECT id FROM cte)` SIP patterns into
+    /// explicit `LEFT SEMI JOIN` for early termination and reduced hash-set
+    /// materialization in ClickHouse.
+    #[serde(default)]
+    pub use_semi_join: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
