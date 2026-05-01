@@ -1072,6 +1072,132 @@ fn resolve_denorm_direction(node: &InputNode, input: &Input) -> Option<&'static 
     None
 }
 
+/// Build edge tag predicates (`has()` / `hasAll()` / `hasAny()`) for a node's
+/// denormalized filters.
+///
+/// Returns a `Vec<Expr>` of predicates using the given `edge_alias` for the
+/// tag column references. Returns an empty vec if no filters are denormalized
+/// or the node has no filters. Only `eq` and `in` filter operators are
+/// supported; other operators are silently skipped (they can't be expressed
+/// as tag predicates).
+///
+/// This is the shared building block used by:
+/// - `rewrite_denormalized_node_filters` (traversal main query)
+/// - `build_cascade_for_node` / `build_multihop_cascade_for_node`
+/// - `inject_hop_frontiers` (path-finding final hop)
+fn build_denorm_tag_predicates(
+    node: &InputNode,
+    dir_prefix: &str,
+    edge_alias: &str,
+    denorm_map: &HashMap<(String, String, String), (String, String)>,
+) -> Vec<Expr> {
+    let entity = match &node.entity {
+        Some(e) => e,
+        None => return vec![],
+    };
+    if node.filters.is_empty() {
+        return vec![];
+    }
+
+    struct TagFilter {
+        edge_column: String,
+        tags: Vec<String>,
+        is_any: bool,
+    }
+    let mut tag_filters: Vec<TagFilter> = Vec::new();
+
+    for (prop_name, filter) in &node.filters {
+        let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
+        let Some((edge_column, tag_key)) = denorm_map.get(&key) else {
+            continue;
+        };
+        match filter.op {
+            None | Some(crate::input::FilterOp::Eq) => {
+                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+                tag_filters.push(TagFilter {
+                    edge_column: edge_column.clone(),
+                    tags: vec![format!("{tag_key}:{val}")],
+                    is_any: false,
+                });
+            }
+            Some(crate::input::FilterOp::In) => {
+                let vals: Vec<String> = filter
+                    .value
+                    .as_ref()
+                    .and_then(|v| v.as_array())
+                    .map(|arr| {
+                        arr.iter()
+                            .filter_map(|v| v.as_str())
+                            .map(|v| format!("{tag_key}:{v}"))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                if !vals.is_empty() {
+                    tag_filters.push(TagFilter {
+                        edge_column: edge_column.clone(),
+                        tags: vals,
+                        is_any: true,
+                    });
+                }
+            }
+            _ => {}
+        }
+    }
+
+    if tag_filters.is_empty() {
+        return vec![];
+    }
+
+    let mut eq_tags_per_column: HashMap<String, Vec<String>> = HashMap::new();
+    let mut exprs: Vec<Expr> = Vec::new();
+
+    for tf in &tag_filters {
+        if tf.is_any {
+            if tf.tags.len() == 1 {
+                exprs.push(Expr::func(
+                    "has",
+                    vec![
+                        Expr::col(edge_alias, &tf.edge_column),
+                        Expr::string(&tf.tags[0]),
+                    ],
+                ));
+            } else {
+                exprs.push(Expr::func(
+                    "hasAny",
+                    vec![
+                        Expr::col(edge_alias, &tf.edge_column),
+                        Expr::func("array", tf.tags.iter().map(Expr::string).collect()),
+                    ],
+                ));
+            }
+        } else {
+            eq_tags_per_column
+                .entry(tf.edge_column.clone())
+                .or_default()
+                .extend(tf.tags.iter().cloned());
+        }
+    }
+
+    for (col, tags) in eq_tags_per_column {
+        if tags.len() == 1 {
+            exprs.push(Expr::func(
+                "has",
+                vec![Expr::col(edge_alias, &col), Expr::string(&tags[0])],
+            ));
+        } else {
+            exprs.push(Expr::func(
+                "hasAll",
+                vec![
+                    Expr::col(edge_alias, &col),
+                    Expr::func("array", tags.iter().map(Expr::string).collect()),
+                ],
+            ));
+        }
+    }
+
+    exprs
+}
+
 type FilterMap = HashMap<String, Vec<Expr>>;
 
 /// Build direction-specific filter maps for neighbors queries.
@@ -1825,6 +1951,19 @@ fn build_cascade_for_node(
         TableRef::union_all(queries, alias)
     };
 
+    // Inject denormalized tag predicates for the cascaded node's filters.
+    let dir_prefix = if select_col == SOURCE_ID_COLUMN {
+        "source"
+    } else {
+        "target"
+    };
+    let tag_preds = build_denorm_tag_predicates(
+        node,
+        dir_prefix,
+        alias,
+        &input.compiler.denormalized_columns,
+    );
+
     Some(Query {
         distinct: input.options.cascade_distinct,
         select: vec![SelectExpr::new(
@@ -1832,7 +1971,11 @@ fn build_cascade_for_node(
             DEFAULT_PRIMARY_KEY,
         )],
         from,
-        where_clause: Expr::and_all([Some(parent_filter), Some(rel_filter), kind_filter]),
+        where_clause: Expr::and_all(
+            [Some(parent_filter), Some(rel_filter), kind_filter]
+                .into_iter()
+                .chain(tag_preds.into_iter().map(Some)),
+        ),
         ..Default::default()
     })
 }
@@ -1965,6 +2108,19 @@ fn build_multihop_cascade_for_node(
         if let Some(kf) = kind_filter(&last) {
             conds.push(kf);
         }
+
+        // Inject denormalized tag predicates on the last edge in the chain.
+        let dir_prefix = if select_col == SOURCE_ID_COLUMN {
+            "source"
+        } else {
+            "target"
+        };
+        conds.extend(build_denorm_tag_predicates(
+            node,
+            dir_prefix,
+            &last,
+            &input.compiler.denormalized_columns,
+        ));
 
         arms.push(Query {
             distinct: input.options.cascade_distinct,
@@ -2834,6 +2990,8 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
         };
     let mut new_ctes = Vec::new();
     let use_distinct = input.options.cascade_distinct;
+    let denorm_map = &input.compiler.denormalized_columns;
+    // Forward frontier reaches the end node; backward reaches the start node.
     inject_hop_frontiers(
         q,
         &mut new_ctes,
@@ -2847,6 +3005,8 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             path_scope_cte,
             anchor_entity: start_entity,
             distinct: use_distinct,
+            endpoint_node: end,
+            denorm_map,
         },
     );
     if backward_depth > 0 {
@@ -2863,6 +3023,8 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
                 path_scope_cte,
                 anchor_entity: end_entity,
                 distinct: use_distinct,
+                endpoint_node: start,
+                denorm_map,
             },
         );
     }
@@ -2903,6 +3065,12 @@ struct HopFrontierOptions<'a> {
     path_scope_cte: Option<&'a str>,
     anchor_entity: Option<&'a str>,
     distinct: bool,
+    /// The endpoint node reached by this frontier direction. When set,
+    /// denormalized tag predicates from the node's filters are injected
+    /// into the final hop CTE only.
+    endpoint_node: Option<&'a InputNode>,
+    /// Denormalized columns map for tag predicate resolution.
+    denorm_map: &'a HashMap<(String, String, String), (String, String)>,
 }
 
 /// Build hop frontier CTEs for one direction and inject SIP filters into
@@ -3006,6 +3174,27 @@ fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFron
                 .collect();
             TableRef::union_all(queries, alias)
         };
+        // On the final hop, inject denormalized tag predicates for the
+        // endpoint node's filters. Intermediate hops are not filtered
+        // because intermediate nodes may not have denormalized properties.
+        let is_final_hop = hop == options.max_depth - 1;
+        let tag_preds = if is_final_hop {
+            if let Some(endpoint) = options.endpoint_node {
+                // The endpoint is on the "next" side of the edge:
+                // forward frontiers reach the target, backward reach the source.
+                let dir = if options.is_forward {
+                    "target"
+                } else {
+                    "source"
+                };
+                build_denorm_tag_predicates(endpoint, dir, alias, options.denorm_map)
+            } else {
+                vec![]
+            }
+        } else {
+            vec![]
+        };
+
         new_ctes.push(Cte::new(
             &hop_name,
             Query {
@@ -3015,12 +3204,11 @@ fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFron
                     DEFAULT_PRIMARY_KEY,
                 )],
                 from,
-                where_clause: Expr::and_all([
-                    anchor_filter,
-                    rel_filter,
-                    scope_filter,
-                    anchor_kind_filter,
-                ]),
+                where_clause: Expr::and_all(
+                    [anchor_filter, rel_filter, scope_filter, anchor_kind_filter]
+                        .into_iter()
+                        .chain(tag_preds.into_iter().map(Some)),
+                ),
                 ..Default::default()
             },
         ));
