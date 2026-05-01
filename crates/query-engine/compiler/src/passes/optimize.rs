@@ -281,9 +281,13 @@ fn prune_orphaned_ctes(q: &mut Query) {
         count_cte_refs_in_query(arm, &cte_names, &mut ref_counts);
     }
 
-    // Remove CTEs with zero references.
-    q.ctes
-        .retain(|c| ref_counts.get(&c.name).copied().unwrap_or(0) > 0);
+    // Remove CTEs with zero references. Preserve _nf_* CTEs — their
+    // references are injected by the deduplicate pass which runs after
+    // optimize.
+    q.ctes.retain(|c| {
+        c.name.starts_with("_nf_")
+            || ref_counts.get(&c.name).copied().unwrap_or(0) > 0
+    });
 }
 
 /// Mark CTEs as `materialized` when they are referenced more than once in the
