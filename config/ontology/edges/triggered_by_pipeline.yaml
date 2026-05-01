@@ -1,6 +1,7 @@
 # config/ontology/edges/triggered_by_pipeline.yaml
 
 description: Job was triggered by an upstream pipeline (child pipeline relationship from the job side)
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Job, id: id }

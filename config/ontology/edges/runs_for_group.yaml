@@ -1,6 +1,7 @@
 # config/ontology/edges/runs_for_group.yaml
 
 description: Runner is registered against a group
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Runner, id: id }
