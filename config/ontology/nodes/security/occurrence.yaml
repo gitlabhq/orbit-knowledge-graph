@@ -39,25 +39,25 @@ properties:
   description:
     type: string
     source: description
-    nullable: false
+    nullable: true
     description: "Detailed description of the occurrence."
 
   solution:
     type: string
     source: solution
-    nullable: false
+    nullable: true
     description: "Recommended solution or remediation."
 
   cve:
     type: string
     source: cve
-    nullable: false
+    nullable: true
     description: "CVE identifier if applicable."
 
   location:
     type: string
     source: location
-    nullable: false
+    nullable: true
     description: "Location where the vulnerability was found."
 
   location_fingerprint:
@@ -163,10 +163,10 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
-    - {name: solution, type: "String", default: "''", codec: ["ZSTD(3)"]}
-    - {name: cve, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: location, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: solution, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: cve, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: location, type: "Nullable(String)", codec: ["ZSTD(3)"]}
     - {name: location_fingerprint, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: report_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
@@ -179,10 +179,8 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_cve, column: cve, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_cve_ngram, column: cve, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_description, column: description, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_cve, column: cve, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

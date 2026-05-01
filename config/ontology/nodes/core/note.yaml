@@ -56,7 +56,7 @@ properties:
   line_code:
     type: string
     source: line_code
-    nullable: false
+    nullable: true
     description: "Code identifying the line position for diff notes."
 
   created_at:
@@ -74,7 +74,7 @@ properties:
   discussion_id:
     type: string
     source: discussion_id
-    nullable: false
+    nullable: true
     description: "ID grouping notes into a discussion thread."
 
   resolved_at:
@@ -98,13 +98,13 @@ properties:
   commit_id:
     type: string
     source: commit_id
-    nullable: false
+    nullable: true
     description: "SHA of the commit this note is on (for commit notes)."
 
   st_diff:
     type: string
     source: st_diff
-    nullable: false
+    nullable: true
     description: "Serialized diff snippet captured at note creation, populated for diff notes."
 
   traversal_path:
@@ -151,10 +151,10 @@ storage:
     - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: noteable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: line_code, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: commit_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: st_diff, type: "String", default: "''", codec: ["ZSTD(3)"]}
-    - {name: discussion_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: line_code, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: commit_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: st_diff, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: discussion_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: resolved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: internal, type: "Bool", default: "false"}
     - {name: confidential, type: "Nullable(Bool)"}

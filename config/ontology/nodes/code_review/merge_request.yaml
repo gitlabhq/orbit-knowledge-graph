@@ -97,7 +97,7 @@ properties:
   merge_commit_sha:
     type: string
     source: merge_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the merge commit."
 
   discussion_locked:
@@ -121,13 +121,13 @@ properties:
   merged_commit_sha:
     type: string
     source: merged_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the commit that landed on the target branch (may differ from merge_commit_sha for fast-forward merges)."
 
   squash_commit_sha:
     type: string
     source: squash_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the squash commit, if the merge request was squashed."
 
   latest_build_started_at:
@@ -474,12 +474,12 @@ storage:
     - {name: squash, type: "Bool", default: "false"}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: merge_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: merge_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: merged_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: squash_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: latest_build_finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
