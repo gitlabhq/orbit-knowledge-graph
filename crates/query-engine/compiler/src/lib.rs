@@ -1105,7 +1105,7 @@ mod tests {
     // ── Denormalization pass tests ──────────────────────────────────────
 
     #[test]
-    fn denorm_single_hop_removes_nf_cte_and_injects_edge_filter() {
+    fn denorm_single_hop_keeps_nf_cte_and_injects_supplementary_tag() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1122,18 +1122,21 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE is kept for dedup correctness (_deleted + LIMIT 1 BY).
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm pass must keep _nf_pipe CTE for dedup correctness, got:\n{sql}"
         );
+        // Supplementary tag is NOT injected when opposite side has node_ids
+        // (PK is more selective than text index).
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "denorm pass should inject has edge filter, got:\n{sql}"
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "tag should be skipped when opposite side has node_ids, got:\n{sql}"
         );
     }
 
     #[test]
-    fn denorm_in_list_filter_rewrites_to_has_any() {
+    fn denorm_in_list_filter_keeps_cte_for_dedup() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1150,22 +1153,15 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness.
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan for IN filter, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("hasAny(e0.source_tags"),
-            "IN-list filter should rewrite to hasAny, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("'status:failed'") && sql.contains("'status:canceled'"),
-            "hasAny should contain both tag values, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
     #[test]
-    fn denorm_in_list_single_value_rewrites_to_has() {
+    fn denorm_in_list_single_value_keeps_cte_for_dedup() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1182,17 +1178,17 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness.
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan for single-value IN, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "single-value IN should rewrite to has(), got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
     #[test]
+    /// Partial denorm: when some filters are denormalized and some are not,
+    /// the CTE is kept (with only non-denormalized filters) and tag
+    /// predicates are injected onto the edge WHERE for the denormalized ones.
     fn denorm_partial_filters_keeps_nf_cte() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
@@ -1211,13 +1207,21 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // _nf_pipe kept with all original filters (partial denorm keeps CTE intact).
         assert!(
             sql.contains("_nf_pipe"),
-            "partial denorm must keep _nf_pipe CTE when not all filters are denormalized, got:\n{sql}"
+            "partial denorm must keep _nf_pipe CTE for non-denormalized filters, got:\n{sql}"
         );
+        // Supplementary has() is NOT injected when the opposite side (proj)
+        // already has node_ids — the PK prunes better than the text index.
         assert!(
-            !sql.contains("has"),
-            "partial denorm must not inject has edge filter, got:\n{sql}"
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "partial denorm must skip has() when opposite side has node_ids, got:\n{sql}"
+        );
+        // CTE retains all filters including the denormalized one.
+        assert!(
+            sql.contains("push"),
+            "partial denorm CTE must retain non-denormalized source filter, got:\n{sql}"
         );
     }
 
@@ -1268,13 +1272,11 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness. Supplementary tag skipped because
+        // opposite side (proj) has node_ids.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "filter on denormalized property must use has edge filter, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("pipe.status"),
-            "node-table status filter should be eliminated by denorm rewrite, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
@@ -1404,6 +1406,64 @@ mod tests {
         assert!(
             !sql.contains("enable_materialized_cte"),
             "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
+        );
+    }
+
+    /// Aggregation query where the target node has a denormalized filter
+    /// (state=merged) and a cascade CTE exists. The _target_mr_ids CTE
+    /// should NOT be created because the cascade already covers the filter
+    /// via has() on edge tags. The _nf_mr CTE should also be removed.
+    #[test]
+    fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Cascade should exist with edge tag predicate.
+        assert!(
+            sql.contains("_cascade_mr"),
+            "cascade CTE must exist, got:\n{sql}"
+        );
+
+        // _target_mr_ids should NOT exist — cascade covers the filter.
+        assert!(
+            !sql.contains("_target_mr_ids"),
+            "_target_mr_ids must be eliminated when cascade + denorm covers the filter, got:\n{sql}"
+        );
+
+        // _nf_mr should NOT exist — state is fully denormalized.
+        assert!(
+            !sql.contains("_nf_mr"),
+            "_nf_mr must be eliminated when all filters are denormalized, got:\n{sql}"
+        );
+
+        // Edge tag predicate should be present.
+        assert!(
+            sql.contains("state:merged"),
+            "edge tag predicate must be present, got:\n{sql}"
         );
     }
 }
