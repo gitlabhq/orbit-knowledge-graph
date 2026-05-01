@@ -4,7 +4,7 @@
 //!
 //! ```ignore
 //! use etl_engine::engine::EngineBuilder;
-//! use etl_engine::handler::HandlerRegistry;
+//! use etl_engine::engine::handler::HandlerRegistry;
 //! use etl_engine::nats::{NatsBroker, NatsConfiguration, NatsServicesImpl};
 //! use etl_engine::configuration::EngineConfiguration;
 //! use std::sync::Arc;
@@ -26,6 +26,13 @@
 //! engine.stop();
 //! ```
 
+pub mod dead_letter;
+pub mod destination;
+pub mod handler;
+pub mod metrics;
+pub mod types;
+pub mod worker_pool;
+
 use std::any::Any;
 use std::panic::AssertUnwindSafe;
 use std::sync::Arc;
@@ -38,15 +45,15 @@ use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::{debug, error, info, warn};
 
-use crate::destination::Destination;
-use crate::handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
-use crate::metrics::EngineMetrics;
 use crate::nats::{DlqResult, NatsBroker, NatsError, NatsMessage, NatsServices, NatsServicesImpl};
-use crate::types::{Envelope, Subscription};
-use crate::worker_pool::WorkerPool;
+use destination::Destination;
 use gkg_server_config::EngineConfiguration;
+use handler::{Handler, HandlerContext, HandlerError, HandlerRegistry, PermanentAction};
+use metrics::EngineMetrics;
+use types::{Envelope, Subscription};
+use worker_pool::WorkerPool;
 
 /// Errors that can occur during engine operation.
 #[derive(Debug, Error)]

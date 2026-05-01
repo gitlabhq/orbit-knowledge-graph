@@ -1,7 +1,7 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
-use crate::types::{Envelope, Subscription};
+use super::types::{Envelope, Subscription};
 
 pub const DEAD_LETTER_STREAM: &str = "GKG_DEAD_LETTERS";
 pub const DEAD_LETTER_SUBJECT_PREFIX: &str = "dlq";
@@ -72,7 +72,7 @@ mod tests {
 
     fn envelope_with_subject(subject: &str) -> Envelope {
         Envelope {
-            id: crate::types::MessageId(Arc::from("test-message")),
+            id: crate::engine::types::MessageId(Arc::from("test-message")),
             subject: Arc::from(subject),
             payload: Bytes::from_static(br#"{"ok":true}"#),
             timestamp: Utc::now(),

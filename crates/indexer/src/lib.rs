@@ -9,8 +9,8 @@
 //!
 //! You provide:
 //! - A [`NatsBroker`](nats::NatsBroker) for message streaming
-//! - A [`Destination`](destination::Destination) (database, data lake, etc.)
-//! - One or more [`Handler`](handler::Handler)s registered in a [`HandlerRegistry`](handler::HandlerRegistry)
+//! - A [`Destination`](engine::destination::Destination) (database, data lake, etc.)
+//! - One or more [`Handler`](engine::handler::Handler)s registered in a [`HandlerRegistry`](engine::handler::HandlerRegistry)
 //!
 //! ```text
 //! NatsBroker ──▶ Engine ──▶ Destination
@@ -28,38 +28,39 @@
 //!
 pub mod checkpoint;
 pub mod clickhouse;
-pub mod dead_letter;
-pub mod destination;
+pub mod config;
 pub mod engine;
-pub mod handler;
 pub mod health;
 pub mod indexing_status;
 pub mod llqm_v1;
 pub mod locking;
-pub mod metrics;
 pub mod modules;
 pub mod nats;
 pub mod scheduler;
 pub mod schema;
 pub mod topic;
-pub mod types;
-pub mod worker_pool;
 
 #[cfg(any(test, feature = "testkit"))]
 pub mod testkit;
 
-use std::net::SocketAddr;
+// Re-export engine submodules at crate root for external API stability.
+pub use config::*;
+pub use engine::{dead_letter, destination, handler, types, worker_pool};
+
+/// Re-export metrics from their canonical locations for external API stability.
+pub mod metrics {
+    pub use crate::engine::metrics::*;
+    pub use crate::schema::metrics::*;
+}
+
 use std::sync::Arc;
 
 use clickhouse::ClickHouseConfigurationExt;
 use clickhouse::ClickHouseDestination;
 use engine::EngineBuilder;
+use engine::handler::{HandlerInitError, HandlerRegistry};
 use gitlab_client::GitlabClient;
-use gkg_server_config::{
-    ClickHouseConfiguration, EngineConfigError, EngineConfiguration, GitlabClientConfiguration,
-    IndexerModule, NatsConfiguration, ScheduleConfig, SchemaConfig,
-};
-use handler::{HandlerInitError, HandlerRegistry};
+use gkg_server_config::IndexerModule;
 use health::{HealthState, run_health_server};
 use indexing_status::{INDEXING_PROGRESS_BUCKET, IndexingStatusStore};
 use locking::INDEXING_LOCKS_BUCKET;
@@ -70,107 +71,8 @@ use modules::namespace_deletion::{
 use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
-use thiserror::Error;
 use tokio_util::sync::CancellationToken;
 use tracing::info;
-
-fn default_health_bind_address() -> SocketAddr {
-    "0.0.0.0:4202".parse().unwrap()
-}
-
-fn default_dispatcher_health_bind_address() -> SocketAddr {
-    "0.0.0.0:4203".parse().unwrap()
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct IndexerConfig {
-    #[serde(default)]
-    pub nats: NatsConfiguration,
-    #[serde(default)]
-    pub graph: ClickHouseConfiguration,
-    #[serde(default)]
-    pub datalake: ClickHouseConfiguration,
-    #[serde(default)]
-    pub engine: EngineConfiguration,
-    #[serde(default)]
-    pub gitlab: Option<GitlabClientConfiguration>,
-    #[serde(default)]
-    pub schedule: ScheduleConfig,
-    #[serde(default = "default_health_bind_address")]
-    pub health_bind_address: SocketAddr,
-    #[serde(default)]
-    pub schema: SchemaConfig,
-}
-
-impl Default for IndexerConfig {
-    fn default() -> Self {
-        Self {
-            nats: NatsConfiguration::default(),
-            graph: ClickHouseConfiguration::default(),
-            datalake: ClickHouseConfiguration::default(),
-            engine: EngineConfiguration::default(),
-            gitlab: None,
-            schedule: ScheduleConfig::default(),
-            health_bind_address: default_health_bind_address(),
-            schema: SchemaConfig::default(),
-        }
-    }
-}
-
-#[derive(Debug, Error)]
-pub enum IndexerError {
-    #[error("NATS connection failed: {0}")]
-    NatsConnection(#[from] nats::NatsError),
-
-    #[error("ClickHouse connection failed: {0}")]
-    ClickHouseConnection(#[from] destination::DestinationError),
-
-    #[error("Engine error: {0}")]
-    Engine(#[from] engine::EngineError),
-
-    #[error("Handler initialization failed: {0}")]
-    HandlerInit(#[from] HandlerInitError),
-
-    #[error("Health server failed: {0}")]
-    Health(#[from] std::io::Error),
-
-    #[error("Schema version error: {0}")]
-    SchemaVersion(#[from] schema::version::SchemaVersionError),
-
-    #[error("Schema migration error: {0}")]
-    SchemaMigration(#[from] schema::migration::MigrationError),
-
-    #[error("Invalid configuration: {0}")]
-    InvalidConfig(#[from] gkg_server_config::SchemaConfigError),
-
-    #[error("Invalid engine configuration: {0}")]
-    InvalidEngineConfig(#[from] EngineConfigError),
-}
-
-#[derive(Clone, Debug, serde::Deserialize, serde::Serialize)]
-pub struct DispatcherConfig {
-    #[serde(default)]
-    pub nats: NatsConfiguration,
-    #[serde(default)]
-    pub graph: ClickHouseConfiguration,
-    #[serde(default)]
-    pub datalake: ClickHouseConfiguration,
-    #[serde(default)]
-    pub schedule: ScheduleConfig,
-    #[serde(default)]
-    pub schema: SchemaConfig,
-    #[serde(default = "default_dispatcher_health_bind_address")]
-    pub health_bind_address: SocketAddr,
-}
-
-#[derive(Debug, Error)]
-pub enum DispatcherError {
-    #[error("scheduler error: {0}")]
-    Scheduler(#[from] scheduler::SchedulerError),
-
-    #[error("health server failed: {0}")]
-    Health(#[from] std::io::Error),
-}
 
 /// Runs the indexer until completion or until the token is cancelled.
 pub async fn run(
@@ -202,9 +104,7 @@ pub async fn run(
         .ensure_managed_streams(&topic::all_managed_subscriptions())
         .await?;
 
-    // Run the migration orchestrator before the engine starts consuming messages.
-    // This ensures no in-flight NATS messages exist during the drain phase.
-    let migration_metrics = metrics::MigrationMetrics::new();
+    let migration_metrics = schema::metrics::MigrationMetrics::new();
     let nats_services: Arc<dyn nats::NatsServices> =
         Arc::new(nats::NatsServicesImpl::new(broker.clone()));
     let lock_service: Arc<dyn locking::LockService> =
@@ -216,7 +116,7 @@ pub async fn run(
     schema::migration::run_if_needed(&graph_client, &lock_service, &ontology, &migration_metrics)
         .await?;
 
-    let metrics = Arc::new(metrics::EngineMetrics::new());
+    let metrics = Arc::new(engine::metrics::EngineMetrics::new());
 
     info!(url = %config.graph.url, "connecting to graph ClickHouse");
     let destination = Arc::new(ClickHouseDestination::new(
@@ -381,7 +281,6 @@ pub async fn run_dispatcher(
             result.map_err(DispatcherError::from)
         }
         result = run_health_server(config.health_bind_address, health_state) => {
-            // Health server died — cancel shutdown token so the scheduler drains gracefully
             shutdown.cancel();
             let error = result.err().unwrap_or_else(|| std::io::Error::other(
                 "dispatcher health server exited unexpectedly",
