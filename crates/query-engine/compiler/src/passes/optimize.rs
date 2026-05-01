@@ -1826,7 +1826,7 @@ fn build_cascade_for_node(
     };
 
     Some(Query {
-        distinct: true,
+        distinct: input.options.cascade_distinct,
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
@@ -1967,7 +1967,7 @@ fn build_multihop_cascade_for_node(
         }
 
         arms.push(Query {
-            distinct: true,
+            distinct: input.options.cascade_distinct,
             select: vec![SelectExpr::new(
                 Expr::col(&last, select_col),
                 DEFAULT_PRIMARY_KEY,
@@ -2399,12 +2399,19 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
         .map(|n| n.id.clone())
         .collect();
 
-    // When no node has explicit node_ids, seed from the first node that has
-    // an _nf_* CTE (created by the lowerer for auth-scoped nodes). This
-    // enables cascades for code graph queries like File → DEFINES → Definition
-    // where no node is pinned by ID but the auth scope on the source still
-    // provides meaningful narrowing through edge reachability.
-    if narrowed.is_empty()
+    // When no node has explicit node_ids (or auth_scope_cascade is forced),
+    // seed from the first node that has an _nf_* CTE (created by the lowerer
+    // for auth-scoped nodes). This enables cascades for code graph queries
+    // like File → DEFINES → Definition where no node is pinned by ID but the
+    // auth scope on the source still provides meaningful narrowing through
+    // edge reachability.
+    //
+    // When any node has node_ids, the pinned-node cascade (seeded above)
+    // already provides better narrowing. The auth-scoped fallback is skipped
+    // to avoid redundant full-table _nf_* scans that regress performance on
+    // aggregation queries.
+    let force_auth_cascade = input.options.auth_scope_cascade;
+    if (narrowed.is_empty() || force_auth_cascade)
         && let Some(seed) = input.relationships.first().and_then(|rel| {
             let nf = node_filter_cte(&rel.from);
             if q.ctes.iter().any(|c| c.name == nf) {
@@ -2725,7 +2732,7 @@ fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
             new_ctes.push(Cte::new(
                 &hop_name,
                 Query {
-                    distinct: true,
+                    distinct: input.options.cascade_distinct,
                     select: vec![SelectExpr::new(
                         Expr::col(alias, next_col),
                         DEFAULT_PRIMARY_KEY,
@@ -2826,6 +2833,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             Some(path.rel_types.as_slice())
         };
     let mut new_ctes = Vec::new();
+    let use_distinct = input.options.cascade_distinct;
     inject_hop_frontiers(
         q,
         &mut new_ctes,
@@ -2838,6 +2846,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             rel_type_filter,
             path_scope_cte,
             anchor_entity: start_entity,
+            distinct: use_distinct,
         },
     );
     if backward_depth > 0 {
@@ -2853,6 +2862,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
                 rel_type_filter,
                 path_scope_cte,
                 anchor_entity: end_entity,
+                distinct: use_distinct,
             },
         );
     }
@@ -2892,6 +2902,7 @@ struct HopFrontierOptions<'a> {
     rel_type_filter: Option<&'a [String]>,
     path_scope_cte: Option<&'a str>,
     anchor_entity: Option<&'a str>,
+    distinct: bool,
 }
 
 /// Build hop frontier CTEs for one direction and inject SIP filters into
@@ -2998,7 +3009,7 @@ fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFron
         new_ctes.push(Cte::new(
             &hop_name,
             Query {
-                distinct: true,
+                distinct: options.distinct,
                 select: vec![SelectExpr::new(
                     Expr::col(alias, next_col),
                     DEFAULT_PRIMARY_KEY,
