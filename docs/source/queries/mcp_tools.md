@@ -31,7 +31,7 @@ Query the knowledge graph and return matching nodes, relationships, and aggregat
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
-| `query`   | object | Yes      | An Orbit [query language object](query_language.md). Valid query types: `traversal`, `aggregation`, `path_finding`, and `neighbors`. |
+| `query`   | object | Yes      | An [Orbit query language object](query_language.md). Valid query types: `traversal`, `aggregation`, `path_finding`, and `neighbors`. |
 
 Example request:
 
