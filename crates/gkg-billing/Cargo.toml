@@ -1,0 +1,19 @@
+[package]
+name = "gkg-billing"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+labkit = { workspace = true }
+labkit-events = { workspace = true }
+gkg-server-config = { path = "../gkg-server-config" }
+query-engine = { path = "../query-engine" }
+serde_json = { workspace = true }
+tracing = { workspace = true }
+
+[lints.rust]
+unsafe_code = "forbid"

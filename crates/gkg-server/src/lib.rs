@@ -1,6 +1,6 @@
 pub mod analytics;
 pub mod auth;
-pub mod billing;
+mod billing_adapter;
 pub mod cli;
 pub mod cluster_health;
 pub mod content;

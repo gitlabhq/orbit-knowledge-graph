@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use crate::analytics::{AnalyticsObserver, AnalyticsTracker};
 use crate::auth::Claims;
-use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_billing::{BillingInputs, BillingObserver, BillingTracker};
 use gkg_server_config::{AnalyticsConfig, ProfilingConfig};
 use indexer::schema::version::SCHEMA_VERSION;
 use labkit_events::orbit::ToolName;
@@ -86,7 +86,7 @@ impl QueryPipelineService {
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
-                claims.clone(),
+                BillingInputs::from(&claims),
             )),
             Box::new(AnalyticsObserver::new(
                 self.analytics_tracker.clone(),

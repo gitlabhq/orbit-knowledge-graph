@@ -11,9 +11,9 @@ use tracing::info;
 
 use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
-use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::proto::knowledge_graph_service_server::KnowledgeGraphServiceServer;
+use gkg_billing::BillingTracker;
 
 use super::service::KnowledgeGraphServiceImpl;
 

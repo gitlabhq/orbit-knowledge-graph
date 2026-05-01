@@ -23,6 +23,7 @@ axum = { workspace = true }
 clap = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
 gkg-analytics = { path = "../gkg-analytics" }
+gkg-billing = { path = "../gkg-billing" }
 gkg-observability = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }

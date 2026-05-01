@@ -20,6 +20,7 @@ members = [
   "crates/orbit-local",
 
   "crates/gkg-analytics",
+  "crates/gkg-billing",
   "crates/gkg-observability",
   "crates/gkg-server-config",
   "crates/gkg-server",
