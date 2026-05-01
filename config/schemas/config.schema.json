@@ -192,7 +192,7 @@
         "max_deliver": 5,
         "password": null,
         "request_timeout_secs": 5,
-        "stream_max_age_secs": null,
+        "stream_max_age_secs": 14400,
         "stream_max_bytes": null,
         "stream_max_messages": null,
         "stream_replicas": 1,
@@ -1092,13 +1092,13 @@
           "minimum": 0
         },
         "stream_max_age_secs": {
-          "description": "Maximum age of messages in seconds before deletion. Defaults to None (unlimited).",
+          "description": "Maximum age of messages in seconds before deletion. Defaults to 14400 (4 hours).",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": null,
+          "default": 14400,
           "minimum": 0
         },
         "stream_max_bytes": {
