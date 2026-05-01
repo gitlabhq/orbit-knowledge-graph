@@ -759,6 +759,11 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
 /// tight primary-key selectivity (node_ids / id_range), because the
 /// primary key prunes granules more effectively than the text index
 /// and the has() predicate just adds overhead via CTE duplication.
+/// Note: caller must gate to Traversal | Aggregation. These are the only
+/// query types that use `e{i}` edge aliases in the outer WHERE. PathFinding
+/// uses frontier CTEs and Neighbors uses union arms with different aliases.
+/// (Same convention as `apply_sip_prefilter`, `apply_nonroot_node_ids_to_edges`,
+/// and `apply_edge_led_reorder`, which carry their own internal guards.)
 fn inject_denorm_tags_on_main_edges(q: &mut Query, input: &Input) {
     if input.compiler.denormalized_columns.is_empty() || input.relationships.is_empty() {
         return;
