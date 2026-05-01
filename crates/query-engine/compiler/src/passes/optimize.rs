@@ -44,7 +44,6 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
             push_kind_literals_into_variable_length_arms(q, input);
-            rewrite_denormalized_node_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -71,6 +70,16 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
+
+            // Denorm runs late so SIP/cascade/target-SIP have already created
+            // their CTEs. Denorm can then remove _nf_* and _target_*_ids CTEs
+            // that are redundant because edge tags cover the same filters.
+            rewrite_denormalized_node_filters(q, input);
+
+            // Cleanup: remove CTEs that are no longer referenced after denorm
+            // removed _nf_* CTEs and their InSubquery consumers.
+            prune_orphaned_ctes(q);
+
             if input.options.materialize_ctes {
                 materialize_multi_ref_ctes(q);
             }
@@ -227,6 +236,54 @@ fn wrap_alias_with_semi_join(
         }
         _ => false,
     }
+}
+
+/// Remove CTEs that are defined but never referenced in the query body.
+/// This cleans up after passes like `rewrite_denormalized_node_filters`
+/// which may remove InSubquery references that were the only consumers
+/// of a CTE, or after `apply_target_sip_prefilter` skips creating a
+/// `_target_*_ids` CTE that would have been the only consumer of a
+/// cascade CTE.
+fn prune_orphaned_ctes(q: &mut Query) {
+    if q.ctes.is_empty() {
+        return;
+    }
+
+    // Collect all CTE names referenced in the query body and in other CTEs.
+    let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+    let mut ref_counts: HashMap<String, usize> = HashMap::new();
+
+    // Count refs in CTE bodies (a later CTE can reference an earlier one).
+    for cte in &q.ctes {
+        count_cte_refs_in_query(&cte.query, &cte_names, &mut ref_counts);
+    }
+
+    // Count refs in the main query body.
+    count_cte_refs_in_from(&q.from, &cte_names, &mut ref_counts);
+    if let Some(w) = &q.where_clause {
+        count_cte_refs_in_expr(w, &cte_names, &mut ref_counts);
+    }
+    if let Some(h) = &q.having {
+        count_cte_refs_in_expr(h, &cte_names, &mut ref_counts);
+    }
+    for sel in &q.select {
+        count_cte_refs_in_expr(&sel.expr, &cte_names, &mut ref_counts);
+    }
+    for ord in &q.order_by {
+        count_cte_refs_in_expr(&ord.expr, &cte_names, &mut ref_counts);
+    }
+    if let Some((_, limit_by_cols)) = &q.limit_by {
+        for col in limit_by_cols {
+            count_cte_refs_in_expr(col, &cte_names, &mut ref_counts);
+        }
+    }
+    for arm in &q.union_all {
+        count_cte_refs_in_query(arm, &cte_names, &mut ref_counts);
+    }
+
+    // Remove CTEs with zero references.
+    q.ctes
+        .retain(|c| ref_counts.get(&c.name).copied().unwrap_or(0) > 0);
 }
 
 /// Mark CTEs as `materialized` when they are referenced more than once in the
@@ -2219,6 +2276,30 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
 
         if target_only_conds.is_empty() {
             continue;
+        }
+
+        // When a _cascade_{target} CTE already exists and all of the target
+        // node's property filters are denormalized onto edge tags, the cascade
+        // already covers the filter via has() predicates. The _target_*_ids
+        // CTE would redundantly re-derive the same ID set via a full node
+        // table dedup scan.
+        let cascade_name = cascade_cte(target_alias);
+        let cascade_exists = q.ctes.iter().any(|c| c.name == cascade_name);
+        if cascade_exists && !target_node.filters.is_empty() {
+            let entity = target_node.entity.as_deref().unwrap_or("");
+            let dir_prefix = resolve_denorm_direction(target_node, input);
+            let all_denormalized = dir_prefix.is_some()
+                && target_node.filters.keys().all(|prop| {
+                    let key = (
+                        entity.to_string(),
+                        prop.clone(),
+                        dir_prefix.unwrap().to_string(),
+                    );
+                    input.compiler.denormalized_columns.contains_key(&key)
+                });
+            if all_denormalized {
+                continue;
+            }
         }
 
         let cte_name = format!("_target_{target_alias}_ids");
