@@ -1406,4 +1406,62 @@ mod tests {
             "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
         );
     }
+
+    /// Aggregation query where the target node has a denormalized filter
+    /// (state=merged) and a cascade CTE exists. The _target_mr_ids CTE
+    /// should NOT be created because the cascade already covers the filter
+    /// via has() on edge tags. The _nf_mr CTE should also be removed.
+    #[test]
+    fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Cascade should exist with edge tag predicate.
+        assert!(
+            sql.contains("_cascade_mr"),
+            "cascade CTE must exist, got:\n{sql}"
+        );
+
+        // _target_mr_ids should NOT exist — cascade covers the filter.
+        assert!(
+            !sql.contains("_target_mr_ids"),
+            "_target_mr_ids must be eliminated when cascade + denorm covers the filter, got:\n{sql}"
+        );
+
+        // _nf_mr should NOT exist — state is fully denormalized.
+        assert!(
+            !sql.contains("_nf_mr"),
+            "_nf_mr must be eliminated when all filters are denormalized, got:\n{sql}"
+        );
+
+        // Edge tag predicate should be present.
+        assert!(
+            sql.contains("state:merged"),
+            "edge tag predicate must be present, got:\n{sql}"
+        );
+    }
 }
