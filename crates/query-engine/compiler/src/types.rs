@@ -103,10 +103,9 @@ impl SecurityContext {
     /// Validates that:
     /// - Each path matches the format `int/int/.../`
     /// - Each segment fits in i64
-    /// - The first segment of each path equals org_id
     pub fn new_with_roles(org_id: i64, traversal_paths: Vec<TraversalPath>) -> Result<Self> {
         for tp in &traversal_paths {
-            Self::validate_traversal_path(&tp.path, org_id)?;
+            Self::validate_traversal_path(&tp.path)?;
             if tp.access_levels.is_empty() {
                 return Err(QueryError::Security(format!(
                     "traversal_path '{}' has no access_levels",
@@ -143,7 +142,7 @@ impl SecurityContext {
             .collect()
     }
 
-    fn validate_traversal_path(path: &str, org_id: i64) -> Result<()> {
+    fn validate_traversal_path(path: &str) -> Result<()> {
         if !TRAVERSAL_PATH_REGEX.is_match(path) {
             return Err(QueryError::Security(format!(
                 "invalid traversal_path format: '{path}' (expected pattern like '1/2/3/')"
@@ -158,13 +157,6 @@ impl SecurityContext {
                     "traversal_path segment '{segment}' exceeds i64 range"
                 ))
             })?;
-        }
-
-        let first_segment: i64 = segments[0].parse().expect("validated above");
-        if first_segment != org_id {
-            return Err(QueryError::Security(format!(
-                "traversal_path '{path}' does not start with org_id {org_id}"
-            )));
         }
 
         Ok(())
