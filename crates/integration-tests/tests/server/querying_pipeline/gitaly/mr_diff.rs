@@ -45,6 +45,7 @@ async fn mock_mr_diff_server(
     + Clone
     + 'static,
     raw_handler: impl Fn(i64, i64) -> (StatusCode, Vec<u8>) + Send + Sync + Clone + 'static,
+    mr_raw_handler: impl Fn(i64, i64) -> (StatusCode, Vec<u8>) + Send + Sync + Clone + 'static,
 ) -> MockServer {
     let app = Router::new()
         .route(
@@ -69,6 +70,19 @@ async fn mock_mr_diff_server(
                     let h = h.clone();
                     async move {
                         let (status, body) = h(pid, did);
+                        (status, Body::from(body)).into_response()
+                    }
+                }
+            }),
+        )
+        .route(
+            "/api/v4/internal/orbit/project/{project_id}/merge_requests/{iid}/raw_diffs",
+            get({
+                let h = mr_raw_handler.clone();
+                move |Path((pid, iid)): Path<(i64, i64)>| {
+                    let h = h.clone();
+                    async move {
+                        let (status, body) = h(pid, iid);
                         (status, Body::from(body)).into_response()
                     }
                 }
@@ -114,6 +128,13 @@ fn raw_patch_row(project_id: i64, diff_id: i64) -> PropertyRow {
     row
 }
 
+fn mr_raw_patch_row(project_id: i64, iid: i64) -> PropertyRow {
+    let mut row = PropertyRow::new();
+    row.insert("project_id".into(), ColumnValue::Int64(project_id));
+    row.insert("iid".into(), ColumnValue::Int64(iid));
+    row
+}
+
 fn diff_batch_json(diff_id: i64, diffs: &[(&str, &str, &str)]) -> String {
     let entries: Vec<serde_json::Value> = diffs
         .iter()
@@ -150,6 +171,10 @@ fn noop_raw(_pid: i64, _did: i64) -> (StatusCode, Vec<u8>) {
     panic!("raw_diffs endpoint should not be called")
 }
 
+fn noop_mr_raw(_pid: i64, _iid: i64) -> (StatusCode, Vec<u8>) {
+    panic!("mr_raw_diffs endpoint should not be called")
+}
+
 #[tokio::test]
 async fn patch_resolves_single_file() {
     let mock = mock_mr_diff_server(
@@ -158,6 +183,7 @@ async fn patch_resolves_single_file() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -187,6 +213,7 @@ async fn patch_resolves_multiple_files_same_snapshot() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -216,6 +243,7 @@ async fn patch_deduplicates_same_file() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -246,6 +274,7 @@ async fn patch_groups_by_project_and_diff_id() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -278,6 +307,7 @@ async fn patch_sends_paths_query_param() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -303,6 +333,7 @@ async fn patch_matches_by_canonical_path_old_path_fallback() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -320,7 +351,7 @@ async fn patch_matches_by_canonical_path_old_path_fallback() {
 
 #[tokio::test]
 async fn patch_missing_project_id_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let mut row = PropertyRow::new();
@@ -338,7 +369,7 @@ async fn patch_missing_project_id_returns_none() {
 
 #[tokio::test]
 async fn patch_missing_diff_id_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let mut row = PropertyRow::new();
@@ -356,7 +387,7 @@ async fn patch_missing_diff_id_returns_none() {
 
 #[tokio::test]
 async fn patch_too_large_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let mut row = patch_row(1, 42, "big.rs", "big.rs");
@@ -379,6 +410,7 @@ async fn patch_empty_diff_returns_none() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -399,6 +431,7 @@ async fn patch_gitlab_500_returns_none() {
     let mock = mock_mr_diff_server(
         |_pid, _did, _paths| (StatusCode::INTERNAL_SERVER_ERROR, String::new()),
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -422,6 +455,7 @@ async fn patch_mixed_valid_and_invalid_rows() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -441,7 +475,7 @@ async fn patch_mixed_valid_and_invalid_rows() {
 
 #[tokio::test]
 async fn patch_empty_batch() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let rows: Vec<&PropertyRow> = vec![];
@@ -467,6 +501,7 @@ async fn patch_same_path_different_projects() {
             (StatusCode::OK, body)
         },
         noop_raw,
+        noop_mr_raw,
     )
     .await;
 
@@ -490,10 +525,14 @@ async fn patch_same_path_different_projects() {
 async fn raw_patch_resolves_single() {
     let patch = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+new\n";
 
-    let mock = mock_mr_diff_server(noop_patch, {
-        let patch = patch.to_string();
-        move |_pid, _did| (StatusCode::OK, patch.clone().into_bytes())
-    })
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        {
+            let patch = patch.to_string();
+            move |_pid, _did| (StatusCode::OK, patch.clone().into_bytes())
+        },
+        noop_mr_raw,
+    )
     .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
@@ -513,10 +552,14 @@ async fn raw_patch_deduplicates_same_snapshot() {
     let call_count = Arc::new(AtomicUsize::new(0));
     let counter = call_count.clone();
 
-    let mock = mock_mr_diff_server(noop_patch, move |_pid, _did| {
-        counter.fetch_add(1, Ordering::SeqCst);
-        (StatusCode::OK, b"@@ shared".to_vec())
-    })
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        move |_pid, _did| {
+            counter.fetch_add(1, Ordering::SeqCst);
+            (StatusCode::OK, b"@@ shared".to_vec())
+        },
+        noop_mr_raw,
+    )
     .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
@@ -535,9 +578,11 @@ async fn raw_patch_deduplicates_same_snapshot() {
 
 #[tokio::test]
 async fn raw_patch_different_snapshots() {
-    let mock = mock_mr_diff_server(noop_patch, |_pid, did| {
-        (StatusCode::OK, format!("@@ diff-{did}").into_bytes())
-    })
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        |_pid, did| (StatusCode::OK, format!("@@ diff-{did}").into_bytes()),
+        noop_mr_raw,
+    )
     .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
@@ -556,9 +601,11 @@ async fn raw_patch_different_snapshots() {
 
 #[tokio::test]
 async fn raw_patch_gitlab_500_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, |_pid, _did| {
-        (StatusCode::INTERNAL_SERVER_ERROR, Vec::new())
-    })
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        |_pid, _did| (StatusCode::INTERNAL_SERVER_ERROR, Vec::new()),
+        noop_mr_raw,
+    )
     .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
@@ -575,7 +622,12 @@ async fn raw_patch_gitlab_500_returns_none() {
 
 #[tokio::test]
 async fn raw_patch_empty_body_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, |_pid, _did| (StatusCode::OK, Vec::new())).await;
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        |_pid, _did| (StatusCode::OK, Vec::new()),
+        noop_mr_raw,
+    )
+    .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let row = raw_patch_row(1, 42);
@@ -591,9 +643,11 @@ async fn raw_patch_empty_body_returns_none() {
 
 #[tokio::test]
 async fn raw_patch_exceeds_size_cap_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, |_pid, _did| {
-        (StatusCode::OK, vec![b'x'; 5_000_001])
-    })
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        |_pid, _did| (StatusCode::OK, vec![b'x'; 5_000_001]),
+        noop_mr_raw,
+    )
     .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
@@ -610,8 +664,12 @@ async fn raw_patch_exceeds_size_cap_returns_none() {
 
 #[tokio::test]
 async fn raw_patch_invalid_utf8_returns_none() {
-    let mock =
-        mock_mr_diff_server(noop_patch, |_pid, _did| (StatusCode::OK, vec![0xFF, 0xFE])).await;
+    let mock = mock_mr_diff_server(
+        noop_patch,
+        |_pid, _did| (StatusCode::OK, vec![0xFF, 0xFE]),
+        noop_mr_raw,
+    )
+    .await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let row = raw_patch_row(1, 42);
@@ -627,7 +685,7 @@ async fn raw_patch_invalid_utf8_returns_none() {
 
 #[tokio::test]
 async fn raw_patch_missing_id_returns_none() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let mut row = PropertyRow::new();
@@ -644,7 +702,7 @@ async fn raw_patch_missing_id_returns_none() {
 
 #[tokio::test]
 async fn unknown_lookup_returns_error() {
-    let mock = mock_mr_diff_server(noop_patch, noop_raw).await;
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
 
     let svc = MergeRequestDiffContentService::new(mock.client.clone());
     let row = patch_row(1, 42, "a.rs", "a.rs");
@@ -656,4 +714,182 @@ async fn unknown_lookup_returns_error() {
         .unwrap_err();
 
     assert!(err.to_string().contains("unknown lookup"));
+}
+
+#[tokio::test]
+async fn mr_raw_patch_resolves_single() {
+    let patch = "diff --git a/f.rs b/f.rs\n--- a/f.rs\n+++ b/f.rs\n@@ -1 +1,2 @@\n+new\n";
+
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, {
+        let patch = patch.to_string();
+        move |_pid, _iid| (StatusCode::OK, patch.clone().into_bytes())
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let row = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![Some(ColumnValue::String(patch.into()))]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_deduplicates_same_mr() {
+    let call_count = Arc::new(AtomicUsize::new(0));
+    let counter = call_count.clone();
+
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, move |_pid, _iid| {
+        counter.fetch_add(1, Ordering::SeqCst);
+        (StatusCode::OK, b"@@ shared".to_vec())
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let r1 = mr_raw_patch_row(1, 100);
+    let r2 = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&r1, &r2];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(call_count.load(Ordering::SeqCst), 1);
+    assert_eq!(results[0], results[1]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_different_mrs() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, |_pid, iid| {
+        (StatusCode::OK, format!("@@ mr-{iid}").into_bytes())
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let r1 = mr_raw_patch_row(1, 10);
+    let r2 = mr_raw_patch_row(1, 20);
+    let rows: Vec<&PropertyRow> = vec![&r1, &r2];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results[0], Some(ColumnValue::String("@@ mr-10".into())));
+    assert_eq!(results[1], Some(ColumnValue::String("@@ mr-20".into())));
+}
+
+#[tokio::test]
+async fn mr_raw_patch_gitlab_500_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, |_pid, _iid| {
+        (StatusCode::INTERNAL_SERVER_ERROR, Vec::new())
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let row = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_empty_body_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, |_pid, _iid| {
+        (StatusCode::OK, Vec::new())
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let row = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_exceeds_size_cap_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, |_pid, _iid| {
+        (StatusCode::OK, vec![b'x'; 5_000_001])
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let row = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_invalid_utf8_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, |_pid, _iid| {
+        (StatusCode::OK, vec![0xFF, 0xFE])
+    })
+    .await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let row = mr_raw_patch_row(1, 100);
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_missing_iid_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let mut row = PropertyRow::new();
+    row.insert("project_id".into(), ColumnValue::Int64(1));
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
+}
+
+#[tokio::test]
+async fn mr_raw_patch_missing_project_id_returns_none() {
+    let mock = mock_mr_diff_server(noop_patch, noop_raw, noop_mr_raw).await;
+
+    let svc = MergeRequestDiffContentService::new(mock.client.clone());
+    let mut row = PropertyRow::new();
+    row.insert("iid".into(), ColumnValue::Int64(100));
+    let rows: Vec<&PropertyRow> = vec![&row];
+
+    let results = svc
+        .resolve_batch("mr_raw_patch", &rows, &resolver_ctx())
+        .await
+        .unwrap();
+
+    assert_eq!(results, vec![None]);
 }

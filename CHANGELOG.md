@@ -1,3 +1,18 @@
+## [0.42.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.1...v0.42.0) (2026-05-01)
+
+### Features
+
+* **content:** add diff virtual field to MergeRequest ([5d20fc1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5d20fc1a5b7de1757bb426491369ea02e2cab97c)) by Jean-Gabriel Doyon
+* **server:** add MR diff virtual field resolver and gitlab-client methods ([ad8c284](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ad8c2840b042c0ee494dcf5c5f465f93c5b4c4c0)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** resolve merge_request denormalised fields from siphon sources ([c97b251](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c97b25164d329b3833ef79ac122ddf066f167d4c)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** partial-match edge tag rewrite for mixed-filter queries ([02ab415](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02ab415a0ae22d0e9d902dcbd3b70035d41e693e)) by Michael Usachenko
+
 ## [0.41.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.0...v0.41.1) (2026-05-01)
 
 ### Fixes
