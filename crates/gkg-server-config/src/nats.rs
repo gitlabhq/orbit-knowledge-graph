@@ -96,8 +96,8 @@ pub struct NatsConfiguration {
     #[serde(default = "NatsConfiguration::default_stream_replicas")]
     pub stream_replicas: usize,
 
-    /// Maximum age of messages in seconds before deletion. Defaults to None (unlimited).
-    #[serde(default)]
+    /// Maximum age of messages in seconds before deletion. Defaults to 14400 (4 hours).
+    #[serde(default = "NatsConfiguration::default_stream_max_age_secs")]
     pub stream_max_age_secs: Option<u64>,
 
     /// Maximum bytes per stream before oldest messages are deleted. Defaults to None (unlimited).
@@ -146,6 +146,10 @@ impl NatsConfiguration {
 
     fn default_stream_replicas() -> usize {
         1
+    }
+
+    fn default_stream_max_age_secs() -> Option<u64> {
+        Some(14400)
     }
 
     fn default_fetch_expires_secs() -> u64 {
@@ -262,7 +266,7 @@ impl Default for NatsConfiguration {
             batch_size: Self::default_batch_size(),
             auto_create_streams: Self::default_auto_create_streams(),
             stream_replicas: Self::default_stream_replicas(),
-            stream_max_age_secs: None,
+            stream_max_age_secs: Self::default_stream_max_age_secs(),
             stream_max_bytes: None,
             stream_max_messages: None,
             fetch_expires_secs: Self::default_fetch_expires_secs(),
