@@ -239,6 +239,15 @@ properties:
     nullable: false
     description: "Namespace traversal path for authentication and authorization."
 
+  diff:
+    type: string
+    nullable: true
+    virtual:
+      service: gitaly
+      lookup: mr_raw_patch
+      depends_on: [project_id, iid]
+    description: "Full unified patch for the latest diff version of this merge request. Resolved from GitLab at query time."
+
 etl:
   # Resolves metric_*, reviewers and approvals from siphon sources at extract
   # time because the upstream `merge_requests_mv` only re-fires on parent

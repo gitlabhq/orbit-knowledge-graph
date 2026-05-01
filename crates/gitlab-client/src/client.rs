@@ -254,6 +254,23 @@ impl GitlabClient {
         Ok(into_byte_stream(response))
     }
 
+    pub async fn get_merge_request_raw_diff_by_iid(
+        &self,
+        project_id: i64,
+        merge_request_iid: i64,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_requests/{}/raw_diffs",
+            self.base_url, project_id, merge_request_iid,
+        );
+
+        debug!(project_id, merge_request_iid, "fetching MR raw diff by IID");
+
+        let response = self.authenticated_get(&url).await?;
+        Self::check_response_status(&response, project_id)?;
+        Ok(into_byte_stream(response))
+    }
+
     async fn streaming_get(
         &self,
         url: reqwest::Url,

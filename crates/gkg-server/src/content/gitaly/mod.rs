@@ -32,7 +32,9 @@ impl ColumnResolver for GitalyService {
         ctx: &ResolverContext,
     ) -> Result<Vec<Option<ColumnValue>>, PipelineError> {
         match lookup {
-            "patch" | "raw_patch" => self.mr_diff.resolve_batch(lookup, rows, ctx).await,
+            "patch" | "raw_patch" | "mr_raw_patch" => {
+                self.mr_diff.resolve_batch(lookup, rows, ctx).await
+            }
             _ => self.file_content.resolve_batch(lookup, rows, ctx).await,
         }
     }
