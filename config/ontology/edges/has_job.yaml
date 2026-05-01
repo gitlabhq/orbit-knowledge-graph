@@ -1,6 +1,7 @@
 # config/ontology/edges/has_job.yaml
 
 description: Pipeline or stage contains job relationship
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Stage, id: id }

@@ -1,6 +1,7 @@
 # config/ontology/edges/has_head_pipeline.yaml
 
 description: Merge request's head pipeline (pipeline running against the tip of the source branch)
+table: gl_ci_edge
 
 variants:
   - from_node: { type: MergeRequest, id: id }
