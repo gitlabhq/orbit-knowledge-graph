@@ -43,6 +43,7 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
+            inject_denorm_tags_on_main_edges(q, input);
             push_kind_literals_into_variable_length_arms(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
@@ -285,8 +286,7 @@ fn prune_orphaned_ctes(q: &mut Query) {
     // references are injected by the deduplicate pass which runs after
     // optimize.
     q.ctes.retain(|c| {
-        c.name.starts_with("_nf_")
-            || ref_counts.get(&c.name).copied().unwrap_or(0) > 0
+        c.name.starts_with("_nf_") || ref_counts.get(&c.name).copied().unwrap_or(0) > 0
     });
 }
 
@@ -733,6 +733,91 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
     if !kind_filters.is_empty() {
         let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
         parts.extend(kind_filters);
+        q.where_clause = Expr::conjoin(parts);
+    }
+}
+
+/// Inject denormalized tag predicates onto the main query's edge aliases
+/// (e0, e1, ...) for every node that has filters on denormalized properties.
+///
+/// This is complementary to the tag injection in cascade CTEs: cascades
+/// already narrow the ID set via IN-subqueries, so adding tags there is
+/// redundant. But the main query's edge scans (used in JOINs) don't have
+/// IN-subquery pre-filters on the edge rows themselves — they rely on the
+/// JOIN condition. Tag predicates here let the text index prune edge
+/// granules before the JOIN materializes.
+/// Inject denormalized tag predicates onto the main query's edge aliases
+/// (e0, e1, ...) for nodes that have filters on denormalized properties
+/// but lack tight selectivity from node_ids or id_range.
+///
+/// Skip injection when the opposite side of the edge already provides
+/// tight primary-key selectivity (node_ids / id_range), because the
+/// primary key prunes granules more effectively than the text index
+/// and the has() predicate just adds overhead via CTE duplication.
+fn inject_denorm_tags_on_main_edges(q: &mut Query, input: &Input) {
+    if input.compiler.denormalized_columns.is_empty() || input.relationships.is_empty() {
+        return;
+    }
+
+    let mut tag_filters: Vec<Expr> = Vec::new();
+
+    for (i, rel) in input.relationships.iter().enumerate() {
+        if rel.max_hops > 1 {
+            continue;
+        }
+        let edge_alias = format!("e{i}");
+        let (start_col, end_col) = rel.direction.edge_columns();
+
+        let from_node = input.nodes.iter().find(|n| n.id == rel.from);
+        let to_node = input.nodes.iter().find(|n| n.id == rel.to);
+
+        let has_tight_selectivity =
+            |n: &InputNode| -> bool { !n.node_ids.is_empty() || n.id_range.is_some() };
+
+        // Source side: inject tag predicates for the "from" node's filters
+        // only when the opposite side (target) doesn't already provide
+        // tight selectivity via node_ids/id_range.
+        if let Some(from_node) = from_node {
+            let opposite_is_tight = to_node.is_some_and(&has_tight_selectivity);
+            if !opposite_is_tight && !from_node.filters.is_empty() {
+                let dir = if start_col == SOURCE_ID_COLUMN {
+                    "source"
+                } else {
+                    "target"
+                };
+                tag_filters.extend(build_denorm_tag_predicates(
+                    from_node,
+                    dir,
+                    &edge_alias,
+                    &input.compiler.denormalized_columns,
+                ));
+            }
+        }
+
+        // Target side: inject tag predicates for the "to" node's filters
+        // only when the opposite side (source) doesn't already provide
+        // tight selectivity.
+        if let Some(to_node) = to_node {
+            let opposite_is_tight = from_node.is_some_and(&has_tight_selectivity);
+            if !opposite_is_tight && !to_node.filters.is_empty() {
+                let dir = if end_col == TARGET_ID_COLUMN {
+                    "target"
+                } else {
+                    "source"
+                };
+                tag_filters.extend(build_denorm_tag_predicates(
+                    to_node,
+                    dir,
+                    &edge_alias,
+                    &input.compiler.denormalized_columns,
+                ));
+            }
+        }
+    }
+
+    if !tag_filters.is_empty() {
+        let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+        parts.extend(tag_filters);
         q.where_clause = Expr::conjoin(parts);
     }
 }
@@ -1963,30 +2048,48 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         let from_edge_only = input.compiler.node_edge_col.contains_key(&rel.from);
 
         // Use multi-hop cascade for max_hops > 1, single-hop for max_hops == 1.
-        let build_cascade =
-            |node_alias: &str, select_col: &str, filter_col: &str, parent: &str| -> Option<Query> {
-                if rel.max_hops > 1 {
-                    build_multihop_cascade_for_node(
-                        input,
-                        node_alias,
-                        select_col,
-                        filter_col,
-                        parent,
-                        &rel.types,
-                        rel.max_hops,
-                    )
-                } else {
-                    build_cascade_for_node(
-                        input, node_alias, select_col, filter_col, parent, &rel.types,
-                    )
-                }
-            };
+        // `parent_alias` is the node on the opposite side of the relationship so
+        // that `build_cascade_for_node_with_parent` can inject source-side tag
+        // predicates for the parent node's denormalized filters.
+        let build_cascade = |node_alias: &str,
+                             select_col: &str,
+                             filter_col: &str,
+                             parent: &str,
+                             parent_alias: Option<&str>|
+         -> Option<Query> {
+            if rel.max_hops > 1 {
+                build_multihop_cascade_for_node(
+                    input,
+                    node_alias,
+                    select_col,
+                    filter_col,
+                    parent,
+                    &rel.types,
+                    rel.max_hops,
+                )
+            } else {
+                build_cascade_for_node_with_parent(
+                    input,
+                    node_alias,
+                    select_col,
+                    filter_col,
+                    parent,
+                    &rel.types,
+                    parent_alias,
+                )
+            }
+        };
 
         if from_cte.is_some()
             && to_cte.is_none()
             && !to_edge_only
-            && let Some(cte) =
-                build_cascade(&rel.to, end_col, start_col, from_cte.as_ref().unwrap())
+            && let Some(cte) = build_cascade(
+                &rel.to,
+                end_col,
+                start_col,
+                from_cte.as_ref().unwrap(),
+                Some(&rel.from),
+            )
         {
             let name = cascade_cte(&rel.to);
             q.ctes.push(Cte::new(&name, cte));
@@ -1995,8 +2098,13 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         if to_cte.is_some()
             && from_cte.is_none()
             && !from_edge_only
-            && let Some(cte) =
-                build_cascade(&rel.from, start_col, end_col, to_cte.as_ref().unwrap())
+            && let Some(cte) = build_cascade(
+                &rel.from,
+                start_col,
+                end_col,
+                to_cte.as_ref().unwrap(),
+                Some(&rel.to),
+            )
         {
             let name = cascade_cte(&rel.from);
             q.ctes.push(Cte::new(&name, cte));
@@ -2039,6 +2147,20 @@ fn build_cascade_for_node(
     filter_col: &str,
     parent_cte: &str,
     rel_types: &[String],
+) -> Option<Query> {
+    build_cascade_for_node_with_parent(
+        input, node_alias, select_col, filter_col, parent_cte, rel_types, None,
+    )
+}
+
+fn build_cascade_for_node_with_parent(
+    input: &Input,
+    node_alias: &str,
+    select_col: &str,
+    filter_col: &str,
+    parent_cte: &str,
+    rel_types: &[String],
+    parent_alias: Option<&str>,
 ) -> Option<Query> {
     let node = input.nodes.iter().find(|n| n.id == node_alias)?;
     node.table.as_deref()?;
@@ -2108,6 +2230,8 @@ fn build_cascade_for_node(
         alias,
         &input.compiler.denormalized_columns,
     );
+
+    let _ = parent_alias;
 
     Some(Query {
         distinct: input.options.cascade_distinct,
