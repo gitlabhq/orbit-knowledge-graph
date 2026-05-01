@@ -125,6 +125,8 @@ pub enum TableRef {
 /// - Right: all rows from right, matching from left
 /// - Full: all rows from both sides
 /// - Cross: cartesian product, no ON condition
+/// - LeftSemi: rows from left that have at least one match in right
+/// - LeftAnti: rows from left that have no match in right
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
@@ -133,6 +135,10 @@ pub enum JoinType {
     Right,
     Full,
     Cross,
+    #[strum(serialize = "LEFT SEMI")]
+    LeftSemi,
+    #[strum(serialize = "LEFT ANTI")]
+    LeftAnti,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

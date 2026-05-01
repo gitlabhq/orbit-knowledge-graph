@@ -22,7 +22,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::ast::{ChType, Cte, Expr, Node, Query, SelectExpr, TableRef};
+use crate::ast::{ChType, Cte, Expr, JoinType, Node, Query, SelectExpr, TableRef};
 use crate::constants::{
     BACKWARD_CTE, CASCADE_EDGE_ALIAS, END_ID_COLUMN, FORWARD_CTE, HOP_EDGE_ALIAS, START_ID_COLUMN,
     TRAVERSAL_PATH_COLUMN, cascade_cte, node_filter_cte, skip_security_filter_tables,
@@ -74,7 +74,158 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.options.materialize_ctes {
                 materialize_multi_ref_ctes(q);
             }
+            if input.options.use_semi_join {
+                rewrite_in_subquery_to_semi_join(q);
+            }
         }
+    }
+}
+
+/// Rewrite `WHERE ... AND col IN (SELECT id FROM cte) AND ...` patterns into
+/// `LEFT SEMI JOIN cte ON col = cte.id`, removing the conjunct from WHERE.
+///
+/// ClickHouse can sometimes optimize `IN (subquery)` into a hash semi-join
+/// automatically, but an explicit `LEFT SEMI JOIN` gives the planner a
+/// stronger guarantee: it can stop scanning the right side as soon as a
+/// match is found (early termination) and avoids materializing the full
+/// hash set when the left side is much smaller than the right.
+fn rewrite_in_subquery_to_semi_join(q: &mut Query) {
+    rewrite_where_in_to_semi_join(&mut q.from, &mut q.where_clause);
+
+    // Recurse into CTE bodies.
+    for cte in &mut q.ctes {
+        rewrite_in_subquery_to_semi_join(&mut cte.query);
+    }
+
+    // Recurse into UNION ALL arms.
+    for arm in &mut q.union_all {
+        rewrite_in_subquery_to_semi_join(arm);
+    }
+
+    // Recurse into subqueries and unions in the FROM tree.
+    rewrite_in_subquery_in_from(&mut q.from);
+}
+
+/// Walk the FROM tree and apply the rewrite to any nested subqueries or unions.
+fn rewrite_in_subquery_in_from(from: &mut TableRef) {
+    match from {
+        TableRef::Join { left, right, .. } => {
+            rewrite_in_subquery_in_from(left);
+            rewrite_in_subquery_in_from(right);
+        }
+        TableRef::Subquery { query, .. } => {
+            rewrite_in_subquery_to_semi_join(query);
+        }
+        TableRef::Union { queries, .. } => {
+            for q in queries {
+                rewrite_in_subquery_to_semi_join(q);
+            }
+        }
+        TableRef::Scan { .. } => {}
+    }
+}
+
+/// Extract `InSubquery` conjuncts from a WHERE clause and rewrite them into
+/// LEFT SEMI JOINs on the FROM tree.
+fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<Expr>) {
+    let w = match where_clause.take() {
+        Some(w) => w,
+        None => return,
+    };
+
+    let conjuncts = w.flatten_and();
+    let mut kept: Vec<Expr> = Vec::new();
+
+    for conj in conjuncts {
+        if let Expr::InSubquery {
+            ref expr,
+            ref cte_name,
+            ref column,
+        } = conj
+        {
+            // Only rewrite when the expression is a simple column reference
+            // (e.g., `e0.source_id`) so we can locate the table in the FROM tree.
+            if let Expr::Column { table, column: col } = expr.as_ref() {
+                let semi_alias = format!("_sj_{cte_name}");
+                let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
+                let semi_scan = TableRef::scan(cte_name, &semi_alias);
+
+                if wrap_alias_with_semi_join(from, table, semi_scan, on) {
+                    continue;
+                }
+            }
+        }
+        kept.push(conj);
+    }
+
+    *where_clause = Expr::conjoin(kept);
+}
+
+/// Walk the FROM tree to find the node that defines `target_alias` and wrap
+/// it in a LEFT SEMI JOIN. Returns true if the alias was found and wrapped.
+fn wrap_alias_with_semi_join(
+    from: &mut TableRef,
+    target_alias: &str,
+    semi_rhs: TableRef,
+    on: Expr,
+) -> bool {
+    match from {
+        TableRef::Scan { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        TableRef::Join { left, right, .. } => {
+            wrap_alias_with_semi_join(left, target_alias, semi_rhs.clone(), on.clone())
+                || wrap_alias_with_semi_join(right, target_alias, semi_rhs, on)
+        }
+        TableRef::Union { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        TableRef::Subquery { alias, .. } if alias == target_alias => {
+            let original = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(original),
+                right: Box::new(semi_rhs),
+                on,
+            };
+            true
+        }
+        _ => false,
     }
 }
 
@@ -1675,7 +1826,7 @@ fn build_cascade_for_node(
     };
 
     Some(Query {
-        distinct: true,
+        distinct: input.options.cascade_distinct,
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
@@ -1816,7 +1967,7 @@ fn build_multihop_cascade_for_node(
         }
 
         arms.push(Query {
-            distinct: true,
+            distinct: input.options.cascade_distinct,
             select: vec![SelectExpr::new(
                 Expr::col(&last, select_col),
                 DEFAULT_PRIMARY_KEY,
@@ -2248,12 +2399,19 @@ fn cascade_node_filter_ctes(q: &mut Query, input: &Input) {
         .map(|n| n.id.clone())
         .collect();
 
-    // When no node has explicit node_ids, seed from the first node that has
-    // an _nf_* CTE (created by the lowerer for auth-scoped nodes). This
-    // enables cascades for code graph queries like File → DEFINES → Definition
-    // where no node is pinned by ID but the auth scope on the source still
-    // provides meaningful narrowing through edge reachability.
-    if narrowed.is_empty()
+    // When no node has explicit node_ids (or auth_scope_cascade is forced),
+    // seed from the first node that has an _nf_* CTE (created by the lowerer
+    // for auth-scoped nodes). This enables cascades for code graph queries
+    // like File → DEFINES → Definition where no node is pinned by ID but the
+    // auth scope on the source still provides meaningful narrowing through
+    // edge reachability.
+    //
+    // When any node has node_ids, the pinned-node cascade (seeded above)
+    // already provides better narrowing. The auth-scoped fallback is skipped
+    // to avoid redundant full-table _nf_* scans that regress performance on
+    // aggregation queries.
+    let force_auth_cascade = input.options.auth_scope_cascade;
+    if (narrowed.is_empty() || force_auth_cascade)
         && let Some(seed) = input.relationships.first().and_then(|rel| {
             let nf = node_filter_cte(&rel.from);
             if q.ctes.iter().any(|c| c.name == nf) {
@@ -2574,7 +2732,7 @@ fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
             new_ctes.push(Cte::new(
                 &hop_name,
                 Query {
-                    distinct: true,
+                    distinct: input.options.cascade_distinct,
                     select: vec![SelectExpr::new(
                         Expr::col(alias, next_col),
                         DEFAULT_PRIMARY_KEY,
@@ -2675,6 +2833,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             Some(path.rel_types.as_slice())
         };
     let mut new_ctes = Vec::new();
+    let use_distinct = input.options.cascade_distinct;
     inject_hop_frontiers(
         q,
         &mut new_ctes,
@@ -2687,6 +2846,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
             rel_type_filter,
             path_scope_cte,
             anchor_entity: start_entity,
+            distinct: use_distinct,
         },
     );
     if backward_depth > 0 {
@@ -2702,6 +2862,7 @@ fn apply_path_hop_frontiers(q: &mut Query, input: &Input) {
                 rel_type_filter,
                 path_scope_cte,
                 anchor_entity: end_entity,
+                distinct: use_distinct,
             },
         );
     }
@@ -2741,6 +2902,7 @@ struct HopFrontierOptions<'a> {
     rel_type_filter: Option<&'a [String]>,
     path_scope_cte: Option<&'a str>,
     anchor_entity: Option<&'a str>,
+    distinct: bool,
 }
 
 /// Build hop frontier CTEs for one direction and inject SIP filters into
@@ -2847,7 +3009,7 @@ fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFron
         new_ctes.push(Cte::new(
             &hop_name,
             Query {
-                distinct: true,
+                distinct: options.distinct,
                 select: vec![SelectExpr::new(
                     Expr::col(alias, next_col),
                     DEFAULT_PRIMARY_KEY,

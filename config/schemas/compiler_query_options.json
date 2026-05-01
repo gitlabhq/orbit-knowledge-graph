@@ -1,0 +1,28 @@
+{
+  "$comment": "Compiler performance options injected into QueryOptions at runtime. Kept separate from the base graph_query.schema.json to reduce token usage for LLM consumers.",
+  "skip_dedup": {
+    "type": "boolean",
+    "description": "Skip ReplacingMergeTree deduplication for node tables. Recommended for code graph traversals (CALLS, DEFINES, EXTENDS, IMPORTS) where eventual consistency is acceptable. Not allowed for aggregation queries.",
+    "default": false
+  },
+  "materialize_ctes": {
+    "type": "boolean",
+    "description": "Materialize multi-referenced CTEs for reduced redundant scans.",
+    "default": false
+  },
+  "use_semi_join": {
+    "type": "boolean",
+    "description": "Rewrite IN-subquery SIP patterns to LEFT SEMI JOIN.",
+    "default": false
+  },
+  "auth_scope_cascade": {
+    "type": "boolean",
+    "description": "Force auth-scoped cascade seeding on every query. When false (default), auth-scoped cascades only fire when no node has node_ids — pinned-node cascades provide better narrowing.",
+    "default": false
+  },
+  "cascade_distinct": {
+    "type": "boolean",
+    "description": "Emit SELECT DISTINCT on cascade and hop frontier CTEs. When false (default), IN already deduplicates internally and DISTINCT adds a blocking barrier.",
+    "default": false
+  }
+}

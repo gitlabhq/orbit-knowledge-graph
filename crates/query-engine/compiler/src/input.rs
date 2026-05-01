@@ -51,6 +51,24 @@ pub struct QueryOptions {
     /// frontier CTEs in multi-relationship queries.
     #[serde(default)]
     pub materialize_ctes: bool,
+    /// When true, rewrites `IN (SELECT id FROM cte)` SIP patterns into
+    /// explicit `LEFT SEMI JOIN` for early termination and reduced hash-set
+    /// materialization in ClickHouse.
+    #[serde(default)]
+    pub use_semi_join: bool,
+    /// When true, forces auth-scoped cascade seeding on every query,
+    /// regardless of whether any node has `node_ids`. When false (default),
+    /// auth-scoped cascades are only used when no node has `node_ids` —
+    /// pinned-node cascades provide better narrowing and avoid redundant
+    /// full-table _nf_* scans.
+    #[serde(default)]
+    pub auth_scope_cascade: bool,
+    /// When true, emits `SELECT DISTINCT` on cascade and hop frontier CTEs.
+    /// When false (default), CTEs emit plain `SELECT` — ClickHouse's `IN`
+    /// operator already deduplicates internally, and `DISTINCT` adds a
+    /// blocking hash aggregation barrier that prevents pipelining.
+    #[serde(default)]
+    pub cascade_distinct: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
