@@ -197,6 +197,6 @@ storage:
     - {name: idx_is_auditor, column: is_auditor, type: "minmax", granularity: 1}
     - {name: idx_is_external, column: is_external, type: "minmax", granularity: 1}
     - {name: idx_username, column: username, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_username_ngram, column: username, type: "ngrambf_v1(3, 256, 2, 0)", granularity: 1}
+    - {name: idx_username_ngram, column: username, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 256, 2, 0)", granularity: 1}
+    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
