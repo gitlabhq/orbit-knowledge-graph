@@ -26,7 +26,7 @@ properties:
   full_path:
     type: string
     source: full_path
-    nullable: false
+    nullable: true
     description: "Full path for the project (e.g. gitlab-org/gitlab)."
 
   name:
@@ -137,7 +137,7 @@ storage:
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: full_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: full_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: archived, type: "Nullable(Bool)"}
@@ -149,8 +149,7 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
-    - {name: idx_full_path, column: full_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
-    - {name: idx_full_path_ngram, column: full_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_full_path, column: full_path, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
