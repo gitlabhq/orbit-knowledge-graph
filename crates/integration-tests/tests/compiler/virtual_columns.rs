@@ -244,6 +244,52 @@ fn definition_content_also_handled() {
 }
 
 #[test]
+fn merge_request_diff_virtual_column_hydration() {
+    let compiled = compile_query(
+        r#"{
+            "query_type": "traversal",
+            "node": {"id": "mr", "entity": "MergeRequest", "node_ids": [1], "columns": ["id", "title", "diff"]},
+            "limit": 5
+        }"#,
+    );
+
+    let sql = &compiled.base.sql;
+    assert!(
+        !sql.contains("mr_diff") && !sql.contains("mr.diff"),
+        "virtual column 'diff' should not appear in SQL, got:\n{sql}"
+    );
+
+    match &compiled.hydration {
+        HydrationPlan::Static(templates) => {
+            let mr_template = templates
+                .iter()
+                .find(|t| t.entity_type == "MergeRequest")
+                .unwrap();
+            let vcs = &mr_template.virtual_columns;
+            assert!(
+                vcs.iter()
+                    .any(|vc| vc.column_name == "diff" && vc.service == "gitaly"),
+                "hydration plan should include diff virtual column with gitaly service, got: {vcs:?}"
+            );
+            let cols = &mr_template.columns;
+            for dep in &["project_id", "iid"] {
+                assert!(
+                    cols.iter().any(|c| c == dep),
+                    "depends_on column '{dep}' should be auto-injected into hydration columns, got: {cols:?}"
+                );
+            }
+            assert!(
+                mr_template
+                    .injected_columns
+                    .contains(&"project_id".to_string()),
+                "'project_id' should be in injected_columns (user didn't request it)"
+            );
+        }
+        other => panic!("expected Static hydration plan, got: {other:?}"),
+    }
+}
+
+#[test]
 fn multiple_virtual_entities_in_same_query() {
     let compiled = compile_query(
         r#"{

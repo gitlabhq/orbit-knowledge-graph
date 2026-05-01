@@ -37,6 +37,7 @@ impl ColumnResolver for MergeRequestDiffContentService {
         let (values, outcome) = match lookup {
             "patch" => self.resolve_per_file_patches(rows).await,
             "raw_patch" => self.resolve_whole_mr_diffs(rows).await,
+            "mr_raw_patch" => self.resolve_mr_raw_diffs(rows).await,
             other => {
                 return Err(PipelineError::ContentResolution(format!(
                     "mr_diff: unknown lookup '{other}'"
@@ -53,6 +54,18 @@ impl ColumnResolver for MergeRequestDiffContentService {
 struct DiffKey {
     project_id: i64,
     diff_id: i64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+struct MrKey {
+    project_id: i64,
+    iid: i64,
+}
+
+fn mr_key_from_row(props: &PropertyRow) -> Option<MrKey> {
+    let project_id = props.get("project_id").and_then(|v| v.coerce::<i64>())?;
+    let iid = props.get("iid").and_then(|v| v.coerce::<i64>())?;
+    Some(MrKey { project_id, iid })
 }
 
 fn diff_key_from_row(props: &PropertyRow) -> Option<DiffKey> {
@@ -102,6 +115,97 @@ impl MergeRequestDiffContentService {
 
         (values, outcome_label(fetch_count, error_count))
     }
+
+    async fn resolve_mr_raw_diffs(
+        &self,
+        rows: &[&PropertyRow],
+    ) -> (Vec<Option<ColumnValue>>, &'static str) {
+        let row_keys: Vec<Option<MrKey>> = rows.iter().map(|r| mr_key_from_row(r)).collect();
+        let unique_keys: HashSet<MrKey> = row_keys.iter().flatten().cloned().collect();
+        let fetch_count = unique_keys.len();
+
+        let fetches = unique_keys.into_iter().map(|key| {
+            let client = Arc::clone(&self.client);
+            async move {
+                let diff = fetch_mr_raw_diff(&client, &key).await;
+                (key, diff)
+            }
+        });
+
+        let mut error_count = 0;
+        let mut diffs_by_key: HashMap<MrKey, String> = HashMap::new();
+        for (key, diff) in futures::future::join_all(fetches).await {
+            match diff {
+                Some(text) => {
+                    diffs_by_key.insert(key, text);
+                }
+                None => error_count += 1,
+            }
+        }
+
+        let values = row_keys
+            .into_iter()
+            .map(|key| {
+                let text = diffs_by_key.get(&key?)?;
+                into_blob_value(text)
+            })
+            .collect();
+
+        (values, outcome_label(fetch_count, error_count))
+    }
+}
+
+async fn fetch_mr_raw_diff(client: &GitlabClient, key: &MrKey) -> Option<String> {
+    metrics::record_mr_diff_call("mr_raw_diff");
+
+    let mut stream = client
+        .get_merge_request_raw_diff_by_iid(key.project_id, key.iid)
+        .await
+        .map_err(|e| {
+            warn!(
+                project_id = key.project_id,
+                iid = key.iid,
+                error = %e,
+                "get_merge_request_raw_diff_by_iid failed; diff will be None"
+            );
+        })
+        .ok()?;
+
+    let mut bytes = Vec::new();
+    while let Some(chunk) = stream.next().await {
+        let chunk = match chunk {
+            Ok(b) => b,
+            Err(e) => {
+                warn!(
+                    project_id = key.project_id,
+                    iid = key.iid,
+                    error = %e,
+                    "mr_raw_diff stream error; diff will be None"
+                );
+                return None;
+            }
+        };
+        if bytes.len().saturating_add(chunk.len()) > MAX_RAW_DIFF_BYTES {
+            warn!(
+                project_id = key.project_id,
+                iid = key.iid,
+                cap = MAX_RAW_DIFF_BYTES,
+                "mr_raw_diff exceeds size cap; diff will be None"
+            );
+            return None;
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+
+    String::from_utf8(bytes)
+        .map_err(|_| {
+            warn!(
+                project_id = key.project_id,
+                iid = key.iid,
+                "mr_raw_diff is not valid UTF-8; diff will be None"
+            );
+        })
+        .ok()
 }
 
 async fn fetch_raw_diff(client: &GitlabClient, key: &DiffKey) -> Option<String> {
