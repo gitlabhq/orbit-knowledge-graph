@@ -115,9 +115,8 @@ properties:
     type: string
     nullable: true
     virtual:
-      service: mr_diff
+      service: gitaly
       lookup: raw_patch
-      disabled: true
       depends_on: [project_id, id]
     description: "Full unified patch for this MR snapshot. Resolved from GitLab at query time."
 

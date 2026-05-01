@@ -13,7 +13,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use gitaly_protos::proto::ListBlobsResponse;
 use gitaly_protos::proto::list_blobs_response::Blob as BlobChunk;
 use gitlab_client::GitlabClient;
-use gkg_server::content::gitaly::GitalyContentService;
+use gkg_server::content::gitaly::file_content::GitalyContentService;
 use gkg_utils::arrow::ColumnValue;
 use prost::Message;
 use query_engine::compiler::SecurityContext;

@@ -10,7 +10,7 @@ use tracing::{debug, warn};
 
 use query_engine::shared::content::{ColumnResolver, PropertyRow, ResolverContext};
 
-use super::metrics;
+use crate::content::metrics;
 
 /// Gitaly-specific parameters extracted from a hydrated entity row.
 ///
