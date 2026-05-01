@@ -780,6 +780,10 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     }
 
     let mut ctes_to_remove: Vec<String> = Vec::new();
+    // CTEs where some (but not all) filters are denormalized. The CTE is
+    // kept but its WHERE is rewritten to contain only the non-denormalized
+    // filters. The denormalized filters are injected onto the edge WHERE.
+    let mut ctes_to_rewrite: HashMap<String, Vec<String>> = HashMap::new();
     // Map CTE name → edge-column filter exprs (using placeholder alias "EDGE")
     let mut filters_per_cte: HashMap<String, Vec<Expr>> = HashMap::new();
 
@@ -802,7 +806,6 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             continue;
         };
 
-        let mut all_rewritable = true;
         // Collect per-filter rewrites: each filter becomes either a has(), hasAny(), or
         // contributes to a hasAll() batch when multiple eq filters target the same column.
         // We track (edge_column, tag_values, is_any) per filter.
@@ -813,6 +816,8 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             is_any: bool,
         }
         let mut tag_filters: Vec<TagFilter> = Vec::new();
+        // Track which property names were successfully converted to tag predicates.
+        let mut denormalized_props: HashSet<String> = HashSet::new();
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
@@ -825,6 +830,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                             tags: vec![format!("{tag_key}:{val}")],
                             is_any: false,
                         });
+                        denormalized_props.insert(prop_name.clone());
                     }
                     Some(crate::input::FilterOp::In) => {
                         let vals: Vec<String> = filter
@@ -838,25 +844,25 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        if vals.is_empty() {
-                            all_rewritable = false;
-                            break;
+                        if !vals.is_empty() {
+                            tag_filters.push(TagFilter {
+                                edge_column: edge_column.clone(),
+                                tags: vals,
+                                is_any: true,
+                            });
+                            denormalized_props.insert(prop_name.clone());
                         }
-                        tag_filters.push(TagFilter {
-                            edge_column: edge_column.clone(),
-                            tags: vals,
-                            is_any: true,
-                        });
                     }
                     _ => {
-                        all_rewritable = false;
-                        break;
+                        // Unsupported operator — this filter stays on the node table.
                     }
                 }
-            } else {
-                all_rewritable = false;
-                break;
             }
+            // Non-denormalized property — stays on the node table (no action needed here).
+        }
+
+        if tag_filters.is_empty() {
+            continue;
         }
 
         // Build filter expressions:
@@ -913,37 +919,114 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             }
         }
 
-        if !all_rewritable {
-            continue;
-        }
+        // Determine which property names remain non-denormalized.
+        let remaining_props: Vec<String> = node
+            .filters
+            .keys()
+            .filter(|k| !denormalized_props.contains(*k))
+            .cloned()
+            .collect();
 
-        ctes_to_remove.push(cte.name.clone());
+        if remaining_props.is_empty() {
+            // All filters denormalized — remove the CTE entirely (existing behavior).
+            ctes_to_remove.push(cte.name.clone());
+        } else {
+            // Partial match — keep the CTE but rewrite its WHERE to only
+            // contain the non-denormalized filters.
+            ctes_to_rewrite.insert(cte.name.clone(), remaining_props);
+        }
         filters_per_cte.insert(cte.name.clone(), edge_filters);
     }
 
-    if ctes_to_remove.is_empty() {
+    if filters_per_cte.is_empty() {
         return;
     }
 
-    // Remove the _nf_ CTEs.
+    // Remove fully-denormalized _nf_ CTEs.
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
+    // Rewrite partial-match CTEs: strip denormalized filters from the CTE's
+    // WHERE clause, keeping only non-denormalized filters. The CTE body is a
+    // subquery wrapping a dedup scan; the outer WHERE is where property filters
+    // live. We rebuild it from the remaining property names.
+    for cte in &mut q.ctes {
+        if let Some(remaining_props) = ctes_to_rewrite.get(&cte.name) {
+            let alias = cte.name.strip_prefix("_nf_").unwrap_or(&cte.name);
+            let node = input.nodes.iter().find(|n| n.id == alias);
+            if let Some(node) = node {
+                // Rebuild the CTE's outer WHERE with only non-denormalized filters.
+                let remaining_filters: Vec<Expr> = node
+                    .filters
+                    .iter()
+                    .filter(|(k, _)| remaining_props.contains(k))
+                    .map(|(col, filter)| crate::passes::lower::filter_expr(&node.id, col, filter))
+                    .collect();
+                // Preserve any non-filter conjuncts (e.g., cascade IN-subquery
+                // filters injected by earlier passes).
+                let existing_conjuncts = cte
+                    .query
+                    .where_clause
+                    .take()
+                    .map(|w| w.flatten_and())
+                    .unwrap_or_default();
+                let non_filter_conjuncts: Vec<Expr> = existing_conjuncts
+                    .into_iter()
+                    .filter(|e| {
+                        // Keep InSubquery and other non-property-filter conjuncts.
+                        // Property filters are Column-based equality/comparison
+                        // expressions — we've rebuilt them above.
+                        matches!(e, Expr::InSubquery { .. })
+                    })
+                    .collect();
+                let all_conjuncts: Vec<Expr> = non_filter_conjuncts
+                    .into_iter()
+                    .chain(remaining_filters)
+                    .collect();
+                cte.query.where_clause = Expr::conjoin(all_conjuncts);
+            }
+        }
+    }
+
     let has_union_in_from = has_union_table_ref(&q.from);
+
+    // All CTE names that have tag predicates (both fully-removed and partial-match).
+    let all_rewritten_ctes: HashSet<&String> = filters_per_cte.keys().collect();
 
     // Phase 1: Replace InSubquery in outer WHERE.
     // Single-hop: add edge-column filters to outer WHERE with e0.
     // Multi-hop: don't add to outer WHERE (column lives on inner e1); injection below.
+    // For fully-removed CTEs, the InSubquery conjunct is dropped.
+    // For partial-match CTEs, the InSubquery conjunct is kept (the CTE still exists).
     if let Some(ref mut where_clause) = q.where_clause {
         let conjuncts = where_clause.clone().flatten_and();
         let mut kept: Vec<Expr> = Vec::new();
+        let mut injected_partial: HashSet<String> = HashSet::new();
         for conj in conjuncts {
-            if let Expr::InSubquery { cte_name, .. } = &conj
-                && ctes_to_remove.contains(cte_name)
-            {
-                if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
-                    kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+            // Extract CTE name before moving conj.
+            let cte_ref = match &conj {
+                Expr::InSubquery { cte_name, .. } => Some(cte_name.clone()),
+                _ => None,
+            };
+            if let Some(ref cte_name) = cte_ref {
+                if ctes_to_remove.contains(cte_name) {
+                    // Fully denormalized — drop the InSubquery, inject tag predicates.
+                    if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                    }
+                    continue;
                 }
-                continue;
+                if ctes_to_rewrite.contains_key(cte_name) {
+                    // Partial match — keep the InSubquery AND inject tag predicates.
+                    kept.push(conj);
+                    if !has_union_in_from
+                        && !injected_partial.contains(cte_name)
+                        && let Some(filters) = filters_per_cte.get(cte_name)
+                    {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                        injected_partial.insert(cte_name.clone());
+                    }
+                    continue;
+                }
             }
             kept.push(conj);
         }
@@ -952,9 +1035,10 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
     // Phase 2: Multi-hop — inject filters into UNION ALL arms in FROM.
     // The first edge in each arm is always e1 (from build_hop_arm).
+    // Inject for both fully-removed and partial-match CTEs.
     if has_union_in_from {
-        for cte_name in &ctes_to_remove {
-            if let Some(filters) = filters_per_cte.get(cte_name) {
+        for cte_name in all_rewritten_ctes.iter() {
+            if let Some(filters) = filters_per_cte.get(*cte_name) {
                 let arm_filters: Vec<Expr> =
                     filters.iter().map(|f| set_edge_alias(f, "e1")).collect();
                 inject_filters_into_from_unions(&mut q.from, &arm_filters);

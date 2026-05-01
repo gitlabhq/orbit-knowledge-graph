@@ -1193,6 +1193,9 @@ mod tests {
     }
 
     #[test]
+    /// Partial denorm: when some filters are denormalized and some are not,
+    /// the CTE is kept (with only non-denormalized filters) and tag
+    /// predicates are injected onto the edge WHERE for the denormalized ones.
     fn denorm_partial_filters_keeps_nf_cte() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
@@ -1211,13 +1214,20 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // _nf_pipe kept with only the non-denormalized filter (source = 'push').
         assert!(
             sql.contains("_nf_pipe"),
-            "partial denorm must keep _nf_pipe CTE when not all filters are denormalized, got:\n{sql}"
+            "partial denorm must keep _nf_pipe CTE for non-denormalized filters, got:\n{sql}"
         );
+        // Status (denormalized) is injected as has() on the edge, not on the CTE.
         assert!(
-            !sql.contains("has"),
-            "partial denorm must not inject has edge filter, got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'status:failed')"),
+            "partial denorm must inject has() for denormalized filter on edge, got:\n{sql}"
+        );
+        // The CTE WHERE should contain 'push' (source filter) but not 'failed' (status moved to edge).
+        assert!(
+            sql.contains("push"),
+            "partial denorm CTE must retain non-denormalized source filter, got:\n{sql}"
         );
     }
 
