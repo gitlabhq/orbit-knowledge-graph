@@ -6,12 +6,12 @@ pub mod deduplicate;
 pub mod enforce;
 pub mod hydrate;
 pub mod lower;
-pub mod lower_v2;
 pub mod normalize;
 pub mod optimize;
 pub mod restrict;
 pub mod security;
 pub mod settings;
+pub mod v2;
 pub mod validate;
 
 use crate::ast::Node;
@@ -105,7 +105,7 @@ where
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let input = state.input_mut()?;
-        let node = lower_v2::lower_v2(input)?;
+        let node = v2::lower::lower_v2(input)?;
         state.set_node(node);
         Ok(())
     }

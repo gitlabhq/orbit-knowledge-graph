@@ -24,7 +24,7 @@ pub fn lower_v2(input: &mut Input) -> Result<Node> {
         QueryType::Traversal if input.is_search() => lower_single_node(input),
         QueryType::Traversal => lower_skeleton(input),
         QueryType::Aggregation => lower_skeleton(input),
-        _ => super::lower::lower(input),
+        _ => super::super::lower::lower(input),
     }
 }
 
