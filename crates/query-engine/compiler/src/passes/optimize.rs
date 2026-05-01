@@ -43,7 +43,12 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
-            inject_denorm_tags_on_main_edges(q, input);
+            if matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            ) {
+                inject_denorm_tags_on_main_edges(q, input);
+            }
             push_kind_literals_into_variable_length_arms(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
