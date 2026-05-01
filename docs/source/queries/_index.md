@@ -33,15 +33,18 @@ Queries respect role-based access control. When you query the
 knowledge graph, you see only data you have permission to see in
 GitLab.
 
-You can query the graph directly by using the Orbit query language, or
+## Run a query
+
+You can query the graph directly by using the [Orbit query language](query_language.md), or
 have an AI agent like GitLab Duo write and run queries for you.
 
-## Prerequisites
+Prerequisites:
 
-- Turn on Orbit for a group or project.
+- Turn on Orbit.
 - The Reporter, Developer, Maintainer, or Owner role for the group or project.
+- For external AI tools. Connect to the Orbit MCP server.
 
-## Run a query in the UI
+### With the UI
 
 Use the query editor to write and run queries in the UI.
 
@@ -49,36 +52,20 @@ To run a query:
 
 1. In the top bar, select **Search or go to** > **Your work**.
 1. Select **Orbit**, then select the **Explore** tab.
-1. In the query editor, enter a query. For information about query syntax, see [Orbit query language](query_language.md).
+1. In the query editor, enter a query.
 1. Select **Execute query**.
 
-## GitLab Duo Agentic Chat
+### With AI
 
-When Orbit is turned on, Agentic Chat automatically uses the knowledge
-graph as a data source to respond to prompts.
+When Orbit is turned on, GitLab Duo Agentic Chat automatically uses
+the knowledge graph as a data source to improve results.
 
-See [use GitLab Duo Chat](https://docs.gitlab.com/user/gitlab_duo_chat/agentic_chat/#use-gitlab-duo-chat).
+Other AI tools connect to the Orbit MCP server to query the knowledge graph.
+For a list of available MCP tools, see [Orbit MCP tools](mcp_tools).
 
-## Connect to the Orbit MCP server
+#### Example prompts
 
-Use the Model Context Protocol (MCP) server to integrate external AI
-tools like Claude Code with Orbit.
-
-Use the [GitLab CLI](https://docs.gitlab.com/cli/) to configure Orbit in one command:
-
-- In the command line, run:
-
-  ```shell
-  glab orbit setup
-  ```
-
-  To run the command without applying settings, you can apply the `--dry-run` option.
-
-For a list of available MCP tools, see [Orbit MCP tools](mcp_tools.md).
-
-## Example prompts
-
-Use these example prompts with Agentic Chat or another AI agent:
+Use these example prompts with Agentic Chat or an MCP-compatible AI agent.
 
 - "List merged merge requests in the last 30 days for `my-project`, grouped by author."
 - "Show all open issues that are blocked by merge requests with failing pipelines in `my-project`."
