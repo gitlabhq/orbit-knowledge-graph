@@ -890,8 +890,8 @@
         },
         "type": {
           "type": "string",
-          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\))$",
-          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), or text(tokenizer = ...)."
+          "pattern": "^(minmax|set\\([0-9]+\\)|bloom_filter\\([0-9.]+\\)|text\\(.+\\)|ngrambf_v1\\([0-9, ]+\\)|tokenbf_v1\\([0-9, ]+\\))$",
+          "description": "Index type. Must be minmax, set(N), bloom_filter(N.NN), text(tokenizer = ...), ngrambf_v1(n, size, hashes, seed), or tokenbf_v1(size, hashes, seed)."
         },
         "granularity": { "type": "integer", "minimum": 1, "default": 1 }
       },

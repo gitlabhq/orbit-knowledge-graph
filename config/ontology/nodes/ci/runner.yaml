@@ -122,6 +122,7 @@ storage:
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 256, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_runner_type, order_by: [runner_type, id]}
