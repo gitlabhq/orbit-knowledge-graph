@@ -1067,16 +1067,46 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     // exist (e.g. a dedup subquery WHERE or a cascade CTE body), removing
     // the CTE would break those references.
     {
-        // Only count refs from the FROM tree (JOIN subqueries injected by
-        // deduplicate). Refs from other CTEs (_cascade_*, etc.) are not
-        // blocking — those CTEs use the _nf_ via InSubquery which still
-        // works when the _nf_ CTE exists. The cascade CTE's own filters
-        // provide adequate narrowing independently.
+        // Count refs from the FROM tree (JOIN subqueries injected by
+        // deduplicate). These block removal because the dedup pass
+        // injects `node.id IN (SELECT id FROM _nf_*)` into subqueries
+        // that the optimizer can't rewrite.
         let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
         let mut from_refs: HashMap<String, usize> = HashMap::new();
         count_cte_refs_in_from(&q.from, &cte_names, &mut from_refs);
 
         ctes_to_remove.retain(|name| from_refs.get(name).copied().unwrap_or(0) == 0);
+    }
+
+    // Also rewrite InSubquery refs inside other CTEs (e.g. _cascade_u
+    // references _nf_mr). Replace with tag predicates using the cascade's
+    // own edge alias (_ce).
+    for removed in &ctes_to_remove {
+        if let Some(filters) = filters_per_cte.get(removed) {
+            for cte in &mut q.ctes {
+                if cte.name == *removed {
+                    continue;
+                }
+                if let Some(ref mut w) = cte.query.where_clause {
+                    let conjuncts = w.clone().flatten_and();
+                    let mut kept: Vec<Expr> = Vec::new();
+                    for conj in conjuncts {
+                        if let Expr::InSubquery { cte_name, .. } = &conj
+                            && cte_name == removed
+                        {
+                            kept.extend(
+                                filters
+                                    .iter()
+                                    .map(|f| set_edge_alias(f, CASCADE_EDGE_ALIAS)),
+                            );
+                            continue;
+                        }
+                        kept.push(conj);
+                    }
+                    *w = Expr::conjoin(kept).unwrap_or(Expr::int(1));
+                }
+            }
+        }
     }
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
