@@ -1214,17 +1214,18 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // _nf_pipe kept with only the non-denormalized filter (source = 'push').
+        // _nf_pipe kept with all original filters (partial denorm keeps CTE intact).
         assert!(
             sql.contains("_nf_pipe"),
             "partial denorm must keep _nf_pipe CTE for non-denormalized filters, got:\n{sql}"
         );
-        // Status (denormalized) is injected as has() on the edge, not on the CTE.
+        // Supplementary has() is NOT injected when the opposite side (proj)
+        // already has node_ids — the PK prunes better than the text index.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "partial denorm must inject has() for denormalized filter on edge, got:\n{sql}"
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "partial denorm must skip has() when opposite side has node_ids, got:\n{sql}"
         );
-        // The CTE WHERE should contain 'push' (source filter) but not 'failed' (status moved to edge).
+        // CTE retains all filters including the denormalized one.
         assert!(
             sql.contains("push"),
             "partial denorm CTE must retain non-denormalized source filter, got:\n{sql}"

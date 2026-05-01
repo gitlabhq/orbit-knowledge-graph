@@ -1138,8 +1138,29 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                 if all_denorm_ctes.contains(cte_name) && !injected_partial.contains(cte_name) {
                     // Partial match — keep the InSubquery AND inject tag predicates
                     // as supplementary filters for text index pruning.
+                    // Skip when the opposite side of the edge already has tight
+                    // selectivity (node_ids/id_range) — the PK prunes better than
+                    // the text index and the has() just adds overhead.
+                    let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
+                    let opposite_is_tight = input.relationships.first().is_some_and(|rel| {
+                        let opposite_alias = if rel.from == alias {
+                            &rel.to
+                        } else if rel.to == alias {
+                            &rel.from
+                        } else {
+                            return false;
+                        };
+                        input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == *opposite_alias)
+                            .is_some_and(|n| !n.node_ids.is_empty() || n.id_range.is_some())
+                    });
                     kept.push(conj);
-                    if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                    if !has_union_in_from
+                        && !opposite_is_tight
+                        && let Some(filters) = filters_per_cte.get(cte_name)
+                    {
                         kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
                         injected_partial.insert(cte_name.clone());
                     }
