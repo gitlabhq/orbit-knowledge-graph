@@ -11,7 +11,7 @@ use serde::Serialize;
 use tracing::debug;
 
 use crate::error::GitlabClientError;
-use crate::types::ProjectInfo;
+use crate::types::{MergeRequestDiffBatch, ProjectInfo};
 use gkg_server_config::GitlabClientConfiguration;
 
 pub type ByteStream = Pin<Box<dyn Stream<Item = Result<bytes::Bytes, GitlabClientError>> + Send>>;
@@ -203,6 +203,55 @@ impl GitlabClient {
 
         let body = ListBlobsRequest { revisions: oids };
         self.streaming_post(&url, project_id, &body).await
+    }
+
+    pub async fn list_merge_request_diff_files(
+        &self,
+        project_id: i64,
+        diff_id: i64,
+        paths: &[String],
+    ) -> Result<MergeRequestDiffBatch, GitlabClientError> {
+        let base = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_request_diffs/{}",
+            self.base_url, project_id, diff_id,
+        );
+        let mut url = reqwest::Url::parse(&base)
+            .map_err(|e| GitlabClientError::Unexpected(format!("invalid URL: {e}")))?;
+
+        if !paths.is_empty() {
+            let mut query = url.query_pairs_mut();
+            for path in paths {
+                query.append_pair("paths[]", path);
+            }
+        }
+
+        debug!(
+            project_id,
+            diff_id,
+            path_count = paths.len(),
+            "listing MR diff files"
+        );
+
+        let response = self.authenticated_get(url).await?;
+        Self::check_response_status(&response, project_id)?;
+        Ok(response.json().await?)
+    }
+
+    pub async fn get_merge_request_raw_diff(
+        &self,
+        project_id: i64,
+        diff_id: i64,
+    ) -> Result<ByteStream, GitlabClientError> {
+        let url = format!(
+            "{}/api/v4/internal/orbit/project/{}/merge_request_diffs/{}/raw_diffs",
+            self.base_url, project_id, diff_id,
+        );
+
+        debug!(project_id, diff_id, "fetching MR raw diff");
+
+        let response = self.authenticated_get(&url).await?;
+        Self::check_response_status(&response, project_id)?;
+        Ok(into_byte_stream(response))
     }
 
     async fn streaming_get(
