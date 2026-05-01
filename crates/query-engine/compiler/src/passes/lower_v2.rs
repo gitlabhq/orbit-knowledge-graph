@@ -96,26 +96,10 @@ fn lower_skeleton(input: &mut Input) -> Result<Node> {
     inject_denorm_tags(&mut where_parts, input, &edge_aliases);
     inject_node_constraints_on_edges(&mut where_parts, input, &edge_aliases);
 
-    let (from, node_selects, node_where_parts) = hydrate_nodes(from, input, &edge_aliases)?;
-    // For aggregation, only include group-by node columns in SELECT.
-    // Other nodes' columns would violate GROUP BY constraints.
-    if input.query_type == QueryType::Aggregation {
-        let group_by_aliases: HashSet<&str> = input
-            .aggregations
-            .iter()
-            .filter_map(|a| a.group_by.as_deref())
-            .collect();
-        for s in &node_selects {
-            // Include if the column belongs to a group-by node.
-            if let Expr::Column { table, .. } = &s.expr {
-                if group_by_aliases.contains(table.as_str()) {
-                    select.push(s.clone());
-                }
-            }
-        }
-    } else {
-        select.extend(node_selects);
-    }
+    let mut ctes = Vec::new();
+    let (from, node_selects, node_where_parts) =
+        hydrate_nodes(from, input, &edge_aliases, &mut ctes)?;
+    select.extend(node_selects);
     where_parts.extend(node_where_parts);
 
     let (select, group_by, order_by) = if input.query_type == QueryType::Aggregation {
@@ -126,6 +110,7 @@ fn lower_skeleton(input: &mut Input) -> Result<Node> {
     };
 
     let q = Query {
+        ctes,
         select,
         from,
         where_clause: Expr::conjoin(where_parts),
@@ -414,6 +399,7 @@ fn hydrate_nodes(
     mut from: TableRef,
     input: &Input,
     edge_aliases: &[String],
+    ctes: &mut Vec<Cte>,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let mut selects = Vec::new();
     let mut where_parts = Vec::new();
@@ -427,13 +413,20 @@ fn hydrate_nodes(
             if hydrated.contains(node_alias) {
                 continue;
             }
-            if let Some(node) = input.nodes.iter().find(|n| n.id == *node_alias)
-                && needs_hydration(node, input)
-            {
-                let (new_from, ns, nw) = join_node_table(from, node, alias, edge_col)?;
-                from = new_from;
-                selects.extend(ns);
-                where_parts.extend(nw);
+            if let Some(node) = input.nodes.iter().find(|n| n.id == *node_alias) {
+                match hydration_strategy(node, input) {
+                    HydrationStrategy::Join => {
+                        let (new_from, ns, nw) =
+                            join_node_table(from, node, alias, edge_col, input)?;
+                        from = new_from;
+                        selects.extend(ns);
+                        where_parts.extend(nw);
+                    }
+                    HydrationStrategy::Subquery => {
+                        where_parts.extend(filter_subquery(node, alias, edge_col, ctes)?);
+                    }
+                    HydrationStrategy::Skip => {}
+                }
             }
             hydrated.insert(node_alias.clone());
         }
@@ -442,12 +435,87 @@ fn hydrate_nodes(
     Ok((from, selects, where_parts))
 }
 
-fn needs_hydration(node: &InputNode, input: &Input) -> bool {
-    let has_columns = match &node.columns {
-        Some(ColumnSelection::All) => true,
-        Some(ColumnSelection::List(cols)) => !cols.is_empty(),
-        None => false,
+/// Build a CTE + InSubquery for a node's non-denormalized filters.
+/// The CTE is single-ref (only used in the WHERE), so ClickHouse
+/// inlining is a non-issue — it's evaluated exactly once.
+fn filter_subquery(
+    node: &InputNode,
+    edge_alias: &str,
+    edge_col: &str,
+    ctes: &mut Vec<Cte>,
+) -> Result<Vec<Expr>> {
+    let table = node
+        .table
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.id)))?;
+    let alias = &node.id;
+    let cte_name = format!("_filter_{}", node.id);
+
+    let mut inner_where = Vec::new();
+    for (prop, filter) in &node.filters {
+        inner_where.push(filter_to_expr(alias, prop, filter));
+    }
+    inner_where.push(Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+
+    let inner = Query {
+        select: vec![SelectExpr::new(
+            Expr::col(alias, DEFAULT_PRIMARY_KEY),
+            DEFAULT_PRIMARY_KEY,
+        )],
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(inner_where),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
     };
+
+    ctes.push(Cte::new(&cte_name, inner));
+
+    Ok(vec![Expr::InSubquery {
+        expr: Box::new(Expr::col(edge_alias, edge_col)),
+        cte_name,
+        column: DEFAULT_PRIMARY_KEY.to_string(),
+    }])
+}
+
+/// Decide hydration strategy for each node:
+/// - `Join`: inline JOIN for columns needed in GROUP BY, ORDER BY, or agg property
+/// - `Subquery`: WHERE IN subquery for non-denormalized filters (no columns in SELECT)
+/// - `Skip`: no hydration needed (all filters are denormalized, no columns needed)
+enum HydrationStrategy {
+    Join,
+    Subquery,
+    Skip,
+}
+
+fn hydration_strategy(node: &InputNode, input: &Input) -> HydrationStrategy {
+    let is_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(&node.id));
+
+    let is_agg_property_target = input.aggregations.iter().any(|a| {
+        a.target.as_deref() == Some(&node.id)
+            && a.property.is_some()
+            && !matches!(a.function, AggFunction::Count)
+    });
+
+    let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == node.id);
+
+    // Needs columns in SELECT → full JOIN.
+    // Note: agg_property_target WITHOUT group_by gets a Join too, but
+    // join_node_table only emits the aggregate property column, not all
+    // default columns.
+    if is_group_by || is_agg_property_target || is_order_by_target {
+        return HydrationStrategy::Join;
+    }
+
     let has_non_denorm_filters = node.filters.iter().any(|(prop, _)| {
         let entity = node.entity.as_deref().unwrap_or("");
         let k1 = (entity.to_string(), prop.clone(), "source".to_string());
@@ -455,11 +523,13 @@ fn needs_hydration(node: &InputNode, input: &Input) -> bool {
         !input.compiler.denormalized_columns.contains_key(&k1)
             && !input.compiler.denormalized_columns.contains_key(&k2)
     });
-    let is_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(&node.id));
-    has_columns || has_non_denorm_filters || is_group_by
+
+    // Has filters that can't go on the edge → WHERE IN subquery.
+    if has_non_denorm_filters {
+        return HydrationStrategy::Subquery;
+    }
+
+    HydrationStrategy::Skip
 }
 
 fn join_node_table(
@@ -467,6 +537,7 @@ fn join_node_table(
     node: &InputNode,
     edge_alias: &str,
     edge_col: &str,
+    input: &Input,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = node
         .table
@@ -503,10 +574,36 @@ fn join_node_table(
         on: join_on,
     };
 
+    // Only emit columns that are needed for GROUP BY or aggregation.
+    // Agg-property-target nodes only need their property columns.
+    // Group-by nodes need their default columns. The hydration pipeline
+    // handles full column sets for the response.
+    let is_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(alias));
+
+    let needed_cols: Vec<String> = if is_group_by || input.query_type != QueryType::Aggregation {
+        requested_columns(node)
+    } else {
+        // Agg-property-target: don't emit raw SELECT columns. The property
+        // is only referenced inside aggregate functions (sum, avg, etc.),
+        // not as standalone SELECT expressions. Emitting it raw would
+        // violate GROUP BY constraints.
+        // Order-by targets need their sort column.
+        let mut cols = Vec::new();
+        if let Some(ref ob) = input.order_by {
+            if ob.node == *alias && !cols.contains(&ob.property) {
+                cols.push(ob.property.clone());
+            }
+        }
+        cols
+    };
+
     let mut selects = Vec::new();
-    for col in requested_columns(node) {
+    for col in &needed_cols {
         selects.push(SelectExpr::new(
-            Expr::col(alias, &col),
+            Expr::col(alias, col),
             format!("{alias}_{col}"),
         ));
     }
