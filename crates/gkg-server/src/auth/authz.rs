@@ -133,10 +133,7 @@ mod tests {
         );
         let ctx = build_security_context(&claims).unwrap();
         assert_eq!(ctx.org_id, 1);
-        assert_eq!(
-            ctx.paths_at_least(20),
-            vec!["1/22/", "2000271/122276018/"]
-        );
+        assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "2000271/122276018/"]);
     }
 
     #[test]

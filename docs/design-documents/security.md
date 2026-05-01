@@ -57,7 +57,7 @@ sequenceDiagram
 
 ## Layer 1: Logical Tenant Segregation by Organization
 
-The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). Organization isolation is implicit: a user in org 42 receives a `SecurityContext` whose traversal paths all start with `42/`, and the `startsWith(traversal_path, '42/')` filter injected by the compiler cannot match rows from org 99.
+The first security boundary is logical tenant segregation enforced through the `traversal_path` column on every graph table. The `traversal_path` encodes the full namespace hierarchy as a `/`-delimited string where the first segment is the organization ID (e.g., `"42/100/1000/"`). A user's `SecurityContext` carries the exact set of traversal paths that Rails authorized. The compiler injects `startsWith(traversal_path, ?)` predicates for each path, so queries are scoped to exactly those namespaces — regardless of which organization(s) the paths belong to.
 
 This layer is primarily intended for .com customers to ensure that they can only query data within their own organization.
 
@@ -66,8 +66,8 @@ This layer is primarily intended for .com customers to ensure that they can only
 **How It's Enforced**:
 
 - **At the ClickHouse Storage Layer**: The indexer writes each row with a `traversal_path` column encoding the full namespace hierarchy, starting with the organization ID as the first path segment.
-- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The organization ID is extracted from the JWT token and validated against traversal paths at `SecurityContext` construction time.
-- **Cross-Org Queries Blocked**: `SecurityContext::new()` validates that every traversal path's first segment matches the JWT's `organization_id`. A path starting with `"2/"` is rejected when `org_id=1`. Each query is scoped to exactly one organization.
+- **Query-Level Enforcement**: The query compiler's `SecurityPass` injects `startsWith(traversal_path, ?)` predicates into every generated SQL query. The `CheckPass` then verifies every `gl_*` table alias has a valid `startsWith` predicate before codegen. The `org_id` on `SecurityContext` is metadata (the user's home organization), not a security boundary — access control comes from the traversal paths themselves.
+- **Cross-Org Queries Supported**: A user may hold traversal paths spanning multiple organizations (e.g., personal groups under a different org). `SecurityContext` accepts all paths that Rails authorizes, regardless of the user's home `organization_id`. Each query is scoped to exactly the set of paths granted by Rails.
 - **Parameterization**: All traversal path values are bound as parameters, never concatenated into SQL strings.
 
 **Code Review Requirements**:
