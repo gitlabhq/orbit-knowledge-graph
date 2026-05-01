@@ -109,9 +109,31 @@ mod tests {
             Some(1),
         );
         let ctx = build_security_context(&claims).unwrap();
+        assert_eq!(ctx.org_id, 1);
         assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "1/33/"]);
         assert_eq!(ctx.paths_at_least(30), vec!["1/33/"]);
         assert!(ctx.paths_at_least(50).is_empty());
+    }
+
+    #[test]
+    fn non_admin_cross_org_paths() {
+        let claims = make_claims(
+            false,
+            vec![
+                TraversalPathClaim {
+                    path: "1/22/".to_string(),
+                    access_levels: vec![20],
+                },
+                TraversalPathClaim {
+                    path: "2000271/122276018/".to_string(),
+                    access_levels: vec![20],
+                },
+            ],
+            Some(1),
+        );
+        let ctx = build_security_context(&claims).unwrap();
+        assert_eq!(ctx.org_id, 1);
+        assert_eq!(ctx.paths_at_least(20), vec!["1/22/", "2000271/122276018/"]);
     }
 
     #[test]
