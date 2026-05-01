@@ -141,7 +141,14 @@ fn rewrite_in_subquery_in_from(from: &mut TableRef) {
 }
 
 /// Extract `InSubquery` conjuncts from a WHERE clause and rewrite them into
-/// LEFT SEMI JOINs on the FROM tree.
+/// LEFT SEMI JOINs appended at the top of the FROM tree.
+///
+/// Each `alias.col IN (SELECT id FROM _cte)` becomes a
+/// `LEFT SEMI JOIN _cte AS _sj__cte ON alias.col = _sj__cte.id`
+/// joined at the outermost level so the rendered SQL has a flat chain:
+///   `... INNER JOIN (...) AS pipe ON ... LEFT SEMI JOIN _cte ON ...`
+/// instead of nesting the semi-join inside a preceding join's right arm
+/// (which produces two consecutive ON clauses that ClickHouse rejects).
 fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<Expr>) {
     let w = match where_clause.take() {
         Some(w) => w,
@@ -150,6 +157,7 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
 
     let conjuncts = w.flatten_and();
     let mut kept: Vec<Expr> = Vec::new();
+    let mut semi_counter: usize = 0;
 
     for conj in conjuncts {
         if let Expr::InSubquery {
@@ -157,18 +165,29 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
             ref cte_name,
             ref column,
         } = conj
+            && let Expr::Column { table, column: col } = expr.as_ref()
+            && alias_exists_in_from(from, table)
         {
-            // Only rewrite when the expression is a simple column reference
-            // (e.g., `e0.source_id`) so we can locate the table in the FROM tree.
-            if let Expr::Column { table, column: col } = expr.as_ref() {
-                let semi_alias = format!("_sj_{cte_name}");
-                let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
-                let semi_scan = TableRef::scan(cte_name, &semi_alias);
+            let semi_alias = format!("_sj{semi_counter}_{cte_name}");
+            semi_counter += 1;
+            let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
+            let semi_scan = TableRef::scan(cte_name, &semi_alias);
 
-                if wrap_alias_with_semi_join(from, table, semi_scan, on) {
-                    continue;
-                }
-            }
+            let current = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(current),
+                right: Box::new(semi_scan),
+                on,
+            };
+            continue;
         }
         kept.push(conj);
     }
@@ -176,71 +195,15 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
     *where_clause = Expr::conjoin(kept);
 }
 
-/// Walk the FROM tree to find the node that defines `target_alias` and wrap
-/// it in a LEFT SEMI JOIN. Returns true if the alias was found and wrapped.
-fn wrap_alias_with_semi_join(
-    from: &mut TableRef,
-    target_alias: &str,
-    semi_rhs: TableRef,
-    on: Expr,
-) -> bool {
+/// Check if an alias exists anywhere in the FROM tree.
+fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
     match from {
-        TableRef::Scan { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
+        TableRef::Scan { alias, .. } => alias == target,
+        TableRef::Subquery { alias, .. } => alias == target,
+        TableRef::Union { alias, .. } => alias == target,
         TableRef::Join { left, right, .. } => {
-            wrap_alias_with_semi_join(left, target_alias, semi_rhs.clone(), on.clone())
-                || wrap_alias_with_semi_join(right, target_alias, semi_rhs, on)
+            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
         }
-        TableRef::Union { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
-        TableRef::Subquery { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
-        _ => false,
     }
 }
 
