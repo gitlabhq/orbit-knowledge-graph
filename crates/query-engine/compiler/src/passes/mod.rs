@@ -94,6 +94,23 @@ where
     }
 }
 
+pub struct LowerV2Pass;
+
+impl<E, S> CompilerPass<E, S> for LowerV2Pass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasInput + HasNode,
+{
+    const NAME: &'static str = "lower_v2";
+
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let input = state.input_mut()?;
+        let node = lower_v2::lower_v2(input)?;
+        state.set_node(node);
+        Ok(())
+    }
+}
+
 pub struct OptimizePass;
 
 impl<E, S> CompilerPass<E, S> for OptimizePass

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 use std::time::Instant;
 
-use compiler::compile;
+use compiler::compile_v2 as compile;
 
 use pipeline::{PipelineError, PipelineObserver, PipelineStage, QueryPipelineContext};
 

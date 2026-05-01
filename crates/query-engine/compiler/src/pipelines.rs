@@ -140,6 +140,47 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
+/// Skeleton-first v2 pipeline. Replaces Lower+Optimize+Deduplicate with
+/// a single LowerV2 pass that produces flat edge-chain JOINs with inline
+/// dedup. No CTEs for the common case.
+///
+/// ```text
+/// JSON → Validate → Normalize → Restrict → LowerV2 → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// ```
+pub fn clickhouse_v2() -> Pipeline<SecureEnv, QueryState> {
+    Pipeline::builder()
+        .pass(ValidatePass)
+        .seal(SealJson)
+        .pass(NormalizePass)
+        .pass(RestrictPass)
+        .pass(LowerV2Pass)
+        .pass(EnforcePass)
+        .pass(SecurityPass)
+        .pass(CheckPass)
+        .pass(HydratePlanPass)
+        .pass(SettingsPass)
+        .pass(CodegenPass)
+        .build()
+}
+
+/// v2 pipeline from pre-built Input (for tests and profiler).
+///
+/// ```text
+/// Input → Restrict → LowerV2 → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// ```
+pub fn from_input_v2() -> Pipeline<SecureEnv, QueryState> {
+    Pipeline::builder()
+        .pass(RestrictPass)
+        .pass(LowerV2Pass)
+        .pass(EnforcePass)
+        .pass(SecurityPass)
+        .pass(CheckPass)
+        .pass(HydratePlanPass)
+        .pass(SettingsPass)
+        .pass(CodegenPass)
+        .build()
+}
+
 /// Compile from a pre-built [`Input`]. Runs full security and check passes.
 ///
 /// Used by tests and the `compile_input()` public API for non-hydration queries.

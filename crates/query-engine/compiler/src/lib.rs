@@ -119,6 +119,20 @@ pub fn compile(
     pipeline.execute(state, &env)?.into_output().count_err()
 }
 
+/// Compile using the skeleton-first v2 pipeline. Flat edge-chain JOINs,
+/// no CTEs, inline dedup. For Traversal and Aggregation queries.
+/// PathFinding and Neighbors fall back to v1.
+pub fn compile_v2(
+    json_input: &str,
+    ontology: &Ontology,
+    ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
+    let state = QueryState::from_json(json_input);
+    let pipeline = pipelines::clickhouse_v2().seal();
+    pipeline.execute(state, &env)?.into_output().count_err()
+}
+
 /// Compile from a pre-built `Input`. Used for internal query types (Hydration)
 /// that bypass JSON schema validation.
 ///
