@@ -1,12 +1,3 @@
-//! End-to-end test that GKG analytics events reach a real Snowplow collector.
-//!
-//! Spins up Snowplow Micro (a single-process Snowplow stand-in) via
-//! testcontainers, configured with an Iglu resolver pointing at the public
-//! `gitlab-org.gitlab.io/iglu` registry so the `com.gitlab/orbit_*` context
-//! schemas validate. Asserts the Tracker → Emitter → collector path delivers
-//! a `gkg_query_executed` event with the expected `orbit_common` and
-//! `orbit_query` contexts as a *good* event in Micro.
-
 use std::time::Duration;
 
 use labkit_events::Tracker;
