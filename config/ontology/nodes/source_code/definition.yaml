@@ -109,6 +109,7 @@ properties:
 storage:
   settings:
     index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}

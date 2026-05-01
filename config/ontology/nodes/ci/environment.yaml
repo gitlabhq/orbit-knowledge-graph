@@ -156,6 +156,8 @@ etl:
 
 storage:
   primary_key: [traversal_path, id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}

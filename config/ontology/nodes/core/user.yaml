@@ -168,6 +168,8 @@ etl:
 
 storage:
   primary_key: [id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: username, type: "String", default: "''", codec: ["ZSTD(1)"]}

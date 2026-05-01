@@ -53,7 +53,7 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -86,7 +86,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_deployment (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -119,7 +119,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_directory (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -143,7 +143,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_environment (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -181,7 +181,7 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_file (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -207,7 +207,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_finding (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -234,7 +234,7 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_group (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -261,7 +261,7 @@ CREATE TABLE IF NOT EXISTS gl_group (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, project_id, branch, id)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_job (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -341,7 +341,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_job_metadata (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, build_id) PRIMARY KEY (traversal_path, build_id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_label (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -390,7 +390,7 @@ CREATE TABLE IF NOT EXISTS gl_label (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -455,7 +455,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -483,7 +483,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -520,7 +520,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_milestone (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -548,7 +548,7 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_note (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -582,7 +582,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_pipeline (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -620,7 +620,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_project (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -651,7 +651,7 @@ CREATE TABLE IF NOT EXISTS gl_project (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_runner (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -676,7 +676,7 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     PROJECTION by_runner_type (SELECT * ORDER BY (runner_type, id))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_security_scan (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -697,7 +697,7 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_stage (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -722,7 +722,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_user (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -757,7 +757,7 @@ CREATE TABLE IF NOT EXISTS gl_user (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 256, 2, 0) GRANULARITY 1
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
-SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -794,7 +794,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -821,7 +821,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -855,7 +855,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -879,7 +879,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_work_item (
     id Int64 CODEC(Delta(8), ZSTD(1)),
@@ -913,7 +913,7 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1;
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -944,7 +944,7 @@ CREATE TABLE IF NOT EXISTS gl_code_edge (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
@@ -979,5 +979,5 @@ CREATE TABLE IF NOT EXISTS gl_edge (
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
 PRIMARY KEY (traversal_path, source_id, relationship_kind)
-SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
