@@ -1067,44 +1067,54 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     // exist (e.g. a dedup subquery WHERE or a cascade CTE body), removing
     // the CTE would break those references.
     {
+        // Only count refs from the FROM tree (JOIN subqueries injected by
+        // deduplicate). Refs from other CTEs (_cascade_*, etc.) are not
+        // blocking — those CTEs use the _nf_ via InSubquery which still
+        // works when the _nf_ CTE exists. The cascade CTE's own filters
+        // provide adequate narrowing independently.
         let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
-        let mut non_where_refs: HashMap<String, usize> = HashMap::new();
-        // Count refs in CTE bodies.
-        for cte in &q.ctes {
-            count_cte_refs_in_query(&cte.query, &cte_names, &mut non_where_refs);
-        }
-        // Count refs in FROM (JOIN subqueries).
-        count_cte_refs_in_from(&q.from, &cte_names, &mut non_where_refs);
-        // (Skip outer WHERE — that's the one we're replacing.)
+        let mut from_refs: HashMap<String, usize> = HashMap::new();
+        count_cte_refs_in_from(&q.from, &cte_names, &mut from_refs);
 
-        ctes_to_remove.retain(|name| non_where_refs.get(name).copied().unwrap_or(0) == 0);
+        ctes_to_remove.retain(|name| from_refs.get(name).copied().unwrap_or(0) == 0);
     }
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
     let has_union_in_from = has_union_table_ref(&q.from);
 
-    // Phase 1: Replace InSubquery in outer WHERE for fully-removed CTEs.
-    // Single-hop: add edge-column filters to outer WHERE with e0.
-    // Multi-hop: don't add to outer WHERE (column lives on inner e1); injection below.
-    // Partial-match CTEs are left untouched — the CTE keeps all original
-    // filters and the has() predicates are already injected by
-    // inject_denorm_tags_on_main_edges or cascade tag injection.
+    // All CTE names that have tag predicates (both fully-removed and partial-match).
+    let all_denorm_ctes: HashSet<&String> = filters_per_cte.keys().collect();
+
+    // Phase 1: Replace InSubquery in outer WHERE.
+    // - Fully-removed CTEs: drop InSubquery, inject tag predicates.
+    // - Partial-match CTEs: keep InSubquery AND inject tag predicates as supplementary.
     if let Some(ref mut where_clause) = q.where_clause {
         let conjuncts = where_clause.clone().flatten_and();
         let mut kept: Vec<Expr> = Vec::new();
+        let mut injected_partial: HashSet<String> = HashSet::new();
         for conj in conjuncts {
             let cte_ref = match &conj {
                 Expr::InSubquery { cte_name, .. } => Some(cte_name.clone()),
                 _ => None,
             };
-            if let Some(ref cte_name) = cte_ref
-                && ctes_to_remove.contains(cte_name)
-            {
-                // Fully denormalized — drop the InSubquery, inject tag predicates.
-                if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
-                    kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+            if let Some(ref cte_name) = cte_ref {
+                if ctes_to_remove.contains(cte_name) {
+                    // Fully denormalized — drop the InSubquery, inject tag predicates.
+                    if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                    }
+                    continue;
                 }
-                continue;
+                if all_denorm_ctes.contains(cte_name) && !injected_partial.contains(cte_name) {
+                    // Partial match — keep the InSubquery AND inject tag predicates
+                    // as supplementary filters for text index pruning.
+                    kept.push(conj);
+                    if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                        injected_partial.insert(cte_name.clone());
+                    }
+                    continue;
+                }
             }
             kept.push(conj);
         }
