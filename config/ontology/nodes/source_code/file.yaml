@@ -79,7 +79,7 @@ properties:
       service: gitaly
       lookup: blob_content
       depends_on: [project_id, commit_sha, branch, path]
-    nullable: true
+    nullable: false
     description: "Raw source text of the file. Resolved from Gitaly at query time."
 
 storage:

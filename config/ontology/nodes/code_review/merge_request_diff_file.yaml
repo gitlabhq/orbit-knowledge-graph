@@ -50,7 +50,7 @@ properties:
   new_path:
     type: string
     source: new_path
-    nullable: true
+    nullable: false
     description: "Path to the file after the change."
 
   old_path:
@@ -80,13 +80,13 @@ properties:
   binary:
     type: boolean
     source: binary
-    nullable: true
+    nullable: false
     description: "Whether this is a binary file."
 
   generated:
     type: boolean
     source: generated
-    nullable: true
+    nullable: false
     description: "Whether this file is considered auto-generated (e.g. lockfiles, minified bundles)."
 
   a_mode:
@@ -110,7 +110,7 @@ properties:
 
   diff:
     type: string
-    nullable: true
+    nullable: false
     virtual:
       service: gitaly
       lookup: patch
@@ -165,13 +165,13 @@ storage:
     - {name: merge_request_diff_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: too_large, type: "Bool", default: "false"}
-    - {name: new_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: new_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: old_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: new_file, type: "Bool", default: "false"}
     - {name: renamed_file, type: "Bool", default: "false"}
     - {name: deleted_file, type: "Bool", default: "false"}
-    - {name: binary, type: "Nullable(Bool)"}
-    - {name: generated, type: "Nullable(Bool)"}
+    - {name: binary, type: "Bool", default: "false"}
+    - {name: generated, type: "Bool", default: "false"}
     - {name: a_mode, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: b_mode, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}

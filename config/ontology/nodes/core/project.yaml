@@ -26,31 +26,31 @@ properties:
   full_path:
     type: string
     source: full_path
-    nullable: true
+    nullable: false
     description: "Full path for the project (e.g. gitlab-org/gitlab)."
 
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Display name."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Project description."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the project was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the project was last updated."
 
   visibility_level:
@@ -78,7 +78,7 @@ properties:
   last_activity_at:
     type: timestamp
     source: last_activity_at
-    nullable: true
+    nullable: false
     description: "Timestamp of last activity in the project."
 
   traversal_path:
@@ -134,15 +134,15 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: visibility_level, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
-    - {name: full_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: archived, type: "Nullable(Bool)"}
-    - {name: star_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: last_activity_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: full_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: archived, type: "Bool", default: "false"}
+    - {name: star_count, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: last_activity_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}

@@ -26,31 +26,31 @@ properties:
   title:
     type: string
     source: title
-    nullable: true
+    nullable: false
     description: "Title/name of the label."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Description of the label."
 
   color:
     type: string
     source: color
-    nullable: true
+    nullable: false
     description: "Hex color code for the label."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the label was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the label was last updated."
 
   traversal_path:
@@ -80,11 +80,11 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: title, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: color, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: color, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}

@@ -37,13 +37,13 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Human-readable runner name."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Maintainer-provided description."
 
   active:
@@ -76,25 +76,25 @@ properties:
   maximum_timeout:
     type: int64
     source: maximum_timeout
-    nullable: true
+    nullable: false
     description: "Maximum job timeout (seconds) enforced by this runner."
 
   organization_id:
     type: int64
     source: organization_id
-    nullable: true
+    nullable: false
     description: "Cell organization the runner belongs to."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the runner was registered."
 
   contacted_at:
     type: timestamp
     source: contacted_at
-    nullable: true
+    nullable: false
     description: "Last time the runner contacted the GitLab instance."
 
 etl:
@@ -110,16 +110,16 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: active, type: "Bool", default: "true"}
     - {name: locked, type: "Bool", default: "false"}
     - {name: run_untagged, type: "Bool", default: "true"}
     - {name: access_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: maximum_timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: organization_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: contacted_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: maximum_timeout, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: organization_id, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: contacted_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}

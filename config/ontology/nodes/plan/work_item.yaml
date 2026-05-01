@@ -32,13 +32,13 @@ properties:
   title:
     type: string
     source: title
-    nullable: true
+    nullable: false
     description: "Title of the work item."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Description body (markdown)."
 
   state:
@@ -77,37 +77,37 @@ properties:
   due_date:
     type: date
     source: due_date
-    nullable: true
+    nullable: false
     description: "Due date for the work item."
 
   start_date:
     type: date
     source: start_date
-    nullable: true
+    nullable: false
     description: "Start date for the work item."
 
   weight:
     type: int64
     source: weight
-    nullable: true
+    nullable: false
     description: "Weight/points assigned to the work item."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the work item was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the work item was last updated."
 
   closed_at:
     type: timestamp
     source: closed_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the work item was closed."
 
   traversal_path:
@@ -150,18 +150,18 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: iid, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: work_item_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: confidential, type: "Bool", default: "false"}
-    - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
-    - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
-    - {name: weight, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: due_date, type: "Date32", default: "'1970-01-01'", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: start_date, type: "Date32", default: "'1970-01-01'", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: weight, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: closed_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}

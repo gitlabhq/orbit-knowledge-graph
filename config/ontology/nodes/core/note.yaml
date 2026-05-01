@@ -26,7 +26,7 @@ properties:
   note:
     type: string
     source: note
-    nullable: true
+    nullable: false
     description: "The text content of the note (markdown)."
 
   noteable_type:
@@ -50,37 +50,37 @@ properties:
   noteable_id:
     type: int64
     source: noteable_id
-    nullable: true
+    nullable: false
     description: "ID of the object this note is attached to (null for commits)."
 
   line_code:
     type: string
     source: line_code
-    nullable: true
+    nullable: false
     description: "Code identifying the line position for diff notes."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the note was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the note was last updated."
 
   discussion_id:
     type: string
     source: discussion_id
-    nullable: true
+    nullable: false
     description: "ID grouping notes into a discussion thread."
 
   resolved_at:
     type: timestamp
     source: resolved_at
-    nullable: true
+    nullable: false
     description: "Timestamp when the note/discussion was resolved."
 
   internal:
@@ -92,19 +92,19 @@ properties:
   confidential:
     type: boolean
     source: confidential
-    nullable: true
+    nullable: false
     description: "Whether this note is confidential."
 
   commit_id:
     type: string
     source: commit_id
-    nullable: true
+    nullable: false
     description: "SHA of the commit this note is on (for commit notes)."
 
   st_diff:
     type: string
     source: st_diff
-    nullable: true
+    nullable: false
     description: "Serialized diff snippet captured at note creation, populated for diff notes."
 
   traversal_path:
@@ -148,18 +148,18 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: note, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: noteable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: line_code, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: commit_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: st_diff, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: discussion_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: resolved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: noteable_id, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: line_code, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: commit_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: st_diff, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: discussion_id, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: resolved_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: internal, type: "Bool", default: "false"}
-    - {name: confidential, type: "Nullable(Bool)"}
-    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: confidential, type: "Bool", default: "false"}
+    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_noteable_type, column: noteable_type, type: "set(14)", granularity: 2}
