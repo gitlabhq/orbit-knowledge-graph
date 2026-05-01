@@ -27,7 +27,7 @@ properties:
   username:
     type: string
     source: username
-    nullable: false
+    nullable: true
     description: "The user's handle (unique in GitLab)."
 
   email:
@@ -41,40 +41,40 @@ properties:
   name:
     type: string
     source: name
-    nullable: false
+    nullable: true
     description: "Display name."
 
   first_name:
     type: string
     source: first_name
-    nullable: false
+    nullable: true
     admin_only: true
     description: "First name, if provided. Not exposed on any public GitLab user surface; admins only."
 
   last_name:
     type: string
     source: last_name
-    nullable: false
+    nullable: true
     admin_only: true
     description: "Last name, if provided. Not exposed on any public GitLab user surface; admins only."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the user was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: false
+    nullable: true
     admin_only: true
     description: "Timestamp when the user record was last updated. Not exposed on any public GitLab user surface; admins only."
 
   state:
     type: enum
     source: state
-    nullable: false
+    nullable: true
     description: "Account state."
     enum_type: string
     values:
@@ -88,27 +88,27 @@ properties:
   avatar_url:
     type: string
     source: avatar
-    nullable: false
+    nullable: true
     description: "URL to the user's avatar image."
 
   public_email:
     type: string
     source: public_email
-    nullable: false
+    nullable: true
     like_allowed: false
     description: "Publicly visible email, if set."
 
   preferred_language:
     type: string
     source: preferred_language
-    nullable: false
+    nullable: true
     admin_only: true
     description: "User's preferred UI language. Self-only on GitLab REST; admins only here until per-cell authorization lands."
 
   last_activity_on:
     type: date
     source: last_activity_on
-    nullable: false
+    nullable: true
     description: "Most recent recorded activity date."
 
   private_profile:
@@ -178,17 +178,17 @@ storage:
     - {name: first_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: last_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: avatar_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: public_email, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: preferred_language, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: last_activity_on, type: "Date32", default: "'1970-01-01'", codec: ["Delta(4)", "ZSTD(1)"]}
+    - {name: avatar_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: public_email, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: preferred_language, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: last_activity_on, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: private_profile, type: "Bool", default: "false"}
     - {name: is_admin, type: "Bool", default: "false"}
     - {name: is_auditor, type: "Bool", default: "false"}
     - {name: is_external, type: "Bool", default: "false"}
     - {name: user_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}
     - {name: idx_user_type, column: user_type, type: "set(26)", granularity: 2}

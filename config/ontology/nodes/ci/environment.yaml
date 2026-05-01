@@ -44,13 +44,13 @@ properties:
   external_url:
     type: string
     source: external_url
-    nullable: false
+    nullable: true
     description: "External URL where the environment can be reached."
 
   environment_type:
     type: string
     source: environment_type
-    nullable: false
+    nullable: true
     description: "Free-form category derived from the name prefix before the first '/' (e.g. 'review', 'staging'); null for environments without a '/'."
 
   state:
@@ -67,7 +67,7 @@ properties:
   tier:
     type: enum
     source: tier
-    nullable: false
+    nullable: true
     description: "Environment tier within the deployment pipeline."
     values:
       0: production
@@ -79,13 +79,13 @@ properties:
   auto_stop_at:
     type: timestamp
     source: auto_stop_at
-    nullable: false
+    nullable: true
     description: "Timestamp at which the environment will be auto-stopped."
 
   auto_delete_at:
     type: timestamp
     source: auto_delete_at
-    nullable: false
+    nullable: true
     description: "Timestamp at which the environment will be auto-deleted."
 
   auto_stop_setting:
@@ -100,37 +100,37 @@ properties:
   cluster_agent_id:
     type: int64
     source: cluster_agent_id
-    nullable: false
+    nullable: true
     description: "ID of the associated Kubernetes cluster agent, if any."
 
   kubernetes_namespace:
     type: string
     source: kubernetes_namespace
-    nullable: false
+    nullable: true
     description: "Kubernetes namespace this environment is deployed into."
 
   flux_resource_path:
     type: string
     source: flux_resource_path
-    nullable: false
+    nullable: true
     description: "Flux resource path for GitOps-driven environments."
 
   description:
     type: string
     source: description
-    nullable: false
+    nullable: true
     description: "Free-form description of the environment."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the environment was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the environment was last updated."
 
   traversal_path:
@@ -163,19 +163,19 @@ storage:
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: slug, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: external_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: environment_type, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: external_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: environment_type, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: state, type: "LowCardinality(String)", default: "'available'", codec: ["LZ4"]}
-    - {name: tier, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: auto_stop_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: auto_delete_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: tier, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: auto_stop_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: auto_delete_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: auto_stop_setting, type: "LowCardinality(String)", default: "'always'", codec: ["LZ4"]}
-    - {name: cluster_agent_id, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: kubernetes_namespace, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: flux_resource_path, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
-    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: cluster_agent_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: kubernetes_namespace, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: flux_resource_path, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(4)", granularity: 2}

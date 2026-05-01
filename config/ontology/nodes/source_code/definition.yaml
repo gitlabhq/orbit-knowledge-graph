@@ -103,7 +103,7 @@ properties:
       service: gitaly
       lookup: blob_content
       depends_on: [project_id, commit_sha, branch, file_path, start_byte, end_byte]
-    nullable: false
+    nullable: true
     description: "Source text of the definition. Resolved from Gitaly at query time using start_byte/end_byte."
 
 storage:

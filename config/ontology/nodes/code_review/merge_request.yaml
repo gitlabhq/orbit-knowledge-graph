@@ -26,19 +26,19 @@ properties:
   iid:
     type: int64
     source: iid
-    nullable: false
+    nullable: true
     description: "Project-scoped merge request number."
 
   title:
     type: string
     source: title
-    nullable: false
+    nullable: true
     description: "Title of the merge request."
 
   description:
     type: string
     source: description
-    nullable: false
+    nullable: true
     description: "Description body (markdown)."
 
   source_branch:
@@ -85,31 +85,31 @@ properties:
   created_at:
     type: timestamp
     source: created_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the merge request was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the merge request was last updated."
 
   merge_commit_sha:
     type: string
     source: merge_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the merge commit."
 
   discussion_locked:
     type: boolean
     source: discussion_locked
-    nullable: false
+    nullable: true
     description: "Whether discussions are locked."
 
   prepared_at:
     type: timestamp
     source: prepared_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the merge request was prepared."
 
   project_id:
@@ -121,103 +121,103 @@ properties:
   merged_commit_sha:
     type: string
     source: merged_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the commit that landed on the target branch (may differ from merge_commit_sha for fast-forward merges)."
 
   squash_commit_sha:
     type: string
     source: squash_commit_sha
-    nullable: false
+    nullable: true
     description: "SHA of the squash commit, if the merge request was squashed."
 
   latest_build_started_at:
     type: timestamp
     source: metric_latest_build_started_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the latest CI build for this MR started."
 
   latest_build_finished_at:
     type: timestamp
     source: metric_latest_build_finished_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the latest CI build for this MR finished."
 
   first_deployed_to_production_at:
     type: timestamp
     source: metric_first_deployed_to_production_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the MR was first deployed to the production environment."
 
   merged_at:
     type: timestamp
     source: metric_merged_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the MR was merged."
 
   latest_closed_at:
     type: timestamp
     source: metric_latest_closed_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the MR was most recently closed."
 
   first_comment_at:
     type: timestamp
     source: metric_first_comment_at
-    nullable: false
+    nullable: true
     description: "Timestamp of the first comment on the MR."
 
   first_commit_at:
     type: timestamp
     source: metric_first_commit_at
-    nullable: false
+    nullable: true
     description: "Authored timestamp of the first commit in the MR."
 
   last_commit_at:
     type: timestamp
     source: metric_last_commit_at
-    nullable: false
+    nullable: true
     description: "Authored timestamp of the last commit in the MR."
 
   diff_size:
     type: int64
     source: metric_diff_size
-    nullable: false
+    nullable: true
     description: "Total size of the MR diff, in bytes."
 
   modified_paths_size:
     type: int64
     source: metric_modified_paths_size
-    nullable: false
+    nullable: true
     description: "Number of modified file paths in the MR."
 
   commits_count:
     type: int64
     source: metric_commits_count
-    nullable: false
+    nullable: true
     description: "Number of commits in the MR."
 
   first_approved_at:
     type: timestamp
     source: metric_first_approved_at
-    nullable: false
+    nullable: true
     description: "Timestamp of the first approval on the MR."
 
   first_reassigned_at:
     type: timestamp
     source: metric_first_reassigned_at
-    nullable: false
+    nullable: true
     description: "Timestamp of the first reassignment of the MR."
 
   added_lines:
     type: int64
     source: metric_added_lines
-    nullable: false
+    nullable: true
     description: "Lines added across all files in the MR diff."
 
   removed_lines:
     type: int64
     source: metric_removed_lines
-    nullable: false
+    nullable: true
     description: "Lines removed across all files in the MR diff."
 
   first_contribution:
@@ -229,7 +229,7 @@ properties:
   reviewer_first_assigned_at:
     type: timestamp
     source: metric_reviewer_first_assigned_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the first reviewer was assigned."
 
   traversal_path:
@@ -454,7 +454,7 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: source_branch, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -463,31 +463,31 @@ storage:
     - {name: merge_status, type: "LowCardinality(String)", default: "'unchecked'", codec: ["LZ4"]}
     - {name: draft, type: "Bool", default: "false"}
     - {name: squash, type: "Bool", default: "false"}
-    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: merge_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: discussion_locked, type: "Bool", default: "false"}
-    - {name: prepared_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: merge_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: discussion_locked, type: "Nullable(Bool)"}
+    - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: merged_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: squash_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: latest_build_started_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: latest_build_finished_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_deployed_to_production_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: merged_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: latest_closed_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_comment_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_commit_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: last_commit_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: diff_size, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: modified_paths_size, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: commits_count, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: first_approved_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: first_reassigned_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: added_lines, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: removed_lines, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: merged_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: squash_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_build_finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_deployed_to_production_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: merged_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: latest_closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: diff_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: added_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: removed_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: first_contribution, type: "Bool", default: "false"}
-    - {name: reviewer_first_assigned_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}

@@ -70,13 +70,13 @@ properties:
   identifier_name:
     type: string
     source: identifier_name
-    nullable: false
+    nullable: true
     description: "Name of the imported symbol."
 
   identifier_alias:
     type: string
     source: identifier_alias
-    nullable: false
+    nullable: true
     description: "Alias used for the import (e.g., 'import numpy as np')."
 
   start_line:
@@ -116,8 +116,8 @@ storage:
     - {name: file_path, type: "String", codec: ["ZSTD(3)"]}
     - {name: import_type, type: "LowCardinality(String)", codec: ["LZ4"]}
     - {name: import_path, type: "String", codec: ["ZSTD(3)"]}
-    - {name: identifier_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: identifier_alias, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: identifier_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: identifier_alias, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: start_line, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: end_line, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: start_byte, type: "Int64", codec: ["ZSTD(1)"]}

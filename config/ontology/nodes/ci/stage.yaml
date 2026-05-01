@@ -26,7 +26,7 @@ properties:
   name:
     type: string
     source: name
-    nullable: false
+    nullable: true
     description: "Name of the stage (e.g., build, test, deploy)."
 
   status:
@@ -52,25 +52,25 @@ properties:
   position:
     type: int64
     source: position
-    nullable: false
+    nullable: true
     description: "Order of the stage within the pipeline (0-indexed)."
 
   created_at:
     type: timestamp
     source: created_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the stage was created."
 
   updated_at:
     type: timestamp
     source: updated_at
-    nullable: false
+    nullable: true
     description: "Timestamp when the stage was last updated."
 
   pipeline_id:
     type: int64
     source: pipeline_id
-    nullable: false
+    nullable: true
     description: "Pipeline this stage belongs to."
 
   traversal_path:
@@ -101,12 +101,12 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: position, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: created_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: updated_at, type: "DateTime64(6, 'UTC')", default: "'1970-01-01 00:00:00'", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: pipeline_id, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
+    - {name: position, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: pipeline_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}

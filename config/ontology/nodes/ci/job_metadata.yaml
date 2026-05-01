@@ -33,19 +33,19 @@ properties:
   interruptible:
     type: boolean
     source: interruptible
-    nullable: false
+    nullable: true
     description: "Whether the job can be auto-canceled by a newer pipeline."
 
   timeout:
     type: int64
     source: timeout
-    nullable: false
+    nullable: true
     description: "Effective timeout for the job in seconds (resolved from project, runner, or job-level config)."
 
   timeout_source:
     type: enum
     source: timeout_source
-    nullable: false
+    nullable: true
     description: "Origin of the effective timeout: project, runner, or job."
     values:
       1: unknown_timeout_source
@@ -56,25 +56,25 @@ properties:
   exit_code:
     type: int64
     source: exit_code
-    nullable: false
+    nullable: true
     description: "Process exit code reported by the runner."
 
   has_exposed_artifacts:
     type: boolean
     source: has_exposed_artifacts
-    nullable: false
+    nullable: true
     description: "Whether the job exposed artifacts to merge requests."
 
   expanded_environment_name:
     type: string
     source: expanded_environment_name
-    nullable: false
+    nullable: true
     description: "Resolved environment name after CI variable interpolation."
 
   environment_auto_stop_in:
     type: string
     source: environment_auto_stop_in
-    nullable: false
+    nullable: true
     description: "Duration after which the deployed environment auto-stops."
 
   debug_trace_enabled:
@@ -108,13 +108,13 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: build_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: interruptible, type: "Bool", default: "false"}
-    - {name: timeout, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: timeout_source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: exit_code, type: "Int64", default: "0", codec: ["ZSTD(1)"]}
-    - {name: has_exposed_artifacts, type: "Bool", default: "false"}
-    - {name: expanded_environment_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: environment_auto_stop_in, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: interruptible, type: "Nullable(Bool)"}
+    - {name: timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: has_exposed_artifacts, type: "Nullable(Bool)"}
+    - {name: expanded_environment_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: environment_auto_stop_in, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: debug_trace_enabled, type: "Bool", default: "false"}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
