@@ -671,7 +671,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics.",
+      "description": "Consumer-level preferences that affect result presentation, not query semantics. Compiler performance options (skip_dedup, materialize_ctes, use_semi_join) are injected by the ontology-derived schema at runtime to keep the base schema token-efficient for LLM consumers.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
@@ -682,19 +682,8 @@
           "type": "boolean",
           "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
           "default": false
-        },
-        "skip_dedup": {
-          "type": "boolean",
-          "description": "When true, skips ReplacingMergeTree deduplication for node tables. Rows are still filtered by _deleted = false but stale duplicates from un-merged parts may appear. Not allowed for aggregation queries. Useful for traversal queries where eventual consistency is acceptable in exchange for lower latency.",
-          "default": false
-        },
-        "materialize_ctes": {
-          "type": "boolean",
-          "description": "When true, marks multi-referenced CTEs as MATERIALIZED so ClickHouse evaluates them once instead of inlining at every reference site. Reduces redundant scans for cascade and hop frontier CTEs in multi-relationship queries.",
-          "default": false
         }
-      },
-      "additionalProperties": false
+      }
     },
     "DynamicColumnMode": {
       "type": "string",
