@@ -1,6 +1,7 @@
 # config/ontology/edges/runs_on.yaml
 
 description: Job executed on a runner
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Job, id: id }

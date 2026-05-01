@@ -1,6 +1,7 @@
 # config/ontology/edges/triggered.yaml
 
 description: Trigger relationship between entities
+table: gl_ci_edge
 
 variants:
   - from_node: { type: User, id: id }

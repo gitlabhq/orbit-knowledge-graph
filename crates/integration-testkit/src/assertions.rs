@@ -1,9 +1,18 @@
 use arrow::array::StringArray;
 use gkg_utils::arrow::ArrowUtils;
 use std::collections::BTreeSet;
+use std::sync::LazyLock;
 
 use crate::context::TestContext;
 use crate::t;
+
+static ONTOLOGY: LazyLock<ontology::Ontology> =
+    LazyLock::new(|| ontology::Ontology::load_embedded().expect("embedded ontology should load"));
+
+/// Returns the prefixed edge table name for the given relationship kind.
+fn edge_table(relationship_kind: &str) -> String {
+    t(ONTOLOGY.edge_table_for_relationship(relationship_kind))
+}
 
 pub async fn assert_node_count(ctx: &TestContext, table: &str, expected: usize) {
     let table = t(table);
@@ -22,7 +31,7 @@ pub async fn assert_edge_count(
     target_kind: &str,
     expected: usize,
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT source_id, target_id FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -48,7 +57,7 @@ pub async fn assert_edge_count_for_traversal_path(
     traversal_path: &str,
     expected: usize,
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT 1 FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -72,7 +81,7 @@ pub async fn assert_edges_have_traversal_path(
     expected_traversal_path: &str,
     expected_count: usize,
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT traversal_path FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -111,7 +120,7 @@ pub async fn assert_edge_tags(
     tag_column: &str,
     expected_tags: &[&str],
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -147,7 +156,7 @@ pub async fn assert_edge_tags_by_source(
     tag_column: &str,
     expected: &[(i64, &[&str])],
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT source_id, {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
@@ -190,7 +199,7 @@ pub async fn assert_edge_tags_by_target(
     tag_column: &str,
     expected: &[(i64, &[&str])],
 ) {
-    let edge_table = t("gl_edge");
+    let edge_table = edge_table(relationship_kind);
     let query = format!(
         "SELECT target_id, {tag_column} FROM {edge_table} FINAL \
          WHERE relationship_kind = '{relationship_kind}' \
