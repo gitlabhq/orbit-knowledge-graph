@@ -6660,7 +6660,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Total content resolution attempts.",
+         "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -6679,6 +6679,57 @@
             "y": 347
          },
          "id": 128,
+         "options": {
+            "legend": {
+               "calcs": [
+                  "lastNotNull",
+                  "max"
+               ],
+               "displayMode": "table",
+               "placement": "bottom"
+            },
+            "tooltip": {
+               "mode": "multi"
+            }
+         },
+         "targets": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "expr": "sum by (endpoint) (rate(gkg_content_mr_diff_calls_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{endpoint}}",
+               "refId": "A"
+            }
+         ],
+         "title": "gkg_content_mr_diff_calls_total — rate/s",
+         "type": "timeseries"
+      },
+      {
+         "datasource": {
+            "type": "prometheus",
+            "uid": "$ORBIT_DS"
+         },
+         "description": "Total content resolution attempts.",
+         "fieldConfig": {
+            "defaults": {
+               "custom": {
+                  "drawStyle": "line",
+                  "fillOpacity": 10,
+                  "lineInterpolation": "smooth",
+                  "showPoints": "auto"
+               },
+               "unit": "short"
+            }
+         },
+         "gridPos": {
+            "h": 8,
+            "w": 8,
+            "x": 8,
+            "y": 347
+         },
+         "id": 129,
          "options": {
             "legend": {
                "calcs": [
@@ -6726,10 +6777,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
+            "x": 16,
             "y": 347
          },
-         "id": 129,
+         "id": 130,
          "options": {
             "legend": {
                "calcs": [
@@ -6795,10 +6846,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 16,
-            "y": 347
+            "x": 0,
+            "y": 355
          },
-         "id": 130,
+         "id": 131,
          "options": {
             "legend": {
                "calcs": [
@@ -6846,10 +6897,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 0,
+            "x": 8,
             "y": 355
          },
-         "id": 131,
+         "id": 132,
          "options": {
             "legend": {
                "calcs": [
@@ -6915,10 +6966,10 @@
          "gridPos": {
             "h": 8,
             "w": 8,
-            "x": 8,
+            "x": 16,
             "y": 355
          },
-         "id": 132,
+         "id": 133,
          "options": {
             "legend": {
                "calcs": [
@@ -6954,7 +7005,7 @@
             "x": 0,
             "y": 363
          },
-         "id": 133,
+         "id": 134,
          "panels": [ ],
          "title": "Schema watcher (webserver)",
          "type": "row"
@@ -6982,7 +7033,7 @@
             "x": 0,
             "y": 364
          },
-         "id": 134,
+         "id": 135,
          "options": {
             "legend": {
                "calcs": [
@@ -7018,7 +7069,7 @@
             "x": 0,
             "y": 372
          },
-         "id": 135,
+         "id": 136,
          "panels": [ ],
          "title": "Siphon producers",
          "type": "row"
@@ -7046,7 +7097,7 @@
             "x": 0,
             "y": 373
          },
-         "id": 136,
+         "id": 137,
          "options": {
             "legend": {
                "calcs": [
@@ -7082,7 +7133,7 @@
             "x": 0,
             "y": 381
          },
-         "id": 137,
+         "id": 138,
          "panels": [ ],
          "title": "Siphon ClickHouse consumers",
          "type": "row"
@@ -7110,7 +7161,7 @@
             "x": 0,
             "y": 382
          },
-         "id": 138,
+         "id": 139,
          "options": {
             "legend": {
                "calcs": [
@@ -7146,7 +7197,7 @@
             "x": 0,
             "y": 390
          },
-         "id": 139,
+         "id": 140,
          "panels": [ ],
          "title": "NATS JetStream + varz",
          "type": "row"
@@ -7174,7 +7225,7 @@
             "x": 0,
             "y": 391
          },
-         "id": 140,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [
@@ -7225,7 +7276,7 @@
             "x": 8,
             "y": 391
          },
-         "id": 141,
+         "id": 142,
          "options": {
             "legend": {
                "calcs": [
@@ -7276,7 +7327,7 @@
             "x": 16,
             "y": 391
          },
-         "id": 142,
+         "id": 143,
          "options": {
             "legend": {
                "calcs": [
@@ -7327,7 +7378,7 @@
             "x": 0,
             "y": 399
          },
-         "id": 143,
+         "id": 144,
          "options": {
             "legend": {
                "calcs": [
@@ -7378,7 +7429,7 @@
             "x": 8,
             "y": 399
          },
-         "id": 144,
+         "id": 145,
          "options": {
             "legend": {
                "calcs": [
@@ -7429,7 +7480,7 @@
             "x": 16,
             "y": 399
          },
-         "id": 145,
+         "id": 146,
          "options": {
             "legend": {
                "calcs": [
@@ -7480,7 +7531,7 @@
             "x": 0,
             "y": 407
          },
-         "id": 146,
+         "id": 147,
          "options": {
             "legend": {
                "calcs": [
@@ -7531,7 +7582,7 @@
             "x": 8,
             "y": 407
          },
-         "id": 147,
+         "id": 148,
          "options": {
             "legend": {
                "calcs": [
@@ -7582,7 +7633,7 @@
             "x": 16,
             "y": 407
          },
-         "id": 148,
+         "id": 149,
          "options": {
             "legend": {
                "calcs": [
@@ -7633,7 +7684,7 @@
             "x": 0,
             "y": 415
          },
-         "id": 149,
+         "id": 150,
          "options": {
             "legend": {
                "calcs": [
@@ -7669,7 +7720,7 @@
             "x": 0,
             "y": 423
          },
-         "id": 150,
+         "id": 151,
          "panels": [ ],
          "title": "Rails KG request path",
          "type": "row"
@@ -7697,7 +7748,7 @@
             "x": 0,
             "y": 424
          },
-         "id": 151,
+         "id": 152,
          "options": {
             "legend": {
                "calcs": [
@@ -7766,7 +7817,7 @@
             "x": 8,
             "y": 424
          },
-         "id": 152,
+         "id": 153,
          "options": {
             "legend": {
                "calcs": [
@@ -7817,7 +7868,7 @@
             "x": 16,
             "y": 424
          },
-         "id": 153,
+         "id": 154,
          "options": {
             "legend": {
                "calcs": [
@@ -7868,7 +7919,7 @@
             "x": 0,
             "y": 432
          },
-         "id": 154,
+         "id": 155,
          "options": {
             "legend": {
                "calcs": [
@@ -7937,7 +7988,7 @@
             "x": 8,
             "y": 432
          },
-         "id": 155,
+         "id": 156,
          "options": {
             "legend": {
                "calcs": [
@@ -7988,7 +8039,7 @@
             "x": 16,
             "y": 432
          },
-         "id": 156,
+         "id": 157,
          "options": {
             "legend": {
                "calcs": [
@@ -8057,7 +8108,7 @@
             "x": 0,
             "y": 440
          },
-         "id": 157,
+         "id": 158,
          "options": {
             "legend": {
                "calcs": [
@@ -8108,7 +8159,7 @@
             "x": 8,
             "y": 440
          },
-         "id": 158,
+         "id": 159,
          "options": {
             "legend": {
                "calcs": [
@@ -8177,7 +8228,7 @@
             "x": 16,
             "y": 440
          },
-         "id": 159,
+         "id": 160,
          "options": {
             "legend": {
                "calcs": [
@@ -8228,7 +8279,7 @@
             "x": 0,
             "y": 448
          },
-         "id": 160,
+         "id": 161,
          "options": {
             "legend": {
                "calcs": [
@@ -8297,7 +8348,7 @@
             "x": 8,
             "y": 448
          },
-         "id": 161,
+         "id": 162,
          "options": {
             "legend": {
                "calcs": [
@@ -8348,7 +8399,7 @@
             "x": 16,
             "y": 448
          },
-         "id": 162,
+         "id": 163,
          "options": {
             "legend": {
                "calcs": [
@@ -8417,7 +8468,7 @@
             "x": 0,
             "y": 456
          },
-         "id": 163,
+         "id": 164,
          "options": {
             "legend": {
                "calcs": [
@@ -8453,7 +8504,7 @@
             "x": 0,
             "y": 464
          },
-         "id": 164,
+         "id": 165,
          "panels": [ ],
          "title": "Rails KG traversal compaction",
          "type": "row"
@@ -8481,7 +8532,7 @@
             "x": 0,
             "y": 465
          },
-         "id": 165,
+         "id": 166,
          "options": {
             "legend": {
                "calcs": [
@@ -8550,7 +8601,7 @@
             "x": 8,
             "y": 465
          },
-         "id": 166,
+         "id": 167,
          "options": {
             "legend": {
                "calcs": [
@@ -8601,7 +8652,7 @@
             "x": 16,
             "y": 465
          },
-         "id": 167,
+         "id": 168,
          "options": {
             "legend": {
                "calcs": [
@@ -8670,7 +8721,7 @@
             "x": 0,
             "y": 473
          },
-         "id": 168,
+         "id": 169,
          "options": {
             "legend": {
                "calcs": [
@@ -8721,7 +8772,7 @@
             "x": 8,
             "y": 473
          },
-         "id": 169,
+         "id": 170,
          "options": {
             "legend": {
                "calcs": [
@@ -8772,7 +8823,7 @@
             "x": 16,
             "y": 473
          },
-         "id": 170,
+         "id": 171,
          "options": {
             "legend": {
                "calcs": [

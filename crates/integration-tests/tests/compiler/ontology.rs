@@ -884,7 +884,7 @@ fn hydration_skips_security_context() {
 }
 
 #[test]
-fn hydration_empty_columns_produces_empty_json() {
+fn hydration_id_only_columns_produces_map_with_id() {
     let input = Input {
         query_type: QueryType::Hydration,
         nodes: vec![InputNode {
@@ -902,13 +902,37 @@ fn hydration_empty_columns_produces_empty_json() {
     let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
     let rendered = result.base.render();
     assert!(
+        rendered.contains("map(") && rendered.contains("'id'"),
+        "PK should be included in map when requested"
+    );
+}
+
+#[test]
+fn hydration_empty_columns_produces_empty_json() {
+    let input = Input {
+        query_type: QueryType::Hydration,
+        nodes: vec![InputNode {
+            id: "hydrate".into(),
+            entity: Some("User".into()),
+            table: Some("gl_user".into()),
+            columns: Some(ColumnSelection::List(vec![])),
+            node_ids: vec![1],
+            ..InputNode::default()
+        }],
+        limit: 1,
+        ..Input::default()
+    };
+
+    let result = compile_input(input, &Arc::new(embedded_ontology()), &test_ctx()).unwrap();
+    let rendered = result.base.render();
+    assert!(
         !rendered.contains("map("),
         "empty props should use literal '{{}}', not map()"
     );
 }
 
 #[test]
-fn hydration_id_column_excluded_from_map() {
+fn hydration_id_column_included_in_map() {
     let input = Input {
         query_type: QueryType::Hydration,
         nodes: vec![InputNode {
@@ -937,8 +961,8 @@ fn hydration_id_column_excluded_from_map() {
         .and_then(|s| s.split(')').next())
         .unwrap_or("");
     assert!(
-        !map_section.contains("'id'"),
-        "map should not contain 'id' key"
+        map_section.contains("'id'"),
+        "map should contain 'id' key when requested"
     );
 }
 

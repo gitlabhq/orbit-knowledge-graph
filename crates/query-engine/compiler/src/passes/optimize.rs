@@ -43,8 +43,13 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
         Node::Insert(_) => {}
         Node::Query(q) => {
             inject_entity_kind_filters(q, input);
+            if matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            ) {
+                inject_denorm_tags_on_main_edges(q, input);
+            }
             push_kind_literals_into_variable_length_arms(q, input);
-            rewrite_denormalized_node_filters(q, input);
             if input.query_type == QueryType::Aggregation {
                 inject_agg_group_by_kind_filters(q, input);
             }
@@ -71,6 +76,16 @@ pub fn optimize(node: &mut Node, input: &mut Input) {
             if input.query_type == QueryType::PathFinding {
                 apply_path_hop_frontiers(q, input);
             }
+
+            // Denorm runs late so SIP/cascade/target-SIP have already created
+            // their CTEs. Denorm can then remove _nf_* and _target_*_ids CTEs
+            // that are redundant because edge tags cover the same filters.
+            rewrite_denormalized_node_filters(q, input);
+
+            // Cleanup: remove CTEs that are no longer referenced after denorm
+            // removed _nf_* CTEs and their InSubquery consumers.
+            prune_orphaned_ctes(q);
+
             if input.options.materialize_ctes {
                 materialize_multi_ref_ctes(q);
             }
@@ -126,7 +141,14 @@ fn rewrite_in_subquery_in_from(from: &mut TableRef) {
 }
 
 /// Extract `InSubquery` conjuncts from a WHERE clause and rewrite them into
-/// LEFT SEMI JOINs on the FROM tree.
+/// LEFT SEMI JOINs appended at the top of the FROM tree.
+///
+/// Each `alias.col IN (SELECT id FROM _cte)` becomes a
+/// `LEFT SEMI JOIN _cte AS _sj__cte ON alias.col = _sj__cte.id`
+/// joined at the outermost level so the rendered SQL has a flat chain:
+///   `... INNER JOIN (...) AS pipe ON ... LEFT SEMI JOIN _cte ON ...`
+/// instead of nesting the semi-join inside a preceding join's right arm
+/// (which produces two consecutive ON clauses that ClickHouse rejects).
 fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<Expr>) {
     let w = match where_clause.take() {
         Some(w) => w,
@@ -135,6 +157,7 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
 
     let conjuncts = w.flatten_and();
     let mut kept: Vec<Expr> = Vec::new();
+    let mut semi_counter: usize = 0;
 
     for conj in conjuncts {
         if let Expr::InSubquery {
@@ -142,18 +165,29 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
             ref cte_name,
             ref column,
         } = conj
+            && let Expr::Column { table, column: col } = expr.as_ref()
+            && alias_exists_in_from(from, table)
         {
-            // Only rewrite when the expression is a simple column reference
-            // (e.g., `e0.source_id`) so we can locate the table in the FROM tree.
-            if let Expr::Column { table, column: col } = expr.as_ref() {
-                let semi_alias = format!("_sj_{cte_name}");
-                let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
-                let semi_scan = TableRef::scan(cte_name, &semi_alias);
+            let semi_alias = format!("_sj{semi_counter}_{cte_name}");
+            semi_counter += 1;
+            let on = Expr::eq(Expr::col(table, col), Expr::col(&semi_alias, column));
+            let semi_scan = TableRef::scan(cte_name, &semi_alias);
 
-                if wrap_alias_with_semi_join(from, table, semi_scan, on) {
-                    continue;
-                }
-            }
+            let current = std::mem::replace(
+                from,
+                TableRef::Scan {
+                    table: String::new(),
+                    alias: String::new(),
+                    final_: false,
+                },
+            );
+            *from = TableRef::Join {
+                join_type: JoinType::LeftSemi,
+                left: Box::new(current),
+                right: Box::new(semi_scan),
+                on,
+            };
+            continue;
         }
         kept.push(conj);
     }
@@ -161,72 +195,67 @@ fn rewrite_where_in_to_semi_join(from: &mut TableRef, where_clause: &mut Option<
     *where_clause = Expr::conjoin(kept);
 }
 
-/// Walk the FROM tree to find the node that defines `target_alias` and wrap
-/// it in a LEFT SEMI JOIN. Returns true if the alias was found and wrapped.
-fn wrap_alias_with_semi_join(
-    from: &mut TableRef,
-    target_alias: &str,
-    semi_rhs: TableRef,
-    on: Expr,
-) -> bool {
+/// Check if an alias exists anywhere in the FROM tree.
+fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
     match from {
-        TableRef::Scan { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
+        TableRef::Scan { alias, .. } => alias == target,
+        TableRef::Subquery { alias, .. } => alias == target,
+        TableRef::Union { alias, .. } => alias == target,
         TableRef::Join { left, right, .. } => {
-            wrap_alias_with_semi_join(left, target_alias, semi_rhs.clone(), on.clone())
-                || wrap_alias_with_semi_join(right, target_alias, semi_rhs, on)
+            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
         }
-        TableRef::Union { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
-        TableRef::Subquery { alias, .. } if alias == target_alias => {
-            let original = std::mem::replace(
-                from,
-                TableRef::Scan {
-                    table: String::new(),
-                    alias: String::new(),
-                    final_: false,
-                },
-            );
-            *from = TableRef::Join {
-                join_type: JoinType::LeftSemi,
-                left: Box::new(original),
-                right: Box::new(semi_rhs),
-                on,
-            };
-            true
-        }
-        _ => false,
     }
+}
+
+/// Remove CTEs that are defined but never referenced in the query body.
+/// This cleans up after passes like `rewrite_denormalized_node_filters`
+/// which may remove InSubquery references that were the only consumers
+/// of a CTE, or after `apply_target_sip_prefilter` skips creating a
+/// `_target_*_ids` CTE that would have been the only consumer of a
+/// cascade CTE.
+fn prune_orphaned_ctes(q: &mut Query) {
+    if q.ctes.is_empty() {
+        return;
+    }
+
+    // Collect all CTE names referenced in the query body and in other CTEs.
+    let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+    let mut ref_counts: HashMap<String, usize> = HashMap::new();
+
+    // Count refs in CTE bodies (a later CTE can reference an earlier one).
+    for cte in &q.ctes {
+        count_cte_refs_in_query(&cte.query, &cte_names, &mut ref_counts);
+    }
+
+    // Count refs in the main query body.
+    count_cte_refs_in_from(&q.from, &cte_names, &mut ref_counts);
+    if let Some(w) = &q.where_clause {
+        count_cte_refs_in_expr(w, &cte_names, &mut ref_counts);
+    }
+    if let Some(h) = &q.having {
+        count_cte_refs_in_expr(h, &cte_names, &mut ref_counts);
+    }
+    for sel in &q.select {
+        count_cte_refs_in_expr(&sel.expr, &cte_names, &mut ref_counts);
+    }
+    for ord in &q.order_by {
+        count_cte_refs_in_expr(&ord.expr, &cte_names, &mut ref_counts);
+    }
+    if let Some((_, limit_by_cols)) = &q.limit_by {
+        for col in limit_by_cols {
+            count_cte_refs_in_expr(col, &cte_names, &mut ref_counts);
+        }
+    }
+    for arm in &q.union_all {
+        count_cte_refs_in_query(arm, &cte_names, &mut ref_counts);
+    }
+
+    // Remove CTEs with zero references. Preserve _nf_* CTEs — their
+    // references are injected by the deduplicate pass which runs after
+    // optimize.
+    q.ctes.retain(|c| {
+        c.name.starts_with("_nf_") || ref_counts.get(&c.name).copied().unwrap_or(0) > 0
+    });
 }
 
 /// Mark CTEs as `materialized` when they are referenced more than once in the
@@ -676,6 +705,97 @@ fn inject_entity_kind_filters(q: &mut Query, input: &Input) {
     }
 }
 
+/// Inject denormalized tag predicates onto the first edge alias (`e0`)
+/// when the nodes on that edge have denormalized filters but neither side
+/// already provides tight selectivity.
+///
+/// Only targets `e0` — later edges (e1, e2, ...) are already narrowed by
+/// JOIN conditions to the preceding edge and gain no benefit from text
+/// index evaluation.
+///
+/// Skips injection when:
+/// - The opposite side has `node_ids` or `id_range` (PK prunes better).
+/// - The node's own filters already feed a `_root_ids`/`_nf_*` CTE that
+///   narrows the edge via `IN (SELECT id FROM ...)`. Adding `has()` on
+///   top just activates the text index redundantly.
+///
+/// Note: caller must gate to Traversal | Aggregation. These are the only
+/// query types that use `e{i}` edge aliases in the outer WHERE. PathFinding
+/// uses frontier CTEs and Neighbors uses union arms with different aliases.
+/// (Same convention as `apply_sip_prefilter`, `apply_nonroot_node_ids_to_edges`,
+/// and `apply_edge_led_reorder`, which carry their own internal guards.)
+fn inject_denorm_tags_on_main_edges(q: &mut Query, input: &Input) {
+    if input.compiler.denormalized_columns.is_empty() || input.relationships.is_empty() {
+        return;
+    }
+
+    // Only inject on the first edge (e0). Later edges are narrowed by JOINs.
+    let rel = &input.relationships[0];
+    if rel.max_hops > 1 {
+        return;
+    }
+    let edge_alias = "e0";
+    let (start_col, end_col) = rel.direction.edge_columns();
+
+    let from_node = input.nodes.iter().find(|n| n.id == rel.from);
+    let to_node = input.nodes.iter().find(|n| n.id == rel.to);
+
+    // A node is "already narrowed" if it has node_ids, id_range, or
+    // property filters (which produce _root_ids / _nf_* CTEs that feed
+    // IN-subquery predicates on the edge, more selective than text index).
+    let is_already_narrowed = |n: &InputNode| -> bool {
+        !n.node_ids.is_empty() || n.id_range.is_some() || !n.filters.is_empty()
+    };
+
+    let mut tag_filters: Vec<Expr> = Vec::new();
+
+    // Source side: inject tag predicates for the "from" node's filters
+    // only when neither side already provides tight narrowing.
+    if let Some(from_node) = from_node {
+        let opposite_narrowed = to_node.is_some_and(&is_already_narrowed);
+        let self_narrowed_by_ids = !from_node.node_ids.is_empty() || from_node.id_range.is_some();
+        if !opposite_narrowed && !self_narrowed_by_ids && !from_node.filters.is_empty() {
+            let dir = if start_col == SOURCE_ID_COLUMN {
+                "source"
+            } else {
+                "target"
+            };
+            tag_filters.extend(build_denorm_tag_predicates(
+                from_node,
+                dir,
+                edge_alias,
+                &input.compiler.denormalized_columns,
+            ));
+        }
+    }
+
+    // Target side: inject tag predicates for the "to" node's filters
+    // only when neither side already provides tight narrowing.
+    if let Some(to_node) = to_node {
+        let opposite_narrowed = from_node.is_some_and(&is_already_narrowed);
+        let self_narrowed_by_ids = !to_node.node_ids.is_empty() || to_node.id_range.is_some();
+        if !opposite_narrowed && !self_narrowed_by_ids && !to_node.filters.is_empty() {
+            let dir = if end_col == TARGET_ID_COLUMN {
+                "target"
+            } else {
+                "source"
+            };
+            tag_filters.extend(build_denorm_tag_predicates(
+                to_node,
+                dir,
+                edge_alias,
+                &input.compiler.denormalized_columns,
+            ));
+        }
+    }
+
+    if !tag_filters.is_empty() {
+        let mut parts: Vec<Expr> = q.where_clause.take().into_iter().collect();
+        parts.extend(tag_filters);
+        q.where_clause = Expr::conjoin(parts);
+    }
+}
+
 /// Push static `source_kind`/`target_kind = '<entity>'` literals into each
 /// arm of a variable-length traversal's UNION ALL.
 ///
@@ -780,6 +900,9 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
     }
 
     let mut ctes_to_remove: Vec<String> = Vec::new();
+    // CTEs where some (but not all) filters are denormalized. The CTE is
+    // kept but its WHERE is rewritten to contain only the non-denormalized
+    // filters. The denormalized filters are injected onto the edge WHERE.
     // Map CTE name → edge-column filter exprs (using placeholder alias "EDGE")
     let mut filters_per_cte: HashMap<String, Vec<Expr>> = HashMap::new();
 
@@ -802,7 +925,6 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             continue;
         };
 
-        let mut all_rewritable = true;
         // Collect per-filter rewrites: each filter becomes either a has(), hasAny(), or
         // contributes to a hasAll() batch when multiple eq filters target the same column.
         // We track (edge_column, tag_values, is_any) per filter.
@@ -813,6 +935,8 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             is_any: bool,
         }
         let mut tag_filters: Vec<TagFilter> = Vec::new();
+        // Track which property names were successfully converted to tag predicates.
+        let mut denormalized_props: HashSet<String> = HashSet::new();
 
         for (prop_name, filter) in &node.filters {
             let key = (entity.clone(), prop_name.clone(), dir_prefix.to_string());
@@ -825,6 +949,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                             tags: vec![format!("{tag_key}:{val}")],
                             is_any: false,
                         });
+                        denormalized_props.insert(prop_name.clone());
                     }
                     Some(crate::input::FilterOp::In) => {
                         let vals: Vec<String> = filter
@@ -838,25 +963,25 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
                                     .collect()
                             })
                             .unwrap_or_default();
-                        if vals.is_empty() {
-                            all_rewritable = false;
-                            break;
+                        if !vals.is_empty() {
+                            tag_filters.push(TagFilter {
+                                edge_column: edge_column.clone(),
+                                tags: vals,
+                                is_any: true,
+                            });
+                            denormalized_props.insert(prop_name.clone());
                         }
-                        tag_filters.push(TagFilter {
-                            edge_column: edge_column.clone(),
-                            tags: vals,
-                            is_any: true,
-                        });
                     }
                     _ => {
-                        all_rewritable = false;
-                        break;
+                        // Unsupported operator — this filter stays on the node table.
                     }
                 }
-            } else {
-                all_rewritable = false;
-                break;
             }
+            // Non-denormalized property — stays on the node table (no action needed here).
+        }
+
+        if tag_filters.is_empty() {
+            continue;
         }
 
         // Build filter expressions:
@@ -913,37 +1038,142 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             }
         }
 
-        if !all_rewritable {
-            continue;
-        }
+        // Determine which property names remain non-denormalized.
+        let remaining_props: Vec<String> = node
+            .filters
+            .keys()
+            .filter(|k| !denormalized_props.contains(*k))
+            .cloned()
+            .collect();
 
-        ctes_to_remove.push(cte.name.clone());
+        if remaining_props.is_empty()
+            && !matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            )
+        {
+            // All filters denormalized AND no dedup dependency — safe to
+            // remove the CTE. Traversal/Aggregation queries always run
+            // through the dedup pass which inlines the CTE's _deleted +
+            // LIMIT 1 BY logic into the JOIN subquery. Removing the CTE
+            // there loses the _deleted filter and produces wrong counts.
+            ctes_to_remove.push(cte.name.clone());
+        }
+        // For Traversal/Aggregation (or partial denorm): keep the CTE
+        // unchanged and inject has()/hasAll() as supplementary edge
+        // predicates for text index pruning.
         filters_per_cte.insert(cte.name.clone(), edge_filters);
     }
 
-    if ctes_to_remove.is_empty() {
+    if filters_per_cte.is_empty() {
         return;
     }
 
-    // Remove the _nf_ CTEs.
+    // Only remove fully-denormalized _nf_ CTEs that are not referenced
+    // from inside JOIN subqueries, other CTEs, or the FROM tree. The outer
+    // WHERE InSubquery will be replaced in Phase 1, but if other consumers
+    // exist (e.g. a dedup subquery WHERE or a cascade CTE body), removing
+    // the CTE would break those references.
+    {
+        // Count refs from the FROM tree (JOIN subqueries injected by
+        // deduplicate). These block removal because the dedup pass
+        // injects `node.id IN (SELECT id FROM _nf_*)` into subqueries
+        // that the optimizer can't rewrite.
+        let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+        let mut from_refs: HashMap<String, usize> = HashMap::new();
+        count_cte_refs_in_from(&q.from, &cte_names, &mut from_refs);
+
+        ctes_to_remove.retain(|name| from_refs.get(name).copied().unwrap_or(0) == 0);
+    }
+
+    // Also rewrite InSubquery refs inside other CTEs (e.g. _cascade_u
+    // references _nf_mr). Replace with tag predicates using the cascade's
+    // own edge alias (_ce).
+    for removed in &ctes_to_remove {
+        if let Some(filters) = filters_per_cte.get(removed) {
+            for cte in &mut q.ctes {
+                if cte.name == *removed {
+                    continue;
+                }
+                if let Some(ref mut w) = cte.query.where_clause {
+                    let conjuncts = w.clone().flatten_and();
+                    let mut kept: Vec<Expr> = Vec::new();
+                    for conj in conjuncts {
+                        if let Expr::InSubquery { cte_name, .. } = &conj
+                            && cte_name == removed
+                        {
+                            kept.extend(
+                                filters
+                                    .iter()
+                                    .map(|f| set_edge_alias(f, CASCADE_EDGE_ALIAS)),
+                            );
+                            continue;
+                        }
+                        kept.push(conj);
+                    }
+                    *w = Expr::conjoin(kept).unwrap_or(Expr::int(1));
+                }
+            }
+        }
+    }
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
     let has_union_in_from = has_union_table_ref(&q.from);
 
+    // All CTE names that have tag predicates (both fully-removed and partial-match).
+    let all_denorm_ctes: HashSet<&String> = filters_per_cte.keys().collect();
+
     // Phase 1: Replace InSubquery in outer WHERE.
-    // Single-hop: add edge-column filters to outer WHERE with e0.
-    // Multi-hop: don't add to outer WHERE (column lives on inner e1); injection below.
+    // - Fully-removed CTEs: drop InSubquery, inject tag predicates.
+    // - Partial-match CTEs: keep InSubquery AND inject tag predicates as supplementary.
     if let Some(ref mut where_clause) = q.where_clause {
         let conjuncts = where_clause.clone().flatten_and();
         let mut kept: Vec<Expr> = Vec::new();
+        let mut injected_partial: HashSet<String> = HashSet::new();
         for conj in conjuncts {
-            if let Expr::InSubquery { cte_name, .. } = &conj
-                && ctes_to_remove.contains(cte_name)
-            {
-                if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
-                    kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+            let cte_ref = match &conj {
+                Expr::InSubquery { cte_name, .. } => Some(cte_name.clone()),
+                _ => None,
+            };
+            if let Some(ref cte_name) = cte_ref {
+                if ctes_to_remove.contains(cte_name) {
+                    // Fully denormalized — drop the InSubquery, inject tag predicates.
+                    if !has_union_in_from && let Some(filters) = filters_per_cte.get(cte_name) {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                    }
+                    continue;
                 }
-                continue;
+                if all_denorm_ctes.contains(cte_name) && !injected_partial.contains(cte_name) {
+                    // Partial match — keep the InSubquery AND inject tag predicates
+                    // as supplementary filters for text index pruning.
+                    // Skip when the opposite side of the edge already has tight
+                    // selectivity (node_ids/id_range) — the PK prunes better than
+                    // the text index and the has() just adds overhead.
+                    let alias = cte_name.strip_prefix("_nf_").unwrap_or(cte_name);
+                    let opposite_is_tight = input.relationships.first().is_some_and(|rel| {
+                        let opposite_alias = if rel.from == alias {
+                            &rel.to
+                        } else if rel.to == alias {
+                            &rel.from
+                        } else {
+                            return false;
+                        };
+                        input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == *opposite_alias)
+                            .is_some_and(|n| !n.node_ids.is_empty() || n.id_range.is_some())
+                    });
+                    kept.push(conj);
+                    if !has_union_in_from
+                        && !opposite_is_tight
+                        && let Some(filters) = filters_per_cte.get(cte_name)
+                    {
+                        kept.extend(filters.iter().map(|f| set_edge_alias(f, "e0")));
+                        injected_partial.insert(cte_name.clone());
+                    }
+                    continue;
+                }
             }
             kept.push(conj);
         }
@@ -952,6 +1182,7 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
     // Phase 2: Multi-hop — inject filters into UNION ALL arms in FROM.
     // The first edge in each arm is always e1 (from build_hop_arm).
+    // Only for fully-removed CTEs (partial-match CTEs stay unchanged).
     if has_union_in_from {
         for cte_name in &ctes_to_remove {
             if let Some(filters) = filters_per_cte.get(cte_name) {
@@ -990,7 +1221,12 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
     // Phase 4: PathFinding — replace InSubquery inside frontier CTE queries.
     // Frontier arms use e1 as the first edge (from build_frontier_arm).
+    // Only process frontier/hop CTEs (_fwd_hop*, _bwd_hop*) — NOT cascade
+    // or other CTEs, which use _ce as their edge alias.
     for cte in &mut q.ctes {
+        if !cte.name.starts_with("_fwd_hop") && !cte.name.starts_with("_bwd_hop") {
+            continue;
+        }
         replace_in_subquery_in_where(
             &mut cte.query.where_clause,
             &ctes_to_remove,
@@ -1818,30 +2054,48 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         let from_edge_only = input.compiler.node_edge_col.contains_key(&rel.from);
 
         // Use multi-hop cascade for max_hops > 1, single-hop for max_hops == 1.
-        let build_cascade =
-            |node_alias: &str, select_col: &str, filter_col: &str, parent: &str| -> Option<Query> {
-                if rel.max_hops > 1 {
-                    build_multihop_cascade_for_node(
-                        input,
-                        node_alias,
-                        select_col,
-                        filter_col,
-                        parent,
-                        &rel.types,
-                        rel.max_hops,
-                    )
-                } else {
-                    build_cascade_for_node(
-                        input, node_alias, select_col, filter_col, parent, &rel.types,
-                    )
-                }
-            };
+        // `parent_alias` is the node on the opposite side of the relationship so
+        // that `build_cascade_for_node_with_parent` can inject source-side tag
+        // predicates for the parent node's denormalized filters.
+        let build_cascade = |node_alias: &str,
+                             select_col: &str,
+                             filter_col: &str,
+                             parent: &str,
+                             parent_alias: Option<&str>|
+         -> Option<Query> {
+            if rel.max_hops > 1 {
+                build_multihop_cascade_for_node(
+                    input,
+                    node_alias,
+                    select_col,
+                    filter_col,
+                    parent,
+                    &rel.types,
+                    rel.max_hops,
+                )
+            } else {
+                build_cascade_for_node_with_parent(
+                    input,
+                    node_alias,
+                    select_col,
+                    filter_col,
+                    parent,
+                    &rel.types,
+                    parent_alias,
+                )
+            }
+        };
 
         if from_cte.is_some()
             && to_cte.is_none()
             && !to_edge_only
-            && let Some(cte) =
-                build_cascade(&rel.to, end_col, start_col, from_cte.as_ref().unwrap())
+            && let Some(cte) = build_cascade(
+                &rel.to,
+                end_col,
+                start_col,
+                from_cte.as_ref().unwrap(),
+                Some(&rel.from),
+            )
         {
             let name = cascade_cte(&rel.to);
             q.ctes.push(Cte::new(&name, cte));
@@ -1850,8 +2104,13 @@ fn apply_sip_prefilter(q: &mut Query, input: &Input) {
         if to_cte.is_some()
             && from_cte.is_none()
             && !from_edge_only
-            && let Some(cte) =
-                build_cascade(&rel.from, start_col, end_col, to_cte.as_ref().unwrap())
+            && let Some(cte) = build_cascade(
+                &rel.from,
+                start_col,
+                end_col,
+                to_cte.as_ref().unwrap(),
+                Some(&rel.to),
+            )
         {
             let name = cascade_cte(&rel.from);
             q.ctes.push(Cte::new(&name, cte));
@@ -1894,6 +2153,20 @@ fn build_cascade_for_node(
     filter_col: &str,
     parent_cte: &str,
     rel_types: &[String],
+) -> Option<Query> {
+    build_cascade_for_node_with_parent(
+        input, node_alias, select_col, filter_col, parent_cte, rel_types, None,
+    )
+}
+
+fn build_cascade_for_node_with_parent(
+    input: &Input,
+    node_alias: &str,
+    select_col: &str,
+    filter_col: &str,
+    parent_cte: &str,
+    rel_types: &[String],
+    parent_alias: Option<&str>,
 ) -> Option<Query> {
     let node = input.nodes.iter().find(|n| n.id == node_alias)?;
     node.table.as_deref()?;
@@ -1963,6 +2236,8 @@ fn build_cascade_for_node(
         alias,
         &input.compiler.denormalized_columns,
     );
+
+    let _ = parent_alias;
 
     Some(Query {
         distinct: input.options.cascade_distinct,
@@ -2219,6 +2494,30 @@ fn apply_target_sip_prefilter(q: &mut Query, input: &Input) {
 
         if target_only_conds.is_empty() {
             continue;
+        }
+
+        // When a _cascade_{target} CTE already exists and all of the target
+        // node's property filters are denormalized onto edge tags, the cascade
+        // already covers the filter via has() predicates. The _target_*_ids
+        // CTE would redundantly re-derive the same ID set via a full node
+        // table dedup scan.
+        let cascade_name = cascade_cte(target_alias);
+        let cascade_exists = q.ctes.iter().any(|c| c.name == cascade_name);
+        if cascade_exists && !target_node.filters.is_empty() {
+            let entity = target_node.entity.as_deref().unwrap_or("");
+            let dir_prefix = resolve_denorm_direction(target_node, input);
+            let all_denormalized = dir_prefix.is_some()
+                && target_node.filters.keys().all(|prop| {
+                    let key = (
+                        entity.to_string(),
+                        prop.clone(),
+                        dir_prefix.unwrap().to_string(),
+                    );
+                    input.compiler.denormalized_columns.contains_key(&key)
+                });
+            if all_denormalized {
+                continue;
+            }
         }
 
         let cte_name = format!("_target_{target_alias}_ids");

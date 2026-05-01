@@ -32,6 +32,17 @@
       "domain": "server.content"
     },
     {
+      "otel_name": "gkg.content.mr_diff.calls",
+      "prom_name": "gkg_content_mr_diff_calls_total",
+      "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
+      "kind": "counter",
+      "labels": [
+        "endpoint"
+      ],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
       "otel_name": "gkg.content.resolve",
       "prom_name": "gkg_content_resolve_total",
       "description": "Total content resolution attempts.",

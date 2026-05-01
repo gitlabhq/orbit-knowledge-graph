@@ -14,6 +14,7 @@ struct ContentResolutionMetrics {
     batch_size: Histogram<u64>,
     blob_bytes: Histogram<u64>,
     gitaly_calls: Counter<u64>,
+    mr_diff_calls: Counter<u64>,
 }
 
 impl ContentResolutionMetrics {
@@ -25,6 +26,7 @@ impl ContentResolutionMetrics {
             batch_size: content::BATCH_SIZE_METRIC.build_histogram_u64(&meter),
             blob_bytes: content::BLOB_BYTES_METRIC.build_histogram_u64(&meter),
             gitaly_calls: content::GITALY_CALLS.build_counter_u64(&meter),
+            mr_diff_calls: content::MR_DIFF_CALLS.build_counter_u64(&meter),
         }
     }
 }
@@ -43,6 +45,12 @@ pub(crate) fn record_gitaly_call() {
 
 pub(crate) fn record_blob_bytes(bytes: u64) {
     METRICS.blob_bytes.record(bytes, &[]);
+}
+
+pub(crate) fn record_mr_diff_call(endpoint: &'static str) {
+    METRICS
+        .mr_diff_calls
+        .add(1, &[KeyValue::new(content::labels::ENDPOINT, endpoint)]);
 }
 
 pub(crate) struct ResolveTimer {

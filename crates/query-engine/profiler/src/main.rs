@@ -51,6 +51,11 @@ struct Cli {
     #[arg(long, default_value = "config/ontology")]
     ontology: PathBuf,
 
+    /// Schema version prefix for table names (e.g. 24 → v24_gl_project).
+    /// Defaults to the embedded SCHEMA_VERSION from config/SCHEMA_VERSION.
+    #[arg(long)]
+    schema_version: Option<u32>,
+
     /// Include EXPLAIN PLAN and EXPLAIN PIPELINE for each query
     #[arg(long)]
     explain: bool,
@@ -148,6 +153,13 @@ fn emit_output(
     Ok(())
 }
 
+fn embedded_schema_version() -> u32 {
+    include_str!("../../../../config/SCHEMA_VERSION")
+        .trim()
+        .parse()
+        .expect("config/SCHEMA_VERSION must contain a valid u32")
+}
+
 #[tokio::main]
 async fn main() -> Result<()> {
     let _ = rustls::crypto::aws_lc_rs::default_provider().install_default();
@@ -166,8 +178,17 @@ async fn main() -> Result<()> {
         cli.query.clone()
     };
 
-    let ontology =
-        Arc::new(Ontology::load_from_dir(&cli.ontology).context("failed to load ontology")?);
+    let ontology = {
+        let ont = Ontology::load_from_dir(&cli.ontology).context("failed to load ontology")?;
+        let version = cli.schema_version.unwrap_or(embedded_schema_version());
+        if version > 0 {
+            let prefix = format!("v{version}_");
+            eprintln!("using table prefix: {prefix}");
+            Arc::new(ont.with_schema_version_prefix(&prefix))
+        } else {
+            Arc::new(ont)
+        }
+    };
 
     let org_id = gkg_utils::traversal_path::org_id(&cli.traversal_paths[0])
         .context("failed to parse org_id from first traversal path")?;
