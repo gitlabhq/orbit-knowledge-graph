@@ -178,7 +178,7 @@ storage:
     - {name: first_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: last_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: avatar_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: avatar_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: public_email, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: preferred_language, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: last_activity_on, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}

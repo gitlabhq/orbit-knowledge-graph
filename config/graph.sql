@@ -730,7 +730,7 @@ CREATE TABLE IF NOT EXISTS gl_user (
     first_name String DEFAULT '' CODEC(ZSTD(1)),
     last_name String DEFAULT '' CODEC(ZSTD(1)),
     state LowCardinality(String) DEFAULT '' CODEC(LZ4),
-    avatar_url String DEFAULT '' CODEC(ZSTD(1)),
+    avatar_url Nullable(String) CODEC(ZSTD(1)),
     public_email String DEFAULT '' CODEC(ZSTD(1)),
     preferred_language String DEFAULT '' CODEC(ZSTD(1)),
     last_activity_on Nullable(Date32) CODEC(Delta(4), ZSTD(1)),
