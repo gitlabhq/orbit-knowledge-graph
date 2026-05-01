@@ -1061,7 +1061,24 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
         return;
     }
 
-    // Remove fully-denormalized _nf_ CTEs.
+    // Only remove fully-denormalized _nf_ CTEs that are not referenced
+    // from inside JOIN subqueries, other CTEs, or the FROM tree. The outer
+    // WHERE InSubquery will be replaced in Phase 1, but if other consumers
+    // exist (e.g. a dedup subquery WHERE or a cascade CTE body), removing
+    // the CTE would break those references.
+    {
+        let cte_names: HashSet<String> = q.ctes.iter().map(|c| c.name.clone()).collect();
+        let mut non_where_refs: HashMap<String, usize> = HashMap::new();
+        // Count refs in CTE bodies.
+        for cte in &q.ctes {
+            count_cte_refs_in_query(&cte.query, &cte_names, &mut non_where_refs);
+        }
+        // Count refs in FROM (JOIN subqueries).
+        count_cte_refs_in_from(&q.from, &cte_names, &mut non_where_refs);
+        // (Skip outer WHERE — that's the one we're replacing.)
+
+        ctes_to_remove.retain(|name| non_where_refs.get(name).copied().unwrap_or(0) == 0);
+    }
     q.ctes.retain(|c| !ctes_to_remove.contains(&c.name));
 
     let has_union_in_from = has_union_table_ref(&q.from);
@@ -1135,7 +1152,12 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
 
     // Phase 4: PathFinding — replace InSubquery inside frontier CTE queries.
     // Frontier arms use e1 as the first edge (from build_frontier_arm).
+    // Only process frontier/hop CTEs (_fwd_hop*, _bwd_hop*) — NOT cascade
+    // or other CTEs, which use _ce as their edge alias.
     for cte in &mut q.ctes {
+        if !cte.name.starts_with("_fwd_hop") && !cte.name.starts_with("_bwd_hop") {
+            continue;
+        }
         replace_in_subquery_in_where(
             &mut cte.query.where_clause,
             &ctes_to_remove,
