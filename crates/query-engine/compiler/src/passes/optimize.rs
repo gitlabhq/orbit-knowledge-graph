@@ -1046,14 +1046,22 @@ fn rewrite_denormalized_node_filters(q: &mut Query, input: &Input) {
             .cloned()
             .collect();
 
-        if remaining_props.is_empty() {
-            // All filters denormalized — remove the CTE entirely (existing behavior).
+        if remaining_props.is_empty()
+            && !matches!(
+                input.query_type,
+                QueryType::Traversal | QueryType::Aggregation
+            )
+        {
+            // All filters denormalized AND no dedup dependency — safe to
+            // remove the CTE. Traversal/Aggregation queries always run
+            // through the dedup pass which inlines the CTE's _deleted +
+            // LIMIT 1 BY logic into the JOIN subquery. Removing the CTE
+            // there loses the _deleted filter and produces wrong counts.
             ctes_to_remove.push(cte.name.clone());
         }
-        // Partial match — keep the CTE unchanged (all original filters stay).
-        // The has()/hasAll() predicates are added to the edge as supplementary
-        // filters, not as replacements. Stripping filters from the CTE would
-        // widen it and cascade extra IDs downstream.
+        // For Traversal/Aggregation (or partial denorm): keep the CTE
+        // unchanged and inject has()/hasAll() as supplementary edge
+        // predicates for text index pruning.
         filters_per_cte.insert(cte.name.clone(), edge_filters);
     }
 

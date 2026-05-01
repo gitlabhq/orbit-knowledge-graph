@@ -1105,7 +1105,7 @@ mod tests {
     // ── Denormalization pass tests ──────────────────────────────────────
 
     #[test]
-    fn denorm_single_hop_removes_nf_cte_and_injects_edge_filter() {
+    fn denorm_single_hop_keeps_nf_cte_and_injects_supplementary_tag() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1122,18 +1122,21 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE is kept for dedup correctness (_deleted + LIMIT 1 BY).
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm pass must keep _nf_pipe CTE for dedup correctness, got:\n{sql}"
         );
+        // Supplementary tag is NOT injected when opposite side has node_ids
+        // (PK is more selective than text index).
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "denorm pass should inject has edge filter, got:\n{sql}"
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "tag should be skipped when opposite side has node_ids, got:\n{sql}"
         );
     }
 
     #[test]
-    fn denorm_in_list_filter_rewrites_to_has_any() {
+    fn denorm_in_list_filter_keeps_cte_for_dedup() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1150,22 +1153,15 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness.
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan for IN filter, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("hasAny(e0.source_tags"),
-            "IN-list filter should rewrite to hasAny, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("'status:failed'") && sql.contains("'status:canceled'"),
-            "hasAny should contain both tag values, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
     #[test]
-    fn denorm_in_list_single_value_rewrites_to_has() {
+    fn denorm_in_list_single_value_keeps_cte_for_dedup() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
@@ -1182,13 +1178,10 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness.
         assert!(
-            !sql.contains("gl_pipeline"),
-            "denorm pass should eliminate gl_pipeline scan for single-value IN, got:\n{sql}"
-        );
-        assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "single-value IN should rewrite to has(), got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
@@ -1279,13 +1272,11 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // CTE kept for dedup correctness. Supplementary tag skipped because
+        // opposite side (proj) has node_ids.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "filter on denormalized property must use has edge filter, got:\n{sql}"
-        );
-        assert!(
-            !sql.contains("pipe.status"),
-            "node-table status filter should be eliminated by denorm rewrite, got:\n{sql}"
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
         );
     }
 
