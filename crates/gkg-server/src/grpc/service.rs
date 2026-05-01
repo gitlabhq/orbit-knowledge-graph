@@ -441,19 +441,15 @@ impl KnowledgeGraphServiceImpl {
 }
 
 fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
-    let org_id = claims
-        .organization_id
-        .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
+    if claims.admin {
+        return Ok(());
+    }
 
-    let authorized_paths: Vec<String> = if claims.admin {
-        vec![format!("{org_id}/")]
-    } else {
-        claims
-            .group_traversal_ids
-            .iter()
-            .map(|tp| tp.path.clone())
-            .collect()
-    };
+    let authorized_paths: Vec<&str> = claims
+        .group_traversal_ids
+        .iter()
+        .map(|tp| tp.path.as_str())
+        .collect();
 
     let is_authorized = authorized_paths
         .iter()
@@ -772,6 +768,7 @@ mod tests {
         for (claims, path) in [
             (admin(42), "42/"),
             (admin(42), "42/100/200/"),
+            (admin(42), "99/100/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/22/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/22/44/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/33/55/"),
@@ -783,7 +780,6 @@ mod tests {
         }
 
         for (claims, path) in [
-            (admin(42), "99/100/"),
             (user(1, vec!["1/22/"]), "1/99/"),
             (user(1, vec!["1/22/33/"]), "1/22/"),
             (user(1, vec![]), "1/22/"),
@@ -794,20 +790,6 @@ mod tests {
                 "expected PermissionDenied for {path}"
             );
         }
-    }
-
-    #[test]
-    fn authorize_traversal_path_missing_org_id_returns_unauthenticated() {
-        let claims = Claims {
-            organization_id: None,
-            ..test_claims()
-        };
-        assert_eq!(
-            authorize_traversal_path(&claims, "1/22/")
-                .unwrap_err()
-                .code(),
-            tonic::Code::Unauthenticated
-        );
     }
 
     #[test]
