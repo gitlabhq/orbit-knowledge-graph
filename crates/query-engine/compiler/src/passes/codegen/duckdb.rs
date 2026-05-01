@@ -126,7 +126,12 @@ impl Context {
                 }
             })
             .collect();
-        parts.push(format!("SELECT {}", select_items.join(", ")));
+        let keyword = if q.distinct {
+            "SELECT DISTINCT"
+        } else {
+            "SELECT"
+        };
+        parts.push(format!("{keyword} {}", select_items.join(", ")));
 
         let from = self.emit_table_ref(&q.from)?;
         parts.push(format!("FROM {from}"));

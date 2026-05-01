@@ -209,6 +209,8 @@ impl Cte {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub ctes: Vec<Cte>,
+    /// When true, emit `SELECT DISTINCT` instead of `SELECT`.
+    pub distinct: bool,
     pub select: Vec<SelectExpr>,
     pub from: TableRef,
     pub where_clause: Option<Expr>,
@@ -226,6 +228,7 @@ impl Default for Query {
     fn default() -> Self {
         Self {
             ctes: vec![],
+            distinct: false,
             select: vec![],
             from: TableRef::Scan {
                 table: String::new(),

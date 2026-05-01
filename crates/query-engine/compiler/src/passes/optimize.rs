@@ -1826,6 +1826,7 @@ fn build_cascade_for_node(
     };
 
     Some(Query {
+        distinct: true,
         select: vec![SelectExpr::new(
             Expr::col(alias, select_col),
             DEFAULT_PRIMARY_KEY,
@@ -1966,6 +1967,7 @@ fn build_multihop_cascade_for_node(
         }
 
         arms.push(Query {
+            distinct: true,
             select: vec![SelectExpr::new(
                 Expr::col(&last, select_col),
                 DEFAULT_PRIMARY_KEY,
@@ -2723,6 +2725,7 @@ fn apply_traversal_hop_frontiers(q: &mut Query, input: &Input) {
             new_ctes.push(Cte::new(
                 &hop_name,
                 Query {
+                    distinct: true,
                     select: vec![SelectExpr::new(
                         Expr::col(alias, next_col),
                         DEFAULT_PRIMARY_KEY,
@@ -2995,6 +2998,7 @@ fn inject_hop_frontiers(q: &mut Query, new_ctes: &mut Vec<Cte>, options: HopFron
         new_ctes.push(Cte::new(
             &hop_name,
             Query {
+                distinct: true,
                 select: vec![SelectExpr::new(
                     Expr::col(alias, next_col),
                     DEFAULT_PRIMARY_KEY,
