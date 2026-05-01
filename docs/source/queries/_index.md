@@ -61,7 +61,7 @@ When Orbit is turned on, GitLab Duo Agentic Chat automatically uses
 the knowledge graph as a data source to improve results.
 
 Other AI tools connect to the Orbit MCP server to query the knowledge graph.
-For a list of available MCP tools, see [Orbit MCP tools](mcp_tools).
+For a list of available MCP tools, see [Orbit MCP tools](mcp_tools.md).
 
 #### Example prompts
 
