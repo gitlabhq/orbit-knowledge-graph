@@ -84,9 +84,12 @@ fn lower_skeleton(input: &mut Input) -> Result<Node> {
     }
 
     let (from, edge_aliases, mut where_parts) = build_edge_chain(input)?;
+    // Edge metadata columns only for traversal — aggregation doesn't need them.
     let mut select = Vec::new();
-    for ea in &edge_aliases {
-        select.extend(edge_select_columns(ea));
+    if input.query_type != QueryType::Aggregation {
+        for ea in &edge_aliases {
+            select.extend(edge_select_columns(ea));
+        }
     }
 
     register_node_edge_mappings(input, &edge_aliases)?;
@@ -94,7 +97,25 @@ fn lower_skeleton(input: &mut Input) -> Result<Node> {
     inject_node_constraints_on_edges(&mut where_parts, input, &edge_aliases);
 
     let (from, node_selects, node_where_parts) = hydrate_nodes(from, input, &edge_aliases)?;
-    select.extend(node_selects);
+    // For aggregation, only include group-by node columns in SELECT.
+    // Other nodes' columns would violate GROUP BY constraints.
+    if input.query_type == QueryType::Aggregation {
+        let group_by_aliases: HashSet<&str> = input
+            .aggregations
+            .iter()
+            .filter_map(|a| a.group_by.as_deref())
+            .collect();
+        for s in &node_selects {
+            // Include if the column belongs to a group-by node.
+            if let Expr::Column { table, .. } = &s.expr {
+                if group_by_aliases.contains(table.as_str()) {
+                    select.push(s.clone());
+                }
+            }
+        }
+    } else {
+        select.extend(node_selects);
+    }
     where_parts.extend(node_where_parts);
 
     let (select, group_by, order_by) = if input.query_type == QueryType::Aggregation {
@@ -657,7 +678,7 @@ fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
             vec![col, Expr::param(ChType::String, str_val())],
         ),
         Some(FilterOp::AllTokens) => Expr::func(
-            "hasTokens",
+            "hasAllTokens",
             vec![col, Expr::param(ChType::String, str_val())],
         ),
         Some(FilterOp::AnyTokens) => Expr::func(

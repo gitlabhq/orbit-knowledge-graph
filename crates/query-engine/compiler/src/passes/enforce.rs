@@ -253,22 +253,26 @@ fn enforce_return_columns(
 
             if needs_separate_pk {
                 // JOIN node table for the auth column (e.g. merge_request_id).
+                // Skip if the alias already exists in FROM (v2 lowerer
+                // hydrates nodes inline with dedup subqueries).
                 let table = node.table.as_ref().ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
                         node.id, node.redaction_id_column
                     ))
                 })?;
-                let join_cond = Expr::eq(
-                    Expr::col(edge_alias, edge_col.as_str()),
-                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                );
-                q.from = TableRef::join(
-                    JoinType::Inner,
-                    std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
-                    TableRef::scan(table, &node.id),
-                    join_cond,
-                );
+                if !alias_exists_in_from(&q.from, &node.id) {
+                    let join_cond = Expr::eq(
+                        Expr::col(edge_alias, edge_col.as_str()),
+                        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    );
+                    q.from = TableRef::join(
+                        JoinType::Inner,
+                        std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
+                        TableRef::scan(table, &node.id),
+                        join_cond,
+                    );
+                }
 
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
                 if !has_pk {
@@ -277,22 +281,26 @@ fn enforce_return_columns(
                         alias: Some(pk_col),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, edge_id_expr.clone());
 
                 let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
                 if !has_id {
                     q.select.push(SelectExpr {
-                        expr: Expr::col(&node.id, &node.redaction_id_column),
+                        expr: id_expr.clone(),
                         alias: Some(id_col.clone()),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, id_expr);
             } else {
                 let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
                 if !has_id {
                     q.select.push(SelectExpr {
-                        expr: edge_id_expr,
+                        expr: edge_id_expr.clone(),
                         alias: Some(id_col.clone()),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, edge_id_expr);
             }
 
             let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
@@ -373,6 +381,17 @@ fn enforce_return_columns(
     }
 
     Ok(())
+}
+
+fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
+    match from {
+        TableRef::Scan { alias, .. }
+        | TableRef::Subquery { alias, .. }
+        | TableRef::Union { alias, .. } => alias == target,
+        TableRef::Join { left, right, .. } => {
+            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
+        }
+    }
 }
 
 #[cfg(test)]
