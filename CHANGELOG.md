@@ -1,3 +1,16 @@
+## [0.41.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.0...v0.41.1) (2026-05-01)
+
+### Fixes
+
+* **auth:** allow cross-org traversal paths in security context ([d0a1e59](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/d0a1e59016a2956666f102ffec6125c02dc7564e)) by Jean-Gabriel Doyon
+* **indexer:** add stream max age to nats for disaster recovery ([0812b49](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0812b496f3399fd881ac04014a0f1763d2e49768)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **ci:** split compiler integration tests out of unit-test job ([f32ea71](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f32ea71936b6a7628e9bc136dc1929099bb895eb)) by Michael Usachenko
+* **compiler:** add LEFT SEMI JOIN support and move perf options to derived schema ([39a83e0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/39a83e05411de3627f2b53029e35cf87656d4282)) by Michael Usachenko
+* **compiler:** extend edge tag filtering to cascade and hop frontier CTEs ([022879b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/022879bead2fbf82edba7ec77c23f5283b3de6ff)) by Michael Usachenko
+
 ## [0.41.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.40.0...v0.41.0) (2026-04-30)
 
 ### Features
