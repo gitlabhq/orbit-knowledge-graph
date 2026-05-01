@@ -44,7 +44,7 @@ Next, make sure Orbit has correctly populated the knowledge graph:
 1. In the **Explore** tab, make sure your groups appear in the knowledge graph.
 1. Optional. Double-click a node to view its details.
 
-You can also check the **Orbit configuration** page to understand the current indexing status.
+You can also check the **Orbit** > **Settings** page to understand the current indexing status.
 Code indexing may take a few minutes for large repositories.
 
 If no data appears after five minutes, see [troubleshooting Orbit](../orbit_troubleshooting/).
