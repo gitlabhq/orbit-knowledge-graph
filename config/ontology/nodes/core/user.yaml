@@ -27,7 +27,7 @@ properties:
   username:
     type: string
     source: username
-    nullable: true
+    nullable: false
     description: "The user's handle (unique in GitLab)."
 
   email:
@@ -41,20 +41,20 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Display name."
 
   first_name:
     type: string
     source: first_name
-    nullable: true
+    nullable: false
     admin_only: true
     description: "First name, if provided. Not exposed on any public GitLab user surface; admins only."
 
   last_name:
     type: string
     source: last_name
-    nullable: true
+    nullable: false
     admin_only: true
     description: "Last name, if provided. Not exposed on any public GitLab user surface; admins only."
 
@@ -74,7 +74,7 @@ properties:
   state:
     type: enum
     source: state
-    nullable: true
+    nullable: false
     description: "Account state."
     enum_type: string
     values:
@@ -94,14 +94,14 @@ properties:
   public_email:
     type: string
     source: public_email
-    nullable: true
+    nullable: false
     like_allowed: false
     description: "Publicly visible email, if set."
 
   preferred_language:
     type: string
     source: preferred_language
-    nullable: true
+    nullable: false
     admin_only: true
     description: "User's preferred UI language. Self-only on GitLab REST; admins only here until per-cell authorization lands."
 
@@ -178,9 +178,9 @@ storage:
     - {name: first_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: last_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: avatar_url, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: public_email, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: preferred_language, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: avatar_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: public_email, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: preferred_language, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: last_activity_on, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: private_profile, type: "Bool", default: "false"}
     - {name: is_admin, type: "Bool", default: "false"}

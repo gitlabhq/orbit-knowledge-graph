@@ -82,7 +82,7 @@ properties:
   on_stop:
     type: string
     source: on_stop
-    nullable: true
+    nullable: false
     description: "Name of the job that stops this deployment, if defined."
 
   archived:
@@ -149,7 +149,7 @@ storage:
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: deployable_type, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: deployable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: on_stop, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: on_stop, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: archived, type: "Bool", default: "false"}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

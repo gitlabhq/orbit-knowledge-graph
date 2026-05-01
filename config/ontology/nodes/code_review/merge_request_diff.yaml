@@ -32,25 +32,25 @@ properties:
   state:
     type: string
     source: state
-    nullable: true
+    nullable: false
     description: "State of the diff (empty, without_files, collected, overflow, etc.)."
 
   base_commit_sha:
     type: string
     source: base_commit_sha
-    nullable: true
+    nullable: false
     description: "SHA of the base commit (common ancestor)."
 
   head_commit_sha:
     type: string
     source: head_commit_sha
-    nullable: true
+    nullable: false
     description: "SHA of the head commit (latest on source branch)."
 
   start_commit_sha:
     type: string
     source: start_commit_sha
-    nullable: true
+    nullable: false
     description: "SHA of the start commit (target branch tip at diff creation)."
 
   commits_count:
@@ -83,7 +83,7 @@ properties:
   real_size:
     type: string
     source: real_size
-    nullable: true
+    nullable: false
     description: "Actual (non-truncated) diff size reported by Gitaly, as a stringified integer."
 
   stored_externally:
@@ -142,15 +142,15 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: merge_request_id, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: state, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: base_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: head_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: start_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: state, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: base_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: head_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: start_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: files_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: diff_type, type: "LowCardinality(String)", default: "'regular'", codec: ["LZ4"]}
-    - {name: real_size, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: real_size, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: stored_externally, type: "Bool", default: "false"}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

@@ -38,13 +38,13 @@ properties:
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Description of the milestone."
 
   state:
     type: string
     source: state
-    nullable: true
+    nullable: false
     description: "Current state of the milestone (active, closed)."
 
   due_date:
@@ -100,8 +100,8 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: state, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: state, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

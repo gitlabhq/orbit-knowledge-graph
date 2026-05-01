@@ -45,7 +45,7 @@ properties:
   timeout_source:
     type: enum
     source: timeout_source
-    nullable: true
+    nullable: false
     description: "Origin of the effective timeout: project, runner, or job."
     values:
       1: unknown_timeout_source
@@ -68,13 +68,13 @@ properties:
   expanded_environment_name:
     type: string
     source: expanded_environment_name
-    nullable: true
+    nullable: false
     description: "Resolved environment name after CI variable interpolation."
 
   environment_auto_stop_in:
     type: string
     source: environment_auto_stop_in
-    nullable: true
+    nullable: false
     description: "Duration after which the deployed environment auto-stops."
 
   debug_trace_enabled:
@@ -110,11 +110,11 @@ storage:
     - {name: build_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: interruptible, type: "Nullable(Bool)"}
     - {name: timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: timeout_source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: has_exposed_artifacts, type: "Nullable(Bool)"}
-    - {name: expanded_environment_name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: environment_auto_stop_in, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: expanded_environment_name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: environment_auto_stop_in, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: debug_trace_enabled, type: "Bool", default: "false"}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

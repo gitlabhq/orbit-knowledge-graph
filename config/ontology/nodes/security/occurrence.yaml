@@ -39,25 +39,25 @@ properties:
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Detailed description of the occurrence."
 
   solution:
     type: string
     source: solution
-    nullable: true
+    nullable: false
     description: "Recommended solution or remediation."
 
   cve:
     type: string
     source: cve
-    nullable: true
+    nullable: false
     description: "CVE identifier if applicable."
 
   location:
     type: string
     source: location
-    nullable: true
+    nullable: false
     description: "Location where the vulnerability was found."
 
   location_fingerprint:
@@ -163,10 +163,10 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: solution, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: cve, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: location, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: solution, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: cve, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: location, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: location_fingerprint, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: report_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

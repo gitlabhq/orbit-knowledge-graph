@@ -50,7 +50,7 @@ properties:
   new_path:
     type: string
     source: new_path
-    nullable: true
+    nullable: false
     description: "Path to the file after the change."
 
   old_path:
@@ -165,7 +165,7 @@ storage:
     - {name: merge_request_diff_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: too_large, type: "Bool", default: "false"}
-    - {name: new_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: new_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: old_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: new_file, type: "Bool", default: "false"}
     - {name: renamed_file, type: "Bool", default: "false"}

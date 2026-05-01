@@ -32,13 +32,13 @@ properties:
   title:
     type: string
     source: title
-    nullable: true
+    nullable: false
     description: "Title of the work item."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Description body (markdown)."
 
   state:
@@ -152,7 +152,7 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: work_item_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: confidential, type: "Bool", default: "false"}

@@ -33,19 +33,19 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Name of the finding."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Detailed description of the finding."
 
   solution:
     type: string
     source: solution
-    nullable: true
+    nullable: false
     description: "Recommended solution or remediation for the finding."
 
   severity:
@@ -70,7 +70,7 @@ properties:
   overridden_uuid:
     type: uuid
     source: overridden_uuid
-    nullable: true
+    nullable: false
     description: "UUID of the finding this one overrides."
 
   traversal_path:
@@ -114,12 +114,12 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: solution, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: solution, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: severity, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: deduplicated, type: "Bool", default: "false"}
-    - {name: overridden_uuid, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: overridden_uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_deduplicated, column: deduplicated, type: "minmax", granularity: 1}

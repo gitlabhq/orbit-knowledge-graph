@@ -37,13 +37,13 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Human-readable runner name."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Maintainer-provided description."
 
   active:
@@ -110,8 +110,8 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: active, type: "Bool", default: "true"}
     - {name: locked, type: "Bool", default: "false"}
     - {name: run_untagged, type: "Bool", default: "true"}

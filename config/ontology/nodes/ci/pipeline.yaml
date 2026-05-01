@@ -32,13 +32,13 @@ properties:
   sha:
     type: string
     source: sha
-    nullable: true
+    nullable: false
     description: "Git commit SHA that the pipeline runs against."
 
   ref:
     type: string
     source: ref
-    nullable: true
+    nullable: false
     description: "Branch or tag name the pipeline runs for."
 
   status:
@@ -103,7 +103,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: true
+    nullable: false
     description: "Reason the pipeline failed, if applicable."
     values:
       0: unknown_failure
@@ -152,13 +152,13 @@ properties:
   before_sha:
     type: string
     source: before_sha
-    nullable: true
+    nullable: false
     description: "Previous commit SHA before the push that produced this pipeline."
 
   yaml_errors:
     type: string
     source: yaml_errors
-    nullable: true
+    nullable: false
     description: "Errors encountered parsing the pipeline configuration, if any."
 
   protected:
@@ -211,20 +211,20 @@ storage:
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: ref, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
     - {name: duration, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: committed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: before_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: yaml_errors, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: before_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: yaml_errors, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: protected, type: "Nullable(Bool)"}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}

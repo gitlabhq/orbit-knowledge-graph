@@ -26,7 +26,7 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Name of the stage (e.g., build, test, deploy)."
 
   status:
@@ -101,7 +101,7 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: position, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
