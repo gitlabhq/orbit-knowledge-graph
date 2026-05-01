@@ -1,9 +1,9 @@
 use std::sync::Arc;
 
 use crate::auth::Claims;
-use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
+use gkg_billing::{BillingInputs, BillingObserver, BillingTracker};
 use gkg_server_config::ProfilingConfig;
 use nats_client::NatsClient;
 use ontology::Ontology;
@@ -73,7 +73,7 @@ impl QueryPipelineService {
             Box::new(OTelPipelineObserver::start()),
             Box::new(BillingObserver::new(
                 self.billing_tracker.clone(),
-                claims.clone(),
+                BillingInputs::from(&claims),
             )),
         ]);
 

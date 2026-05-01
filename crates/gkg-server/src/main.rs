@@ -6,8 +6,8 @@ use std::time::Duration;
 
 use clap::Parser;
 use clickhouse_client::ClickHouseConfigurationExt;
+use gkg_billing::SnowplowBillingTracker;
 use gkg_server::auth::JwtValidator;
-use gkg_server::billing::SnowplowBillingTracker;
 use gkg_server::cli::{Args, Mode};
 use gkg_server::cluster_health::ClusterHealthChecker;
 use gkg_server::content;

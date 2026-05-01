@@ -12,7 +12,6 @@ use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
 use crate::auth::{Claims, JwtValidator, build_security_context};
-use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
 use crate::graph_status::GraphStatusService;
 use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_error};
@@ -25,6 +24,7 @@ use crate::proto::{
     ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
+use gkg_billing::BillingTracker;
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {

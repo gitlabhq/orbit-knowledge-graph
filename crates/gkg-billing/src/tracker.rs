@@ -3,7 +3,7 @@ use std::sync::Arc;
 use gkg_server_config::BillingConfig;
 use labkit_events::BillingEvent;
 
-use super::constants::APP_ID;
+use crate::constants::APP_ID;
 
 pub trait BillingTracker: Send + Sync {
     fn track(&self, event: BillingEvent);

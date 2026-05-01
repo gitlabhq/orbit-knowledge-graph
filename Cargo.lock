@@ -5142,6 +5142,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "gkg-billing"
+version = "0.1.0"
+dependencies = [
+ "gkg-server-config",
+ "labkit",
+ "labkit-events",
+ "query-engine",
+ "serde_json",
+ "tracing",
+]
+
+[[package]]
 name = "gkg-fuzz"
 version = "0.1.0"
 dependencies = [
@@ -5174,6 +5186,7 @@ dependencies = [
  "clickhouse-client",
  "futures",
  "gitlab-client",
+ "gkg-billing",
  "gkg-observability",
  "gkg-server-config",
  "gkg-utils",
