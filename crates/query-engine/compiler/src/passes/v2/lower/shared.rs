@@ -284,13 +284,7 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
 
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
-    // For traversal queries, nodes with requested columns need a hydration
-    // JOIN so their properties appear in the main result. Without this, the
-    // formatter only sees the node's ID from the edge and properties are empty.
-    let needs_columns = input.query_type != QueryType::Aggregation
-        && matches!(&node_plan.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty());
-
-    if is_group_by || is_agg_property_target || is_order_by_target || needs_columns {
+    if is_group_by || is_agg_property_target || is_order_by_target {
         return HydrationStrategy::Join;
     }
 
@@ -610,9 +604,14 @@ fn emit_fk_direct(skeleton: &Skeleton, fk: &HopFk, input: &mut Input) -> Result<
         }
     }
 
-    // If the target node needs hydration (group-by, columns, etc.), join it.
+    // FK paths must hydrate target nodes inline — there's no edge table for
+    // the HydrationPlan to reference. Force Join when the target has requested
+    // columns, even if determine_hydration chose Skip.
+    let target_needs_join = target_np.hydration == HydrationStrategy::Join
+        || (input.query_type != QueryType::Aggregation
+            && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
     let mut ctes = Vec::new();
-    if target_np.hydration == HydrationStrategy::Join {
+    if target_needs_join {
         let (new_from, ns, nw) = emit_node_join(from, target_np, fk_alias, &fk.fk_column, input)?;
         selects.extend(ns);
         where_parts.extend(nw);
@@ -827,24 +826,25 @@ fn emit_fk_star(
             ));
         }
 
-        // Target hydration.
-        match target_np.hydration {
-            HydrationStrategy::Join => {
-                let (new_from, ns, nw) =
-                    emit_node_join(from, target_np, center_alias, &fk.fk_column, input)?;
-                from = new_from;
-                selects.extend(ns);
-                where_parts.extend(nw);
-            }
-            HydrationStrategy::FilterOnly => {
-                where_parts.extend(emit_filter_subquery(
-                    target_np,
-                    center_alias,
-                    &fk.fk_column,
-                    &mut ctes,
-                )?);
-            }
-            HydrationStrategy::Skip => {}
+        // FK paths must hydrate target nodes inline — there's no edge table
+        // for the HydrationPlan to reference. Force Join when the target has
+        // requested columns, even if determine_hydration chose Skip.
+        let target_needs_join = target_np.hydration == HydrationStrategy::Join
+            || (input.query_type != QueryType::Aggregation
+                && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
+        if target_needs_join {
+            let (new_from, ns, nw) =
+                emit_node_join(from, target_np, center_alias, &fk.fk_column, input)?;
+            from = new_from;
+            selects.extend(ns);
+            where_parts.extend(nw);
+        } else if target_np.hydration == HydrationStrategy::FilterOnly {
+            where_parts.extend(emit_filter_subquery(
+                target_np,
+                center_alias,
+                &fk.fk_column,
+                &mut ctes,
+            )?);
         }
     }
 
