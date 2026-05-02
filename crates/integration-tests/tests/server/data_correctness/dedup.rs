@@ -96,10 +96,10 @@ pub(super) async fn search_excludes_deleted_rows(ctx: &TestContext) {
 /// Duplicate MR rows (same id) in one INSERT. Aggregation counts it once.
 pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) {
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9100, 99, 'Dedup MR',         'merged', '1/100/1000/', '2024-01-01 00:00:00', false),
-         (9100, 99, 'Dedup MR Updated', 'merged', '1/100/1000/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9100, 99, 'Dedup MR',         'merged', '1/100/1000/', 1000, '2024-01-01 00:00:00', false),
+          (9100, 99, 'Dedup MR Updated', 'merged', '1/100/1000/', 1000, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
@@ -216,11 +216,11 @@ pub(super) async fn aggregation_filter_excludes_stale_mutable_match(ctx: &TestCo
     // MR 9200: v1 merged, v2 opened -- latest is 'opened', should NOT match state='merged'
     // MR 9201: single version, state='merged' -- should match
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9200, 200, 'Flipped MR', 'merged', '1/100/1002/', '2024-01-01 00:00:00', false),
-         (9200, 200, 'Flipped MR', 'opened', '1/100/1002/', '2024-06-01 00:00:00', false),
-         (9201, 201, 'Stable MR',  'merged', '1/100/1002/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9200, 200, 'Flipped MR', 'merged', '1/100/1002/', 1002, '2024-01-01 00:00:00', false),
+          (9200, 200, 'Flipped MR', 'opened', '1/100/1002/', 1002, '2024-06-01 00:00:00', false),
+          (9201, 201, 'Stable MR',  'merged', '1/100/1002/', 1002, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
@@ -310,11 +310,11 @@ pub(super) async fn traversal_filter_excludes_stale_version(ctx: &TestContext) {
     // MR 9400: v1 merged, v2 opened -- latest is 'opened'
     // MR 9401: single version, state='merged' -- should match
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9400, 400, 'Stale Traversal MR', 'merged', '1/100/1003/', '2024-01-01 00:00:00', false),
-         (9400, 400, 'Stale Traversal MR', 'opened', '1/100/1003/', '2024-06-01 00:00:00', false),
-         (9401, 401, 'Good Traversal MR',  'merged', '1/100/1003/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9400, 400, 'Stale Traversal MR', 'merged', '1/100/1003/', 1003, '2024-01-01 00:00:00', false),
+          (9400, 400, 'Stale Traversal MR', 'opened', '1/100/1003/', 1003, '2024-06-01 00:00:00', false),
+          (9401, 401, 'Good Traversal MR',  'merged', '1/100/1003/', 1003, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
@@ -365,11 +365,11 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     // MR 9500: v1 alive, v2 deleted
     // MR 9501: single version, alive
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', '2024-01-01 00:00:00', false),
-         (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', '2024-06-01 00:00:00', true),
-         (9501, 501, 'Alive MR',   'merged', '1/100/1004/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', 1004, '2024-01-01 00:00:00', false),
+          (9500, 500, 'Deleted MR', 'merged', '1/100/1004/', 1004, '2024-06-01 00:00:00', true),
+          (9501, 501, 'Alive MR',   'merged', '1/100/1004/', 1004, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
@@ -543,10 +543,10 @@ pub(super) async fn traversal_excludes_deleted_edge(ctx: &TestContext) {
     // MR 9700: alive, with a deleted edge to project 1000
     // MR 9701: alive, with a non-deleted edge to project 1000
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9700, 700, 'Alive MR deleted edge', 'merged', '1/100/1000/', '2024-06-01 00:00:00', false),
-         (9701, 701, 'Alive MR good edge',    'merged', '1/100/1000/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9700, 700, 'Alive MR deleted edge', 'merged', '1/100/1000/', 0, '2024-06-01 00:00:00', false),
+          (9701, 701, 'Alive MR good edge',    'merged', '1/100/1000/', 1000, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
@@ -627,11 +627,11 @@ pub(super) async fn search_three_versions_returns_latest(ctx: &TestContext) {
 /// MR 9901 is alive and serves as the control (should be counted).
 pub(super) async fn aggregation_excludes_deleted_from_count(ctx: &TestContext) {
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9900, 900, 'Counted then deleted', 'merged', '1/100/1002/', '2024-01-01 00:00:00', false),
-         (9900, 900, 'Counted then deleted', 'merged', '1/100/1002/', '2024-06-01 00:00:00', true),
-         (9901, 901, 'Alive MR',             'merged', '1/100/1002/', '2024-06-01 00:00:00', false)",
-        t("gl_merge_request")
+         "INSERT INTO {} (id, iid, title, state, traversal_path, project_id, _version, _deleted) VALUES
+          (9900, 900, 'Counted then deleted', 'merged', '1/100/1002/', 1002, '2024-01-01 00:00:00', false),
+          (9900, 900, 'Counted then deleted', 'merged', '1/100/1002/', 1002, '2024-06-01 00:00:00', true),
+          (9901, 901, 'Alive MR',             'merged', '1/100/1002/', 1002, '2024-06-01 00:00:00', false)",
+         t("gl_merge_request")
     ))
     .await;
     ctx.execute(&format!(
