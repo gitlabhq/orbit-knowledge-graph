@@ -9,7 +9,8 @@ use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, GraphConverter, NullSink, Pipeline, PipelineConfig, PipelineContext,
+    BatchTx, GraphConverter, GraphStatsCounters, NullSink, Pipeline, PipelineConfig,
+    PipelineContext,
 };
 
 use super::assertions::{Severity, TestSuite};
@@ -205,12 +206,19 @@ pub async fn run_yaml_suite(yaml: &str) {
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();
+            let dirs = AtomicUsize::new(0);
+            let files_count = AtomicUsize::new(0);
             let defs = AtomicUsize::new(0);
             let imps = AtomicUsize::new(0);
             let edgs = AtomicUsize::new(0);
             {
                 let errors = std::sync::Mutex::new(Vec::new());
-                let btx = BatchTx::new(&tx, &converter, &errors, &defs, &imps, &edgs);
+                let btx = BatchTx::new(
+                    &tx,
+                    &converter,
+                    &errors,
+                    GraphStatsCounters::new(&dirs, &files_count, &defs, &imps, &edgs),
+                );
                 dispatch_by_tag(tag, &files, &ctx, &btx)
                     .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));

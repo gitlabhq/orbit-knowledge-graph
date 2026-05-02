@@ -3,7 +3,7 @@
 //!
 //! Two use sites:
 //!
-//! - [`parsable_language`] / [`is_parsable`] — used by `walk_and_group`
+//! - [`parsable_language`] / [`is_parsable`] — used by parser discovery
 //!   after extraction to decide which language to dispatch a file to.
 //! - [`is_excluded_from_indexing`] — used by the archive extractor
 //!   before bytes touch disk. Exclusion-based by design: we drop only

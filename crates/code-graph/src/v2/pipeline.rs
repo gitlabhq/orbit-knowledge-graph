@@ -1,11 +1,11 @@
-use crate::v2::config::{Language, parsable_language};
+use crate::v2::config::{Language, detect_language_from_extension, parsable_language};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
 use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::Path;
@@ -173,13 +173,61 @@ impl LanguageContext {
 /// Wraps a channel sender, converter reference, and stat counters.
 /// Language pipelines call `send_graph()` for graph-based output
 /// or `send_raw()` for pre-built Arrow batches.
+#[derive(Clone, Copy)]
+pub struct GraphStatsCounters<'a> {
+    directories: &'a AtomicUsize,
+    files: &'a AtomicUsize,
+    definitions: &'a AtomicUsize,
+    imports: &'a AtomicUsize,
+    edges: &'a AtomicUsize,
+}
+
+impl<'a> GraphStatsCounters<'a> {
+    pub fn new(
+        directories: &'a AtomicUsize,
+        files: &'a AtomicUsize,
+        definitions: &'a AtomicUsize,
+        imports: &'a AtomicUsize,
+        edges: &'a AtomicUsize,
+    ) -> Self {
+        Self {
+            directories,
+            files,
+            definitions,
+            imports,
+            edges,
+        }
+    }
+
+    fn record_graph(self, graph: &CodeGraph) {
+        if graph.output.includes_structure() {
+            self.directories
+                .fetch_add(graph.directories().count(), Ordering::Relaxed);
+            self.files
+                .fetch_add(graph.files().count(), Ordering::Relaxed);
+        }
+        self.definitions
+            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
+        self.imports
+            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
+        let emitted_edges = if graph.output.includes_structure() {
+            graph.edge_count()
+        } else {
+            graph
+                .graph
+                .edge_indices()
+                .filter(|&idx| graph.graph[idx].relationship.edge_kind.as_ref() != "CONTAINS")
+                .count()
+        };
+        self.edges.fetch_add(emitted_edges, Ordering::Relaxed);
+    }
+}
+
 pub struct BatchTx<'a> {
     tx: &'a Sender<(String, RecordBatch)>,
     converter: &'a dyn GraphConverter,
     errors: &'a Mutex<Vec<PipelineError>>,
-    definitions: &'a AtomicUsize,
-    imports: &'a AtomicUsize,
-    edges: &'a AtomicUsize,
+    stats: GraphStatsCounters<'a>,
 }
 
 impl<'a> BatchTx<'a> {
@@ -187,17 +235,13 @@ impl<'a> BatchTx<'a> {
         tx: &'a Sender<(String, RecordBatch)>,
         converter: &'a dyn GraphConverter,
         errors: &'a Mutex<Vec<PipelineError>>,
-        definitions: &'a AtomicUsize,
-        imports: &'a AtomicUsize,
-        edges: &'a AtomicUsize,
+        stats: GraphStatsCounters<'a>,
     ) -> Self {
         Self {
             tx,
             converter,
             errors,
-            definitions,
-            imports,
-            edges,
+            stats,
         }
     }
 }
@@ -206,11 +250,7 @@ impl BatchTx<'_> {
     /// Count graph stats, convert to Arrow batches, and send to the
     /// writer thread. Takes ownership — graph is dropped after conversion.
     pub fn send_graph(&self, graph: CodeGraph) {
-        self.definitions
-            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
-        self.imports
-            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
-        self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
+        self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
             Err(error) => {
@@ -252,6 +292,40 @@ impl BatchTx<'_> {
     }
 }
 
+fn write_graph_direct(
+    graph: CodeGraph,
+    converter: &dyn GraphConverter,
+    sink: &dyn BatchSink,
+    errors: &Mutex<Vec<PipelineError>>,
+    stats: GraphStatsCounters<'_>,
+) {
+    stats.record_graph(&graph);
+    let batches = match converter.convert(graph) {
+        Ok(batches) => batches,
+        Err(error) => {
+            errors.lock().unwrap().push(
+                crate::v2::error::CodeGraphError::ArrowConversion {
+                    message: error.to_string(),
+                }
+                .into(),
+            );
+            return;
+        }
+    };
+    for (table, batch) in batches {
+        if let Err(error) = sink.write_batch(&table, &batch) {
+            errors.lock().unwrap().push(
+                crate::v2::error::CodeGraphError::SinkWrite {
+                    table,
+                    message: error.to_string(),
+                }
+                .into(),
+            );
+            return;
+        }
+    }
+}
+
 /// Trait for language-specific pipeline execution.
 ///
 /// All pipelines stream their output through a `BatchTx` handle.
@@ -283,6 +357,13 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
+    /// Optional complete repository file inventory. Server indexing fills this
+    /// from archive metadata before extraction filters skip bytes.
+    pub file_inventory: Option<Arc<[FileInventoryEntry]>>,
+    /// Internal switch set by `Pipeline::run_with_tracer` so parser graphs only
+    /// emit parsed nodes and relationships while a separate structural graph
+    /// owns repository file/directory rows.
+    pub emit_file_inventory_graph: bool,
 }
 
 impl Default for PipelineConfig {
@@ -295,8 +376,16 @@ impl Default for PipelineConfig {
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
+            file_inventory: None,
+            emit_file_inventory_graph: false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileInventoryEntry {
+    pub path: String,
+    pub size: u64,
 }
 
 pub struct PipelineResult {
@@ -311,6 +400,8 @@ pub struct PipelineResult {
 pub struct PipelineStats {
     pub files_discovered: usize,
     pub bytes_discovered: u64,
+    pub directories_indexed: usize,
+    pub files_indexed: usize,
     pub files_parsed: usize,
     pub files_skipped: usize,
     pub definitions_count: usize,
@@ -390,33 +481,28 @@ impl Pipeline {
     /// Blocks until all languages finish processing and writing.
     pub fn run_with_tracer(
         root: &Path,
-        config: PipelineConfig,
+        mut config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
+        config.emit_file_inventory_graph = true;
 
         // 1. Walk filesystem, group files by language
         let pb_discover = spinner("Discovering files...");
-        let files_by_language = Self::walk_and_group(root, &config);
-        let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
-        let total_bytes: u64 = files_by_language
-            .values()
-            .flatten()
-            .filter_map(|path| {
-                root.join(path)
-                    .metadata()
-                    .ok()
-                    .map(|metadata| metadata.len())
-            })
-            .sum();
+        let discovery = Self::discover_files(root, &config);
+        let files_by_language = discovery.files_by_language;
+        let file_inventory = discovery.file_inventory;
+        let total_files = file_inventory.len();
+        let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
+        let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_language
             .iter()
             .map(|(l, f)| format!("{l}: {}", f.len()))
             .collect();
         pb_discover.finish_with_message(format!(
-            "Found {total_files} files ({})",
+            "Found {total_files} files, {parsable_files} parseable ({})",
             lang_summary.join(", ")
         ));
 
@@ -436,12 +522,31 @@ impl Pipeline {
             0 => 2,
             n => n,
         };
+        let directories_count = AtomicUsize::new(0);
+        let files_count = AtomicUsize::new(0);
         let files_parsed = AtomicUsize::new(0);
         let files_skipped = AtomicUsize::new(0);
         let definitions_count = AtomicUsize::new(0);
         let imports_count = AtomicUsize::new(0);
         let edges_count = AtomicUsize::new(0);
         let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
+
+        if !file_inventory.is_empty() {
+            let structural_graph = Self::build_file_inventory_graph(root, &file_inventory);
+            write_graph_direct(
+                structural_graph,
+                converter.as_ref(),
+                sink.as_ref(),
+                &all_errors,
+                GraphStatsCounters::new(
+                    &directories_count,
+                    &files_count,
+                    &definitions_count,
+                    &imports_count,
+                    &edges_count,
+                ),
+            );
+        }
 
         // Bounded channel as a semaphore: N permits = N concurrent languages
         let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
@@ -460,6 +565,8 @@ impl Pipeline {
                 let sem_tx = &sem_tx;
                 let files_parsed = &files_parsed;
                 let files_skipped = &files_skipped;
+                let directories_count = &directories_count;
+                let files_count = &files_count;
                 let definitions_count = &definitions_count;
                 let imports_count = &imports_count;
                 let edges_count = &edges_count;
@@ -519,9 +626,13 @@ impl Pipeline {
                         tx: &tx,
                         converter: converter.as_ref(),
                         errors: all_errors,
-                        definitions: definitions_count,
-                        imports: imports_count,
-                        edges: edges_count,
+                        stats: GraphStatsCounters::new(
+                            directories_count,
+                            files_count,
+                            definitions_count,
+                            imports_count,
+                            edges_count,
+                        ),
                     };
 
                     tracing::info!(
@@ -617,6 +728,8 @@ impl Pipeline {
             stats: PipelineStats {
                 files_discovered: total_files,
                 bytes_discovered: total_bytes,
+                directories_indexed: directories_count.into_inner(),
+                files_indexed: files_count.into_inner(),
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
                 definitions_count: definitions_count.into_inner(),
@@ -631,9 +744,16 @@ impl Pipeline {
         }
     }
 
+    #[cfg(test)]
     fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
+        Self::discover_files(root, config).files_by_language
+    }
+
+    fn discover_files(root: &Path, config: &PipelineConfig) -> FileDiscovery {
         let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+        let mut discovered_files = Vec::new();
         let mut accepted_files = 0usize;
+        let collect_inventory_from_walk = config.file_inventory.is_none();
 
         let walker = WalkBuilder::new(root)
             .git_ignore(config.respect_gitignore)
@@ -652,20 +772,29 @@ impl Pipeline {
             }
 
             let path = entry.path();
+            let rel_path = path.strip_prefix(root).unwrap_or(path);
+            let metadata = path.metadata().ok();
 
-            if let Ok(metadata) = path.metadata()
-                && metadata.len() > config.max_file_size
+            if collect_inventory_from_walk {
+                discovered_files.push(FileInventoryEntry {
+                    path: rel_path.to_string_lossy().to_string(),
+                    size: metadata.as_ref().map_or(0, |metadata| metadata.len()),
+                });
+            }
+
+            if metadata
+                .as_ref()
+                .is_some_and(|metadata| metadata.len() > config.max_file_size)
             {
                 continue;
             }
 
-            let rel_path = path.strip_prefix(root).unwrap_or(path);
             let Some(lang) = parsable_language(rel_path) else {
                 continue;
             };
 
             if config.max_files > 0 && accepted_files >= config.max_files {
-                break;
+                continue;
             }
 
             // Verify file is readable, but don't load yet.
@@ -680,8 +809,43 @@ impl Pipeline {
                 .push(rel_path.to_string_lossy().to_string());
         }
 
-        groups
+        let file_inventory = config
+            .file_inventory
+            .as_ref()
+            .map(|entries| entries.iter().cloned().collect())
+            .unwrap_or(discovered_files);
+
+        FileDiscovery {
+            files_by_language: groups,
+            file_inventory,
+        }
     }
+
+    fn build_file_inventory_graph(root: &Path, inventory: &[FileInventoryEntry]) -> CodeGraph {
+        let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
+        let mut seen = FxHashSet::default();
+        let mut files = inventory.to_vec();
+        files.sort_by(|a, b| a.path.cmp(&b.path));
+
+        for entry in files {
+            if !seen.insert(entry.path.clone()) {
+                continue;
+            }
+            let language = Path::new(&entry.path)
+                .extension()
+                .and_then(|ext| ext.to_str())
+                .and_then(detect_language_from_extension);
+            graph.add_unparsed_file(&entry.path, language, entry.size);
+        }
+
+        graph.drop_construction_indexes();
+        graph
+    }
+}
+
+struct FileDiscovery {
+    files_by_language: FxHashMap<Language, Vec<FileInput>>,
+    file_inventory: Vec<FileInventoryEntry>,
 }
 
 /// Generic pipeline parameterized by language spec `P` and rules `R`.
@@ -841,6 +1005,9 @@ where
 
         let mut graph =
             CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
+        if ctx.config.emit_file_inventory_graph {
+            graph.mark_parsed_only();
+        }
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
         let mut files_with_refs: Vec<Option<FileWithRefs>> =
@@ -1153,11 +1320,18 @@ mod tests {
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();
+        let dirs = AtomicUsize::new(0);
+        let files = AtomicUsize::new(0);
         let defs = AtomicUsize::new(0);
         let imps = AtomicUsize::new(0);
         let edgs = AtomicUsize::new(0);
         let errors = Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, capture.as_ref(), &errors, &defs, &imps, &edgs);
+        let btx = BatchTx::new(
+            &tx,
+            capture.as_ref(),
+            &errors,
+            GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
+        );
         crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
@@ -1183,6 +1357,65 @@ mod tests {
         let accepted = groups.values().map(Vec::len).sum::<usize>();
 
         assert_eq!(accepted, 2);
+    }
+
+    #[test]
+    fn file_inventory_emits_unparsed_file_nodes_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.py"), "def hello(): pass\n").unwrap();
+
+        let inventory = vec![
+            FileInventoryEntry {
+                path: "src/main.py".into(),
+                size: 17,
+            },
+            FileInventoryEntry {
+                path: "README.md".into(),
+                size: 12,
+            },
+            FileInventoryEntry {
+                path: "config/app.yml".into(),
+                size: 9,
+            },
+            FileInventoryEntry {
+                path: "assets/logo.png".into(),
+                size: 128,
+            },
+        ];
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            PipelineConfig {
+                file_inventory: Some(Arc::from(inventory)),
+                ..PipelineConfig::default()
+            },
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+        assert_eq!(result.stats.files_indexed, 4);
+        assert_eq!(result.stats.files_parsed, 1);
+
+        let graphs = capture.take();
+        let structural_files: Vec<_> = graphs
+            .iter()
+            .filter(|g| g.output.includes_structure())
+            .flat_map(|g| {
+                g.files()
+                    .map(|(_, file)| (file.path.clone(), file.language_name()))
+            })
+            .collect();
+
+        assert_eq!(structural_files.len(), 4);
+        assert!(structural_files.contains(&("src/main.py".into(), "python")));
+        assert!(structural_files.contains(&("README.md".into(), "unknown")));
+        assert!(structural_files.contains(&("config/app.yml".into(), "unknown")));
+        assert!(structural_files.contains(&("assets/logo.png".into(), "unknown")));
     }
 
     // ── Python fixture ──────────────────────────────────────────────
@@ -1352,8 +1585,16 @@ namespace MyApp {
         assert_eq!(result.errors.len(), 0, "Should have no errors");
 
         let graphs = capture.take();
-        let total_files: usize = graphs.iter().map(|g| g.files().count()).sum();
-        let total_dirs: usize = graphs.iter().map(|g| g.directories().count()).sum();
+        let total_files: usize = graphs
+            .iter()
+            .filter(|g| g.output.includes_structure())
+            .map(|g| g.files().count())
+            .sum();
+        let total_dirs: usize = graphs
+            .iter()
+            .filter(|g| g.output.includes_structure())
+            .map(|g| g.directories().count())
+            .sum();
         let total_edges: usize = graphs.iter().map(|g| g.edge_count()).sum();
         assert_eq!(total_files, 4);
         assert!(total_dirs > 0);

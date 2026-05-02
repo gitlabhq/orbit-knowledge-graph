@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use code_graph::v2::FileInventoryEntry;
 use flate2::read::GzDecoder;
 use tracing::{trace, warn};
 
@@ -42,7 +43,7 @@ fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
-    extract_tar_gz_from_reader(data, target_dir, accept_all_filter)
+    extract_tar_gz_from_reader(data, target_dir, accept_all_filter).map(|_| ())
 }
 
 #[cfg(test)]
@@ -56,7 +57,7 @@ pub fn extract_tar_gz_from_reader<R: Read, F>(
     reader: R,
     target_dir: &Path,
     filter: F,
-) -> Result<(), ArchiveError>
+) -> Result<Vec<FileInventoryEntry>, ArchiveError>
 where
     F: Fn(&Path, u64) -> bool,
 {
@@ -64,7 +65,11 @@ where
     unpack_tar(decoder, target_dir, filter)
 }
 
-fn unpack_tar<R: Read, F>(reader: R, target_dir: &Path, filter: F) -> Result<(), ArchiveError>
+fn unpack_tar<R: Read, F>(
+    reader: R,
+    target_dir: &Path,
+    filter: F,
+) -> Result<Vec<FileInventoryEntry>, ArchiveError>
 where
     F: Fn(&Path, u64) -> bool,
 {
@@ -85,6 +90,7 @@ where
     // extraction loop, so create_dir_all and dest.exists() can never follow
     // a symlink that resolves outside the target directory.
     let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut inventory = Vec::new();
 
     // Tracks whether `entries.next()` has yielded an Ok item (including
     // skipped PAX headers). False + a truncation-shaped error means the body
@@ -144,10 +150,15 @@ where
         if relative_path.as_os_str().is_empty() {
             continue;
         }
+        reject_unsafe_relative_path(&relative_path)?;
 
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
+            inventory.push(FileInventoryEntry {
+                path: relative_path.to_string_lossy().to_string(),
+                size: entry.header().size().unwrap_or(0),
+            });
             let link_target = entry
                 .link_name()
                 .map_err(|e| ArchiveError::Archive(e.to_string()))?
@@ -159,6 +170,10 @@ where
 
         if entry_type == tar::EntryType::Regular {
             let declared_size = entry.header().size().unwrap_or(0);
+            inventory.push(FileInventoryEntry {
+                path: relative_path.to_string_lossy().to_string(),
+                size: declared_size,
+            });
             if !filter(&relative_path, declared_size) {
                 trace!(
                     path = %relative_path.display(),
@@ -203,7 +218,7 @@ where
     gkg_utils::fs::validate_symlinks(&target_canonical)
         .map_err(|e| ArchiveError::Archive(e.to_string()))?;
 
-    Ok(())
+    Ok(inventory)
 }
 
 /// Strip the Gitaly archive root prefix from a path during extraction.
@@ -238,6 +253,23 @@ fn strip_archive_root(
     }
 
     Ok(components.as_path().to_path_buf())
+}
+
+fn reject_unsafe_relative_path(path: &Path) -> Result<(), ArchiveError> {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err(ArchiveError::Archive(format!(
+            "path traversal detected: {}",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -614,11 +646,13 @@ mod tests {
             Entry::File("project-main/Cargo.lock", b"# lockfile"),
         ]);
 
-        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
+        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
             path.extension().and_then(|e| e.to_str()) == Some("rs")
         })
         .unwrap();
 
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/main.rs", "assets/logo.png", "Cargo.lock"]);
         assert!(dir.path().join("src/main.rs").exists());
         assert!(!dir.path().join("assets/logo.png").exists());
         assert!(!dir.path().join("Cargo.lock").exists());
@@ -649,11 +683,13 @@ mod tests {
             Entry::Symlink("project-main/bin/run", "../src/lib.rs"),
         ]);
 
-        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
+        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
             path.extension().and_then(|e| e.to_str()) == Some("rs")
         })
         .unwrap();
 
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/lib.rs", "bin/run"]);
         assert!(dir.path().join("src/lib.rs").exists());
         assert!(dir.path().join("bin/run").exists());
     }

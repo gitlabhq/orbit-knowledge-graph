@@ -188,7 +188,7 @@ Example NATS KV:
 
 After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
-The extractor uses the same parsability predicate as the parser (`code_graph::v2::config::is_parsable`) before unpacking each tar entry. Entries the parser would never accept — files whose extension no language claims, paths matching a per-language exclude suffix such as `*.min.js` or `*_test.go`, and entries whose declared size exceeds the configured per-file ceiling — are dropped from the tar stream so they never touch disk. Symlinks, hardlinks, and directories bypass the filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
+The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to avoid writing obvious binary/media/archive/document/datastore blobs or oversized blobs to disk. Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
 The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
 
@@ -221,11 +221,13 @@ For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` 
 
 The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
 
-1. **Directory walking** discovers files. Because non-parsable entries were already dropped at archive-extraction time, the walker mostly sees source files only.
-2. **Extension filtering** runs the same `is_parsable` predicate as the extractor as a defence-in-depth check, then groups files by language.
-3. **Async file reads** load file contents with bounded IO concurrency.
-4. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
-5. **Analysis** groups parsed results by language and builds the graph.
+1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from archive metadata before extraction filters run; local CLI indexing reads it from `git ls-files`.
+2. **Directory walking** discovers the files that were materialized on disk and can be read by parsers and resolvers.
+3. **Extension filtering** runs `parsable_language` over materialized files, then groups parseable files by language.
+4. **Structural graph emission** creates `Directory`, `File`, and containment edges from the repository inventory. Non-parsable files use `language = "unknown"` and do not produce definitions or imports.
+5. **Async file reads** load parseable file contents with bounded IO concurrency.
+6. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
+7. **Analysis** groups parsed results by language and builds definition, import, call, and inheritance relationships that attach to the structural file nodes.
 
 IO reads and CPU-bound parsing are bounded independently: file reads use a concurrency limit proportional to the worker thread count, while parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
 
@@ -236,7 +238,7 @@ After parsing, the analysis phase groups results by language and builds a graph 
 | Node type | Description |
 |---|---|
 | Directory | Directory in the repository tree |
-| File | Source file with path, language, extension |
+| File | Repository file with path, language, extension. Non-parsable files use `unknown` for language. |
 | Definition | Code definition with FQN, type, source range, file path |
 | Imported symbol | Import statement with path, type, identifier, source range |
 
@@ -319,7 +321,8 @@ Tasks with no `branch` field resolve the default branch via `GET /api/v4/interna
                            |- 4. Acquire distributed lock via NATS KV
                            |- 5. Download full repository archive
                            |- 6. Run indexing pipeline
-                           |       |- File discovery (respects .gitignore)
+                           |       |- Repository file inventory
+                           |       |- Parser file discovery
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       |- Analysis phase -> graph

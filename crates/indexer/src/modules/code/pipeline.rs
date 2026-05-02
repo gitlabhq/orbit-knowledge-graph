@@ -74,7 +74,7 @@ impl CodeIndexingPipeline {
         request: &IndexingRequest,
     ) -> Result<IndexOutcome, HandlerError> {
         let fetch_start = Instant::now();
-        let repo_path = match self
+        let repository = match self
             .resolver
             .resolve(
                 request.project_id,
@@ -135,7 +135,8 @@ impl CodeIndexingPipeline {
                 commit_sha,
                 &request.traversal_path,
                 indexed_at,
-                &repo_path,
+                &repository.path,
+                repository.file_inventory.clone(),
             )
             .await;
 
@@ -215,6 +216,7 @@ impl CodeIndexingPipeline {
         traversal_path: &str,
         indexed_at: DateTime<Utc>,
         repo_dir: &Path,
+        file_inventory: Arc<[code_graph::v2::FileInventoryEntry]>,
     ) -> Result<(), HandlerError> {
         let indexing_start = Instant::now();
         let per_file_timeout = if self.pipeline_config.per_file_timeout_ms > 0 {
@@ -231,6 +233,7 @@ impl CodeIndexingPipeline {
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,
+            file_inventory: Some(file_inventory),
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);

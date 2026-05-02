@@ -80,24 +80,33 @@ pub fn convert_code_graph(
     ontology: &Ontology,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
+    let include_structure = graph.output.includes_structure();
 
     Ok(ConvertedGraphData {
-        branch: convert_branch(envelope)?,
+        branch: convert_branch(envelope, include_structure)?,
         directories: convert_entity(graph, &ids, envelope, ontology, "Directory", |g, ids| {
-            g.directories()
-                .map(|(idx, dir)| DirectoryRow {
-                    dir,
-                    id: ids[idx.index()],
-                })
-                .collect()
+            if include_structure {
+                g.directories()
+                    .map(|(idx, dir)| DirectoryRow {
+                        dir,
+                        id: ids[idx.index()],
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
         })?,
         files: convert_entity(graph, &ids, envelope, ontology, "File", |g, ids| {
-            g.files()
-                .map(|(idx, file)| FileRow {
-                    file,
-                    id: ids[idx.index()],
-                })
-                .collect()
+            if include_structure {
+                g.files()
+                    .map(|(idx, file)| FileRow {
+                        file,
+                        id: ids[idx.index()],
+                    })
+                    .collect()
+            } else {
+                Vec::new()
+            }
         })?,
         definitions: convert_entity(graph, &ids, envelope, ontology, "Definition", |g, ids| {
             g.definitions()
@@ -126,7 +135,7 @@ pub fn convert_code_graph(
                     .collect()
             },
         )?,
-        edges: convert_edges(graph, &ids, envelope, ontology)?,
+        edges: convert_edges(graph, &ids, envelope, ontology, include_structure)?,
     })
 }
 
@@ -238,7 +247,10 @@ fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
     R::to_record_batch(&rows, &specs, env)
 }
 
-fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
+fn convert_branch(
+    env: &IndexerEnvelope,
+    include_structure: bool,
+) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
     // Branch has a fixed schema (not driven by row types).
     let specs = vec![
@@ -298,7 +310,11 @@ fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
         }
     }
 
-    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
+    if include_structure {
+        BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
+    } else {
+        BranchRow::to_record_batch(&[], &specs, &())
+    }
 }
 
 fn convert_edges(
@@ -306,6 +322,7 @@ fn convert_edges(
     ids: &[i64],
     env: &IndexerEnvelope,
     ontology: &Ontology,
+    include_structure: bool,
 ) -> Result<RecordBatch, ArrowError> {
     let specs = edge_specs(ontology);
 
@@ -357,42 +374,44 @@ fn convert_edges(
 
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
-    // Branch --IN_PROJECT--> Project
-    edge_rows.push(IndexerEdgeRow {
-        env,
-        source_id: branch_id,
-        target_id: env.project_id,
-        edge_kind: "IN_PROJECT",
-        source_node_kind: "Branch",
-        target_node_kind: "Project",
-        denormalized_column_names: &denorm_cols,
-    });
+    if include_structure {
+        // Branch --IN_PROJECT--> Project
+        edge_rows.push(IndexerEdgeRow {
+            env,
+            source_id: branch_id,
+            target_id: env.project_id,
+            edge_kind: "IN_PROJECT",
+            source_node_kind: "Branch",
+            target_node_kind: "Project",
+            denormalized_column_names: &denorm_cols,
+        });
 
-    // Branch --CONTAINS--> root-level directories and files
-    for (idx, dir) in graph.directories() {
-        if dir.path != "." && !dir.path.contains('/') {
-            edge_rows.push(IndexerEdgeRow {
-                env,
-                source_id: branch_id,
-                target_id: ids[idx.index()],
-                edge_kind: "CONTAINS",
-                source_node_kind: "Branch",
-                target_node_kind: "Directory",
-                denormalized_column_names: &denorm_cols,
-            });
+        // Branch --CONTAINS--> root-level directories and files
+        for (idx, dir) in graph.directories() {
+            if dir.path != "." && !dir.path.contains('/') {
+                edge_rows.push(IndexerEdgeRow {
+                    env,
+                    source_id: branch_id,
+                    target_id: ids[idx.index()],
+                    edge_kind: "CONTAINS",
+                    source_node_kind: "Branch",
+                    target_node_kind: "Directory",
+                    denormalized_column_names: &denorm_cols,
+                });
+            }
         }
-    }
-    for (idx, file) in graph.files() {
-        if !file.path.contains('/') {
-            edge_rows.push(IndexerEdgeRow {
-                env,
-                source_id: branch_id,
-                target_id: ids[idx.index()],
-                edge_kind: "CONTAINS",
-                source_node_kind: "Branch",
-                target_node_kind: "File",
-                denormalized_column_names: &denorm_cols,
-            });
+        for (idx, file) in graph.files() {
+            if !file.path.contains('/') {
+                edge_rows.push(IndexerEdgeRow {
+                    env,
+                    source_id: branch_id,
+                    target_id: ids[idx.index()],
+                    edge_kind: "CONTAINS",
+                    source_node_kind: "Branch",
+                    target_node_kind: "File",
+                    denormalized_column_names: &denorm_cols,
+                });
+            }
         }
     }
 
@@ -400,6 +419,9 @@ fn convert_edges(
     for ei in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
         let edge = &graph.graph[ei];
+        if !include_structure && edge.relationship.edge_kind.as_ref() == "CONTAINS" {
+            continue;
+        }
         edge_rows.push(IndexerEdgeRow {
             env,
             source_id: ids[src.index()],

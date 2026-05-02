@@ -648,13 +648,14 @@ async fn index_repo(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
-    pipeline_config: code_graph::v2::PipelineConfig,
+    mut pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
+    pipeline_config.file_inventory = Some(git_file_inventory(&git.repo_path)?);
 
     let db_path = store.db_path();
     let client =
@@ -723,8 +724,8 @@ async fn index_repo(
         skipped_files: v2_result.skipped,
         faulted_files: v2_result.faults,
         graph_stats: IndexGraphStats {
-            directories: 0,
-            files: v2_result.stats.files_parsed,
+            directories: v2_result.stats.directories_indexed,
+            files: v2_result.stats.files_indexed,
             definitions: v2_result.stats.definitions_count,
             imported_symbols: v2_result.stats.imports_count,
             relationships: v2_result.stats.edges_count,
@@ -733,6 +734,44 @@ async fn index_repo(
         },
         database_path: Some(db_path.display().to_string()),
     })
+}
+
+fn git_file_inventory(
+    repo_path: &std::path::Path,
+) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
+    let output = std::process::Command::new("git")
+        .args([
+            "-C",
+            repo_path.to_str().context("repository path is not UTF-8")?,
+            "ls-files",
+            "-z",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+        ])
+        .output()
+        .with_context(|| format!("failed to list git tree files in {}", repo_path.display()))?;
+    if !output.status.success() {
+        anyhow::bail!(
+            "git ls-files failed in {}: {}",
+            repo_path.display(),
+            String::from_utf8_lossy(&output.stderr)
+        );
+    }
+
+    let entries: Vec<_> = output
+        .stdout
+        .split(|b| *b == 0)
+        .filter(|path| !path.is_empty())
+        .map(|path| {
+            let path = String::from_utf8_lossy(path).to_string();
+            let size = std::fs::symlink_metadata(repo_path.join(&path))
+                .ok()
+                .map_or(0, |metadata| metadata.len());
+            code_graph::v2::FileInventoryEntry { path, size }
+        })
+        .collect();
+    Ok(Arc::from(entries))
 }
 
 fn build_index_output(

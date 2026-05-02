@@ -94,6 +94,18 @@ impl GraphEdge {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum GraphOutput {
+    Complete,
+    ParsedOnly,
+}
+
+impl GraphOutput {
+    pub fn includes_structure(self) -> bool {
+        matches!(self, Self::Complete)
+    }
+}
+
 // ── CodeGraph ───────────────────────────────────────────────────
 
 /// The complete code graph. No lifetime parameter.
@@ -108,6 +120,7 @@ pub struct CodeGraph {
     pub strings: StringPool,
     pub indexes: GraphIndexes,
     pub root_path: String,
+    pub output: GraphOutput,
     /// Language-specific resolution rules (spec, separator, hooks, settings).
     /// Set once at construction via `with_rules()`.
     pub rules: Option<std::sync::Arc<super::rules::ResolutionRules>>,
@@ -122,6 +135,7 @@ impl CodeGraph {
             strings: StringPool::new(),
             indexes: GraphIndexes::new(),
             root_path: String::new(),
+            output: GraphOutput::Complete,
             rules: None,
         }
     }
@@ -136,6 +150,10 @@ impl CodeGraph {
     pub fn with_rules(mut self, rules: std::sync::Arc<super::rules::ResolutionRules>) -> Self {
         self.rules = Some(rules);
         self
+    }
+
+    pub fn mark_parsed_only(&mut self) {
+        self.output = GraphOutput::ParsedOnly;
     }
 
     /// FQN separator for this language. Falls back to `"."`.
@@ -156,6 +174,43 @@ impl CodeGraph {
         path: &str,
         extension: &str,
         language: Language,
+        file_size: u64,
+        definitions: &[CanonicalDefinition],
+        imports: &[CanonicalImport],
+    ) -> (NodeIndex, Vec<NodeIndex>, Vec<NodeIndex>) {
+        self.add_file_with_language(
+            path,
+            extension,
+            Some(language),
+            file_size,
+            definitions,
+            imports,
+        )
+    }
+
+    /// Add a file that should be represented in the graph but is not parsed by
+    /// any language pipeline.
+    pub fn add_unparsed_file(
+        &mut self,
+        path: &str,
+        language: Option<Language>,
+        file_size: u64,
+    ) -> NodeIndex {
+        let extension = Path::new(path)
+            .extension()
+            .and_then(|ext| ext.to_str())
+            .unwrap_or_default()
+            .to_string();
+        let (file_node, _, _) =
+            self.add_file_with_language(path, &extension, language, file_size, &[], &[]);
+        file_node
+    }
+
+    fn add_file_with_language(
+        &mut self,
+        path: &str,
+        extension: &str,
+        language: Option<Language>,
         file_size: u64,
         definitions: &[CanonicalDefinition],
         imports: &[CanonicalImport],
@@ -1002,7 +1057,7 @@ impl<C: gkg_utils::arrow::RowEnvelope> AsRecordBatch<C> for FileRow<'_> {
         b.col("path")?.push_str(&self.file.path)?;
         b.col("name")?.push_str(&self.file.name)?;
         b.col("extension")?.push_str(&self.file.extension)?;
-        b.col("language")?.push_str(self.file.language.names()[0])?;
+        b.col("language")?.push_str(self.file.language_name())?;
         Ok(())
     }
 }

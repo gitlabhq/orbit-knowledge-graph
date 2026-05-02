@@ -16,8 +16,10 @@ pub(crate) fn to_lance_datasets(
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
-    datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
-    datasets.insert("File".into(), build_file_batch(graph, &ids)?);
+    if graph.output.includes_structure() {
+        datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
+        datasets.insert("File".into(), build_file_batch(graph, &ids)?);
+    }
     datasets.insert("Definition".into(), build_definition_batch(graph, &ids)?);
     datasets.insert("ImportedSymbol".into(), build_import_batch(graph, &ids)?);
 
@@ -80,7 +82,7 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
         path_b.append_value(&f.path);
         name_b.append_value(&f.name);
         ext_b.append_value(&f.extension);
-        lang_b.append_value(f.language.names()[0]);
+        lang_b.append_value(f.language_name());
     }
 
     make_batch(
@@ -222,6 +224,10 @@ fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
     graph
         .graph
         .edge_indices()
+        .filter(|&edge_idx| {
+            graph.output.includes_structure()
+                || graph.graph[edge_idx].relationship.edge_kind.as_ref() != "CONTAINS"
+        })
         .filter_map(|edge_idx| {
             let (src, tgt) = graph.graph.edge_endpoints(edge_idx)?;
             let weight = &graph.graph[edge_idx];

@@ -1,9 +1,8 @@
-use std::path::PathBuf;
 use std::sync::Arc;
 
 use tracing::info;
 
-use super::cache::{RepositoryCache, RepositoryCacheError};
+use super::cache::{CachedRepository, RepositoryCache, RepositoryCacheError};
 use super::service::{RepositoryService, RepositoryServiceError};
 use crate::handler::HandlerError;
 use crate::modules::code::metrics::CodeMetrics;
@@ -97,7 +96,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         commit_sha: Option<&str>,
-    ) -> Result<PathBuf, ResolveError> {
+    ) -> Result<CachedRepository, ResolveError> {
         let ref_name = commit_sha.unwrap_or(branch);
         self.full_download(project_id, branch, ref_name).await
     }
@@ -115,7 +114,7 @@ impl RepositoryResolver {
         project_id: i64,
         branch: &str,
         ref_name: &str,
-    ) -> Result<PathBuf, ResolveError> {
+    ) -> Result<CachedRepository, ResolveError> {
         info!(
             project_id,
             branch, ref_name, "downloading repository archive"

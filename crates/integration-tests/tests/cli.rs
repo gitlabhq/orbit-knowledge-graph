@@ -212,6 +212,59 @@ fn reindex_idempotent() {
 }
 
 #[test]
+fn indexes_non_parsable_git_tree_files() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            ("src/main.py", "def hello(): pass\n"),
+            ("README.md", "# Project\n"),
+            ("config/app.yml", "enabled: true\n"),
+            ("Dockerfile", "FROM scratch\n"),
+            (".gitignore", "target/\n"),
+            ("assets/logo.png", "fake png bytes\n"),
+            ("docs/only/README.md", "# Nested\n"),
+        ],
+    );
+
+    assert!(orbit_index(&repo, data_dir.path()));
+
+    let files = orbit_query(&q("files_simple"), data_dir.path());
+    let paths: Vec<_> = nodes(&files)
+        .into_iter()
+        .filter_map(|node| node["path"].as_str())
+        .collect();
+    for expected in [
+        ".gitignore",
+        "Dockerfile",
+        "README.md",
+        "assets/logo.png",
+        "config/app.yml",
+        "docs/only/README.md",
+        "src/main.py",
+    ] {
+        assert!(
+            paths.contains(&expected),
+            "expected File node for {expected}, got {paths:?}"
+        );
+    }
+
+    let traversal = serde_json::json!({
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "d", "entity": "Directory", "filters": {"path": "config"}, "columns": ["id", "path"]},
+            {"id": "f", "entity": "File", "filters": {"path": "config/app.yml"}, "columns": ["id", "path"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "d", "to": "f"}],
+        "limit": 5
+    });
+    let result = orbit_query(&serde_json::to_string(&traversal).unwrap(), data_dir.path());
+    assert_eq!(edge_count(&result), 1);
+}
+
+#[test]
 fn sequential_read_consistency() {
     let data_dir = tempfile::TempDir::new().unwrap();
     let repo = create_test_repo();

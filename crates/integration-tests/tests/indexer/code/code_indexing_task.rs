@@ -55,6 +55,92 @@ async fn indexes_repository() {
         .await;
 }
 
+#[tokio::test]
+async fn indexes_file_nodes_for_all_archive_files() {
+    let project_id: i64 = 8;
+    let commit_sha = "allfiles";
+    let traversal_path = "/all-files";
+
+    let clickhouse = integration_testkit::TestContext::new(&[
+        integration_testkit::SIPHON_SCHEMA_SQL,
+        *integration_testkit::GRAPH_SCHEMA_SQL,
+    ])
+    .await;
+
+    let mock = MockGitlabServer::start().await;
+    mock.add_project(
+        project_id,
+        "main",
+        &[
+            ("src/main.py", "def hello():\n    return 1\n"),
+            ("README.md", "# Project\n"),
+            ("config/app.yml", "enabled: true\n"),
+            ("Dockerfile", "FROM scratch\n"),
+            (".gitignore", "target/\n"),
+            ("assets/logo.png", "fake png bytes"),
+            ("docs/only/README.md", "# Nested\n"),
+        ],
+    );
+
+    let deps = CodeIndexingDeps::new(&mock, &clickhouse);
+    let handler = deps.code_indexing_task_handler();
+    index_code(
+        &handler,
+        &clickhouse,
+        project_id,
+        commit_sha,
+        1,
+        traversal_path,
+    )
+    .await;
+
+    let files = active_file_rows(&clickhouse, project_id).await;
+    let paths: Vec<_> = files.iter().map(|row| row.0.as_str()).collect();
+    for expected in [
+        ".gitignore",
+        "Dockerfile",
+        "README.md",
+        "assets/logo.png",
+        "config/app.yml",
+        "docs/only/README.md",
+        "src/main.py",
+    ] {
+        assert!(
+            paths.contains(&expected),
+            "expected File node for {expected}, got {paths:?}"
+        );
+    }
+    assert_eq!(
+        language_for(&files, "README.md"),
+        Some("unknown"),
+        "non-parsable markdown should use the stable unknown language"
+    );
+    assert_eq!(language_for(&files, "assets/logo.png"), Some("unknown"));
+    assert_eq!(language_for(&files, "src/main.py"), Some("python"));
+
+    assert_directory_is_active(&clickhouse, project_id, "config").await;
+    assert_directory_is_active(&clickhouse, project_id, "docs/only").await;
+    assert_contains_edge_between_directory_and_file(
+        &clickhouse,
+        project_id,
+        "config",
+        "config/app.yml",
+    )
+    .await;
+    assert_contains_edge_between_directory_and_file(
+        &clickhouse,
+        project_id,
+        "docs/only",
+        "docs/only/README.md",
+    )
+    .await;
+
+    assert_no_active_definitions(&clickhouse, project_id, "README.md").await;
+    assert_no_active_definitions(&clickhouse, project_id, "config/app.yml").await;
+    assert_no_active_definitions(&clickhouse, project_id, "assets/logo.png").await;
+    assert_active_definitions(&clickhouse, project_id, "src/main.py", &["hello"]).await;
+}
+
 /// End-to-end test for CALLS and EXTENDS edges:
 /// indexes Java code with class inheritance and a method call, then
 /// queries `gl_code_edge` to verify both relationship kinds were written.
@@ -656,6 +742,95 @@ async fn assert_file_is_active(
     assert!(
         result.first().is_some_and(|b| b.num_rows() > 0),
         "file '{path}' should be active"
+    );
+}
+
+async fn active_file_rows(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+) -> Vec<(String, String, String)> {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT path, extension, language FROM {} FINAL \
+             WHERE project_id = {project_id} AND _deleted = false \
+             ORDER BY path",
+            t("gl_file")
+        ))
+        .await;
+
+    let mut rows = Vec::new();
+    for batch in result {
+        let paths =
+            ArrowUtils::get_column_by_name::<StringArray>(&batch, "path").expect("path column");
+        let extensions = ArrowUtils::get_column_by_name::<StringArray>(&batch, "extension")
+            .expect("extension column");
+        let languages = ArrowUtils::get_column_by_name::<StringArray>(&batch, "language")
+            .expect("language column");
+        for row in 0..batch.num_rows() {
+            rows.push((
+                paths.value(row).to_string(),
+                extensions.value(row).to_string(),
+                languages.value(row).to_string(),
+            ));
+        }
+    }
+    rows
+}
+
+fn language_for<'a>(rows: &'a [(String, String, String)], path: &str) -> Option<&'a str> {
+    rows.iter()
+        .find(|row| row.0 == path)
+        .map(|row| row.2.as_str())
+}
+
+async fn assert_directory_is_active(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    path: &str,
+) {
+    let result = clickhouse
+        .query(&format!(
+            "SELECT id FROM {} FINAL \
+             WHERE project_id = {project_id} AND path = '{path}' AND _deleted = false",
+            t("gl_directory")
+        ))
+        .await;
+    assert!(
+        result.first().is_some_and(|b| b.num_rows() > 0),
+        "directory '{path}' should be active"
+    );
+}
+
+async fn assert_contains_edge_between_directory_and_file(
+    clickhouse: &integration_testkit::TestContext,
+    project_id: i64,
+    directory_path: &str,
+    file_path: &str,
+) {
+    let ontology = integration_testkit::load_ontology();
+    let edge_table = ontology.edge_table_for_relationship("CONTAINS");
+    let result = clickhouse
+        .query(&format!(
+            "SELECT e.source_id FROM {edge_table} AS e FINAL \
+             INNER JOIN {} AS d FINAL ON e.source_id = d.id \
+             INNER JOIN {} AS f FINAL ON e.target_id = f.id \
+             WHERE e.relationship_kind = 'CONTAINS' \
+               AND e.source_kind = 'Directory' \
+               AND e.target_kind = 'File' \
+               AND d.project_id = {project_id} \
+               AND f.project_id = {project_id} \
+               AND d.path = '{directory_path}' \
+               AND f.path = '{file_path}' \
+               AND d._deleted = false \
+               AND f._deleted = false \
+               AND e._deleted = false",
+            t("gl_directory"),
+            t("gl_file")
+        ))
+        .await;
+    assert!(
+        result.first().is_some_and(|b| b.num_rows() > 0),
+        "expected CONTAINS edge from directory '{directory_path}' to file '{file_path}'"
     );
 }
 
