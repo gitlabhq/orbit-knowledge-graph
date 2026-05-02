@@ -18,3 +18,4 @@ variants:
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
     description: "User authored work item."
+

@@ -689,16 +689,6 @@
       "properties": {
         "from_node": { "$ref": "#/definitions/edgeNodeReference" },
         "to_node": { "$ref": "#/definitions/edgeNodeReference" },
-        "fk": {
-          "type": "object",
-          "description": "Foreign key on a node table that encodes this relationship. When present, the query compiler can join node tables directly instead of scanning the edge table.",
-          "properties": {
-            "node": { "type": "string", "description": "Which node type holds the FK column (must be one of from_node.type or to_node.type)." },
-            "column": { "type": "string", "description": "The FK column name on the node table (e.g. 'project_id', 'author_id')." }
-          },
-          "required": ["node", "column"],
-          "additionalProperties": false
-        },
         "description": {
           "type": "string",
           "description": "Human-readable description of this edge variant."
