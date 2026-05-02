@@ -80,12 +80,15 @@ pub fn convert_code_graph(
     ontology: &Ontology,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
-    let include_structure = graph.output.includes_structure();
+    // The inventory graph owns repository structure. Per-language graphs keep
+    // transient File nodes for semantic edges, but must not re-write
+    // File/Directory rows or CONTAINS edges.
+    let write_repository_structure = graph.output.writes_repository_structure();
 
     Ok(ConvertedGraphData {
-        branch: convert_branch(envelope, include_structure)?,
+        branch: convert_branch(envelope, write_repository_structure)?,
         directories: convert_entity(graph, &ids, envelope, ontology, "Directory", |g, ids| {
-            if include_structure {
+            if write_repository_structure {
                 g.directories()
                     .map(|(idx, dir)| DirectoryRow {
                         dir,
@@ -97,7 +100,7 @@ pub fn convert_code_graph(
             }
         })?,
         files: convert_entity(graph, &ids, envelope, ontology, "File", |g, ids| {
-            if include_structure {
+            if write_repository_structure {
                 g.files()
                     .map(|(idx, file)| FileRow {
                         file,
@@ -135,7 +138,7 @@ pub fn convert_code_graph(
                     .collect()
             },
         )?,
-        edges: convert_edges(graph, &ids, envelope, ontology, include_structure)?,
+        edges: convert_edges(graph, &ids, envelope, ontology, write_repository_structure)?,
     })
 }
 
@@ -249,7 +252,7 @@ fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
 
 fn convert_branch(
     env: &IndexerEnvelope,
-    include_structure: bool,
+    write_repository_structure: bool,
 ) -> Result<RecordBatch, ArrowError> {
     let branch_id = compute_branch_id(env.project_id, &env.branch);
     // Branch has a fixed schema (not driven by row types).
@@ -310,7 +313,7 @@ fn convert_branch(
         }
     }
 
-    if include_structure {
+    if write_repository_structure {
         BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
     } else {
         BranchRow::to_record_batch(&[], &specs, &())
@@ -322,7 +325,7 @@ fn convert_edges(
     ids: &[i64],
     env: &IndexerEnvelope,
     ontology: &Ontology,
-    include_structure: bool,
+    write_repository_structure: bool,
 ) -> Result<RecordBatch, ArrowError> {
     let specs = edge_specs(ontology);
 
@@ -374,7 +377,7 @@ fn convert_edges(
 
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
-    if include_structure {
+    if write_repository_structure {
         // Branch --IN_PROJECT--> Project
         edge_rows.push(IndexerEdgeRow {
             env,
@@ -419,7 +422,7 @@ fn convert_edges(
     for ei in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
         let edge = &graph.graph[ei];
-        if !include_structure && edge.relationship.edge_kind.as_ref() == "CONTAINS" {
+        if !write_repository_structure && edge.relationship.edge_kind.as_ref() == "CONTAINS" {
             continue;
         }
         edge_rows.push(IndexerEdgeRow {

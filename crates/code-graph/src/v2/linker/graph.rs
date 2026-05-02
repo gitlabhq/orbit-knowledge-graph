@@ -101,7 +101,7 @@ pub enum GraphOutput {
 }
 
 impl GraphOutput {
-    pub fn includes_structure(self) -> bool {
+    pub fn writes_repository_structure(self) -> bool {
         matches!(self, Self::Complete)
     }
 }

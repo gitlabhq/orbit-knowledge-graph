@@ -200,7 +200,7 @@ impl<'a> GraphStatsCounters<'a> {
     }
 
     fn record_graph(self, graph: &CodeGraph) {
-        if graph.output.includes_structure() {
+        if graph.output.writes_repository_structure() {
             self.directories
                 .fetch_add(graph.directories().count(), Ordering::Relaxed);
             self.files
@@ -210,7 +210,7 @@ impl<'a> GraphStatsCounters<'a> {
             .fetch_add(graph.definitions().count(), Ordering::Relaxed);
         self.imports
             .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
-        let emitted_edges = if graph.output.includes_structure() {
+        let emitted_edges = if graph.output.writes_repository_structure() {
             graph.edge_count()
         } else {
             graph
@@ -1446,7 +1446,7 @@ mod tests {
         let graphs = capture.take();
         let mut structural_files: Vec<_> = graphs
             .iter()
-            .filter(|g| g.output.includes_structure())
+            .filter(|g| g.output.writes_repository_structure())
             .flat_map(|g| {
                 g.files()
                     .map(|(_, file)| (file.path.clone(), file.language_name()))
@@ -1635,12 +1635,12 @@ namespace MyApp {
         let graphs = capture.take();
         let total_files: usize = graphs
             .iter()
-            .filter(|g| g.output.includes_structure())
+            .filter(|g| g.output.writes_repository_structure())
             .map(|g| g.files().count())
             .sum();
         let total_dirs: usize = graphs
             .iter()
-            .filter(|g| g.output.includes_structure())
+            .filter(|g| g.output.writes_repository_structure())
             .map(|g| g.directories().count())
             .sum();
         let total_edges: usize = graphs.iter().map(|g| g.edge_count()).sum();

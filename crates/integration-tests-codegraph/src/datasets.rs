@@ -16,7 +16,7 @@ pub(crate) fn to_lance_datasets(
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
-    if graph.output.includes_structure() {
+    if graph.output.writes_repository_structure() {
         datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
         datasets.insert("File".into(), build_file_batch(graph, &ids)?);
     }
@@ -225,7 +225,7 @@ fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
         .graph
         .edge_indices()
         .filter(|&edge_idx| {
-            graph.output.includes_structure()
+            graph.output.writes_repository_structure()
                 || graph.graph[edge_idx].relationship.edge_kind.as_ref() != "CONTAINS"
         })
         .filter_map(|edge_idx| {

@@ -61,7 +61,7 @@ pub fn convert_v2_graph(
         commit_sha,
     };
     let ids = graph.assign_ids(project_id, branch);
-    let include_structure = graph.output.includes_structure();
+    let write_repository_structure = graph.output.writes_repository_structure();
     let mut tables = Vec::new();
 
     for entity_name in ontology.local_entity_names() {
@@ -74,7 +74,7 @@ pub fn convert_v2_graph(
         let specs = entity_specs(ontology, entity_name);
         let batch = match entity_name {
             "Directory" => {
-                let rows: Vec<_> = if include_structure {
+                let rows: Vec<_> = if write_repository_structure {
                     graph
                         .directories()
                         .map(|(idx, dir)| DirectoryRow {
@@ -88,7 +88,7 @@ pub fn convert_v2_graph(
                 DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "File" => {
-                let rows: Vec<_> = if include_structure {
+                let rows: Vec<_> = if write_repository_structure {
                     graph
                         .files()
                         .map(|(idx, file)| FileRow {
@@ -141,7 +141,8 @@ pub fn convert_v2_graph(
         .graph
         .edge_indices()
         .filter(|&ei| {
-            include_structure || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
+            write_repository_structure
+                || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
         })
         .map(|ei| {
             let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
