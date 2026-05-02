@@ -149,8 +149,6 @@ where
     }
 }
 
-
-
 pub struct SecurityPass;
 
 impl<E, S> CompilerPass<E, S> for SecurityPass

@@ -267,10 +267,8 @@ fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
             }
         }
 
-        if all_match {
-            if let Some(col) = common_fk {
-                rel.fk_column = Some(col.to_string());
-            }
+        if all_match && let Some(col) = common_fk {
+            rel.fk_column = Some(col.to_string());
         }
     }
 }

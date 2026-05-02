@@ -7,9 +7,9 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use crate::constants::*;
 use super::shared::{edge_select_columns, edge_select_columns_with_prefix};
 use super::types::Skeleton;
+use crate::constants::*;
 
 pub fn lower_traversal(input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {
@@ -21,10 +21,7 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
 
     let mut select = Vec::new();
     for (i, ea) in output.edge_aliases.iter().enumerate() {
-        let is_multi = input
-            .relationships
-            .get(i)
-            .is_some_and(|r| r.max_hops > 1);
+        let is_multi = input.relationships.get(i).is_some_and(|r| r.max_hops > 1);
         if is_multi {
             // Multi-hop: use hop_ prefix and include path_nodes.
             let prefix = format!("hop_{ea}");
