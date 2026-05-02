@@ -154,8 +154,7 @@ tests:
       - { row: { fqn: Geo.Models.Line, type: Class } }
 
   # ── Cross-file member chain ──────────────────────────────────
-  - name: "Line.Length calls Point.DistanceTo via typed field"
-    skip: true  # property type annotation not followed during chain resolution (cross-language gap)
+  - name: "Line.Length calls Point.DistanceTo via typed property"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.fqn = 'Geo.Models.Line.Length'
