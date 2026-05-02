@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::sync::Arc;
 
 use arrow::array::{Array, BooleanArray, Int64Array, StringArray};
@@ -95,21 +96,25 @@ async fn indexes_file_nodes_for_all_archive_files() {
     .await;
 
     let files = active_file_rows(&clickhouse, project_id).await;
-    let paths: Vec<_> = files.iter().map(|row| row.0.as_str()).collect();
-    for expected in [
-        ".gitignore",
-        "Dockerfile",
-        "README.md",
-        "assets/logo.png",
-        "config/app.yml",
-        "docs/only/README.md",
-        "src/main.py",
-    ] {
-        assert!(
-            paths.contains(&expected),
-            "expected File node for {expected}, got {paths:?}"
-        );
-    }
+    let paths: Vec<_> = files.iter().map(|row| row.0.clone()).collect();
+    let unique_paths: BTreeSet<_> = paths.iter().cloned().collect();
+    assert_eq!(
+        paths.len(),
+        unique_paths.len(),
+        "duplicate File nodes: {paths:?}"
+    );
+    assert_eq!(
+        unique_paths,
+        BTreeSet::from([
+            ".gitignore".to_string(),
+            "Dockerfile".to_string(),
+            "README.md".to_string(),
+            "assets/logo.png".to_string(),
+            "config/app.yml".to_string(),
+            "docs/only/README.md".to_string(),
+            "src/main.py".to_string(),
+        ])
+    );
     assert_eq!(
         language_for(&files, "README.md"),
         Some("unknown"),
@@ -828,9 +833,10 @@ async fn assert_contains_edge_between_directory_and_file(
             t("gl_file")
         ))
         .await;
-    assert!(
-        result.first().is_some_and(|b| b.num_rows() > 0),
-        "expected CONTAINS edge from directory '{directory_path}' to file '{file_path}'"
+    let row_count: usize = result.iter().map(|batch| batch.num_rows()).sum();
+    assert_eq!(
+        row_count, 1,
+        "expected exactly one CONTAINS edge from directory '{directory_path}' to file '{file_path}'"
     );
 }
 

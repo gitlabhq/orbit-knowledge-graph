@@ -1,14 +1,14 @@
-use crate::v2::config::{Language, detect_language_from_extension, parsable_language};
+use crate::v2::config::{Language, parsable_language};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
 use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
-use rustc_hash::{FxHashMap, FxHashSet};
+use rustc_hash::FxHashMap;
 use std::any::Any;
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -494,6 +494,7 @@ impl Pipeline {
         let discovery = Self::discover_files(root, &config);
         let files_by_language = discovery.files_by_language;
         let file_inventory = discovery.file_inventory;
+        let parsed_file_languages = discovery.parsed_file_languages;
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
@@ -532,7 +533,8 @@ impl Pipeline {
         let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
 
         if !file_inventory.is_empty() {
-            let structural_graph = Self::build_file_inventory_graph(root, &file_inventory);
+            let structural_graph =
+                Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
             write_graph_direct(
                 structural_graph,
                 converter.as_ref(),
@@ -751,9 +753,9 @@ impl Pipeline {
 
     fn discover_files(root: &Path, config: &PipelineConfig) -> FileDiscovery {
         let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
-        let mut discovered_files = Vec::new();
+        let mut walked_inventory = Vec::new();
+        let mut parsed_file_languages = FxHashMap::default();
         let mut accepted_files = 0usize;
-        let collect_inventory_from_walk = config.file_inventory.is_none();
 
         let walker = WalkBuilder::new(root)
             .git_ignore(config.respect_gitignore)
@@ -774,13 +776,12 @@ impl Pipeline {
             let path = entry.path();
             let rel_path = path.strip_prefix(root).unwrap_or(path);
             let metadata = path.metadata().ok();
+            let rel_path_string = rel_path.to_string_lossy().to_string();
 
-            if collect_inventory_from_walk {
-                discovered_files.push(FileInventoryEntry {
-                    path: rel_path.to_string_lossy().to_string(),
-                    size: metadata.as_ref().map_or(0, |metadata| metadata.len()),
-                });
-            }
+            walked_inventory.push(FileInventoryEntry {
+                path: rel_path_string.clone(),
+                size: metadata.as_ref().map_or(0, |metadata| metadata.len()),
+            });
 
             if metadata
                 .as_ref()
@@ -803,38 +804,33 @@ impl Pipeline {
             }
 
             accepted_files += 1;
-            groups
-                .entry(lang)
-                .or_default()
-                .push(rel_path.to_string_lossy().to_string());
+            parsed_file_languages.insert(rel_path_string.clone(), lang);
+            groups.entry(lang).or_default().push(rel_path_string);
         }
 
-        let file_inventory = config
+        let inventory_source = config
             .file_inventory
             .as_ref()
-            .map(|entries| entries.iter().cloned().collect())
-            .unwrap_or(discovered_files);
+            .into_iter()
+            .flat_map(|entries| entries.iter().cloned())
+            .chain(walked_inventory);
+        let file_inventory = canonical_file_inventory(inventory_source);
 
         FileDiscovery {
             files_by_language: groups,
             file_inventory,
+            parsed_file_languages,
         }
     }
 
-    fn build_file_inventory_graph(root: &Path, inventory: &[FileInventoryEntry]) -> CodeGraph {
+    fn build_file_inventory_graph(
+        root: &Path,
+        inventory: &[FileInventoryEntry],
+        parsed_file_languages: &FxHashMap<String, Language>,
+    ) -> CodeGraph {
         let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
-        let mut seen = FxHashSet::default();
-        let mut files = inventory.to_vec();
-        files.sort_by(|a, b| a.path.cmp(&b.path));
-
-        for entry in files {
-            if !seen.insert(entry.path.clone()) {
-                continue;
-            }
-            let language = Path::new(&entry.path)
-                .extension()
-                .and_then(|ext| ext.to_str())
-                .and_then(detect_language_from_extension);
+        for entry in inventory {
+            let language = parsed_file_languages.get(&entry.path).copied();
             graph.add_unparsed_file(&entry.path, language, entry.size);
         }
 
@@ -846,6 +842,43 @@ impl Pipeline {
 struct FileDiscovery {
     files_by_language: FxHashMap<Language, Vec<FileInput>>,
     file_inventory: Vec<FileInventoryEntry>,
+    parsed_file_languages: FxHashMap<String, Language>,
+}
+
+fn canonical_file_inventory(
+    entries: impl IntoIterator<Item = FileInventoryEntry>,
+) -> Vec<FileInventoryEntry> {
+    let mut by_path = FxHashMap::default();
+    for entry in entries {
+        let Some(path) = normalize_inventory_path(&entry.path) else {
+            continue;
+        };
+        by_path.entry(path).or_insert(entry.size);
+    }
+
+    let mut entries: Vec<_> = by_path
+        .into_iter()
+        .map(|(path, size)| FileInventoryEntry { path, size })
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
+fn normalize_inventory_path(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
+    }
 }
 
 /// Generic pipeline parameterized by language spec `P` and rules `R`.
@@ -1376,12 +1409,20 @@ mod tests {
                 size: 12,
             },
             FileInventoryEntry {
+                path: "./README.md".into(),
+                size: 12,
+            },
+            FileInventoryEntry {
                 path: "config/app.yml".into(),
                 size: 9,
             },
             FileInventoryEntry {
                 path: "assets/logo.png".into(),
                 size: 128,
+            },
+            FileInventoryEntry {
+                path: "vendor/jquery.min.js".into(),
+                size: 256,
             },
         ];
 
@@ -1398,11 +1439,12 @@ mod tests {
         );
 
         assert_eq!(result.errors.len(), 0, "Should have no errors");
-        assert_eq!(result.stats.files_indexed, 4);
+        assert_eq!(result.stats.files_discovered, 5);
+        assert_eq!(result.stats.files_indexed, 5);
         assert_eq!(result.stats.files_parsed, 1);
 
         let graphs = capture.take();
-        let structural_files: Vec<_> = graphs
+        let mut structural_files: Vec<_> = graphs
             .iter()
             .filter(|g| g.output.includes_structure())
             .flat_map(|g| {
@@ -1410,12 +1452,18 @@ mod tests {
                     .map(|(_, file)| (file.path.clone(), file.language_name()))
             })
             .collect();
+        structural_files.sort();
 
-        assert_eq!(structural_files.len(), 4);
-        assert!(structural_files.contains(&("src/main.py".into(), "python")));
-        assert!(structural_files.contains(&("README.md".into(), "unknown")));
-        assert!(structural_files.contains(&("config/app.yml".into(), "unknown")));
-        assert!(structural_files.contains(&("assets/logo.png".into(), "unknown")));
+        assert_eq!(
+            structural_files,
+            vec![
+                ("README.md".into(), "unknown"),
+                ("assets/logo.png".into(), "unknown"),
+                ("config/app.yml".into(), "unknown"),
+                ("src/main.py".into(), "python"),
+                ("vendor/jquery.min.js".into(), "unknown"),
+            ]
+        );
     }
 
     // ── Python fixture ──────────────────────────────────────────────

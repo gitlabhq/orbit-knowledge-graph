@@ -763,14 +763,26 @@ fn git_file_inventory(
         .stdout
         .split(|b| *b == 0)
         .filter(|path| !path.is_empty())
-        .map(|path| {
+        .filter_map(|path| {
             let path = String::from_utf8_lossy(path).to_string();
-            let size = std::fs::symlink_metadata(repo_path.join(&path))
-                .ok()
-                .map_or(0, |metadata| metadata.len());
-            code_graph::v2::FileInventoryEntry { path, size }
+            let metadata = match std::fs::symlink_metadata(repo_path.join(&path)) {
+                Ok(metadata) => metadata,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
+                Err(error) => {
+                    return Some(Err(error).with_context(|| {
+                        format!(
+                            "failed to read metadata for git inventory entry {}",
+                            repo_path.join(&path).display()
+                        )
+                    }));
+                }
+            };
+            Some(Ok(code_graph::v2::FileInventoryEntry {
+                path,
+                size: metadata.len(),
+            }))
         })
-        .collect();
+        .collect::<Result<_>>()?;
     Ok(Arc::from(entries))
 }
 

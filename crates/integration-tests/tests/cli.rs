@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo nextest run --test cli`
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 use integration_testkit::cli::{
@@ -226,30 +226,41 @@ fn indexes_non_parsable_git_tree_files() {
             (".gitignore", "target/\n"),
             ("assets/logo.png", "fake png bytes\n"),
             ("docs/only/README.md", "# Nested\n"),
+            ("docs/deleted.md", "# Deleted\n"),
         ],
     );
+    std::fs::remove_file(repo.join("docs/deleted.md")).unwrap();
+    std::fs::create_dir_all(repo.join("notes")).unwrap();
+    std::fs::write(repo.join("notes/local.md"), "# Local\n").unwrap();
+    std::fs::create_dir_all(repo.join("target")).unwrap();
+    std::fs::write(repo.join("target/ignored.md"), "# Ignored\n").unwrap();
 
     assert!(orbit_index(&repo, data_dir.path()));
 
     let files = orbit_query(&q("files_simple"), data_dir.path());
     let paths: Vec<_> = nodes(&files)
         .into_iter()
-        .filter_map(|node| node["path"].as_str())
+        .filter_map(|node| node["path"].as_str().map(str::to_string))
         .collect();
-    for expected in [
-        ".gitignore",
-        "Dockerfile",
-        "README.md",
-        "assets/logo.png",
-        "config/app.yml",
-        "docs/only/README.md",
-        "src/main.py",
-    ] {
-        assert!(
-            paths.contains(&expected),
-            "expected File node for {expected}, got {paths:?}"
-        );
-    }
+    let unique_paths: BTreeSet<_> = paths.iter().cloned().collect();
+    assert_eq!(
+        paths.len(),
+        unique_paths.len(),
+        "duplicate File nodes: {paths:?}"
+    );
+    assert_eq!(
+        unique_paths,
+        BTreeSet::from([
+            ".gitignore".to_string(),
+            "Dockerfile".to_string(),
+            "README.md".to_string(),
+            "assets/logo.png".to_string(),
+            "config/app.yml".to_string(),
+            "docs/only/README.md".to_string(),
+            "notes/local.md".to_string(),
+            "src/main.py".to_string(),
+        ])
+    );
 
     let traversal = serde_json::json!({
         "query_type": "traversal",

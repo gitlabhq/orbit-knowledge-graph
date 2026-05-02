@@ -260,6 +260,7 @@ fn reject_unsafe_relative_path(path: &Path) -> Result<(), ArchiveError> {
         matches!(
             component,
             std::path::Component::ParentDir
+                | std::path::Component::CurDir
                 | std::path::Component::RootDir
                 | std::path::Component::Prefix(_)
         )

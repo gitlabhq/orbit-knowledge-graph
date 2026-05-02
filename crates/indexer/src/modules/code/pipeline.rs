@@ -292,6 +292,10 @@ impl CodeIndexingPipeline {
         self.metrics
             .record_files_processed(skipped_count as u64, "skipped");
         self.metrics
+            .record_nodes_indexed(result.stats.directories_indexed as u64, "directory");
+        self.metrics
+            .record_nodes_indexed(result.stats.files_indexed as u64, "file");
+        self.metrics
             .record_nodes_indexed(result.stats.definitions_count as u64, "definition");
         self.metrics
             .record_nodes_indexed(result.stats.imports_count as u64, "imported_symbol");
