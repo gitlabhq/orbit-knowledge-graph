@@ -2,7 +2,7 @@ use serde::Deserialize;
 use std::collections::BTreeMap;
 
 use crate::OntologyError;
-use crate::entities::{EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeSourceEtlConfig};
+use crate::entities::{EdgeEndpoint, EdgeEndpointType, EdgeEntity, EdgeFk, EdgeSourceEtlConfig};
 use crate::etl::EtlScope;
 
 use super::EtlSettings;
@@ -25,6 +25,14 @@ pub(crate) struct EdgeYaml {
 struct EdgeVariantYaml {
     from_node: EdgeNodeRef,
     to_node: EdgeNodeRef,
+    #[serde(default)]
+    fk: Option<EdgeFkYaml>,
+}
+
+#[derive(Debug, Deserialize)]
+struct EdgeFkYaml {
+    node: String,
+    column: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +85,10 @@ impl EdgeYaml {
                 target: v.to_node.id.clone(),
                 target_kind: v.to_node.node_type.clone(),
                 destination_table: table.clone(),
+                fk: v.fk.as_ref().map(|fk| EdgeFk {
+                    node: fk.node.clone(),
+                    column: fk.column.clone(),
+                }),
             })
             .collect()
     }

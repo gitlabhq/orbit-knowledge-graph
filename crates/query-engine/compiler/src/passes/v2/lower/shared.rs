@@ -147,6 +147,22 @@ fn build_hops(input: &Input) -> Vec<Hop> {
         .iter()
         .map(|rel| {
             let edge_table = resolve_edge_table(input, &rel.types);
+            let fk =
+                rel.fk.as_ref().map(|input_fk| {
+                    let (fk_node, target_node) = if input_fk.node == rel.from
+                        || input.nodes.iter().any(|n| {
+                            n.entity.as_deref() == Some(&input_fk.node) && n.id == rel.from
+                        }) {
+                        (rel.from.clone(), rel.to.clone())
+                    } else {
+                        (rel.to.clone(), rel.from.clone())
+                    };
+                    HopFk {
+                        fk_node,
+                        fk_column: input_fk.column.clone(),
+                        target_node,
+                    }
+                });
             Hop {
                 rel_types: rel.types.clone(),
                 edge_table,
@@ -154,6 +170,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 to_node: rel.to.clone(),
                 direction: rel.direction,
                 max_hops: rel.max_hops,
+                fk,
             }
         })
         .collect()
@@ -297,6 +314,13 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOutput> {
+    // Single-hop with FK: skip the edge table entirely, join nodes directly.
+    if skeleton.hops.len() == 1 {
+        if let Some(ref fk) = skeleton.hops[0].fk {
+            return emit_fk_direct(skeleton, fk, input);
+        }
+    }
+
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
@@ -409,6 +433,130 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
     Ok(SkeletonOutput {
         from,
         edge_aliases,
+        where_parts,
+        select: selects,
+        ctes,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Emit: FK direct (no edge table)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Single-hop with FK: join the two node tables directly using the FK column.
+/// No edge table scan. The FK node's table drives, the target node joins via
+/// FK column = target.id.
+fn emit_fk_direct(skeleton: &Skeleton, fk: &HopFk, input: &mut Input) -> Result<SkeletonOutput> {
+    let hop = &skeleton.hops[0];
+
+    let fk_np = skeleton.nodes.get(&fk.fk_node).ok_or_else(|| {
+        QueryError::Lowering(format!("FK node '{}' not found in skeleton", fk.fk_node))
+    })?;
+    let target_np = skeleton.nodes.get(&fk.target_node).ok_or_else(|| {
+        QueryError::Lowering(format!(
+            "target node '{}' not found in skeleton",
+            fk.target_node
+        ))
+    })?;
+
+    let fk_table = fk_np
+        .table
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("FK node '{}' has no table", fk.fk_node)))?;
+    let fk_alias = &fk_np.alias;
+
+    // FK direct: the node table IS the driving table. SELECT * because
+    // downstream passes (enforce, check) add columns we can't predict
+    // (cursor tie-breakers like created_at, updated_at).
+    let fk_needed = requested_columns(&fk_np.columns);
+
+    let fk_dedup = Query {
+        select: vec![SelectExpr::star()],
+        from: TableRef::scan(fk_table, fk_alias),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(fk_alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(fk_alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
+    };
+
+    let from = TableRef::Subquery {
+        query: Box::new(fk_dedup),
+        alias: fk_alias.to_string(),
+    };
+
+    let mut where_parts = Vec::new();
+
+    // FK node filters.
+    for (prop, filter) in &fk_np.filters {
+        where_parts.push(filter_to_expr(fk_alias, prop, filter));
+    }
+    where_parts.push(Expr::eq(
+        Expr::col(fk_alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+
+    // Target node constraint via FK column.
+    if !target_np.node_ids.is_empty() {
+        where_parts.push(ids_on_edge(fk_alias, &fk.fk_column, &target_np.node_ids));
+    }
+
+    // Register node-edge mappings for enforce.
+    // FK node: id comes from its own table.
+    input.compiler.node_edge_col.insert(
+        fk.fk_node.clone(),
+        (fk_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
+    );
+    // Target node: id comes from the FK column on the FK node.
+    input.compiler.node_edge_col.insert(
+        fk.target_node.clone(),
+        (fk_alias.to_string(), fk.fk_column.clone()),
+    );
+
+    // Outer SELECT: FK node's columns — only for traversal or if this node
+    // is the group-by target. For aggregation where this node is just the
+    // driving scan, its columns don't belong in SELECT (GROUP BY violation).
+    let is_fk_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(fk_alias.as_str()));
+    let mut selects = Vec::new();
+    if is_fk_group_by || input.query_type != QueryType::Aggregation {
+        for col in &fk_needed {
+            selects.push(SelectExpr::new(
+                Expr::col(fk_alias, col),
+                format!("{fk_alias}_{col}"),
+            ));
+        }
+    }
+
+    // If the target node needs hydration (group-by, columns, etc.), join it.
+    let mut ctes = Vec::new();
+    if target_np.hydration == HydrationStrategy::Join {
+        let (new_from, ns, nw) = emit_node_join(from, target_np, fk_alias, &fk.fk_column, input)?;
+        selects.extend(ns);
+        where_parts.extend(nw);
+        return Ok(SkeletonOutput {
+            from: new_from,
+            edge_aliases: vec![],
+            where_parts,
+            select: selects,
+            ctes,
+        });
+    }
+    if target_np.hydration == HydrationStrategy::FilterOnly {
+        where_parts.extend(emit_filter_subquery(
+            target_np,
+            fk_alias,
+            &fk.fk_column,
+            &mut ctes,
+        )?);
+    }
+
+    Ok(SkeletonOutput {
+        from,
+        edge_aliases: vec![],
         where_parts,
         select: selects,
         ctes,

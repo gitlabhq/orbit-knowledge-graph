@@ -227,7 +227,59 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
+    resolve_fk_metadata(&mut input, ontology);
     Ok(input)
+}
+
+fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
+        .collect();
+
+    for rel in &mut input.relationships {
+        let from_entity = entity_for.get(rel.from.as_str()).copied();
+        let to_entity = entity_for.get(rel.to.as_str()).copied();
+
+        // Find FK: all rel types must agree on the same FK for this (from, to) pair.
+        let mut common_fk: Option<(&str, &str)> = None;
+        let mut all_match = true;
+
+        for rel_type in &rel.types {
+            let fk = ontology
+                .edges()
+                .find(|e| {
+                    e.relationship_kind == *rel_type
+                        && Some(e.source_kind.as_str()) == from_entity
+                        && Some(e.target_kind.as_str()) == to_entity
+                })
+                .and_then(|e| e.fk.as_ref());
+
+            match (&common_fk, fk) {
+                (None, Some(fk)) => common_fk = Some((&fk.node, &fk.column)),
+                (Some((n, c)), Some(fk)) if *n == fk.node && *c == fk.column => {}
+                (Some(_), Some(_)) => {
+                    all_match = false;
+                    break;
+                }
+                (Some(_), None) => {
+                    all_match = false;
+                    break;
+                }
+                (None, None) => {}
+            }
+        }
+
+        if all_match {
+            if let Some((node, column)) = common_fk {
+                rel.fk = Some(crate::input::InputFk {
+                    node: node.to_string(),
+                    column: column.to_string(),
+                });
+            }
+        }
+    }
 }
 
 fn is_wildcard(types: &[String]) -> bool {

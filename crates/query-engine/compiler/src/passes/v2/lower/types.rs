@@ -35,6 +35,20 @@ pub struct Hop {
     pub direction: Direction,
     /// Max hops (1 for single-hop, >1 for variable-length).
     pub max_hops: u32,
+    /// FK on a node table that encodes this relationship.
+    /// When set, the skeleton can join node tables directly without the edge table.
+    pub fk: Option<HopFk>,
+}
+
+/// FK info for a hop — which node has the FK column.
+#[derive(Clone, Debug)]
+pub struct HopFk {
+    /// Node alias that holds the FK (must be one of from_node or to_node).
+    pub fk_node: String,
+    /// The FK column on that node (e.g. "project_id").
+    pub fk_column: String,
+    /// The other node's alias (the one the FK points to).
+    pub target_node: String,
 }
 
 /// Per-node plan: where its ID comes from and what to do with it.

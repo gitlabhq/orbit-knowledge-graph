@@ -281,6 +281,19 @@ pub struct EdgeEntity {
     pub target_kind: String,
     /// ClickHouse table that stores this edge (defaults to the global edge table).
     pub destination_table: String,
+    /// Foreign key on a node table that encodes this relationship.
+    /// When present, the compiler can join node tables directly instead of
+    /// scanning the edge table.
+    pub fk: Option<EdgeFk>,
+}
+
+/// FK metadata for an edge variant.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EdgeFk {
+    /// Which node type holds the FK column.
+    pub node: String,
+    /// The FK column name (e.g. "project_id", "author_id").
+    pub column: String,
 }
 
 /// ETL configuration for edges sourced from join tables.

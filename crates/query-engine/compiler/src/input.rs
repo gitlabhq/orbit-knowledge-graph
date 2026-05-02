@@ -540,6 +540,18 @@ pub struct InputRelationship {
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
+    /// FK on a node table that encodes this relationship. Set during normalization.
+    #[serde(skip)]
+    pub fk: Option<InputFk>,
+}
+
+/// FK metadata resolved from the ontology.
+#[derive(Debug, Clone)]
+pub struct InputFk {
+    /// Which node type holds the FK column.
+    pub node: String,
+    /// The FK column name (e.g. "project_id").
+    pub column: String,
 }
 
 fn default_hops() -> u32 {
