@@ -36,6 +36,12 @@ fixtures:
   - path: app/assets/javascripts/components/child_badge.vue
     content: |
       <script>
+      export class Helper {
+        open() {
+          return 'helper';
+        }
+      }
+
       export default {
         name: 'ChildBadge',
         methods: {
@@ -45,6 +51,14 @@ fixtures:
         },
       };
       </script>
+
+  - path: app/assets/javascripts/components/component_host.ts
+    content: |
+      import ChildBadge from './child_badge.vue';
+
+      export function mountBadge() {
+        return new ChildBadge();
+      }
 
   - path: app/assets/javascripts/components/parent_panel.vue
     content: |
@@ -93,6 +107,17 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/components/child_badge.vue::default" } }
+
+  - name: Vue default import resolves to virtual component when SFC also exports classes
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/component_host.ts'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "mountBadge", callee_file: "app/assets/javascripts/components/child_badge.vue", callee: "ChildBadge" } }
+      - { not: true, row: { callee: "Helper" } }
 
   - name: Vue GraphQL default import targets primary export proxy
     query: |

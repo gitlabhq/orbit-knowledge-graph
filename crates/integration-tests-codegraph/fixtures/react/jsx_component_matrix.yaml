@@ -1,0 +1,332 @@
+name: "React JSX component resolution matrix"
+pipeline: js
+fixtures:
+  - path: src/components/button.tsx
+    content: |
+      export interface ButtonProps {
+        label: string;
+      }
+
+      export function Button(props: ButtonProps) {
+        return <button>{props.label}</button>;
+      }
+
+      export const IconButton = (props: ButtonProps) => {
+        return <Button label={props.label} />;
+      };
+
+      export class ClassBadge {}
+
+  - path: src/components/card.tsx
+    content: |
+      import { Button, IconButton, ClassBadge } from './button';
+
+      function Card() {
+        return (
+          <section>
+            <Button label="primary" />
+            <IconButton label="icon" />
+            <ClassBadge />
+          </section>
+        );
+      }
+
+      export default Card;
+
+      export const CardFooter = () => {
+        return <Button label="footer" />;
+      };
+
+  - path: src/components/icons.tsx
+    content: |
+      export function StatusIcon() {
+        return <svg />;
+      }
+
+      export function WarningIcon() {
+        return <svg />;
+      }
+
+      export const Icons = {
+        StatusIcon,
+        WarningIcon,
+      };
+
+  - path: src/components/index.ts
+    content: |
+      export { Button as PrimaryButton, IconButton, ClassBadge } from './button';
+      export { default as Card, CardFooter } from './card';
+      export * from './icons';
+
+  - path: src/Home.tsx
+    content: |
+      import React from 'react';
+      import DefaultCard from './components/card';
+      import {
+        Card,
+        CardFooter,
+        PrimaryButton,
+        Icons,
+        StatusIcon,
+      } from './components';
+      import { Button as RenamedButton } from './components/button';
+      import * as CardModule from './components/card';
+      import * as Reexported from './components';
+      import { MissingExternal } from '@external/ui';
+
+      export function Home() {
+        return (
+          <main>
+            <Card />
+            <CardFooter />
+            <PrimaryButton label="ok" />
+            <Icons.StatusIcon />
+            <Icons.WarningIcon />
+            <StatusIcon />
+            <Reexported.IconButton label="namespace" />
+            <MissingExternal />
+          </main>
+        );
+      }
+
+      export function Panel(props: { children: React.ReactNode }) {
+        return <section>{props.children}</section>;
+      }
+
+      export function FragmentHost() {
+        return (
+          <>
+            <Panel>
+              <PrimaryButton label="child" />
+            </Panel>
+          </>
+        );
+      }
+
+      export function AliasDefaultHost() {
+        return (
+          <>
+            <DefaultCard />
+            <RenamedButton label="alias" />
+          </>
+        );
+      }
+
+      export function NamespaceDefaultHost() {
+        return <CardModule.default />;
+      }
+
+      export function NativeOnly() {
+        return (
+          <div>
+            <span />
+          </div>
+        );
+      }
+
+  - path: src/Plain.jsx
+    content: |
+      import { Button } from './components/button';
+
+      export function PlainJsx() {
+        return <Button label="plain" />;
+      }
+
+tests:
+  - name: React component definitions are extracted across TSX files
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN [
+        'src/components/button.tsx',
+        'src/components/card.tsx',
+        'src/components/icons.tsx',
+        'src/Home.tsx',
+        'src/Plain.jsx'
+      ]
+        AND d.fqn IN [
+          'ButtonProps',
+          'Button',
+          'IconButton',
+          'ClassBadge',
+          'Card',
+          'CardFooter',
+          'StatusIcon',
+          'WarningIcon',
+          'Icons',
+          'Home',
+          'Panel',
+          'FragmentHost',
+          'AliasDefaultHost',
+          'NamespaceDefaultHost',
+          'NativeOnly',
+          'PlainJsx'
+        ]
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path, fqn
+    assert:
+      - { row_count: 16 }
+      - { row: { file_path: "src/components/button.tsx", fqn: "ButtonProps", type: "Interface" } }
+      - { row: { file_path: "src/components/button.tsx", fqn: "Button", type: "Function" } }
+      - { row: { file_path: "src/components/button.tsx", fqn: "IconButton", type: "Function" } }
+      - { row: { file_path: "src/components/button.tsx", fqn: "ClassBadge", type: "Class" } }
+      - { row: { file_path: "src/components/card.tsx", fqn: "Card", type: "Function" } }
+      - { row: { file_path: "src/components/card.tsx", fqn: "CardFooter", type: "Function" } }
+      - { row: { file_path: "src/components/icons.tsx", fqn: "StatusIcon", type: "Function" } }
+      - { row: { file_path: "src/components/icons.tsx", fqn: "WarningIcon", type: "Function" } }
+      - { row: { file_path: "src/components/icons.tsx", fqn: "Icons", type: "Variable" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "Home", type: "Function" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "Panel", type: "Function" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "FragmentHost", type: "Function" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "AliasDefaultHost", type: "Function" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "NamespaceDefaultHost", type: "Function" } }
+      - { row: { file_path: "src/Home.tsx", fqn: "NativeOnly", type: "Function" } }
+      - { row: { file_path: "src/Plain.jsx", fqn: "PlainJsx", type: "Function" } }
+
+  - name: React barrel imports resolve default named namespace and member targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'src/Home.tsx'
+      RETURN i.import_type AS import_type, i.path AS path, i.name AS name, i.alias AS alias, d.fqn AS target
+      ORDER BY import_type, name, target
+    assert:
+      - { row_count: 9 }
+      - { row: { import_type: "DefaultImport", path: "./components/card", name: "default", alias: "DefaultCard", target: "src/components/card.tsx::default" } }
+      - { row: { import_type: "NamedImport", path: "./components/button", name: "Button", alias: "RenamedButton", target: "src/components/button.tsx::Button" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "Card", alias: null, target: "src/components/index.ts::Card" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "CardFooter", alias: null, target: "src/components/index.ts::CardFooter" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "Icons", alias: null, target: "src/components/icons.tsx::Icons" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "PrimaryButton", alias: null, target: "src/components/index.ts::PrimaryButton" } }
+      - { row: { import_type: "NamedImport", path: "./components", name: "StatusIcon", alias: null, target: "src/components/icons.tsx::StatusIcon" } }
+      - { row: { import_type: "NamespaceImport", path: "./components/card", name: null, alias: "CardModule", target: "src/components/card.tsx" } }
+      - { row: { import_type: "NamespaceImport", path: "./components", name: null, alias: "Reexported", target: "src/components/index.ts" } }
+
+  - name: External React and package imports stay unresolved
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'src/Home.tsx'
+        AND i.path IN ['react', '@external/ui']
+      RETURN i.path AS path, i.name AS name
+      ORDER BY path, name
+    assert:
+      - { row_count: 2 }
+      - { row: { path: "react", name: "default" } }
+      - { row: { path: "@external/ui", name: "MissingExternal" } }
+
+  - name: External React and package imports have no local targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'src/Home.tsx'
+        AND i.path IN ['react', '@external/ui']
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: Cross-file JSX calls resolve through named default namespace and star reexports
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'Home'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY callee_file, callee
+    assert:
+      - { row_count: 6 }
+      - { row: { caller: "Home", callee_file: "src/components/button.tsx", callee: "Button" } }
+      - { row: { caller: "Home", callee_file: "src/components/button.tsx", callee: "IconButton" } }
+      - { row: { caller: "Home", callee_file: "src/components/card.tsx", callee: "Card" } }
+      - { row: { caller: "Home", callee_file: "src/components/card.tsx", callee: "CardFooter" } }
+      - { row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "StatusIcon" } }
+      - { row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "WarningIcon" } }
+      - { not: true, row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "Icons" } }
+
+  - name: Cross-file JSX calls resolve from default component internals
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'Card'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY callee
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "Button" } }
+      - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "ClassBadge" } }
+      - { row: { caller: "Card", callee_file: "src/components/button.tsx", callee: "IconButton" } }
+
+  - name: Local JSX calls inside the same TSX file still resolve
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn IN ['IconButton', 'CardFooter']
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "CardFooter", callee_file: "src/components/button.tsx", callee: "Button" } }
+      - { row: { caller: "IconButton", callee_file: "src/components/button.tsx", callee: "Button" } }
+
+  - name: JSX fragments children aliases and default imports resolve
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn IN ['FragmentHost', 'AliasDefaultHost', 'NamespaceDefaultHost']
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee_file, callee
+    assert:
+      - { row_count: 5 }
+      - { row: { caller: "AliasDefaultHost", callee_file: "src/components/button.tsx", callee: "Button" } }
+      - { row: { caller: "AliasDefaultHost", callee_file: "src/components/card.tsx", callee: "Card" } }
+      - { row: { caller: "FragmentHost", callee_file: "src/Home.tsx", callee: "Panel" } }
+      - { row: { caller: "FragmentHost", callee_file: "src/components/button.tsx", callee: "Button" } }
+      - { row: { caller: "NamespaceDefaultHost", callee_file: "src/components/card.tsx", callee: "Card" } }
+
+  - name: Plain JSX files resolve imported TSX components
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/Plain.jsx'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "PlainJsx", callee_file: "src/components/button.tsx", callee: "Button" } }
+
+  - name: Plain JSX imports target TSX component definitions
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'src/Plain.jsx'
+      RETURN i.path AS path, i.name AS name, d.fqn AS target
+    assert:
+      - { row_count: 1 }
+      - { row: { path: "./components/button", name: "Button", target: "src/components/button.tsx::Button" } }
+
+  - name: TSX type declarations do not create runtime call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/components/button.tsx'
+        AND callee.name = 'ButtonProps'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Intrinsic JSX tags do not create code call edges
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'NativeOnly'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { empty: true }
+
+  - name: Intrinsic JSX tags do not create definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN [
+        'src/components/button.tsx',
+        'src/components/card.tsx',
+        'src/components/icons.tsx',
+        'src/Home.tsx',
+        'src/Plain.jsx'
+      ]
+        AND d.name IN ['button', 'section', 'main', 'div', 'span', 'svg']
+      RETURN d.file_path AS file_path, d.name AS name
+    assert:
+      - { empty: true }

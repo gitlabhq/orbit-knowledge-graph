@@ -1,0 +1,352 @@
+name: "Next.js router matrix expansion"
+pipeline: js
+fixtures:
+  - path: jsconfig.json
+    content: |
+      {
+        "compilerOptions": {
+          "baseUrl": "src",
+          "paths": {
+            "@components/*": ["components/*"],
+            "@features/*": ["features/*"],
+            "@lib": ["lib/index.ts"]
+          }
+        }
+      }
+
+  - path: src/components/Nav.tsx
+    content: |
+      export default function Nav() {
+        return <nav />;
+      }
+
+  - path: src/components/Banner.tsx
+    content: |
+      export function Banner() {
+        return <section />;
+      }
+
+  - path: src/components/index.ts
+    content: |
+      export { default as Nav } from './Nav';
+      export { Banner } from './Banner';
+
+  - path: src/features/dashboard/index.tsx
+    content: |
+      export default function Dashboard() {
+        return <main />;
+      }
+
+  - path: src/lib/index.ts
+    content: |
+      export function getMarketing() {
+        return { title: 'Marketing' };
+      }
+
+      export function getItem() {
+        return { id: 1 };
+      }
+
+      export function updateItem() {
+        return { ok: true };
+      }
+
+  - path: src/app/(marketing)/blog/[...slug]/page.tsx
+    content: |
+      import { Nav, Banner } from 'components';
+      import Dashboard from '@features/dashboard';
+      import { getMarketing } from '@lib';
+
+      export default function MarketingCatchAll() {
+        getMarketing();
+        return (
+          <>
+            <Nav />
+            <Banner />
+            <Dashboard />
+          </>
+        );
+      }
+
+  - path: src/app/shop/[[...filters]]/page.tsx
+    content: |
+      import * as Components from 'components';
+
+      export function generateStaticParams() {
+        return [];
+      }
+
+      export default function ShopOptionalCatchAll() {
+        return <Components.Nav />;
+      }
+
+  - path: src/app/@modal/(.)login/page.tsx
+    content: |
+      import { Banner } from '@components/Banner';
+
+      export default function LoginModal() {
+        return <Banner />;
+      }
+
+  - path: src/app/loading.tsx
+    content: |
+      import { Nav } from 'components';
+
+      export default function Loading() {
+        return <Nav />;
+      }
+
+  - path: src/app/error.tsx
+    content: |
+      'use client';
+
+      import { Banner } from '@components/Banner';
+
+      export default function ErrorBoundary() {
+        return <Banner />;
+      }
+
+  - path: src/app/not-found.tsx
+    content: |
+      import { Nav } from 'components';
+
+      export default function NotFound() {
+        return <Nav />;
+      }
+
+  - path: src/app/template.tsx
+    content: |
+      export default function Template({ children }) {
+        return <>{children}</>;
+      }
+
+  - path: src/app/default.tsx
+    content: |
+      import { Banner } from '@components/Banner';
+
+      export default function SlotDefault() {
+        return <Banner />;
+      }
+
+  - path: src/app/api/items/[id]/route.ts
+    content: |
+      import type { NextRequest } from 'next/server';
+      import { NextResponse } from 'next/server';
+      import { getItem, updateItem } from '@lib';
+
+      export const runtime = 'edge';
+      export const dynamic = 'force-dynamic';
+      export const revalidate = 30;
+
+      export async function GET(_request: NextRequest) {
+        return NextResponse.json(getItem());
+      }
+
+      export async function PUT(_request: NextRequest) {
+        return NextResponse.json(updateItem());
+      }
+
+      export async function PATCH(_request: NextRequest) {
+        return Response.json(updateItem());
+      }
+
+      export async function DELETE(_request: NextRequest) {
+        return NextResponse.json(updateItem());
+      }
+
+      export async function HEAD() {
+        return getItem();
+      }
+
+      export async function OPTIONS() {
+        return getItem();
+      }
+
+  - path: src/app/actions.ts
+    content: |
+      'use server';
+
+      import { updateItem } from '@lib';
+
+      export function savePost() {
+        return updateItem();
+      }
+
+  - path: src/app/client-panel.tsx
+    content: |
+      'use client';
+
+      import { useRouter } from 'next/navigation';
+      import { savePost } from './actions';
+
+      export function ClientPanel() {
+        const router = useRouter();
+        savePost();
+        return <button data-path={router} />;
+      }
+
+tests:
+  - name: Next app router special path shapes are preserved as module definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'src/app/(marketing)/blog/[...slug]/page.tsx',
+        'src/app/shop/[[...filters]]/page.tsx',
+        'src/app/@modal/(.)login/page.tsx',
+        'src/app/loading.tsx',
+        'src/app/error.tsx',
+        'src/app/not-found.tsx',
+        'src/app/template.tsx',
+        'src/app/default.tsx',
+        'src/app/api/items/[id]/route.ts'
+      ]
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path
+    assert:
+      - { row_count: 9 }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", fqn: "src/app/(marketing)/blog/[...slug]/page.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", fqn: "src/app/shop/[[...filters]]/page.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", fqn: "src/app/@modal/(.)login/page.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/loading.tsx", fqn: "src/app/loading.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/error.tsx", fqn: "src/app/error.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/not-found.tsx", fqn: "src/app/not-found.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/template.tsx", fqn: "src/app/template.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/default.tsx", fqn: "src/app/default.tsx", type: "Module" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", fqn: "src/app/api/items/[id]/route.ts", type: "Module" } }
+
+  - name: Next route export proxies are synthesized for route conventions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'src/app/(marketing)/blog/[...slug]/page.tsx::default',
+        'src/app/shop/[[...filters]]/page.tsx::default',
+        'src/app/shop/[[...filters]]/page.tsx::generateStaticParams',
+        'src/app/api/items/[id]/route.ts::GET',
+        'src/app/api/items/[id]/route.ts::PUT',
+        'src/app/api/items/[id]/route.ts::PATCH',
+        'src/app/api/items/[id]/route.ts::DELETE',
+        'src/app/api/items/[id]/route.ts::HEAD',
+        'src/app/api/items/[id]/route.ts::OPTIONS',
+        'src/app/api/items/[id]/route.ts::runtime',
+        'src/app/api/items/[id]/route.ts::dynamic',
+        'src/app/api/items/[id]/route.ts::revalidate'
+      ]
+      RETURN d.fqn AS fqn, d.definition_type AS type
+      ORDER BY fqn
+    assert:
+      - { row_count: 12 }
+      - { row: { fqn: "src/app/(marketing)/blog/[...slug]/page.tsx::default", type: "Function" } }
+      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::default", type: "Function" } }
+      - { row: { fqn: "src/app/shop/[[...filters]]/page.tsx::generateStaticParams", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::GET", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::PUT", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::PATCH", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::DELETE", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::HEAD", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::OPTIONS", type: "Function" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::runtime", type: "Variable" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::dynamic", type: "Variable" } }
+      - { row: { fqn: "src/app/api/items/[id]/route.ts::revalidate", type: "Variable" } }
+
+  - name: Next jsconfig baseUrl paths aliases and barrels resolve imports
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN [
+        'src/app/(marketing)/blog/[...slug]/page.tsx',
+        'src/app/shop/[[...filters]]/page.tsx',
+        'src/app/@modal/(.)login/page.tsx',
+        'src/app/api/items/[id]/route.ts',
+        'src/app/client-panel.tsx'
+      ]
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.import_type AS import_type, d.fqn AS target
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 9 }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Banner", import_type: "NamedImport", target: "src/components/index.ts::Banner" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "components", name: "Nav", import_type: "NamedImport", target: "src/components/index.ts::Nav" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@features/dashboard", name: "default", import_type: "DefaultImport", target: "src/features/dashboard/index.tsx::default" } }
+      - { row: { file_path: "src/app/(marketing)/blog/[...slug]/page.tsx", path: "@lib", name: "getMarketing", import_type: "NamedImport", target: "src/lib/index.ts::getMarketing" } }
+      - { row: { file_path: "src/app/shop/[[...filters]]/page.tsx", path: "components", name: null, import_type: "NamespaceImport", target: "src/components/index.ts" } }
+      - { row: { file_path: "src/app/@modal/(.)login/page.tsx", path: "@components/Banner", name: "Banner", import_type: "NamedImport", target: "src/components/Banner.tsx::Banner" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "getItem", import_type: "NamedImport", target: "src/lib/index.ts::getItem" } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "@lib", name: "updateItem", import_type: "NamedImport", target: "src/lib/index.ts::updateItem" } }
+      - { row: { file_path: "src/app/client-panel.tsx", path: "./actions", name: "savePost", import_type: "NamedImport", target: "src/app/actions.ts::savePost" } }
+
+  - name: Next route components resolve through baseUrl aliases barrels and folder indexes
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
+          'src/app/(marketing)/blog/[...slug]/page.tsx',
+          'src/app/shop/[[...filters]]/page.tsx',
+          'src/app/@modal/(.)login/page.tsx',
+          'src/app/loading.tsx',
+          'src/app/error.tsx',
+          'src/app/not-found.tsx',
+          'src/app/default.tsx'
+        ]
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee_file, callee
+    assert:
+      - { row_count: 10 }
+      - { row: { caller: "MarketingCatchAll", callee_file: "src/components/Nav.tsx", callee: "Nav" } }
+      - { row: { caller: "MarketingCatchAll", callee_file: "src/components/Banner.tsx", callee: "Banner" } }
+      - { row: { caller: "MarketingCatchAll", callee_file: "src/features/dashboard/index.tsx", callee: "Dashboard" } }
+      - { row: { caller: "MarketingCatchAll", callee_file: "src/lib/index.ts", callee: "getMarketing" } }
+      - { row: { caller: "ShopOptionalCatchAll", callee_file: "src/components/Nav.tsx", callee: "Nav" } }
+      - { row: { caller: "LoginModal", callee_file: "src/components/Banner.tsx", callee: "Banner" } }
+      - { row: { caller: "Loading", callee_file: "src/components/Nav.tsx", callee: "Nav" } }
+      - { row: { caller: "ErrorBoundary", callee_file: "src/components/Banner.tsx", callee: "Banner" } }
+      - { row: { caller: "NotFound", callee_file: "src/components/Nav.tsx", callee: "Nav" } }
+      - { row: { caller: "SlotDefault", callee_file: "src/components/Banner.tsx", callee: "Banner" } }
+
+  - name: Next route handlers resolve one local helper edge per method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'src/app/api/items/[id]/route.ts'
+        AND callee.file_path = 'src/lib/index.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 6 }
+      - { row: { caller: "GET", callee: "getItem" } }
+      - { row: { caller: "PUT", callee: "updateItem" } }
+      - { row: { caller: "PATCH", callee: "updateItem" } }
+      - { row: { caller: "DELETE", callee: "updateItem" } }
+      - { row: { caller: "HEAD", callee: "getItem" } }
+      - { row: { caller: "OPTIONS", callee: "getItem" } }
+
+  - name: Next client and server directives do not block local calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN ['src/app/actions.ts', 'src/app/client-panel.tsx']
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "ClientPanel", callee_file: "src/app/actions.ts", callee: "savePost" } }
+      - { row: { caller: "savePost", callee_file: "src/lib/index.ts", callee: "updateItem" } }
+
+  - name: Next external package imports remain external in expanded matrix
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
+        AND i.path IN ['next/server', 'next/navigation']
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 3 }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextRequest", is_type_only: true } }
+      - { row: { file_path: "src/app/api/items/[id]/route.ts", path: "next/server", name: "NextResponse", is_type_only: false } }
+      - { row: { file_path: "src/app/client-panel.tsx", path: "next/navigation", name: "useRouter", is_type_only: false } }
+
+  - name: Next external package imports have no local targets in expanded matrix
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN ['src/app/api/items/[id]/route.ts', 'src/app/client-panel.tsx']
+        AND i.path IN ['next/server', 'next/navigation']
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { empty: true }

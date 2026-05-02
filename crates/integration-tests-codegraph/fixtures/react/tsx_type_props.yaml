@@ -1,0 +1,79 @@
+name: "React TSX type props and runtime helpers"
+pipeline: js
+fixtures:
+  - path: src/types.ts
+    content: |
+      export interface ButtonProps {
+        label: string;
+      }
+
+      export type ButtonVariant = 'primary' | 'secondary';
+
+  - path: src/use_button_label.ts
+    content: |
+      export function useButtonLabel(label: string): string {
+        return label.trim();
+      }
+
+  - path: src/Button.tsx
+    content: |
+      import type { ButtonProps, ButtonVariant } from './types';
+      import { useButtonLabel } from './use_button_label';
+
+      export function Button(props: ButtonProps & { variant: ButtonVariant }) {
+        const label = useButtonLabel(props.label);
+        return <button>{label}</button>;
+      }
+
+  - path: src/Toolbar.tsx
+    content: |
+      import { Button } from './Button';
+      import type { ButtonProps } from './types';
+
+      export function Toolbar(props: ButtonProps) {
+        return <Button label={props.label} variant="primary" />;
+      }
+
+tests:
+  - name: TSX type declarations and components are extracted
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN ['src/types.ts', 'src/Button.tsx', 'src/Toolbar.tsx']
+        AND d.name IN ['ButtonProps', 'ButtonVariant', 'Button', 'Toolbar']
+        AND d.fqn = d.name
+      RETURN d.file_path AS file_path, d.name AS name, d.definition_type AS type
+      ORDER BY file_path, name
+    assert:
+      - { row_count: 4 }
+      - { row: { file_path: "src/types.ts", name: "ButtonProps", type: "Interface" } }
+      - { row: { file_path: "src/types.ts", name: "ButtonVariant", type: "TypeAlias" } }
+      - { row: { file_path: "src/Button.tsx", name: "Button", type: "Function" } }
+      - { row: { file_path: "src/Toolbar.tsx", name: "Toolbar", type: "Function" } }
+
+  - name: TSX type-only imports are retained separately from runtime imports
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
+      RETURN i.file_path AS file_path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      ORDER BY file_path, name
+    assert:
+      - { row_count: 5 }
+      - { row: { file_path: "src/Button.tsx", name: "ButtonProps", is_type_only: true, target: "src/types.ts::ButtonProps" } }
+      - { row: { file_path: "src/Button.tsx", name: "ButtonVariant", is_type_only: true, target: "src/types.ts::ButtonVariant" } }
+      - { row: { file_path: "src/Button.tsx", name: "useButtonLabel", is_type_only: false, target: "src/use_button_label.ts::useButtonLabel" } }
+      - { row: { file_path: "src/Toolbar.tsx", name: "Button", is_type_only: false, target: "src/Button.tsx::Button" } }
+      - { row: { file_path: "src/Toolbar.tsx", name: "ButtonProps", is_type_only: true, target: "src/types.ts::ButtonProps" } }
+
+  - name: TSX runtime calls exclude type-only definitions
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN ['src/Button.tsx', 'src/Toolbar.tsx']
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+      ORDER BY caller, callee
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "Button", callee: "useButtonLabel" } }
+      - { row: { caller: "Toolbar", callee: "Button" } }
+      - { not: true, row: { callee: "ButtonProps" } }
+      - { not: true, row: { callee: "ButtonVariant" } }
