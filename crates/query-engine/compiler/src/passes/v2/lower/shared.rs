@@ -496,7 +496,19 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                         where_parts
                             .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }
-                    HydrationStrategy::Skip => {}
+                    HydrationStrategy::Skip => {
+                        // Edge-based queries: the security pass only sees
+                        // gl_edge (default access level). Nodes with
+                        // has_traversal_path may require a higher access
+                        // level — emit a FilterOnly subquery so their table
+                        // appears in the query and the security pass can
+                        // enforce the correct min_access_level.
+                        if np.has_traversal_path && np.table.is_some() {
+                            where_parts.extend(emit_filter_subquery(
+                                np, edge_alias, edge_col, &mut ctes,
+                            )?);
+                        }
+                    }
                 }
             }
             hydrated.insert(node_alias.clone());
