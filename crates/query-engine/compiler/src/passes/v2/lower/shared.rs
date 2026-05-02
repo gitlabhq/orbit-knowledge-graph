@@ -22,8 +22,12 @@ impl Skeleton {
     /// Build the skeleton plan from query input.
     pub fn plan(input: &Input) -> Self {
         let hops = build_hops(input);
-        let mut nodes = build_node_plans(input);
+        let nodes = build_node_plans(input);
 
+        // Reorder chain so the most selective node drives the scan.
+        let hops = reorder_by_selectivity(hops, &nodes);
+
+        let mut nodes = nodes;
         // Assign ID sources: which edge alias + column carries each node's ID.
         assign_id_sources(&hops, &input.relationships, &mut nodes);
 
@@ -95,6 +99,48 @@ impl SkeletonOutput {
 // Plan builders
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Reorder the hop chain so the most selective node is at the start.
+/// ClickHouse processes JOINs left-to-right, so the leftmost edge becomes
+/// the build side of the first hash join. Putting the selective end first
+/// means a tiny hash table probing outward instead of a large scan.
+fn reorder_by_selectivity(mut hops: Vec<Hop>, nodes: &HashMap<String, NodePlan>) -> Vec<Hop> {
+    if hops.len() <= 1 {
+        return hops;
+    }
+
+    // Find the most selective node in the chain.
+    let chain_start = &hops[0].from_node;
+    let chain_end = &hops.last().unwrap().to_node;
+
+    let start_sel = nodes
+        .get(chain_start)
+        .map(|np| np.selectivity)
+        .unwrap_or(Selectivity::Open);
+    let end_sel = nodes
+        .get(chain_end)
+        .map(|np| np.selectivity)
+        .unwrap_or(Selectivity::Open);
+
+    // If the end is more selective than the start, reverse the chain.
+    if end_sel < start_sel {
+        hops.reverse();
+        for hop in &mut hops {
+            std::mem::swap(&mut hop.from_node, &mut hop.to_node);
+            hop.direction = flip_direction(hop.direction);
+        }
+    }
+
+    hops
+}
+
+fn flip_direction(d: Direction) -> Direction {
+    match d {
+        Direction::Outgoing => Direction::Incoming,
+        Direction::Incoming => Direction::Outgoing,
+        Direction::Both => Direction::Both,
+    }
+}
+
 fn build_hops(input: &Input) -> Vec<Hop> {
     input
         .relationships
@@ -139,12 +185,12 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
 
 fn assign_id_sources(
     hops: &[Hop],
-    rels: &[InputRelationship],
+    _rels: &[InputRelationship],
     nodes: &mut HashMap<String, NodePlan>,
 ) {
-    for (i, (hop, rel)) in hops.iter().zip(rels.iter()).enumerate() {
+    for (i, hop) in hops.iter().enumerate() {
         let alias = format!("e{i}");
-        let (start_col, end_col) = rel.direction.edge_columns();
+        let (start_col, end_col) = hop.direction.edge_columns();
 
         if let Some(np) = nodes.get_mut(&hop.from_node) {
             if np.id_source.is_none() {
@@ -260,11 +306,11 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
 
     for (i, hop) in skeleton.hops.iter().enumerate() {
         let alias = format!("e{i}");
-        let (start_col, end_col) = input.relationships[i].direction.edge_columns();
+        let (start_col, end_col) = hop.direction.edge_columns();
 
         if let Some(prev_from) = from.take() {
             let prev_alias = &edge_aliases[i - 1];
-            let prev_end = input.relationships[i - 1].direction.edge_columns().1;
+            let prev_end = skeleton.hops[i - 1].direction.edge_columns().1;
             let right = TableRef::scan(&hop.edge_table, &alias);
             let join_on = Expr::eq(
                 Expr::col(prev_alias, prev_end),
@@ -334,7 +380,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
 
     for (i, hop) in skeleton.hops.iter().enumerate() {
         let edge_alias = &edge_aliases[i];
-        let (start_col, end_col) = input.relationships[i].direction.edge_columns();
+        let (start_col, end_col) = hop.direction.edge_columns();
 
         for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
             if hydrated.contains(node_alias) {
