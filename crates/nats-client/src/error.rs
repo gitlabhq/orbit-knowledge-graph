@@ -1,3 +1,4 @@
+use circuit_breaker::CircuitBreakerError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -60,6 +61,49 @@ pub enum NatsError {
 
     #[error("KV keys listing failed for '{bucket}': {message}")]
     KvKeys { bucket: String, message: String },
+
+    #[error("circuit open for service {service}")]
+    CircuitOpen { service: &'static str },
+}
+
+impl NatsError {
+    pub fn is_transient(&self) -> bool {
+        use async_nats::jetstream::context::{CreateStreamErrorKind, GetStreamErrorKind};
+
+        match self {
+            Self::Connection(_)
+            | Self::Publish(_)
+            | Self::Subscribe(_)
+            | Self::Ack(_)
+            | Self::Nack(_)
+            | Self::KvBucket { .. }
+            | Self::KvGet { .. }
+            | Self::KvPut { .. }
+            | Self::KvDelete { .. }
+            | Self::KvKeys { .. } => true,
+
+            Self::StreamNotFound { source, .. } => matches!(
+                source.kind(),
+                GetStreamErrorKind::Request | GetStreamErrorKind::JetStream(_)
+            ),
+            Self::StreamCreationFailed { source, .. } => matches!(
+                source.kind(),
+                CreateStreamErrorKind::TimedOut
+                    | CreateStreamErrorKind::JetStreamUnavailable
+                    | CreateStreamErrorKind::Response
+                    | CreateStreamErrorKind::JetStream(_)
+            ),
+
+            Self::PublishDuplicate | Self::CircuitOpen { .. } => false,
+        }
+    }
+
+    pub(crate) fn from_circuit_breaker(error: CircuitBreakerError<Self>) -> Self {
+        match error {
+            CircuitBreakerError::Open { service } => Self::CircuitOpen { service },
+            CircuitBreakerError::Inner(inner) => inner,
+        }
+    }
 }
 
 pub(crate) fn map_connect_error(error: async_nats::ConnectError) -> NatsError {

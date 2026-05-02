@@ -7730,6 +7730,7 @@ dependencies = [
  "async-nats",
  "async-trait",
  "bytes",
+ "circuit-breaker",
  "futures",
  "gkg-server-config",
  "parking_lot",
