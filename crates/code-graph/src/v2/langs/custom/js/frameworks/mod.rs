@@ -9,7 +9,9 @@ mod vue;
 
 use oxc_linter::loader::{JavaScriptSource, PartialLoader};
 
-pub(in crate::v2::langs::custom::js) use vue::extract_vue_options_api;
+pub(in crate::v2::langs::custom::js) use vue::{
+    extract_vue_options_api, is_vue_like_path, vue_default_component_def,
+};
 
 use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
 

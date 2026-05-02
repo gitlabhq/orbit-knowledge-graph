@@ -9,7 +9,9 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
-use super::super::frameworks::extract_vue_options_api;
+use super::super::frameworks::{
+    extract_vue_options_api, is_vue_like_path, vue_default_component_def,
+};
 use super::super::types::{
     ExportedBinding, ImportedName, JsClassInfo, JsDef, JsDefKind, JsFileAnalysis, JsImport,
     JsImportKind, JsInvocationSupport, JsModuleInfo,
@@ -903,14 +905,4 @@ impl JsAnalyzer {
             module_info,
         })
     }
-}
-
-fn is_vue_like_path(relative_path: &str) -> bool {
-    relative_path.ends_with(".vue") || relative_path.contains(".vue.")
-}
-
-fn vue_default_component_def(defs: &[JsDef], default_range: Range) -> Option<&JsDef> {
-    defs.iter()
-        .filter(|def| def.kind == JsDefKind::Class && def.is_exported)
-        .find(|def| def.range.is_contained_within(default_range))
 }

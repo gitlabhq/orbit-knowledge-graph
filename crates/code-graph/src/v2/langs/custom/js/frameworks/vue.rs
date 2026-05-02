@@ -106,8 +106,17 @@ fn vue_component_object_from_call<'a>(
         .map(|object| &**object)
 }
 
-fn is_vue_like_path(relative_path: &str) -> bool {
+pub(in crate::v2::langs::custom::js) fn is_vue_like_path(relative_path: &str) -> bool {
     relative_path.ends_with(".vue") || relative_path.contains(".vue.")
+}
+
+pub(in crate::v2::langs::custom::js) fn vue_default_component_def(
+    defs: &[JsDef],
+    default_range: Range,
+) -> Option<&JsDef> {
+    defs.iter()
+        .filter(|def| def.kind == JsDefKind::Class && def.is_exported)
+        .find(|def| def.range.is_contained_within(default_range))
 }
 
 fn is_known_vue_component_wrapper(call: &CallExpression<'_>) -> bool {

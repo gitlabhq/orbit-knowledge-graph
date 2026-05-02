@@ -12,9 +12,9 @@ use std::collections::HashMap;
 use bumpalo::Bump;
 use oxc::ast::ast::{
     ArrowFunctionExpression, AssignmentExpression, AssignmentTarget, CallExpression, Class,
-    Expression, FormalParameters, Function, IfStatement, JSXElementName, JSXMemberExpressionObject,
-    JSXOpeningElement, LogicalExpression, MethodDefinition, NewExpression, ObjectProperty, Program,
-    TSType, TSTypeName, TaggedTemplateExpression, VariableDeclarator, WhileStatement,
+    Expression, FormalParameters, Function, IfStatement, JSXOpeningElement, LogicalExpression,
+    MethodDefinition, NewExpression, ObjectProperty, Program, TSType, TSTypeName,
+    TaggedTemplateExpression, VariableDeclarator, WhileStatement,
 };
 use oxc::ast_visit::{Visit, walk};
 use oxc::syntax::symbol::SymbolId;
@@ -29,8 +29,9 @@ use super::super::types::{
 use super::analyzer::Ctx;
 use super::calls::{
     binding_from_identifier_reference, build_import_binding_map,
-    imported_call_from_jsx_member_expression, imported_call_from_member_expression,
+    imported_call_from_member_expression,
 };
+use super::jsx::{self, JsxInvocation};
 
 pub(super) fn extract_call_edges<'a>(
     ctx: &Ctx,
@@ -386,46 +387,6 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
         self.append_invocation(name, chain, invocation_kind);
     }
 
-    fn record_jsx_invocation_from_name(&mut self, name: &JSXElementName<'a>) {
-        match name {
-            JSXElementName::IdentifierReference(identifier) => {
-                if is_intrinsic_jsx_name(identifier.name.as_str()) {
-                    return;
-                }
-
-                if let Some(binding) =
-                    binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
-                {
-                    self.record_imported_call(JsImportedCall {
-                        binding,
-                        member_path: Vec::new(),
-                        invocation_kind: JsInvocationKind::Jsx,
-                    });
-                    return;
-                }
-
-                self.append_invocation(identifier.name.to_string(), None, JsInvocationKind::Jsx);
-            }
-            JSXElementName::MemberExpression(member) => {
-                if let Some(imported_call) = imported_call_from_jsx_member_expression(
-                    self.ctx,
-                    member,
-                    &self.import_bindings,
-                    JsInvocationKind::Jsx,
-                ) {
-                    self.record_imported_call(imported_call);
-                    return;
-                }
-
-                if let Some((name, chain)) = jsx_invocation_target(name) {
-                    self.append_invocation(name, chain, JsInvocationKind::Jsx);
-                }
-            }
-            JSXElementName::ThisExpression(_) => {}
-            _ => {}
-        }
-    }
-
     fn walk_if_statement_manual(&mut self, it: &IfStatement<'a>) {
         self.visit_expression(&it.test);
         let pre_block = self.current_block;
@@ -543,7 +504,15 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
     }
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
-        self.record_jsx_invocation_from_name(&it.name);
+        match jsx::invocation_from_name(self.ctx, &it.name, &self.import_bindings) {
+            Some(JsxInvocation::Imported(imported_call)) => {
+                self.record_imported_call(imported_call);
+            }
+            Some(JsxInvocation::Local { name, chain }) => {
+                self.append_invocation(name, chain, JsInvocationKind::Jsx);
+            }
+            None => {}
+        }
         walk::walk_jsx_opening_element(self, it);
     }
 
@@ -676,45 +645,4 @@ fn bare_invocation_steps(callee: &Expression<'_>) -> Option<Vec<ExpressionStep>>
         }
         _ => None,
     }
-}
-
-fn is_intrinsic_jsx_name(name: &str) -> bool {
-    name.chars()
-        .next()
-        .is_some_and(|ch| ch.is_ascii_lowercase())
-}
-
-fn jsx_invocation_target(
-    name: &JSXElementName<'_>,
-) -> Option<(String, Option<Vec<ExpressionStep>>)> {
-    match name {
-        JSXElementName::IdentifierReference(identifier) => {
-            Some((identifier.name.to_string(), None))
-        }
-        JSXElementName::ThisExpression(_) => None,
-        JSXElementName::MemberExpression(member) => {
-            let mut chain = jsx_member_object_steps(&member.object)?;
-            chain.push(ExpressionStep::Call(
-                member.property.name.to_string().into(),
-            ));
-            Some((member.property.name.to_string(), Some(chain)))
-        }
-        _ => None,
-    }
-}
-
-fn jsx_member_object_steps(object: &JSXMemberExpressionObject<'_>) -> Option<Vec<ExpressionStep>> {
-    stacker::maybe_grow(32 * 1024, 1024 * 1024, || match object {
-        JSXMemberExpressionObject::IdentifierReference(identifier) => {
-            Some(vec![ExpressionStep::Ident(identifier.name.as_str().into())])
-        }
-        JSXMemberExpressionObject::MemberExpression(member) => {
-            let mut chain = jsx_member_object_steps(&member.object)?;
-            chain.push(ExpressionStep::Field(
-                member.property.name.to_string().into(),
-            ));
-            Some(chain)
-        }
-        JSXMemberExpressionObject::ThisExpression(_) => Some(vec![ExpressionStep::This]),
-    })
 }
