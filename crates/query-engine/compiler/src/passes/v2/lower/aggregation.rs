@@ -11,10 +11,6 @@ use super::shared::requested_columns;
 use super::types::*;
 
 pub fn lower_aggregation(input: &mut Input) -> Result<Node> {
-    if input.relationships.is_empty() {
-        return super::traversal::lower_traversal(input);
-    }
-
     let skeleton = Skeleton::plan(input);
     let output = skeleton.emit(input)?;
     let (agg_select, group_by, order_by) = build_aggregation(input)?;
