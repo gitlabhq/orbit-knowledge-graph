@@ -163,22 +163,32 @@ fn build_hops(input: &Input) -> Vec<Hop> {
         .iter()
         .map(|rel| {
             let edge_table = resolve_edge_table(input, &rel.types);
-            let fk =
-                rel.fk.as_ref().map(|input_fk| {
-                    let (fk_node, target_node) = if input_fk.node == rel.from
-                        || input.nodes.iter().any(|n| {
-                            n.entity.as_deref() == Some(&input_fk.node) && n.id == rel.from
-                        }) {
-                        (rel.from.clone(), rel.to.clone())
-                    } else {
-                        (rel.to.clone(), rel.from.clone())
-                    };
-                    HopFk {
-                        fk_node,
-                        fk_column: input_fk.column.clone(),
-                        target_node,
-                    }
-                });
+            let fk = rel.fk_column.as_ref().map(|col| {
+                // Resolve which node has the FK column by checking node tables.
+                let from_has_col = input
+                    .compiler
+                    .table_columns
+                    .get(
+                        input
+                            .nodes
+                            .iter()
+                            .find(|n| n.id == rel.from)
+                            .and_then(|n| n.table.as_deref())
+                            .unwrap_or(""),
+                    )
+                    .is_some_and(|cols| cols.contains(col));
+
+                let (fk_node, target_node) = if from_has_col {
+                    (rel.from.clone(), rel.to.clone())
+                } else {
+                    (rel.to.clone(), rel.from.clone())
+                };
+                HopFk {
+                    fk_node,
+                    fk_column: col.clone(),
+                    target_node,
+                }
+            });
             Hop {
                 rel_types: rel.types.clone(),
                 edge_table,

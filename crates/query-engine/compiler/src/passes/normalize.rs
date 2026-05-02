@@ -242,28 +242,24 @@ fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
         let from_entity = entity_for.get(rel.from.as_str()).copied();
         let to_entity = entity_for.get(rel.to.as_str()).copied();
 
-        // Find FK: all rel types must agree on the same FK for this (from, to) pair.
-        let mut common_fk: Option<(&str, &str)> = None;
+        // Find FK: all rel types must agree on the same fk_column for this (from, to) pair.
+        let mut common_fk: Option<&str> = None;
         let mut all_match = true;
 
         for rel_type in &rel.types {
-            let fk = ontology
+            let fk_col = ontology
                 .edges()
                 .find(|e| {
                     e.relationship_kind == *rel_type
                         && Some(e.source_kind.as_str()) == from_entity
                         && Some(e.target_kind.as_str()) == to_entity
                 })
-                .and_then(|e| e.fk.as_ref());
+                .and_then(|e| e.fk_column.as_deref());
 
-            match (&common_fk, fk) {
-                (None, Some(fk)) => common_fk = Some((&fk.node, &fk.column)),
-                (Some((n, c)), Some(fk)) if *n == fk.node && *c == fk.column => {}
-                (Some(_), Some(_)) => {
-                    all_match = false;
-                    break;
-                }
-                (Some(_), None) => {
+            match (common_fk, fk_col) {
+                (None, Some(col)) => common_fk = Some(col),
+                (Some(c), Some(col)) if c == col => {}
+                (Some(_), Some(_)) | (Some(_), None) => {
                     all_match = false;
                     break;
                 }
@@ -272,11 +268,8 @@ fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
         }
 
         if all_match {
-            if let Some((node, column)) = common_fk {
-                rel.fk = Some(crate::input::InputFk {
-                    node: node.to_string(),
-                    column: column.to_string(),
-                });
+            if let Some(col) = common_fk {
+                rel.fk_column = Some(col.to_string());
             }
         }
     }
