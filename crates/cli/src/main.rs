@@ -7,7 +7,7 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
-use gitalisk_core::repository::gitalisk_repository::{CoreGitaliskRepository, IterFileOptions};
+use gitalisk_core::repository::gitalisk_repository::IterFileOptions;
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{self, ResultFormatter};
@@ -656,7 +656,7 @@ async fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    pipeline_config.file_inventory = Some(gitalisk_file_inventory(&git.repo_path)?);
+    pipeline_config.file_inventory = Some(gitalisk_file_inventory(git)?);
 
     let db_path = store.db_path();
     let client =
@@ -738,14 +738,10 @@ async fn index_repo(
 }
 
 fn gitalisk_file_inventory(
-    repo_path: &std::path::Path,
+    git: &workspace::GitInfo,
 ) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
-    let path_str = repo_path
-        .to_str()
-        .context("repository path is not UTF-8")?
-        .to_string();
-    let repo = CoreGitaliskRepository::new(path_str.clone(), path_str);
-    let files = repo
+    let files = git
+        .repository()
         .get_repo_files(IterFileOptions {
             include_ignored: false,
             include_hidden: true,
@@ -754,7 +750,7 @@ fn gitalisk_file_inventory(
         .with_context(|| {
             format!(
                 "failed to list repository files with Gitalisk in {}",
-                repo_path.display()
+                git.repo_path.display()
             )
         })?;
 
@@ -763,7 +759,7 @@ fn gitalisk_file_inventory(
         .map(|file| {
             let path = file.path();
             let relative_path = path
-                .strip_prefix(repo_path)
+                .strip_prefix(&git.repo_path)
                 .unwrap_or(path)
                 .to_string_lossy()
                 .to_string();
