@@ -487,7 +487,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                 match np.hydration {
                     HydrationStrategy::Join => {
                         let (new_from, ns, nw) =
-                            emit_node_join(from, np, edge_alias, edge_col, input)?;
+                            emit_node_join(from, np, edge_alias, edge_col, input, false)?;
                         from = new_from;
                         selects.extend(ns);
                         where_parts.extend(nw);
@@ -624,7 +624,7 @@ fn emit_fk_direct(skeleton: &Skeleton, fk: &HopFk, input: &mut Input) -> Result<
             && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
     let mut ctes = Vec::new();
     if target_needs_join {
-        let (new_from, ns, nw) = emit_node_join(from, target_np, fk_alias, &fk.fk_column, input)?;
+        let (new_from, ns, nw) = emit_node_join(from, target_np, fk_alias, &fk.fk_column, input, true)?;
         selects.extend(ns);
         where_parts.extend(nw);
         return Ok(SkeletonOutput {
@@ -846,7 +846,7 @@ fn emit_fk_star(
                 && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
         if target_needs_join {
             let (new_from, ns, nw) =
-                emit_node_join(from, target_np, center_alias, &fk.fk_column, input)?;
+                emit_node_join(from, target_np, center_alias, &fk.fk_column, input, true)?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
@@ -981,12 +981,20 @@ fn emit_node_ids_on_edge(
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Join a node's dedup subquery into the FROM tree.
+///
+/// `use_traversal_path_join`: when true, adds `node.traversal_path =
+/// edge_alias.traversal_path` to the ON clause. Only valid when `edge_alias`
+/// is another node table (FK paths) — NOT when it's an edge table, because
+/// edge tables store the *target's* namespace path which differs from the
+/// source node's traversal_path.
 fn emit_node_join(
     from: TableRef,
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
     input: &Input,
+    use_traversal_path_join: bool,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = np
         .table
@@ -1108,7 +1116,7 @@ fn emit_node_join(
                 Expr::col(alias, DEFAULT_PRIMARY_KEY),
                 Expr::col(edge_alias, edge_col),
             );
-            if np.has_traversal_path {
+            if use_traversal_path_join && np.has_traversal_path {
                 Expr::and(
                     id_join,
                     Expr::eq(
