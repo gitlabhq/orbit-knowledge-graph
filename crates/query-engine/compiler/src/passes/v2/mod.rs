@@ -11,5 +11,4 @@
 //! └── aggregation.rs   — skeleton + GROUP BY + agg functions
 //! ```
 
-pub mod enforce;
 pub mod lower;

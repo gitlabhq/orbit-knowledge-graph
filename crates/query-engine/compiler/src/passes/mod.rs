@@ -149,24 +149,7 @@ where
     }
 }
 
-pub struct EnforceV2Pass;
 
-impl<E, S> CompilerPass<E, S> for EnforceV2Pass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx,
-{
-    const NAME: &'static str = "enforce_v2";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let mut node = state.take_node()?;
-        let input = state.input()?;
-        let result_context = v2::enforce::enforce_return(&mut node, input)?;
-        state.set_node(node);
-        state.set_result_ctx(result_context);
-        Ok(())
-    }
-}
 
 pub struct SecurityPass;
 
