@@ -2401,4 +2401,35 @@ properties:
             "local edge table should not be prefixed"
         );
     }
+
+    #[test]
+    fn fk_column_loaded_from_edge_yaml() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let in_project_mr = ontology
+            .edges()
+            .find(|e| {
+                e.relationship_kind == "IN_PROJECT"
+                    && e.source_kind == "MergeRequest"
+                    && e.target_kind == "Project"
+            })
+            .expect("IN_PROJECT MR→Project should exist");
+        assert_eq!(
+            in_project_mr.fk_column.as_deref(),
+            Some("project_id"),
+            "IN_PROJECT MR→Project should declare fk_column = project_id"
+        );
+    }
+
+    #[test]
+    fn fk_column_none_when_not_declared() {
+        let ontology = Ontology::load_embedded().expect("should load");
+        let reviewer = ontology
+            .edges()
+            .find(|e| e.relationship_kind == "REVIEWER")
+            .expect("REVIEWER should exist");
+        assert_eq!(
+            reviewer.fk_column, None,
+            "REVIEWER should not declare fk_column (many-to-many)"
+        );
+    }
 }
