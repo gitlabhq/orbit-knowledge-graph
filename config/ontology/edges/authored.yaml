@@ -5,20 +5,16 @@ description: Authorship relationship between users and entities
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Note, id: id }
-    fk: { node: Note, column: author_id }
     description: "User authored note."
 
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
-    fk: { node: MergeRequest, column: author_id }
     description: "User authored merge request."
 
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
-    fk: { node: Vulnerability, column: author_id }
     description: "User reported vulnerability."
 
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
-    fk: { node: WorkItem, column: author_id }
     description: "User authored work item."

@@ -38,6 +38,8 @@ impl Skeleton {
 
         let strategy = if hops.is_empty() {
             Strategy::SingleNode
+        } else if let Some(center) = detect_fk_star(&hops) {
+            Strategy::FkStar { center }
         } else {
             Strategy::Flat
         };
@@ -54,11 +56,9 @@ impl Skeleton {
     pub fn emit(&self, input: &mut Input) -> Result<SkeletonOutput> {
         match self.strategy {
             Strategy::SingleNode => emit_single_node(self, input),
+            Strategy::FkStar { ref center } => emit_fk_star(self, center, input),
             Strategy::Flat => emit_flat_chain(self, input),
-            Strategy::Bidirectional { .. } => {
-                // Future: emit bidi arms + meeting join.
-                emit_flat_chain(self, input)
-            }
+            Strategy::Bidirectional { .. } => emit_flat_chain(self, input),
         }
     }
 }
@@ -98,6 +98,22 @@ impl SkeletonOutput {
 // ─────────────────────────────────────────────────────────────────────────────
 // Plan builders
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Detect if all hops have FKs on the same center node (star-schema pattern).
+/// Returns the center node alias if so.
+fn detect_fk_star(hops: &[Hop]) -> Option<String> {
+    if hops.is_empty() {
+        return None;
+    }
+    let first_center = hops[0].fk.as_ref().map(|fk| &fk.fk_node)?;
+    for hop in &hops[1..] {
+        let center = hop.fk.as_ref().map(|fk| &fk.fk_node)?;
+        if center != first_center {
+            return None;
+        }
+    }
+    Some(first_center.clone())
+}
 
 /// Reorder the hop chain so the most selective node is at the start.
 /// ClickHouse processes JOINs left-to-right, so the leftmost edge becomes
@@ -552,6 +568,221 @@ fn emit_fk_direct(skeleton: &Skeleton, fk: &HopFk, input: &mut Input) -> Result<
             &fk.fk_column,
             &mut ctes,
         )?);
+    }
+
+    Ok(SkeletonOutput {
+        from,
+        edge_aliases: vec![],
+        where_parts,
+        select: selects,
+        ctes,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Emit: FK star (all hops FK to same center node, zero edges)
+// ─────────────────────────────────────────────────────────────────────────────
+
+fn emit_fk_star(
+    skeleton: &Skeleton,
+    center_alias: &str,
+    input: &mut Input,
+) -> Result<SkeletonOutput> {
+    let center_np = skeleton.nodes.get(center_alias).ok_or_else(|| {
+        QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
+    })?;
+    let center_table = center_np.table.as_deref().ok_or_else(|| {
+        QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
+    })?;
+
+    // Center node: dedup subquery with explicit columns.
+    // SELECT * doesn't reliably expose all columns through LIMIT 1 BY
+    // subqueries in ClickHouse 26.2.
+    let mut center_cols = vec![
+        SelectExpr::new(
+            Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
+            DEFAULT_PRIMARY_KEY,
+        ),
+        SelectExpr::new(Expr::col(center_alias, VERSION_COLUMN), VERSION_COLUMN),
+        SelectExpr::new(Expr::col(center_alias, DELETED_COLUMN), DELETED_COLUMN),
+    ];
+    if center_np.has_traversal_path {
+        center_cols.push(SelectExpr::new(
+            Expr::col(center_alias, TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
+    // FK columns for each hop.
+    for hop in &skeleton.hops {
+        if let Some(ref fk) = hop.fk {
+            if !center_cols
+                .iter()
+                .any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str()))
+            {
+                center_cols.push(SelectExpr::new(
+                    Expr::col(center_alias, &fk.fk_column),
+                    fk.fk_column.as_str(),
+                ));
+            }
+        }
+    }
+    // Requested columns.
+    for col in requested_columns(&center_np.columns) {
+        if !center_cols
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(col.as_str()))
+        {
+            center_cols.push(SelectExpr::new(Expr::col(center_alias, &col), col.as_str()));
+        }
+    }
+    // Filter columns.
+    for (prop, _) in &center_np.filters {
+        if !center_cols
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(prop.as_str()))
+        {
+            center_cols.push(SelectExpr::new(
+                Expr::col(center_alias, prop),
+                prop.as_str(),
+            ));
+        }
+    }
+    // Agg property columns.
+    for agg in &input.aggregations {
+        if agg.target.as_deref() == Some(center_alias) {
+            if let Some(ref prop) = agg.property {
+                if !center_cols
+                    .iter()
+                    .any(|s| s.alias.as_deref() == Some(prop.as_str()))
+                {
+                    center_cols.push(SelectExpr::new(
+                        Expr::col(center_alias, prop),
+                        prop.as_str(),
+                    ));
+                }
+            }
+        }
+    }
+    // ORDER BY column.
+    if let Some(ref ob) = input.order_by {
+        if ob.node == center_alias
+            && !center_cols
+                .iter()
+                .any(|s| s.alias.as_deref() == Some(ob.property.as_str()))
+        {
+            center_cols.push(SelectExpr::new(
+                Expr::col(center_alias, &ob.property),
+                ob.property.as_str(),
+            ));
+        }
+    }
+    // Redaction column.
+    if center_np.redaction_id_column != DEFAULT_PRIMARY_KEY
+        && !center_cols
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(center_np.redaction_id_column.as_str()))
+    {
+        center_cols.push(SelectExpr::new(
+            Expr::col(center_alias, &center_np.redaction_id_column),
+            center_np.redaction_id_column.as_str(),
+        ));
+    }
+
+    let center_dedup = Query {
+        select: center_cols,
+        from: TableRef::scan(center_table, center_alias),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(center_alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(center_alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
+    };
+
+    let mut from = TableRef::Subquery {
+        query: Box::new(center_dedup),
+        alias: center_alias.to_string(),
+    };
+
+    let mut where_parts = Vec::new();
+    let mut selects = Vec::new();
+    let mut ctes = Vec::new();
+
+    // Center node filters.
+    for (prop, filter) in &center_np.filters {
+        where_parts.push(filter_to_expr(center_alias, prop, filter));
+    }
+    where_parts.push(Expr::eq(
+        Expr::col(center_alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+
+    // Center node: register ID mapping.
+    input.compiler.node_edge_col.insert(
+        center_alias.to_string(),
+        (center_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
+    );
+
+    // Center node SELECT columns (traversal or group-by).
+    let is_center_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(center_alias));
+    if is_center_group_by || input.query_type != QueryType::Aggregation {
+        for col in requested_columns(&center_np.columns) {
+            selects.push(SelectExpr::new(
+                Expr::col(center_alias, &col),
+                format!("{center_alias}_{col}"),
+            ));
+        }
+    }
+
+    // Each hop: target node is connected via FK column on center.
+    for hop in &skeleton.hops {
+        let fk = hop
+            .fk
+            .as_ref()
+            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+
+        let target_alias = &fk.target_node;
+        let target_np = skeleton.nodes.get(target_alias).ok_or_else(|| {
+            QueryError::Lowering(format!("FK star target '{target_alias}' not found"))
+        })?;
+
+        // Register target node ID mapping: comes from center's FK column.
+        input.compiler.node_edge_col.insert(
+            target_alias.clone(),
+            (center_alias.to_string(), fk.fk_column.clone()),
+        );
+
+        // Pinned target: push WHERE center.fk_col = X.
+        if !target_np.node_ids.is_empty() {
+            where_parts.push(ids_on_edge(
+                center_alias,
+                &fk.fk_column,
+                &target_np.node_ids,
+            ));
+        }
+
+        // Target hydration.
+        match target_np.hydration {
+            HydrationStrategy::Join => {
+                let (new_from, ns, nw) =
+                    emit_node_join(from, target_np, center_alias, &fk.fk_column, input)?;
+                from = new_from;
+                selects.extend(ns);
+                where_parts.extend(nw);
+            }
+            HydrationStrategy::FilterOnly => {
+                where_parts.extend(emit_filter_subquery(
+                    target_np,
+                    center_alias,
+                    &fk.fk_column,
+                    &mut ctes,
+                )?);
+            }
+            HydrationStrategy::Skip => {}
+        }
     }
 
     Ok(SkeletonOutput {

@@ -142,4 +142,8 @@ pub enum Strategy {
     Bidirectional { meeting_hop: usize },
     /// Single node, no edges.
     SingleNode,
+    /// Star-schema optimization: all hops have FKs on the same center node.
+    /// The center node drives a single scan; other nodes JOIN via FK columns.
+    /// Zero edge table scans.
+    FkStar { center: String },
 }
