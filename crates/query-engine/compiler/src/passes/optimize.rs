@@ -3999,6 +3999,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -4068,6 +4069,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    fk_column: None,
                 },
                 InputRelationship {
                     types: vec!["DEFINES".into()],
@@ -4077,6 +4079,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    fk_column: None,
                 },
             ],
             ..Default::default()
@@ -4140,6 +4143,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -4241,6 +4245,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -4309,6 +4314,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    fk_column: None,
                 },
                 InputRelationship {
                     types: vec!["MANAGES".into()],
@@ -4318,6 +4324,7 @@ mod tests {
                     max_hops: 1,
                     direction: Direction::Outgoing,
                     filters: Default::default(),
+                    fk_column: None,
                 },
             ],
             aggregations: vec![count_agg("mr", Some("p"))],
@@ -4374,6 +4381,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -4447,6 +4455,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -4521,6 +4530,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -4588,6 +4598,7 @@ mod tests {
                 max_hops: 1,
                 direction: Direction::Incoming,
                 filters: Default::default(),
+                fk_column: None,
             }],
             aggregations: vec![count_agg("mr", Some("p"))],
             ..Default::default()
@@ -4706,6 +4717,7 @@ mod tests {
                 max_hops: 3,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -4829,6 +4841,7 @@ mod tests {
                 max_hops: 2,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -4904,6 +4917,7 @@ mod tests {
                 max_hops: 2,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -4979,6 +4993,7 @@ mod tests {
                 max_hops: 2,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -5019,6 +5034,7 @@ mod tests {
                 max_hops: 3,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -5094,6 +5110,7 @@ mod tests {
                 max_hops: 2,
                 direction: Direction::Outgoing,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
@@ -5159,6 +5176,7 @@ mod tests {
                 max_hops: 2,
                 direction: Direction::Incoming,
                 filters: Default::default(),
+                fk_column: None,
             }],
             ..Default::default()
         };
