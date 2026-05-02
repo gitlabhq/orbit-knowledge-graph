@@ -729,12 +729,20 @@ mod tests {
     use code_graph::v2::linker::graph::GraphNode;
     use code_graph::v2::types::EdgeKind;
     use code_graph::v2::{
-        BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
+        BatchSink, FileInventoryEntry, GraphConverter, NullSink, Pipeline, PipelineConfig,
+        SinkError,
     };
     use std::sync::{Arc, Mutex};
 
     struct CapturingConverter {
         graphs: Mutex<Vec<CodeGraph>>,
+    }
+
+    struct CapturedPipelineRun {
+        graphs: Vec<CodeGraph>,
+        files_discovered: usize,
+        files_indexed: usize,
+        files_parsed: usize,
     }
 
     impl GraphConverter for CapturingConverter {
@@ -750,7 +758,10 @@ mod tests {
     /// Stand up the archive endpoint, fetch via reqwest, stream into
     /// `extract_tar_gz_from_reader` with the production exclusion
     /// filter. Mirrors `LocalRepositoryCache::store_archive` end-to-end.
-    async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) {
+    async fn extract_via_archive_endpoint(
+        entries: &[Entry<'_>],
+        target: &Path,
+    ) -> Vec<FileInventoryEntry> {
         use axum::Router;
         use axum::body::Body;
         use axum::http::header;
@@ -792,19 +803,23 @@ mod tests {
         );
         let target = target.to_path_buf();
         let handle = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
+        let inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
             extract_tar_gz_from_reader(bridge, &target, |rel, _size| {
                 !is_excluded_from_indexing(rel)
             })
-            .unwrap();
+            .unwrap()
         })
         .await
         .unwrap();
         server.abort();
+        inventory
     }
 
-    async fn run_pipeline(root: &Path) -> Vec<CodeGraph> {
+    async fn run_pipeline(
+        root: &Path,
+        file_inventory: Vec<FileInventoryEntry>,
+    ) -> CapturedPipelineRun {
         let capturer = Arc::new(CapturingConverter {
             graphs: Mutex::new(Vec::new()),
         });
@@ -814,6 +829,7 @@ mod tests {
             let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
             Pipeline::run(
                 &root,
+                Arc::from(file_inventory),
                 PipelineConfig::default(),
                 capturer_for_pipeline as Arc<dyn GraphConverter>,
                 sink,
@@ -826,12 +842,21 @@ mod tests {
             "pipeline errors: {:#?}",
             result.errors
         );
-        Arc::try_unwrap(capturer)
+        let files_discovered = result.stats.files_discovered;
+        let files_indexed = result.stats.files_indexed;
+        let files_parsed = result.stats.files_parsed;
+        let graphs = Arc::try_unwrap(capturer)
             .ok()
             .expect("capturer still has outstanding refs")
             .graphs
             .into_inner()
-            .unwrap()
+            .unwrap();
+        CapturedPipelineRun {
+            graphs,
+            files_discovered,
+            files_indexed,
+            files_parsed,
+        }
     }
 
     fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
@@ -861,6 +886,13 @@ mod tests {
                     .count()
             })
             .sum()
+    }
+
+    fn file_language(graphs: &[CodeGraph], path: &str) -> Option<&'static str> {
+        graphs
+            .iter()
+            .flat_map(|g| g.files())
+            .find_map(|(_, file)| (file.path == path).then(|| file.language_name()))
     }
 
     /// Mirrors the cargo workspace YAML suites: cross-crate `lib::greet`
@@ -895,7 +927,7 @@ mod tests {
             Entry::File("root/assets/logo.png", b"\x89PNG"),
             Entry::File("root/dist/build.zip", b"PK"),
         ];
-        extract_via_archive_endpoint(&entries, dir.path()).await;
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
 
         // Resolver inputs survived.
         assert!(dir.path().join("Cargo.toml").exists());
@@ -905,18 +937,57 @@ mod tests {
         assert!(!dir.path().join("assets/logo.png").exists());
         assert!(!dir.path().join("dist/build.zip").exists());
 
-        let graphs = run_pipeline(dir.path()).await;
+        let run = run_pipeline(dir.path(), file_inventory).await;
         assert!(
-            has_def(&graphs, "crates/lib/src/lib.rs", "greet"),
+            has_def(&run.graphs, "crates/lib/src/lib.rs", "greet"),
             "Rust workspace resolver missed lib::greet"
         );
         assert!(
-            has_def(&graphs, "crates/app/src/main.rs", "main"),
+            has_def(&run.graphs, "crates/app/src/main.rs", "main"),
             "Rust workspace resolver missed app::main"
         );
         assert!(
-            edge_count(&graphs, EdgeKind::Calls) > 0,
+            edge_count(&run.graphs, EdgeKind::Calls) > 0,
             "no Calls edges emitted; cross-crate resolution likely failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn excluded_archive_entries_are_not_materialized_or_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
+            Entry::File("root/assets/logo.png", b"\x89PNG"),
+            Entry::File("root/dist/build.zip", b"PK"),
+        ];
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
+        let inventory_paths: Vec<_> = file_inventory
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert!(inventory_paths.contains(&"src/app.ts"));
+        assert!(inventory_paths.contains(&"assets/logo.png"));
+        assert!(inventory_paths.contains(&"dist/build.zip"));
+
+        assert!(dir.path().join("src/app.ts").exists());
+        assert!(!dir.path().join("assets/logo.png").exists());
+        assert!(!dir.path().join("dist/build.zip").exists());
+
+        let run = run_pipeline(dir.path(), file_inventory).await;
+        assert_eq!(run.files_discovered, 3);
+        assert_eq!(run.files_indexed, 3);
+        assert_eq!(run.files_parsed, 1);
+        assert_eq!(
+            file_language(&run.graphs, "assets/logo.png"),
+            Some("unknown")
+        );
+        assert_eq!(
+            file_language(&run.graphs, "dist/build.zip"),
+            Some("unknown")
+        );
+        assert!(
+            has_def(&run.graphs, "src/app.ts", "run"),
+            "materialized source file should still be parsed"
         );
     }
 
@@ -947,7 +1018,7 @@ mod tests {
             Entry::File("root/static/banner.gif", b"GIF89a"),
             Entry::File("root/fonts/Inter.woff2", b""),
         ];
-        extract_via_archive_endpoint(&entries, dir.path()).await;
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
 
         // Resolver inputs survived.
         assert!(dir.path().join("package.json").exists());
@@ -956,17 +1027,17 @@ mod tests {
         assert!(!dir.path().join("static/banner.gif").exists());
         assert!(!dir.path().join("fonts/Inter.woff2").exists());
 
-        let graphs = run_pipeline(dir.path()).await;
+        let run = run_pipeline(dir.path(), file_inventory).await;
         assert!(
-            has_def(&graphs, "src/utils.ts", "helper"),
+            has_def(&run.graphs, "src/utils.ts", "helper"),
             "JS resolver missed utils::helper"
         );
         assert!(
-            has_def(&graphs, "src/main.ts", "run"),
+            has_def(&run.graphs, "src/main.ts", "run"),
             "JS resolver missed main::run"
         );
         assert!(
-            edge_count(&graphs, EdgeKind::Imports) > 0,
+            edge_count(&run.graphs, EdgeKind::Imports) > 0,
             "no Imports edges emitted; tsconfig alias likely failed to resolve"
         );
     }

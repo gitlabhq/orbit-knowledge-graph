@@ -2,7 +2,6 @@ use crate::v2::config::{Language, parsable_language};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
-use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
@@ -345,7 +344,6 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    pub respect_gitignore: bool,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -357,9 +355,6 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
-    /// Optional complete repository file inventory. Server indexing fills this
-    /// from archive metadata before extraction filters skip bytes.
-    pub file_inventory: Option<Arc<[FileInventoryEntry]>>,
     /// Internal switch set by `Pipeline::run_with_tracer` so parser graphs only
     /// emit parsed nodes and relationships while a separate structural graph
     /// owns repository file/directory rows.
@@ -371,12 +366,10 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             max_files: 0,
-            respect_gitignore: true,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
-            file_inventory: None,
             emit_file_inventory_graph: false,
         }
     }
@@ -466,11 +459,19 @@ pub struct Pipeline;
 impl Pipeline {
     pub fn run(
         root: &Path,
+        file_inventory: Arc<[FileInventoryEntry]>,
         config: PipelineConfig,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
-        Self::run_with_tracer(root, config, Tracer::new(false), converter, sink)
+        Self::run_with_tracer(
+            root,
+            file_inventory,
+            config,
+            Tracer::new(false),
+            converter,
+            sink,
+        )
     }
 
     /// Run the pipeline. Each language gets its own CPU thread and a
@@ -481,6 +482,7 @@ impl Pipeline {
     /// Blocks until all languages finish processing and writing.
     pub fn run_with_tracer(
         root: &Path,
+        file_inventory: Arc<[FileInventoryEntry]>,
         mut config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
@@ -489,12 +491,11 @@ impl Pipeline {
         let root_str = root.to_string_lossy().to_string();
         config.emit_file_inventory_graph = true;
 
-        // 1. Walk filesystem, group files by language
-        let pb_discover = spinner("Discovering files...");
-        let discovery = Self::discover_files(root, &config);
-        let files_by_language = discovery.files_by_language;
-        let file_inventory = discovery.file_inventory;
-        let parsed_file_languages = discovery.parsed_file_languages;
+        // 1. Normalize the repository inventory, then group parseable files by language.
+        let pb_discover = spinner("Preparing file inventory...");
+        let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
+        let (files_by_language, parsed_file_languages) =
+            group_parseable_inventory(root, &file_inventory, &config);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
         let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
@@ -747,80 +748,12 @@ impl Pipeline {
     }
 
     #[cfg(test)]
-    fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
-        Self::discover_files(root, config).files_by_language
-    }
-
-    fn discover_files(root: &Path, config: &PipelineConfig) -> FileDiscovery {
-        let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
-        let mut walked_inventory = Vec::new();
-        let mut parsed_file_languages = FxHashMap::default();
-        let mut accepted_files = 0usize;
-
-        let walker = WalkBuilder::new(root)
-            .git_ignore(config.respect_gitignore)
-            .hidden(true)
-            .build();
-
-        for entry in walker.filter_map(|result| match result {
-            Ok(entry) => Some(entry),
-            Err(e) => {
-                tracing::debug!(error = %e, "directory walk error, skipping entry");
-                None
-            }
-        }) {
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-
-            let path = entry.path();
-            let rel_path = path.strip_prefix(root).unwrap_or(path);
-            let metadata = path.metadata().ok();
-            let rel_path_string = rel_path.to_string_lossy().to_string();
-
-            walked_inventory.push(FileInventoryEntry {
-                path: rel_path_string.clone(),
-                size: metadata.as_ref().map_or(0, |metadata| metadata.len()),
-            });
-
-            if metadata
-                .as_ref()
-                .is_some_and(|metadata| metadata.len() > config.max_file_size)
-            {
-                continue;
-            }
-
-            let Some(lang) = parsable_language(rel_path) else {
-                continue;
-            };
-
-            if config.max_files > 0 && accepted_files >= config.max_files {
-                continue;
-            }
-
-            // Verify file is readable, but don't load yet.
-            if !path.is_file() {
-                continue;
-            }
-
-            accepted_files += 1;
-            parsed_file_languages.insert(rel_path_string.clone(), lang);
-            groups.entry(lang).or_default().push(rel_path_string);
-        }
-
-        let inventory_source = config
-            .file_inventory
-            .as_ref()
-            .into_iter()
-            .flat_map(|entries| entries.iter().cloned())
-            .chain(walked_inventory);
-        let file_inventory = canonical_file_inventory(inventory_source);
-
-        FileDiscovery {
-            files_by_language: groups,
-            file_inventory,
-            parsed_file_languages,
-        }
+    fn group_inventory(
+        root: &Path,
+        inventory: &[FileInventoryEntry],
+        config: &PipelineConfig,
+    ) -> FxHashMap<Language, Vec<FileInput>> {
+        group_parseable_inventory(root, inventory, config).0
     }
 
     fn build_file_inventory_graph(
@@ -839,10 +772,42 @@ impl Pipeline {
     }
 }
 
-struct FileDiscovery {
-    files_by_language: FxHashMap<Language, Vec<FileInput>>,
-    file_inventory: Vec<FileInventoryEntry>,
-    parsed_file_languages: FxHashMap<String, Language>,
+fn group_parseable_inventory(
+    root: &Path,
+    inventory: &[FileInventoryEntry],
+    config: &PipelineConfig,
+) -> (
+    FxHashMap<Language, Vec<FileInput>>,
+    FxHashMap<String, Language>,
+) {
+    let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+    let mut parsed_file_languages = FxHashMap::default();
+    let mut accepted_files = 0usize;
+
+    for entry in inventory {
+        if entry.size > config.max_file_size {
+            continue;
+        }
+
+        let rel_path = Path::new(&entry.path);
+        let Some(lang) = parsable_language(rel_path) else {
+            continue;
+        };
+
+        if config.max_files > 0 && accepted_files >= config.max_files {
+            continue;
+        }
+
+        if !root.join(rel_path).is_file() {
+            continue;
+        }
+
+        accepted_files += 1;
+        parsed_file_languages.insert(entry.path.clone(), lang);
+        groups.entry(lang).or_default().push(entry.path.clone());
+    }
+
+    (groups, parsed_file_languages)
 }
 
 fn canonical_file_inventory(
@@ -1374,14 +1339,29 @@ mod tests {
     }
 
     #[test]
-    fn walk_and_group_respects_max_files() {
+    fn inventory_grouping_respects_max_files() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("a.java"), "class A {}").expect("write a");
         std::fs::write(dir.path().join("b.java"), "class B {}").expect("write b");
         std::fs::write(dir.path().join("c.java"), "class C {}").expect("write c");
 
-        let groups = Pipeline::walk_and_group(
+        let inventory = [
+            FileInventoryEntry {
+                path: "a.java".into(),
+                size: 10,
+            },
+            FileInventoryEntry {
+                path: "b.java".into(),
+                size: 10,
+            },
+            FileInventoryEntry {
+                path: "c.java".into(),
+                size: 10,
+            },
+        ];
+        let groups = Pipeline::group_inventory(
             dir.path(),
+            &inventory,
             &PipelineConfig {
                 max_files: 2,
                 ..PipelineConfig::default()
@@ -1429,10 +1409,8 @@ mod tests {
         let capture = Arc::new(TestCapture::new());
         let result = Pipeline::run_with_tracer(
             root,
-            PipelineConfig {
-                file_inventory: Some(Arc::from(inventory)),
-                ..PipelineConfig::default()
-            },
+            Arc::from(inventory),
+            PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
             Arc::new(NullSink),
@@ -1464,6 +1442,40 @@ mod tests {
                 ("vendor/jquery.min.js".into(), "unknown"),
             ]
         );
+    }
+
+    #[test]
+    fn supplied_inventory_is_the_only_file_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("listed.py"), "def listed(): pass\n").unwrap();
+        std::fs::write(root.join("unlisted.py"), "def unlisted(): pass\n").unwrap();
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "listed.py".into(),
+                size: 19,
+            }]),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.stats.files_discovered, 1);
+        assert_eq!(result.stats.files_indexed, 1);
+        assert_eq!(result.stats.files_parsed, 1);
+
+        let structural_files: Vec<_> = capture
+            .take()
+            .iter()
+            .filter(|g| g.output.writes_repository_structure())
+            .flat_map(|g| g.files().map(|(_, file)| file.path.clone()))
+            .collect();
+        assert_eq!(structural_files, vec!["listed.py".to_string()]);
     }
 
     // ── Python fixture ──────────────────────────────────────────────
@@ -1623,6 +1635,24 @@ namespace MyApp {
         let sink = Arc::new(NullSink);
         let result = Pipeline::run_with_tracer(
             root,
+            Arc::from(vec![
+                FileInventoryEntry {
+                    path: "app.py".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "Service.java".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "App.kt".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "Controller.cs".into(),
+                    size: 0,
+                },
+            ]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),

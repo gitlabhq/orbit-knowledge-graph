@@ -229,11 +229,9 @@ impl CodeIndexingPipeline {
         let config = PipelineConfig {
             max_file_size: self.pipeline_config.max_file_size_bytes,
             max_files: self.pipeline_config.max_files,
-            respect_gitignore: self.pipeline_config.respect_gitignore,
             worker_threads: self.pipeline_config.worker_threads,
             max_concurrent_languages: self.pipeline_config.max_concurrent_languages,
             per_file_timeout,
-            file_inventory: Some(file_inventory),
             ..Default::default()
         };
         let tracer = code_graph::v2::trace::Tracer::new(false);
@@ -264,7 +262,14 @@ impl CodeIndexingPipeline {
         // tokio runtime if we blocked the worker here.
         let repo_dir_owned = repo_dir.to_path_buf();
         let result = tokio::task::spawn_blocking(move || {
-            Pipeline::run_with_tracer(&repo_dir_owned, config, tracer, converter, sink)
+            Pipeline::run_with_tracer(
+                &repo_dir_owned,
+                file_inventory,
+                config,
+                tracer,
+                converter,
+                sink,
+            )
         })
         .await
         .map_err(|e| HandlerError::Processing(format!("pipeline thread panicked: {e}")))?;

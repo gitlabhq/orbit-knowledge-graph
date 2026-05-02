@@ -196,10 +196,6 @@ fn default_code_indexing_max_files() -> usize {
     1_000_000
 }
 
-fn default_code_indexing_respect_gitignore() -> bool {
-    true
-}
-
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
     5000
 }
@@ -211,8 +207,6 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
-    #[serde(default = "default_code_indexing_respect_gitignore")]
-    pub respect_gitignore: bool,
     #[serde(default)]
     pub worker_threads: usize,
     #[serde(default)]
@@ -229,7 +223,6 @@ impl Default for CodeIndexingPipelineConfig {
         Self {
             max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
             max_files: default_code_indexing_max_files(),
-            respect_gitignore: default_code_indexing_respect_gitignore(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),

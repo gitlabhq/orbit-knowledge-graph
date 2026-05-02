@@ -217,12 +217,12 @@ For each file, the parser extracts three categories of information:
 
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity. A second OXC-driven pass records invocation sites, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
 
-##### Streaming indexing pipeline
+##### Inventory-driven indexing pipeline
 
-The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
+The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:
 
 1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from Gitaly archive metadata for the indexed revision before extraction filters run; local CLI indexing reads present, non-ignored files from Gitalisk.
-2. **Directory walking** discovers the files that were materialized on disk and can be read by parsers and resolvers.
+2. **Materialized-file checks** use the inventory paths to find files that were unpacked or are present on disk and can be read by parsers and resolvers. No second directory walk runs.
 3. **Extension filtering** runs `parsable_language` over materialized files, then groups parseable files by language.
 4. **Structural graph emission** creates `Directory`, `File`, and containment edges from the repository inventory. Non-parsable files use `language = "unknown"` and do not produce definitions or imports.
 5. **Async file reads** load parseable file contents with bounded IO concurrency.

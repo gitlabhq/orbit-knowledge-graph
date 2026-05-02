@@ -568,7 +568,6 @@ async fn run_index(path: PathBuf, threads: usize, show_stats: bool) -> Result<()
 
     let pipeline_config = code_graph::v2::PipelineConfig {
         max_file_size: 5_000_000,
-        respect_gitignore: true,
         worker_threads: threads,
         ..Default::default()
     };
@@ -649,14 +648,14 @@ async fn index_repo(
     git: &workspace::GitInfo,
     store: &workspace::Workspace,
     ontology: &Ontology,
-    mut pipeline_config: code_graph::v2::PipelineConfig,
+    pipeline_config: code_graph::v2::PipelineConfig,
 ) -> Result<IndexRunResult> {
     let key = git.repo_path.to_string_lossy().to_string();
     let root_path = key.clone();
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    pipeline_config.file_inventory = Some(gitalisk_file_inventory(git)?);
+    let file_inventory = gitalisk_file_inventory(git)?;
 
     let db_path = store.db_path();
     let client =
@@ -693,6 +692,7 @@ async fn index_repo(
 
     let v2_result = code_graph::v2::Pipeline::run_with_tracer(
         std::path::Path::new(&root_path),
+        file_inventory,
         pipeline_config.clone(),
         tracer,
         converter,
