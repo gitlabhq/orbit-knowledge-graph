@@ -28,10 +28,8 @@ impl Skeleton {
         let hops = reorder_by_selectivity(hops, &nodes);
 
         let mut nodes = nodes;
-        // Assign ID sources: which edge alias + column carries each node's ID.
-        assign_id_sources(&hops, &input.relationships, &mut nodes);
+        assign_id_sources(&hops, &mut nodes);
 
-        // Determine hydration strategy per node.
         for (_, node_plan) in &mut nodes {
             node_plan.hydration = determine_hydration(node_plan, input);
         }
@@ -51,14 +49,12 @@ impl Skeleton {
         }
     }
 
-    /// Emit SQL AST from the plan. Returns (from, edge_aliases, where_parts, ctes).
-    /// Also registers node-edge mappings on the compiler context.
+    /// Emit SQL AST from the plan.
     pub fn emit(&self, input: &mut Input) -> Result<SkeletonOutput> {
         match self.strategy {
             Strategy::SingleNode => emit_single_node(self, input),
             Strategy::FkStar { ref center } => emit_fk_star(self, center, input),
-            Strategy::Flat => emit_flat_chain(self, input),
-            Strategy::Bidirectional { .. } => emit_flat_chain(self, input),
+            Strategy::Flat | Strategy::Bidirectional { .. } => emit_flat_chain(self, input),
         }
     }
 }
@@ -96,16 +92,149 @@ impl SkeletonOutput {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Shared primitives: dedup, columns, predicates
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build a dedup subquery: SELECT cols FROM table ORDER BY _version DESC LIMIT 1 BY id.
+fn build_dedup_subquery(alias: &str, table: &str, select: Vec<SelectExpr>) -> Query {
+    Query {
+        select,
+        from: TableRef::scan(table, alias),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
+    }
+}
+
+/// Collect all columns a node needs in its dedup subquery.
+/// Covers: system columns, requested columns, filter columns, agg property
+/// columns, order_by columns, redaction_id, and _deleted.
+fn collect_dedup_columns(alias: &str, np: &NodePlan, input: &Input) -> Vec<SelectExpr> {
+    let mut seen = HashSet::new();
+    let mut cols = Vec::new();
+
+    let mut push = |col: &str| {
+        if seen.insert(col.to_string()) {
+            cols.push(SelectExpr::new(Expr::col(alias, col), col));
+        }
+    };
+
+    // System columns always needed.
+    push(DEFAULT_PRIMARY_KEY);
+    push(VERSION_COLUMN);
+    if np.has_traversal_path {
+        push(TRAVERSAL_PATH_COLUMN);
+    }
+
+    // Requested columns.
+    for col in requested_columns(&np.columns) {
+        push(&col);
+    }
+
+    // Filter columns.
+    for (prop, _) in &np.filters {
+        push(prop);
+    }
+
+    // FK columns (for FkStar center nodes).
+    // Handled by caller since it needs hop-level info.
+
+    // Agg property columns.
+    for agg in &input.aggregations {
+        if agg.target.as_deref() == Some(alias) {
+            if let Some(ref prop) = agg.property {
+                push(prop);
+            }
+        }
+    }
+
+    // ORDER BY column.
+    if let Some(ref ob) = input.order_by {
+        if ob.node == alias {
+            push(&ob.property);
+        }
+    }
+
+    // Redaction column (when != id).
+    if np.redaction_id_column != DEFAULT_PRIMARY_KEY {
+        push(&np.redaction_id_column);
+    }
+
+    // _deleted for WHERE filter.
+    push(DELETED_COLUMN);
+
+    cols
+}
+
+/// WHERE predicates for a node: filters + _deleted=false.
+fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+    let mut w = Vec::new();
+    w.push(Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+    for (prop, filter) in &np.filters {
+        w.push(filter_to_expr(alias, prop, filter));
+    }
+    if !np.node_ids.is_empty() {
+        w.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+    }
+    if let Some(ref range) = np.id_range {
+        w.push(id_range_predicate(alias, range));
+    }
+    w
+}
+
+/// IN-list predicate: `alias.col IN (ids)` or `alias.col = id` for single.
+fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
+    if ids.len() == 1 {
+        Expr::eq(Expr::col(alias, col), Expr::int(ids[0]))
+    } else {
+        Expr::col_in(
+            alias,
+            col,
+            ChType::Int64,
+            ids.iter().map(|id| serde_json::Value::from(*id)).collect(),
+        )
+        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+    }
+}
+
+/// Node columns for the outer SELECT, aliased as `{alias}_{col}` for the
+/// graph formatter. Only for non-aggregation queries (aggregation builds
+/// its own SELECT).
+fn node_select_columns(alias: &str, np: &NodePlan, input: &Input) -> Vec<SelectExpr> {
+    let is_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(alias));
+    if !is_group_by && input.query_type == QueryType::Aggregation {
+        return vec![];
+    }
+    requested_columns(&np.columns)
+        .into_iter()
+        .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
+        .collect()
+}
+
+/// Whether a target node in an FK path needs inline JOIN hydration.
+/// FK paths bypass the edge table, so the HydrationPlan can't fetch columns
+/// via supplementary queries. Force Join when the target has requested columns.
+fn fk_target_needs_join(np: &NodePlan, input: &Input) -> bool {
+    np.hydration == HydrationStrategy::Join
+        || (input.query_type != QueryType::Aggregation
+            && matches!(&np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Plan builders
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Detect if all hops have FKs on the same center node (star-schema pattern).
-/// Returns the center node alias if so.
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
-    if hops.is_empty() {
-        return None;
-    }
-    let first_center = hops[0].fk.as_ref().map(|fk| &fk.fk_node)?;
+    let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
     for hop in &hops[1..] {
         let center = hop.fk.as_ref().map(|fk| &fk.fk_node)?;
         if center != first_center {
@@ -115,46 +244,31 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     Some(first_center.clone())
 }
 
-/// Reorder the hop chain so the most selective node is at the start.
-/// ClickHouse processes JOINs left-to-right, so the leftmost edge becomes
-/// the build side of the first hash join. Putting the selective end first
-/// means a tiny hash table probing outward instead of a large scan.
 fn reorder_by_selectivity(mut hops: Vec<Hop>, nodes: &HashMap<String, NodePlan>) -> Vec<Hop> {
     if hops.len() <= 1 {
         return hops;
     }
-
-    // Find the most selective node in the chain.
-    let chain_start = &hops[0].from_node;
-    let chain_end = &hops.last().unwrap().to_node;
-
     let start_sel = nodes
-        .get(chain_start)
+        .get(&hops[0].from_node)
         .map(|np| np.selectivity)
         .unwrap_or(Selectivity::Open);
     let end_sel = nodes
-        .get(chain_end)
+        .get(&hops.last().unwrap().to_node)
         .map(|np| np.selectivity)
         .unwrap_or(Selectivity::Open);
 
-    // If the end is more selective than the start, reverse the chain.
     if end_sel < start_sel {
         hops.reverse();
         for hop in &mut hops {
             std::mem::swap(&mut hop.from_node, &mut hop.to_node);
-            hop.direction = flip_direction(hop.direction);
+            hop.direction = match hop.direction {
+                Direction::Outgoing => Direction::Incoming,
+                Direction::Incoming => Direction::Outgoing,
+                Direction::Both => Direction::Both,
+            };
         }
     }
-
     hops
-}
-
-fn flip_direction(d: Direction) -> Direction {
-    match d {
-        Direction::Outgoing => Direction::Incoming,
-        Direction::Incoming => Direction::Outgoing,
-        Direction::Both => Direction::Both,
-    }
 }
 
 fn build_hops(input: &Input) -> Vec<Hop> {
@@ -164,44 +278,24 @@ fn build_hops(input: &Input) -> Vec<Hop> {
         .map(|rel| {
             let edge_table = resolve_edge_table(input, &rel.types);
             let fk = rel.fk_column.as_ref().and_then(|col| {
-                // Resolve which node has the FK column by checking node tables.
-                // If neither node has the column, skip FK optimization.
-                let from_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.from)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
-                let to_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.to)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
+                let from_table = input.nodes.iter().find(|n| n.id == rel.from)
+                    .and_then(|n| n.table.as_deref()).unwrap_or("");
+                let to_table = input.nodes.iter().find(|n| n.id == rel.to)
+                    .and_then(|n| n.table.as_deref()).unwrap_or("");
 
-                let from_has_col = input
-                    .compiler
-                    .table_columns
-                    .get(from_table)
+                let from_has = input.compiler.table_columns.get(from_table)
                     .is_some_and(|cols| cols.contains(col));
-                let to_has_col = input
-                    .compiler
-                    .table_columns
-                    .get(to_table)
+                let to_has = input.compiler.table_columns.get(to_table)
                     .is_some_and(|cols| cols.contains(col));
 
-                let (fk_node, target_node) = if from_has_col {
+                let (fk_node, target_node) = if from_has {
                     (rel.from.clone(), rel.to.clone())
-                } else if to_has_col {
+                } else if to_has {
                     (rel.to.clone(), rel.from.clone())
                 } else {
                     return None;
                 };
-                Some(HopFk {
-                    fk_node,
-                    fk_column: col.clone(),
-                    target_node,
-                })
+                Some(HopFk { fk_node, fk_column: col.clone(), target_node })
             });
             Hop {
                 rel_types: rel.types.clone(),
@@ -222,48 +316,36 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
         .nodes
         .iter()
         .map(|n| {
-            let plan = NodePlan {
+            (n.id.clone(), NodePlan {
                 alias: n.id.clone(),
                 entity: n.entity.clone(),
                 table: n.table.clone(),
                 selectivity: Selectivity::from_node(n),
-                hydration: HydrationStrategy::Skip, // set later
-                id_source: None,                    // set later
+                hydration: HydrationStrategy::Skip,
+                id_source: None,
                 has_traversal_path: n.has_traversal_path,
                 redaction_id_column: n.redaction_id_column.clone(),
                 filters: n.filters.clone().into_iter().collect(),
                 node_ids: n.node_ids.clone(),
                 id_range: n.id_range.clone(),
                 columns: n.columns.clone(),
-            };
-            (n.id.clone(), plan)
+            })
         })
         .collect()
 }
 
-fn assign_id_sources(
-    hops: &[Hop],
-    _rels: &[InputRelationship],
-    nodes: &mut HashMap<String, NodePlan>,
-) {
+fn assign_id_sources(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>) {
     for (i, hop) in hops.iter().enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
-
-        if let Some(np) = nodes.get_mut(&hop.from_node) {
-            if np.id_source.is_none() {
-                np.id_source = Some(IdSource {
-                    edge_alias: alias.clone(),
-                    column: start_col.to_string(),
-                });
-            }
-        }
-        if let Some(np) = nodes.get_mut(&hop.to_node) {
-            if np.id_source.is_none() {
-                np.id_source = Some(IdSource {
-                    edge_alias: alias.clone(),
-                    column: end_col.to_string(),
-                });
+        for (node, col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+            if let Some(np) = nodes.get_mut(node) {
+                if np.id_source.is_none() {
+                    np.id_source = Some(IdSource {
+                        edge_alias: alias.clone(),
+                        column: col.to_string(),
+                    });
+                }
             }
         }
     }
@@ -272,17 +354,13 @@ fn assign_id_sources(
 fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
-    let is_group_by = input
-        .aggregations
-        .iter()
+    let is_group_by = input.aggregations.iter()
         .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
-
     let is_agg_property_target = input.aggregations.iter().any(|a| {
         a.target.as_deref() == Some(alias.as_str())
             && a.property.is_some()
             && !matches!(a.function, AggFunction::Count)
     });
-
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
     if is_group_by || is_agg_property_target || is_order_by_target {
@@ -309,78 +387,21 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOutput> {
-    let (_, node_plan) = skeleton
-        .nodes
-        .iter()
-        .next()
+    let (_, np) = skeleton.nodes.iter().next()
         .ok_or_else(|| QueryError::Lowering("no nodes in skeleton".into()))?;
-
-    let table = node_plan
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node_plan.alias)))?;
-    let alias = &node_plan.alias;
-
-    // Dedup subquery: ReplacingMergeTree may have unmerged duplicates.
-    // SELECT * because enforce/check may add columns we can't predict
-    // (cursor tie-breakers, _gkg_* identity columns).
-    let dedup = Query {
-        select: vec![SelectExpr::star()],
-        from: TableRef::scan(table, alias),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
+    let table = np.table.as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
+    let alias = &np.alias;
 
     let from = TableRef::Subquery {
-        query: Box::new(dedup),
+        query: Box::new(build_dedup_subquery(alias, table, vec![SelectExpr::star()])),
         alias: alias.to_string(),
     };
 
-    let mut where_parts = Vec::new();
+    let mut where_parts = node_where_predicates(alias, np);
+    let select = node_select_columns(alias, np, input);
 
-    where_parts.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
-
-    for (prop, filter) in &node_plan.filters {
-        where_parts.push(filter_to_expr(alias, prop, filter));
-    }
-    if !node_plan.node_ids.is_empty() {
-        where_parts.push(node_ids_predicate(alias, &node_plan.node_ids));
-    }
-    if let Some(ref range) = node_plan.id_range {
-        where_parts.push(id_range_predicate(alias, range));
-    }
-
-    // Node columns go into skeleton SELECT only for non-aggregation queries.
-    // Aggregation builds its own SELECT via build_aggregation(); adding node
-    // columns here would violate GROUP BY constraints.
-    // The graph formatter expects columns aliased as `{alias}_{col}`.
-    let select = if input.query_type != QueryType::Aggregation {
-        let mut s = Vec::new();
-        for col in requested_columns(&node_plan.columns) {
-            s.push(SelectExpr::new(
-                Expr::col(alias, &col),
-                format!("{alias}_{col}"),
-            ));
-        }
-        s
-    } else {
-        vec![]
-    };
-
-    Ok(SkeletonOutput {
-        from,
-        edge_aliases: vec![],
-        where_parts,
-        select,
-        ctes: vec![],
-    })
+    Ok(SkeletonOutput { from, edge_aliases: vec![], where_parts, select, ctes: vec![] })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,121 +409,64 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOutput> {
-    // Single-hop with FK: skip the edge table entirely, join nodes directly.
-    if skeleton.hops.len() == 1 {
-        if let Some(ref fk) = skeleton.hops[0].fk {
-            return emit_fk_direct(skeleton, fk, input);
-        }
-    }
-
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
-
-    // Build the edge chain FROM tree.
     let mut from: Option<TableRef> = None;
 
     for (i, hop) in skeleton.hops.iter().enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
-
         let is_multi_hop = hop.max_hops > 1;
 
+        // Build edge source: UNION ALL for multi-hop, plain scan for single.
+        let edge_source = if is_multi_hop {
+            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &skeleton.nodes);
+            where_parts.extend(union_wheres);
+            union
+        } else {
+            TableRef::scan(&hop.edge_table, &alias)
+        };
+
+        // JOIN to previous hop (or set as initial FROM).
         if let Some(prev_from) = from.take() {
             let prev_hop = &skeleton.hops[i - 1];
             let prev_alias = &edge_aliases[i - 1];
             let (prev_start, prev_end) = prev_hop.direction.edge_columns();
-            let right = if is_multi_hop {
-                let (union, union_wheres) =
-                    build_multi_hop_union(hop, &alias, &skeleton.nodes);
-                where_parts.extend(union_wheres);
-                union
+
+            // Pick join columns based on shared node topology.
+            let (prev_col, curr_col) = if prev_hop.to_node == hop.from_node {
+                (prev_end, start_col)
+            } else if prev_hop.to_node == hop.to_node {
+                (prev_end, end_col)
+            } else if prev_hop.from_node == hop.from_node {
+                (prev_start, start_col)
+            } else if prev_hop.from_node == hop.to_node {
+                (prev_start, end_col)
             } else {
-                TableRef::scan(&hop.edge_table, &alias)
+                (prev_end, start_col)
             };
-            // Determine which columns to join on by finding the shared node
-            // between consecutive hops. Handles fan-in (both edges point to
-            // the same target) and reverse chains.
-            let (prev_join_col, curr_join_col) =
-                if prev_hop.to_node == hop.from_node {
-                    // Linear: prev→shared→curr (most common)
-                    (prev_end, start_col)
-                } else if prev_hop.to_node == hop.to_node {
-                    // Fan-in: both edges target the shared node
-                    (prev_end, end_col)
-                } else if prev_hop.from_node == hop.from_node {
-                    // Fan-out: both edges source from the shared node
-                    (prev_start, start_col)
-                } else if prev_hop.from_node == hop.to_node {
-                    // Reverse: prev←shared←curr
-                    (prev_start, end_col)
-                } else {
-                    // Fallback: assume linear chain
-                    (prev_end, start_col)
-                };
-            let join_on = Expr::eq(
-                Expr::col(prev_alias, prev_join_col),
-                Expr::col(&alias, curr_join_col),
-            );
-            from = Some(TableRef::Join {
-                join_type: JoinType::Inner,
-                left: Box::new(prev_from),
-                right: Box::new(right),
-                on: join_on,
-            });
-        } else if is_multi_hop {
-            let (union, union_wheres) =
-                build_multi_hop_union(hop, &alias, &skeleton.nodes);
-            from = Some(union);
-            where_parts.extend(union_wheres);
+            from = Some(TableRef::join(
+                JoinType::Inner,
+                prev_from,
+                edge_source,
+                Expr::eq(Expr::col(prev_alias, prev_col), Expr::col(&alias, curr_col)),
+            ));
         } else {
-            from = Some(TableRef::scan(&hop.edge_table, &alias));
+            from = Some(edge_source);
         }
 
         if !is_multi_hop {
-            // Single-hop: edge predicates on the outer WHERE.
-            push_edge_predicates(
-                &mut where_parts,
-                &alias,
-                hop,
-                &skeleton.nodes,
-                start_col,
-                end_col,
-            );
+            push_edge_predicates(&mut where_parts, &alias, hop, &skeleton.nodes, start_col, end_col);
         }
-        // Multi-hop: entity kind + _deleted predicates already added by
-        // build_multi_hop_union; relationship kind filters are inside each arm.
 
-        // Denorm tags.
-        emit_denorm_tags(
-            &mut where_parts,
-            &alias,
-            hop,
-            &skeleton.nodes,
-            input,
-            start_col,
-            end_col,
-        );
+        emit_denorm_tags(&mut where_parts, &alias, hop, &skeleton.nodes, input, start_col, end_col);
+        emit_node_ids_on_edge(&mut where_parts, &alias, hop, &skeleton.nodes, start_col, end_col);
 
-        // Pinned node_ids on edges.
-        emit_node_ids_on_edge(
-            &mut where_parts,
-            &alias,
-            hop,
-            &skeleton.nodes,
-            start_col,
-            end_col,
-        );
-
-        // Register node-edge mappings for enforce.
-        input
-            .compiler
-            .node_edge_col
+        input.compiler.node_edge_col
             .entry(hop.from_node.clone())
             .or_insert_with(|| (alias.clone(), start_col.to_string()));
-        input
-            .compiler
-            .node_edge_col
+        input.compiler.node_edge_col
             .entry(hop.to_node.clone())
             .or_insert_with(|| (alias.clone(), end_col.to_string()));
 
@@ -510,8 +474,6 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
     }
 
     let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in skeleton".into()))?;
-
-    // Hydrate nodes.
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
 
@@ -520,181 +482,38 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
         let (start_col, end_col) = hop.direction.edge_columns();
 
         for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-            if hydrated.contains(node_alias) {
+            if !hydrated.insert(node_alias.clone()) {
                 continue;
             }
-            if let Some(np) = skeleton.nodes.get(node_alias) {
-                match np.hydration {
-                    HydrationStrategy::Join => {
-                        let (new_from, ns, nw) =
-                            emit_node_join(from, np, edge_alias, edge_col, input, false)?;
-                        from = new_from;
-                        selects.extend(ns);
-                        where_parts.extend(nw);
-                    }
-                    HydrationStrategy::FilterOnly => {
-                        where_parts
-                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
-                    }
-                    HydrationStrategy::Skip => {
-                        // Edge-based queries: the security pass only sees
-                        // gl_edge (default access level). Nodes with
-                        // has_traversal_path may require a higher access
-                        // level — emit a FilterOnly subquery so their table
-                        // appears in the query and the security pass can
-                        // enforce the correct min_access_level.
-                        if np.has_traversal_path && np.table.is_some() {
-                            where_parts.extend(emit_filter_subquery(
-                                np, edge_alias, edge_col, &mut ctes,
-                            )?);
-                        }
+            let Some(np) = skeleton.nodes.get(node_alias) else { continue };
+            match np.hydration {
+                HydrationStrategy::Join => {
+                    let (new_from, ns, nw) =
+                        emit_node_join(from, np, edge_alias, edge_col, input, false)?;
+                    from = new_from;
+                    selects.extend(ns);
+                    where_parts.extend(nw);
+                }
+                HydrationStrategy::FilterOnly => {
+                    where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
+                }
+                HydrationStrategy::Skip => {
+                    // Nodes with has_traversal_path need a FilterOnly subquery
+                    // so the security pass can enforce per-entity min_access_level.
+                    if np.has_traversal_path && np.table.is_some() {
+                        where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }
                 }
             }
-            hydrated.insert(node_alias.clone());
         }
     }
 
-    Ok(SkeletonOutput {
-        from,
-        edge_aliases,
-        where_parts,
-        select: selects,
-        ctes,
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit: FK direct (no edge table)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/// Single-hop with FK: join the two node tables directly using the FK column.
-/// No edge table scan. The FK node's table drives, the target node joins via
-/// FK column = target.id.
-fn emit_fk_direct(skeleton: &Skeleton, fk: &HopFk, input: &mut Input) -> Result<SkeletonOutput> {
-    let hop = &skeleton.hops[0];
-
-    let fk_np = skeleton.nodes.get(&fk.fk_node).ok_or_else(|| {
-        QueryError::Lowering(format!("FK node '{}' not found in skeleton", fk.fk_node))
-    })?;
-    let target_np = skeleton.nodes.get(&fk.target_node).ok_or_else(|| {
-        QueryError::Lowering(format!(
-            "target node '{}' not found in skeleton",
-            fk.target_node
-        ))
-    })?;
-
-    let fk_table = fk_np
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("FK node '{}' has no table", fk.fk_node)))?;
-    let fk_alias = &fk_np.alias;
-
-    // FK direct: the node table IS the driving table. SELECT * because
-    // downstream passes (enforce, check) add columns we can't predict
-    // (cursor tie-breakers like created_at, updated_at).
-    let fk_needed = requested_columns(&fk_np.columns);
-
-    let fk_dedup = Query {
-        select: vec![SelectExpr::star()],
-        from: TableRef::scan(fk_table, fk_alias),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(fk_alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(fk_alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
-
-    let from = TableRef::Subquery {
-        query: Box::new(fk_dedup),
-        alias: fk_alias.to_string(),
-    };
-
-    let mut where_parts = Vec::new();
-
-    // FK node filters.
-    for (prop, filter) in &fk_np.filters {
-        where_parts.push(filter_to_expr(fk_alias, prop, filter));
-    }
-    where_parts.push(Expr::eq(
-        Expr::col(fk_alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
-
-    // Target node constraint via FK column.
-    if !target_np.node_ids.is_empty() {
-        where_parts.push(ids_on_edge(fk_alias, &fk.fk_column, &target_np.node_ids));
-    }
-
-    // Register node-edge mappings for enforce.
-    // FK node: id comes from its own table.
-    input.compiler.node_edge_col.insert(
-        fk.fk_node.clone(),
-        (fk_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
-    );
-    // Target node: id comes from the FK column on the FK node.
-    input.compiler.node_edge_col.insert(
-        fk.target_node.clone(),
-        (fk_alias.to_string(), fk.fk_column.clone()),
-    );
-
-    // Outer SELECT: FK node's columns — only for traversal or if this node
-    // is the group-by target. For aggregation where this node is just the
-    // driving scan, its columns don't belong in SELECT (GROUP BY violation).
-    let is_fk_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(fk_alias.as_str()));
-    let mut selects = Vec::new();
-    if is_fk_group_by || input.query_type != QueryType::Aggregation {
-        for col in &fk_needed {
-            selects.push(SelectExpr::new(
-                Expr::col(fk_alias, col),
-                format!("{fk_alias}_{col}"),
-            ));
-        }
-    }
-
-    // FK paths must hydrate target nodes inline — there's no edge table for
-    // the HydrationPlan to reference. Force Join when the target has requested
-    // columns, even if determine_hydration chose Skip.
-    let target_needs_join = target_np.hydration == HydrationStrategy::Join
-        || (input.query_type != QueryType::Aggregation
-            && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
-    let mut ctes = Vec::new();
-    if target_needs_join {
-        let (new_from, ns, nw) = emit_node_join(from, target_np, fk_alias, &fk.fk_column, input, true)?;
-        selects.extend(ns);
-        where_parts.extend(nw);
-        return Ok(SkeletonOutput {
-            from: new_from,
-            edge_aliases: vec![],
-            where_parts,
-            select: selects,
-            ctes,
-        });
-    }
-    if target_np.hydration == HydrationStrategy::FilterOnly {
-        where_parts.extend(emit_filter_subquery(
-            target_np,
-            fk_alias,
-            &fk.fk_column,
-            &mut ctes,
-        )?);
-    }
-
-    Ok(SkeletonOutput {
-        from,
-        edge_aliases: vec![],
-        where_parts,
-        select: selects,
-        ctes,
-    })
+    Ok(SkeletonOutput { from, edge_aliases, where_parts, select: selects, ctes })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Emit: FK star (all hops FK to same center node, zero edges)
+// Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
 // ─────────────────────────────────────────────────────────────────────────────
 
 fn emit_fk_star(
@@ -702,37 +521,17 @@ fn emit_fk_star(
     center_alias: &str,
     input: &mut Input,
 ) -> Result<SkeletonOutput> {
-    let center_np = skeleton.nodes.get(center_alias).ok_or_else(|| {
-        QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
-    })?;
-    let center_table = center_np.table.as_deref().ok_or_else(|| {
-        QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
-    })?;
+    let center_np = skeleton.nodes.get(center_alias)
+        .ok_or_else(|| QueryError::Lowering(format!("FK star center '{center_alias}' not found")))?;
+    let center_table = center_np.table.as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("FK star center '{center_alias}' has no table")))?;
 
-    // Center node: dedup subquery with explicit columns.
-    // SELECT * doesn't reliably expose all columns through LIMIT 1 BY
-    // subqueries in ClickHouse 26.2.
-    let mut center_cols = vec![
-        SelectExpr::new(
-            Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        ),
-        SelectExpr::new(Expr::col(center_alias, VERSION_COLUMN), VERSION_COLUMN),
-        SelectExpr::new(Expr::col(center_alias, DELETED_COLUMN), DELETED_COLUMN),
-    ];
-    if center_np.has_traversal_path {
-        center_cols.push(SelectExpr::new(
-            Expr::col(center_alias, TRAVERSAL_PATH_COLUMN),
-            TRAVERSAL_PATH_COLUMN,
-        ));
-    }
-    // FK columns for each hop.
+    // Build center dedup columns: system + requested + filter + agg + FK columns.
+    let mut center_cols = collect_dedup_columns(center_alias, center_np, input);
+    // Add FK columns for each hop (not covered by collect_dedup_columns).
     for hop in &skeleton.hops {
         if let Some(ref fk) = hop.fk {
-            if !center_cols
-                .iter()
-                .any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str()))
-            {
+            if !center_cols.iter().any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str())) {
                 center_cols.push(SelectExpr::new(
                     Expr::col(center_alias, &fk.fk_column),
                     fk.fk_column.as_str(),
@@ -740,96 +539,16 @@ fn emit_fk_star(
             }
         }
     }
-    // Requested columns.
-    for col in requested_columns(&center_np.columns) {
-        if !center_cols
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(col.as_str()))
-        {
-            center_cols.push(SelectExpr::new(Expr::col(center_alias, &col), col.as_str()));
-        }
-    }
-    // Filter columns.
-    for (prop, _) in &center_np.filters {
-        if !center_cols
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(prop.as_str()))
-        {
-            center_cols.push(SelectExpr::new(
-                Expr::col(center_alias, prop),
-                prop.as_str(),
-            ));
-        }
-    }
-    // Agg property columns.
-    for agg in &input.aggregations {
-        if agg.target.as_deref() == Some(center_alias) {
-            if let Some(ref prop) = agg.property {
-                if !center_cols
-                    .iter()
-                    .any(|s| s.alias.as_deref() == Some(prop.as_str()))
-                {
-                    center_cols.push(SelectExpr::new(
-                        Expr::col(center_alias, prop),
-                        prop.as_str(),
-                    ));
-                }
-            }
-        }
-    }
-    // ORDER BY column.
-    if let Some(ref ob) = input.order_by {
-        if ob.node == center_alias
-            && !center_cols
-                .iter()
-                .any(|s| s.alias.as_deref() == Some(ob.property.as_str()))
-        {
-            center_cols.push(SelectExpr::new(
-                Expr::col(center_alias, &ob.property),
-                ob.property.as_str(),
-            ));
-        }
-    }
-    // Redaction column.
-    if center_np.redaction_id_column != DEFAULT_PRIMARY_KEY
-        && !center_cols
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(center_np.redaction_id_column.as_str()))
-    {
-        center_cols.push(SelectExpr::new(
-            Expr::col(center_alias, &center_np.redaction_id_column),
-            center_np.redaction_id_column.as_str(),
-        ));
-    }
 
-    let center_dedup = Query {
-        select: center_cols,
-        from: TableRef::scan(center_table, center_alias),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(center_alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(center_alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
-
+    let center_dedup = build_dedup_subquery(center_alias, center_table, center_cols);
     let mut from = TableRef::Subquery {
         query: Box::new(center_dedup),
         alias: center_alias.to_string(),
     };
 
-    let mut where_parts = Vec::new();
-    let mut selects = Vec::new();
+    let mut where_parts = node_where_predicates(center_alias, center_np);
+    let mut selects = node_select_columns(center_alias, center_np, input);
     let mut ctes = Vec::new();
-
-    // Center node filters.
-    for (prop, filter) in &center_np.filters {
-        where_parts.push(filter_to_expr(center_alias, prop, filter));
-    }
-    where_parts.push(Expr::eq(
-        Expr::col(center_alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
 
     // Center node: register ID mapping.
     input.compiler.node_edge_col.insert(
@@ -837,197 +556,47 @@ fn emit_fk_star(
         (center_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
     );
 
-    // Center node SELECT columns (traversal or group-by).
-    let is_center_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(center_alias));
-    if is_center_group_by || input.query_type != QueryType::Aggregation {
-        for col in requested_columns(&center_np.columns) {
-            selects.push(SelectExpr::new(
-                Expr::col(center_alias, &col),
-                format!("{center_alias}_{col}"),
-            ));
-        }
-    }
-
-    // Each hop: target node is connected via FK column on center.
+    // Each hop: target node connected via FK column on center.
     for hop in &skeleton.hops {
-        let fk = hop
-            .fk
-            .as_ref()
+        let fk = hop.fk.as_ref()
             .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
+        let target_np = skeleton.nodes.get(&fk.target_node)
+            .ok_or_else(|| QueryError::Lowering(format!("FK target '{}' not found", fk.target_node)))?;
 
-        let target_alias = &fk.target_node;
-        let target_np = skeleton.nodes.get(target_alias).ok_or_else(|| {
-            QueryError::Lowering(format!("FK star target '{target_alias}' not found"))
-        })?;
-
-        // Register target node ID mapping: comes from center's FK column.
+        // Register target node ID mapping.
         input.compiler.node_edge_col.insert(
-            target_alias.clone(),
+            fk.target_node.clone(),
             (center_alias.to_string(), fk.fk_column.clone()),
         );
 
-        // Pinned target: push WHERE center.fk_col = X.
+        // Pinned target IDs.
         if !target_np.node_ids.is_empty() {
-            where_parts.push(ids_on_edge(
-                center_alias,
-                &fk.fk_column,
-                &target_np.node_ids,
-            ));
+            where_parts.push(id_list_predicate(center_alias, &fk.fk_column, &target_np.node_ids));
         }
 
-        // FK paths must hydrate target nodes inline — there's no edge table
-        // for the HydrationPlan to reference. Force Join when the target has
-        // requested columns, even if determine_hydration chose Skip.
-        let target_needs_join = target_np.hydration == HydrationStrategy::Join
-            || (input.query_type != QueryType::Aggregation
-                && matches!(&target_np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
-        if target_needs_join {
+        // Target hydration.
+        if fk_target_needs_join(target_np, input) {
             let (new_from, ns, nw) =
                 emit_node_join(from, target_np, center_alias, &fk.fk_column, input, true)?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
         } else if target_np.hydration == HydrationStrategy::FilterOnly {
-            where_parts.extend(emit_filter_subquery(
-                target_np,
-                center_alias,
-                &fk.fk_column,
-                &mut ctes,
-            )?);
+            where_parts.extend(emit_filter_subquery(target_np, center_alias, &fk.fk_column, &mut ctes)?);
         }
     }
 
-    Ok(SkeletonOutput {
-        from,
-        edge_aliases: vec![],
-        where_parts,
-        select: selects,
-        ctes,
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit helpers: edge predicates
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn push_edge_predicates(
-    where_parts: &mut Vec<Expr>,
-    alias: &str,
-    hop: &Hop,
-    nodes: &HashMap<String, NodePlan>,
-    start_col: &str,
-    end_col: &str,
-) {
-    // Relationship kind.
-    if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
-        where_parts.push(f);
-    }
-
-    // Entity kind on source side.
-    if let Some(np) = nodes.get(&hop.from_node) {
-        if let Some(ref entity) = np.entity {
-            let kind_col = if start_col == SOURCE_ID_COLUMN {
-                SOURCE_KIND_COLUMN
-            } else {
-                TARGET_KIND_COLUMN
-            };
-            where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
-        }
-    }
-
-    // Entity kind on target side.
-    if let Some(np) = nodes.get(&hop.to_node) {
-        if let Some(ref entity) = np.entity {
-            let kind_col = if end_col == TARGET_ID_COLUMN {
-                TARGET_KIND_COLUMN
-            } else {
-                SOURCE_KIND_COLUMN
-            };
-            where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
-        }
-    }
-
-    // _deleted filter.
-    where_parts.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
-}
-
-fn emit_denorm_tags(
-    where_parts: &mut Vec<Expr>,
-    alias: &str,
-    hop: &Hop,
-    nodes: &HashMap<String, NodePlan>,
-    input: &Input,
-    start_col: &str,
-    end_col: &str,
-) {
-    if input.compiler.denormalized_columns.is_empty() {
-        return;
-    }
-    if let Some(np) = nodes.get(&hop.from_node) {
-        let dir = if start_col == SOURCE_ID_COLUMN {
-            "source"
-        } else {
-            "target"
-        };
-        where_parts.extend(denorm_tag_exprs_from_plan(
-            np,
-            dir,
-            alias,
-            &input.compiler.denormalized_columns,
-        ));
-    }
-    if let Some(np) = nodes.get(&hop.to_node) {
-        let dir = if end_col == TARGET_ID_COLUMN {
-            "target"
-        } else {
-            "source"
-        };
-        where_parts.extend(denorm_tag_exprs_from_plan(
-            np,
-            dir,
-            alias,
-            &input.compiler.denormalized_columns,
-        ));
-    }
-}
-
-fn emit_node_ids_on_edge(
-    where_parts: &mut Vec<Expr>,
-    alias: &str,
-    hop: &Hop,
-    nodes: &HashMap<String, NodePlan>,
-    start_col: &str,
-    end_col: &str,
-) {
-    if let Some(np) = nodes.get(&hop.from_node) {
-        if !np.node_ids.is_empty() {
-            where_parts.push(ids_on_edge(alias, start_col, &np.node_ids));
-        }
-    }
-    if let Some(np) = nodes.get(&hop.to_node) {
-        if !np.node_ids.is_empty() {
-            where_parts.push(ids_on_edge(alias, end_col, &np.node_ids));
-        }
-    }
+    Ok(SkeletonOutput { from, edge_aliases: vec![], where_parts, select: selects, ctes })
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Join a node's dedup subquery into the FROM tree.
+/// JOIN a node's dedup subquery into the FROM tree.
 ///
-/// `use_traversal_path_join`: when true, adds `node.traversal_path =
-/// edge_alias.traversal_path` to the ON clause. Only valid when `edge_alias`
-/// is another node table (FK paths) — NOT when it's an edge table, because
-/// edge tables store the *target's* namespace path which differs from the
-/// source node's traversal_path.
+/// `use_traversal_path_join`: true for FK paths (node-to-node), false for
+/// edge paths (edge.traversal_path has different semantics than node's).
 fn emit_node_join(
     from: TableRef,
     np: &NodePlan,
@@ -1036,153 +605,30 @@ fn emit_node_join(
     input: &Input,
     use_traversal_path_join: bool,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    let table = np
-        .table
-        .as_deref()
+    let table = np.table.as_deref()
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
-    // Determine which columns we need first — this drives both the
-    // dedup subquery SELECT and the outer SELECT.
-    let is_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
+    let dedup_cols = collect_dedup_columns(alias, np, input);
+    let dedup_query = build_dedup_subquery(alias, table, dedup_cols);
 
-    let needed_cols: Vec<String> = if is_group_by || input.query_type != QueryType::Aggregation {
-        requested_columns(&np.columns)
-    } else {
-        let mut cols = Vec::new();
-        if let Some(ref ob) = input.order_by {
-            if ob.node == *alias && !cols.contains(&ob.property) {
-                cols.push(ob.property.clone());
-            }
-        }
-        cols
-    };
-
-    // Build dedup subquery with only the columns we need.
-    let mut dedup_cols = vec![
-        SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
-        SelectExpr::new(Expr::col(alias, VERSION_COLUMN), VERSION_COLUMN),
-    ];
-    if np.has_traversal_path {
-        dedup_cols.push(SelectExpr::new(
+    let mut on = Expr::eq(Expr::col(alias, DEFAULT_PRIMARY_KEY), Expr::col(edge_alias, edge_col));
+    if use_traversal_path_join && np.has_traversal_path {
+        on = Expr::and(on, Expr::eq(
             Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            TRAVERSAL_PATH_COLUMN,
-        ));
-    }
-    for col in &needed_cols {
-        if col != DEFAULT_PRIMARY_KEY && col != VERSION_COLUMN && col != TRAVERSAL_PATH_COLUMN {
-            dedup_cols.push(SelectExpr::new(Expr::col(alias, col), col.as_str()));
-        }
-    }
-    for (prop, _) in &np.filters {
-        if !dedup_cols
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(prop.as_str()))
-        {
-            dedup_cols.push(SelectExpr::new(Expr::col(alias, prop), prop.as_str()));
-        }
-    }
-    // Aggregate property columns (sum, avg, min, max targets).
-    for agg in &input.aggregations {
-        if agg.target.as_deref() == Some(alias) {
-            if let Some(ref prop) = agg.property {
-                if !dedup_cols
-                    .iter()
-                    .any(|s| s.alias.as_deref() == Some(prop.as_str()))
-                {
-                    dedup_cols.push(SelectExpr::new(Expr::col(alias, prop), prop.as_str()));
-                }
-            }
-        }
-    }
-    // ORDER BY column.
-    if let Some(ref ob) = input.order_by {
-        if ob.node == *alias
-            && !dedup_cols
-                .iter()
-                .any(|s| s.alias.as_deref() == Some(ob.property.as_str()))
-        {
-            dedup_cols.push(SelectExpr::new(
-                Expr::col(alias, &ob.property),
-                ob.property.as_str(),
-            ));
-        }
-    }
-    // Enforce adds redaction_id_column — include it if it's not "id".
-    if np.redaction_id_column != DEFAULT_PRIMARY_KEY
-        && !dedup_cols
-            .iter()
-            .any(|s| s.alias.as_deref() == Some(np.redaction_id_column.as_str()))
-    {
-        dedup_cols.push(SelectExpr::new(
-            Expr::col(alias, &np.redaction_id_column),
-            np.redaction_id_column.as_str(),
-        ));
-    }
-    // _deleted needed for WHERE filter.
-    if !dedup_cols
-        .iter()
-        .any(|s| s.alias.as_deref() == Some(DELETED_COLUMN))
-    {
-        dedup_cols.push(SelectExpr::new(
-            Expr::col(alias, DELETED_COLUMN),
-            DELETED_COLUMN,
+            Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
         ));
     }
 
-    let dedup_query = Query {
-        select: dedup_cols,
-        from: TableRef::scan(table, alias),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
+    let joined = TableRef::join(
+        JoinType::Inner,
+        from,
+        TableRef::Subquery { query: Box::new(dedup_query), alias: alias.to_string() },
+        on,
+    );
 
-    let joined = TableRef::Join {
-        join_type: JoinType::Inner,
-        left: Box::new(from),
-        right: Box::new(TableRef::Subquery {
-            query: Box::new(dedup_query),
-            alias: alias.to_string(),
-        }),
-        on: {
-            let id_join = Expr::eq(
-                Expr::col(alias, DEFAULT_PRIMARY_KEY),
-                Expr::col(edge_alias, edge_col),
-            );
-            if use_traversal_path_join && np.has_traversal_path {
-                Expr::and(
-                    id_join,
-                    Expr::eq(
-                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                        Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
-                    ),
-                )
-            } else {
-                id_join
-            }
-        },
-    };
-
-    let selects: Vec<SelectExpr> = needed_cols
-        .iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, col), format!("{alias}_{col}")))
-        .collect();
-
-    let mut wheres = Vec::new();
-    for (prop, filter) in &np.filters {
-        wheres.push(filter_to_expr(alias, prop, filter));
-    }
-    wheres.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    let selects = node_select_columns(alias, np, input);
+    let wheres = node_where_predicates(alias, np);
 
     Ok((joined, selects, wheres))
 }
@@ -1193,33 +639,18 @@ fn emit_filter_subquery(
     edge_col: &str,
     ctes: &mut Vec<Cte>,
 ) -> Result<Vec<Expr>> {
-    let table = np
-        .table
-        .as_deref()
+    let table = np.table.as_deref()
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    let mut inner_where = Vec::new();
-    for (prop, filter) in &np.filters {
-        inner_where.push(filter_to_expr(alias, prop, filter));
-    }
-    inner_where.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    let mut inner_where = node_where_predicates(alias, np);
 
     let inner = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
+        select: vec![SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY)],
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(inner_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
+        order_by: vec![OrderExpr { expr: Expr::col(alias, VERSION_COLUMN), desc: true }],
         limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
         ..Default::default()
     };
@@ -1234,10 +665,70 @@ fn emit_filter_subquery(
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Denorm tag expressions from NodePlan
+// Emit helpers: edge predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn denorm_tag_exprs_from_plan(
+fn push_edge_predicates(
+    where_parts: &mut Vec<Expr>,
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+    start_col: &str,
+    end_col: &str,
+) {
+    if let Some(f) = rel_kind_filter(alias, &hop.rel_types) {
+        where_parts.push(f);
+    }
+    // Entity kind filters.
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        if let Some(np) = nodes.get(node_alias) {
+            if let Some(ref entity) = np.entity {
+                let kind_col = if id_col == SOURCE_ID_COLUMN { SOURCE_KIND_COLUMN } else { TARGET_KIND_COLUMN };
+                where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
+            }
+        }
+    }
+    where_parts.push(Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::param(ChType::Bool, false)));
+}
+
+fn emit_denorm_tags(
+    where_parts: &mut Vec<Expr>,
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+    input: &Input,
+    start_col: &str,
+    end_col: &str,
+) {
+    if input.compiler.denormalized_columns.is_empty() {
+        return;
+    }
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        if let Some(np) = nodes.get(node_alias) {
+            let dir = if id_col == SOURCE_ID_COLUMN { "source" } else { "target" };
+            where_parts.extend(denorm_tag_exprs(np, dir, alias, &input.compiler.denormalized_columns));
+        }
+    }
+}
+
+fn emit_node_ids_on_edge(
+    where_parts: &mut Vec<Expr>,
+    alias: &str,
+    hop: &Hop,
+    nodes: &HashMap<String, NodePlan>,
+    start_col: &str,
+    end_col: &str,
+) {
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        if let Some(np) = nodes.get(node_alias) {
+            if !np.node_ids.is_empty() {
+                where_parts.push(id_list_predicate(alias, id_col, &np.node_ids));
+            }
+        }
+    }
+}
+
+fn denorm_tag_exprs(
     np: &NodePlan,
     dir_prefix: &str,
     edge_alias: &str,
@@ -1250,39 +741,30 @@ fn denorm_tag_exprs_from_plan(
     let mut exprs = Vec::new();
     for (prop, filter) in &np.filters {
         let key = (entity.clone(), prop.clone(), dir_prefix.to_string());
-        let Some((edge_column, tag_key)) = denorm_map.get(&key) else {
-            continue;
-        };
+        let Some((edge_column, tag_key)) = denorm_map.get(&key) else { continue };
         match filter.op {
             None | Some(FilterOp::Eq) => {
                 let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                exprs.push(Expr::func(
-                    "has",
-                    vec![
-                        Expr::col(edge_alias, edge_column),
-                        Expr::string(format!("{tag_key}:{val}")),
-                    ],
-                ));
+                exprs.push(Expr::func("has", vec![
+                    Expr::col(edge_alias, edge_column),
+                    Expr::string(format!("{tag_key}:{val}")),
+                ]));
             }
             Some(FilterOp::In) => {
                 if let Some(values) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                    let tags: Vec<String> = values
-                        .iter()
+                    let tags: Vec<String> = values.iter()
                         .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
                         .collect();
                     if tags.len() == 1 {
-                        exprs.push(Expr::func(
-                            "has",
-                            vec![Expr::col(edge_alias, edge_column), Expr::string(&tags[0])],
-                        ));
+                        exprs.push(Expr::func("has", vec![
+                            Expr::col(edge_alias, edge_column),
+                            Expr::string(&tags[0]),
+                        ]));
                     } else if !tags.is_empty() {
-                        exprs.push(Expr::func(
-                            "hasAny",
-                            vec![
-                                Expr::col(edge_alias, edge_column),
-                                Expr::func("array", tags.iter().map(Expr::string).collect()),
-                            ],
-                        ));
+                        exprs.push(Expr::func("hasAny", vec![
+                            Expr::col(edge_alias, edge_column),
+                            Expr::func("array", tags.iter().map(Expr::string).collect()),
+                        ]));
                     }
                 }
             }
@@ -1300,8 +782,6 @@ pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
     edge_select_columns_with_prefix(alias, alias)
 }
 
-/// Edge metadata SELECT with a custom output prefix. Used by multi-hop
-/// traversals that use `hop_e0_` prefix instead of `e0_`.
 pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectExpr> {
     [
         (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
@@ -1333,19 +813,11 @@ fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
         return None;
     }
     if types.len() == 1 {
-        Some(Expr::eq(
-            Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
-            Expr::string(&types[0]),
-        ))
+        Some(Expr::eq(Expr::col(alias, RELATIONSHIP_KIND_COLUMN), Expr::string(&types[0])))
     } else {
         Expr::col_in(
-            alias,
-            RELATIONSHIP_KIND_COLUMN,
-            ChType::String,
-            types
-                .iter()
-                .map(|t| serde_json::Value::String(t.clone()))
-                .collect(),
+            alias, RELATIONSHIP_KIND_COLUMN, ChType::String,
+            types.iter().map(|t| serde_json::Value::String(t.clone())).collect(),
         )
     }
 }
@@ -1366,51 +838,26 @@ pub fn filter_to_expr(alias: &str, prop: &str, filter: &InputFilter) -> Expr {
         Some(FilterOp::Lte) => Expr::binary(Op::Le, col, typed(val())),
         Some(FilterOp::In) => {
             if let Some(arr) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                Expr::col_in(
-                    alias,
-                    prop,
-                    data_type_to_ch(filter.data_type.as_ref()),
-                    arr.clone(),
-                )
-                .unwrap_or_else(|| Expr::param(ChType::Bool, false))
+                Expr::col_in(alias, prop, data_type_to_ch(filter.data_type.as_ref()), arr.clone())
+                    .unwrap_or_else(|| Expr::param(ChType::Bool, false))
             } else {
                 Expr::param(ChType::Bool, false)
             }
         }
-        Some(FilterOp::Contains) => Expr::func(
-            "positionCaseInsensitive",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::StartsWith) => Expr::func(
-            "startsWith",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::EndsWith) => Expr::func(
-            "endsWith",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
+        Some(FilterOp::Contains) => Expr::func("positionCaseInsensitive", vec![col, Expr::param(ChType::String, str_val())]),
+        Some(FilterOp::StartsWith) => Expr::func("startsWith", vec![col, Expr::param(ChType::String, str_val())]),
+        Some(FilterOp::EndsWith) => Expr::func("endsWith", vec![col, Expr::param(ChType::String, str_val())]),
         Some(FilterOp::IsNull) => Expr::unary(Op::IsNull, col),
         Some(FilterOp::IsNotNull) => Expr::unary(Op::IsNotNull, col),
-        Some(FilterOp::TokenMatch) => Expr::func(
-            "hasToken",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AllTokens) => Expr::func(
-            "hasAllTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
-        Some(FilterOp::AnyTokens) => Expr::func(
-            "hasAnyTokens",
-            vec![col, Expr::param(ChType::String, str_val())],
-        ),
+        Some(FilterOp::TokenMatch) => Expr::func("hasToken", vec![col, Expr::param(ChType::String, str_val())]),
+        Some(FilterOp::AllTokens) => Expr::func("hasAllTokens", vec![col, Expr::param(ChType::String, str_val())]),
+        Some(FilterOp::AnyTokens) => Expr::func("hasAnyTokens", vec![col, Expr::param(ChType::String, str_val())]),
     }
 }
 
 fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
     match dt {
-        Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => {
-            ChType::String
-        }
+        Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => ChType::String,
         Some(ontology::DataType::Int) => ChType::Int64,
         Some(ontology::DataType::Float) => ChType::Float64,
         Some(ontology::DataType::Bool) => ChType::Bool,
@@ -1427,46 +874,14 @@ pub fn requested_columns(columns: &Option<ColumnSelection>) -> Vec<String> {
     }
 }
 
-fn ids_on_edge(edge_alias: &str, edge_col: &str, ids: &[i64]) -> Expr {
-    if ids.len() == 1 {
-        Expr::eq(Expr::col(edge_alias, edge_col), Expr::int(ids[0]))
-    } else {
-        Expr::col_in(
-            edge_alias,
-            edge_col,
-            ChType::Int64,
-            ids.iter().map(|id| serde_json::Value::from(*id)).collect(),
-        )
-        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-    }
-}
-
 pub fn node_ids_predicate(alias: &str, ids: &[i64]) -> Expr {
-    if ids.len() == 1 {
-        Expr::eq(Expr::col(alias, DEFAULT_PRIMARY_KEY), Expr::int(ids[0]))
-    } else {
-        Expr::col_in(
-            alias,
-            DEFAULT_PRIMARY_KEY,
-            ChType::Int64,
-            ids.iter().map(|id| serde_json::Value::from(*id)).collect(),
-        )
-        .unwrap_or_else(|| Expr::param(ChType::Bool, false))
-    }
+    id_list_predicate(alias, DEFAULT_PRIMARY_KEY, ids)
 }
 
 pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
     Expr::and(
-        Expr::binary(
-            Op::Ge,
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            Expr::int(range.start),
-        ),
-        Expr::binary(
-            Op::Le,
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            Expr::int(range.end),
-        ),
+        Expr::binary(Op::Ge, Expr::col(alias, DEFAULT_PRIMARY_KEY), Expr::int(range.start)),
+        Expr::binary(Op::Le, Expr::col(alias, DEFAULT_PRIMARY_KEY), Expr::int(range.end)),
     )
 }
 
@@ -1474,9 +889,6 @@ pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
 // Variable-length: UNION ALL of edge chains
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build a UNION ALL subquery for variable-length traversals (min_hops..=max_hops).
-/// Each arm is a chain of `depth` edge JOINs. The output columns are normalized
-/// so all arms share the same schema.
 fn build_multi_hop_union(
     hop: &Hop,
     alias: &str,
@@ -1489,59 +901,35 @@ fn build_multi_hop_union(
         Direction::Incoming => SOURCE_KIND_COLUMN,
     };
 
-    let type_filter: Option<Vec<String>> = if hop.rel_types.is_empty()
-        || (hop.rel_types.len() == 1 && hop.rel_types[0] == "*")
-    {
-        None
-    } else {
-        Some(hop.rel_types.clone())
-    };
+    let type_filter = rel_kind_filter_values(&hop.rel_types);
 
     let queries: Vec<Query> = (start..=hop.max_hops)
-        .map(|depth| {
-            build_depth_arm(
-                depth,
-                &hop.edge_table,
-                start_col,
-                end_col,
-                end_type_col,
-                hop.direction,
-                &type_filter,
-            )
-        })
+        .map(|depth| build_depth_arm(depth, &hop.edge_table, start_col, end_col, end_type_col, hop.direction, &type_filter))
         .collect();
 
     let union = TableRef::union_all(queries, alias);
 
-    // Edge predicates that go on the outer WHERE (entity kind filters).
-    // source_kind/target_kind filtering is done per-arm internally, but we
-    // also need it on the outer query for the normalized columns.
     let mut where_parts = Vec::new();
-    if let Some(np) = nodes.get(&hop.from_node) {
-        if let Some(ref entity) = np.entity {
-            where_parts.push(Expr::eq(
-                Expr::col(alias, SOURCE_KIND_COLUMN),
-                Expr::string(entity),
-            ));
+    for (node_alias, kind_col) in [(&hop.from_node, SOURCE_KIND_COLUMN), (&hop.to_node, TARGET_KIND_COLUMN)] {
+        if let Some(np) = nodes.get(node_alias) {
+            if let Some(ref entity) = np.entity {
+                where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
+            }
         }
     }
-    if let Some(np) = nodes.get(&hop.to_node) {
-        if let Some(ref entity) = np.entity {
-            where_parts.push(Expr::eq(
-                Expr::col(alias, TARGET_KIND_COLUMN),
-                Expr::string(entity),
-            ));
-        }
-    }
-    where_parts.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    where_parts.push(Expr::eq(Expr::col(alias, DELETED_COLUMN), Expr::param(ChType::Bool, false)));
 
     (union, where_parts)
 }
 
-/// Build one arm of the UNION ALL: a chain of `depth` edge JOINs.
+fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
+    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+        None
+    } else {
+        Some(types.to_vec())
+    }
+}
+
 fn build_depth_arm(
     depth: u32,
     edge_table: &str,
@@ -1551,41 +939,22 @@ fn build_depth_arm(
     direction: Direction,
     type_filter: &Option<Vec<String>>,
 ) -> Query {
-    // First edge scan.
     let mut from = TableRef::scan(edge_table, "e1");
-    let mut where_clause = None;
+    let mut where_clause = type_filter.as_ref().and_then(|types| {
+        Expr::col_in("e1", RELATIONSHIP_KIND_COLUMN, ChType::String,
+            types.iter().map(|t| serde_json::Value::String(t.clone())).collect())
+    });
 
-    // Relationship kind filter on first edge.
-    if let Some(types) = type_filter {
-        where_clause = Expr::col_in(
-            "e1",
-            RELATIONSHIP_KIND_COLUMN,
-            ChType::String,
-            types
-                .iter()
-                .map(|t| serde_json::Value::String(t.clone()))
-                .collect(),
-        );
-    }
-
-    // Chain: e1 JOIN e2 ON e1.end = e2.start JOIN e3 ...
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
         let right = TableRef::scan(edge_table, &curr);
         let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
-        // Relationship kind filter on chained edges.
         if let Some(types) = type_filter {
-            if let Some(type_cond) = Expr::col_in(
-                &curr,
-                RELATIONSHIP_KIND_COLUMN,
-                ChType::String,
-                types
-                    .iter()
-                    .map(|t| serde_json::Value::String(t.clone()))
-                    .collect(),
-            ) {
-                join_on = Expr::and(join_on, type_cond);
+            if let Some(tc) = Expr::col_in(&curr, RELATIONSHIP_KIND_COLUMN, ChType::String,
+                types.iter().map(|t| serde_json::Value::String(t.clone())).collect())
+            {
+                join_on = Expr::and(join_on, tc);
             }
         }
         from = TableRef::join(JoinType::Inner, from, right, join_on);
@@ -1593,57 +962,39 @@ fn build_depth_arm(
 
     let last = format!("e{depth}");
 
-    // Determine source/target columns based on direction.
-    let (rel_kind_expr, src_id_expr, src_kind_expr, tgt_id_expr, tgt_kind_expr) = match direction {
+    let (rel_kind, src_id, src_kind, tgt_id, tgt_kind) = match direction {
         Direction::Outgoing | Direction::Both => (
             Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
-            Expr::col("e1", SOURCE_ID_COLUMN),
-            Expr::col("e1", SOURCE_KIND_COLUMN),
-            Expr::col(&last, TARGET_ID_COLUMN),
-            Expr::col(&last, TARGET_KIND_COLUMN),
+            Expr::col("e1", SOURCE_ID_COLUMN), Expr::col("e1", SOURCE_KIND_COLUMN),
+            Expr::col(&last, TARGET_ID_COLUMN), Expr::col(&last, TARGET_KIND_COLUMN),
         ),
         Direction::Incoming => (
             Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
-            Expr::col(&last, SOURCE_ID_COLUMN),
-            Expr::col(&last, SOURCE_KIND_COLUMN),
-            Expr::col("e1", TARGET_ID_COLUMN),
-            Expr::col("e1", TARGET_KIND_COLUMN),
+            Expr::col(&last, SOURCE_ID_COLUMN), Expr::col(&last, SOURCE_KIND_COLUMN),
+            Expr::col("e1", TARGET_ID_COLUMN), Expr::col("e1", TARGET_KIND_COLUMN),
         ),
     };
 
-    // path_nodes: array of (end_id, end_kind) tuples for intermediate nodes.
-    let path_nodes_expr = Expr::func(
-        "array",
-        (1..=depth)
-            .map(|i| {
-                let e = format!("e{i}");
-                Expr::func(
-                    "tuple",
-                    vec![Expr::col(&e, end_col), Expr::col(&e, end_type_col)],
-                )
-            })
-            .collect(),
+    let path_nodes = Expr::func("array",
+        (1..=depth).map(|i| {
+            let e = format!("e{i}");
+            Expr::func("tuple", vec![Expr::col(&e, end_col), Expr::col(&e, end_type_col)])
+        }).collect(),
     );
 
     Query {
         select: vec![
-            // Normalized edge columns that match a single-hop scan.
             SelectExpr::new(Expr::col("e1", start_col), start_col),
             SelectExpr::new(Expr::col(&last, end_col), end_col),
-            SelectExpr::new(rel_kind_expr, RELATIONSHIP_KIND_COLUMN),
-            SelectExpr::new(src_id_expr, SOURCE_ID_COLUMN),
-            SelectExpr::new(src_kind_expr, SOURCE_KIND_COLUMN),
-            SelectExpr::new(tgt_id_expr, TARGET_ID_COLUMN),
-            SelectExpr::new(tgt_kind_expr, TARGET_KIND_COLUMN),
-            SelectExpr::new(path_nodes_expr, PATH_NODES_COLUMN),
+            SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
+            SelectExpr::new(src_id, SOURCE_ID_COLUMN),
+            SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
+            SelectExpr::new(tgt_id, TARGET_ID_COLUMN),
+            SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
+            SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
-            // _deleted from first edge for outer filter.
             SelectExpr::new(Expr::col("e1", DELETED_COLUMN), DELETED_COLUMN),
-            // traversal_path from first edge for security pass.
-            SelectExpr::new(
-                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
-                TRAVERSAL_PATH_COLUMN,
-            ),
+            SelectExpr::new(Expr::col("e1", TRAVERSAL_PATH_COLUMN), TRAVERSAL_PATH_COLUMN),
         ],
         from,
         where_clause,
