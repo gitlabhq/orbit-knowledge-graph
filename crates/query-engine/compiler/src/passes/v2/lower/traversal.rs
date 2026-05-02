@@ -4,11 +4,11 @@
 //! Multi-node: skeleton edge chain + edge metadata SELECT + ORDER BY.
 
 use crate::ast::*;
-use crate::error::{QueryError, Result};
+use crate::error::Result;
 use crate::input::*;
 
-use super::shared::*;
-use super::types::*;
+use super::shared::edge_select_columns;
+use super::types::Skeleton;
 
 pub fn lower_traversal(input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {
@@ -41,19 +41,6 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
 fn lower_single_node(input: &mut Input) -> Result<Node> {
     let skeleton = Skeleton::plan(input);
     let output = skeleton.emit(input)?;
-
-    let node = input
-        .nodes
-        .first()
-        .ok_or_else(|| QueryError::Lowering("no nodes in query".into()))?;
-
-    let mut select = vec![SelectExpr::new(Expr::col(&node.id, "id"), "id")];
-    for col in requested_columns(&node.columns) {
-        if col != "id" {
-            select.push(SelectExpr::new(Expr::col(&node.id, &col), col.clone()));
-        }
-    }
-
-    let q = output.into_query(select, vec![], vec![], input.limit);
+    let q = output.into_query(vec![], vec![], vec![], input.limit);
     Ok(Node::Query(Box::new(q)))
 }
