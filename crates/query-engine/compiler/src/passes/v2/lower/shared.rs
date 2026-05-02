@@ -683,7 +683,12 @@ fn emit_fk_star(
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
-        } else if target_np.hydration == HydrationStrategy::FilterOnly {
+        } else if target_np.hydration == HydrationStrategy::FilterOnly
+            || (target_np.hydration == HydrationStrategy::Skip
+                && target_np.has_traversal_path
+                && target_np.table.is_some()
+                && has_elevated_access_level(target_np, input))
+        {
             where_parts.extend(emit_filter_subquery(
                 target_np,
                 center_alias,
