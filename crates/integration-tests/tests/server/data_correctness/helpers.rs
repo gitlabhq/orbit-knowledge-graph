@@ -18,6 +18,7 @@
 pub(super) use std::collections::HashSet;
 pub(super) use std::sync::Arc;
 
+pub(super) use crate::common::compile;
 pub(super) use crate::common::{
     GRAPH_SCHEMA_SQL, MockRedactionService, SIPHON_SCHEMA_SQL, TestContext, admin_security_context,
     load_ontology, run_redaction, test_security_context,
@@ -26,7 +27,7 @@ pub(super) use gkg_server::pipeline::HydrationStage;
 pub(super) use gkg_server::redaction::QueryResult;
 pub(super) use integration_testkit::load_seed;
 pub(super) use integration_testkit::visitor::{NodeExt, Requirement, ResponseView};
-pub(super) use query_engine::compiler::{SecurityContext, compile};
+pub(super) use query_engine::compiler::SecurityContext;
 pub(super) use query_engine::formatters::{GraphFormatter, ResultFormatter};
 pub(super) use query_engine::pipeline::{
     NoOpObserver, PipelineStage, QueryPipelineContext, TypeMap,
@@ -65,19 +66,7 @@ pub(super) async fn run_query_with_security(
 ) -> ResponseView {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-
-    // When GKG_TEST_V2=1, inject use_v2 into the query to exercise the
-    // skeleton-first compiler. Every data correctness test runs through
-    // v2 automatically — same expected results, different compiler.
-    let json = if std::env::var("GKG_TEST_V2").as_deref() == Ok("1") {
-        let mut v: Value = serde_json::from_str(json).unwrap();
-        v["options"]["use_v2"] = Value::Bool(true);
-        v.to_string()
-    } else {
-        json.to_string()
-    };
-
-    let compiled = Arc::new(compile(&json, &ontology, &security_ctx).unwrap());
+    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
 

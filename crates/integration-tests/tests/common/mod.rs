@@ -2,7 +2,10 @@
 
 use gkg_server::redaction::QueryResult;
 use ontology::Ontology;
-use query_engine::compiler::{CompiledQueryContext, SecurityContext, compile};
+use query_engine::compiler::error::Result;
+use query_engine::compiler::{
+    CompiledQueryContext, SecurityContext, compile as compile_v1, compile_v2,
+};
 
 pub use integration_testkit::mock_redaction::MockRedactionService;
 pub use integration_testkit::{GRAPH_SCHEMA_SQL, SIPHON_SCHEMA_SQL, TestContext, load_ontology};
@@ -13,6 +16,21 @@ pub fn test_security_context() -> SecurityContext {
 
 pub fn admin_security_context() -> SecurityContext {
     test_security_context().with_role(true, None)
+}
+
+/// Drop-in replacement for `compiler::compile`. Routes to v2 when
+/// `GKG_TEST_V2=1` is set, otherwise uses v1. Every test that imports
+/// `compile` from this module gets automatic v2 coverage.
+pub fn compile(
+    json: &str,
+    ontology: &Ontology,
+    security_ctx: &SecurityContext,
+) -> Result<CompiledQueryContext> {
+    if std::env::var("GKG_TEST_V2").as_deref() == Ok("1") {
+        compile_v2(json, ontology, security_ctx)
+    } else {
+        compile_v1(json, ontology, security_ctx)
+    }
 }
 
 pub async fn compile_and_execute(
