@@ -65,7 +65,19 @@ pub(super) async fn run_query_with_security(
 ) -> ResponseView {
     let ontology = Arc::new(load_ontology());
     let client = Arc::new(ctx.create_client());
-    let compiled = Arc::new(compile(json, &ontology, &security_ctx).unwrap());
+
+    // When GKG_TEST_V2=1, inject use_v2 into the query to exercise the
+    // skeleton-first compiler. Every data correctness test runs through
+    // v2 automatically — same expected results, different compiler.
+    let json = if std::env::var("GKG_TEST_V2").as_deref() == Ok("1") {
+        let mut v: Value = serde_json::from_str(json).unwrap();
+        v["options"]["use_v2"] = Value::Bool(true);
+        v.to_string()
+    } else {
+        json.to_string()
+    };
+
+    let compiled = Arc::new(compile(&json, &ontology, &security_ctx).unwrap());
 
     let batches = ctx.query_parameterized(&compiled.base).await;
 
