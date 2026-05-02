@@ -8,6 +8,7 @@ use crate::error::{QueryError, Result};
 use crate::input::*;
 
 use super::shared::*;
+use super::types::*;
 
 pub fn lower_traversal(input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {

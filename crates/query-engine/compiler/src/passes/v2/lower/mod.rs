@@ -3,6 +3,7 @@
 pub mod aggregation;
 pub mod shared;
 pub mod traversal;
+pub mod types;
 
 use crate::ast::Node;
 use crate::error::Result;

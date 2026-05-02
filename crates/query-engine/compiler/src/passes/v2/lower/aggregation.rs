@@ -8,6 +8,7 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::shared::*;
+use super::types::*;
 
 pub fn lower_aggregation(input: &mut Input) -> Result<Node> {
     if input.relationships.is_empty() {
