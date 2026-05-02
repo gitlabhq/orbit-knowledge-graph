@@ -1,6 +1,7 @@
 # config/ontology/edges/auto_canceled_by.yaml
 
 description: Entity was auto-canceled by a newer entity of the same kind
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Pipeline, id: id }

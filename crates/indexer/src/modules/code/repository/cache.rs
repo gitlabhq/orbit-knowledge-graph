@@ -6,8 +6,8 @@ use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
 
+use super::archive::{ArchiveError, extract_tar_gz_from_reader};
 use super::service::ByteStream;
-use crate::modules::code::archive::{ArchiveError, extract_tar_gz_from_reader};
 use crate::modules::code::metrics::CodeMetrics;
 
 #[derive(Debug, thiserror::Error)]

@@ -73,6 +73,8 @@ fn emit_index_type(it: &IndexType) -> String {
         IndexType::Set(n) => format!("set({n})"),
         IndexType::BloomFilter(rate) => format!("bloom_filter({rate:.2})"),
         IndexType::Text(params) => format!("text({params})"),
+        IndexType::NgramBF(params) => format!("ngrambf_v1({params})"),
+        IndexType::TokenBF(params) => format!("tokenbf_v1({params})"),
     }
 }
 

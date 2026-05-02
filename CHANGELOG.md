@@ -1,3 +1,36 @@
+## [0.43.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.42.0...v0.43.0) (2026-05-02)
+
+### Features
+
+* **ontology:** separate CI edges into dedicated gl_ci_edge table ([97609e5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97609e5127e71b045ada9a44636dce7dedb793f5)) by Michael Usachenko
+
+### Performance
+
+* **schema:** add ngram skip indexes and auto column statistics ([1af5814](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1af5814b010f8b84a00e376734b445faea26738a)) by Michael Usachenko
+
+### Other
+
+* **indexer:** restructure top-level files into engine/ and config modules ([4256cbd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4256cbd3f58761d4384ea55727556b52b3db0c7d)) by Jean-Gabriel Doyon
+* update landing page ([8d45d50](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8d45d502a9f8d3717c8661c0ac5ca1c0af525bfb)) by Phillip Wells
+* update mcp tools ([517de22](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/517de2258ca166cf03a762a663335573ede09751)) by Phillip Wells
+* update query language fields ([2080468](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2080468434207ac46d24d5fc7d903c21be48d690)) by Phillip Wells
+* update troubleshooting ([2cce45d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2cce45d95c0635abefabb46947341ffb9ef7d1bf)) by phillipwells
+
+## [0.42.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.1...v0.42.0) (2026-05-01)
+
+### Features
+
+* **content:** add diff virtual field to MergeRequest ([5d20fc1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5d20fc1a5b7de1757bb426491369ea02e2cab97c)) by Jean-Gabriel Doyon
+* **server:** add MR diff virtual field resolver and gitlab-client methods ([ad8c284](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/ad8c2840b042c0ee494dcf5c5f465f93c5b4c4c0)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** resolve merge_request denormalised fields from siphon sources ([c97b251](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c97b25164d329b3833ef79ac122ddf066f167d4c)) by Jean-Gabriel Doyon
+
+### Performance
+
+* **compiler:** partial-match edge tag rewrite for mixed-filter queries ([02ab415](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/02ab415a0ae22d0e9d902dcbd3b70035d41e693e)) by Michael Usachenko
+
 ## [0.41.1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.0...v0.41.1) (2026-05-01)
 
 ### Fixes

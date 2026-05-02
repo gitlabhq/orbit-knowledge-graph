@@ -1,5 +1,5 @@
-mod global_dispatch;
-mod namespace_dispatch;
+mod global;
+mod namespace;
 
-pub use global_dispatch::GlobalDispatcher;
-pub use namespace_dispatch::NamespaceDispatcher;
+pub use global::GlobalDispatcher;
+pub use namespace::NamespaceDispatcher;

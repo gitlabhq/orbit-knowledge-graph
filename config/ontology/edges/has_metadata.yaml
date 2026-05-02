@@ -1,6 +1,7 @@
 # config/ontology/edges/has_metadata.yaml
 
 description: Job has runtime metadata sourced from siphon_p_ci_builds_metadata
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Job, id: id }

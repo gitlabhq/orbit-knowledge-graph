@@ -38,13 +38,13 @@ properties:
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Description of the milestone."
 
   state:
     type: string
     source: state
-    nullable: true
+    nullable: false
     description: "Current state of the milestone (active, closed)."
 
   due_date:
@@ -94,12 +94,14 @@ etl:
 
 storage:
   primary_key: [traversal_path, id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(3)"]}
-    - {name: state, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
+    - {name: state, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -108,8 +110,10 @@ storage:
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_title, column: title, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_title_ngram, column: title, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_state, column: state, type: "set(4)", granularity: 2}
     - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

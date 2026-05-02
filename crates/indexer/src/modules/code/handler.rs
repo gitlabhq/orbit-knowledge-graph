@@ -6,10 +6,9 @@ use chrono::{DateTime, Utc};
 use gitlab_client::GitlabClientError;
 use tracing::{debug, info, warn};
 
-use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
-use super::indexing_pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
-use super::locking::project_lock_key;
+use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::metrics::CodeMetrics;
+use super::pipeline::{CodeIndexingPipeline, IndexOutcome, IndexingRequest};
 use super::repository::{EmptyRepositoryReason, RepositoryService, RepositoryServiceError};
 use crate::handler::{Handler, HandlerContext, HandlerError};
 use crate::topic::CodeIndexingTaskRequest;
@@ -22,6 +21,12 @@ use gkg_server_config::{CodeIndexingTaskHandlerConfig, HandlerConfiguration};
 /// `(traversal_path, project_id)` and ignores branch, so any non-empty value
 /// satisfies the schema and dedupes future dispatch cycles.
 const DELETED_PROJECT_BRANCH_SENTINEL: &str = "HEAD";
+
+fn project_lock_key(project_id: i64, branch: &str) -> String {
+    use base64::Engine;
+    let encoded_branch = base64::engine::general_purpose::URL_SAFE_NO_PAD.encode(branch);
+    format!("project.{project_id}.{encoded_branch}")
+}
 
 pub struct CodeIndexingTaskHandler {
     pipeline: Arc<CodeIndexingPipeline>,
@@ -294,9 +299,9 @@ impl CodeIndexingTaskHandler {
 mod tests {
     use super::*;
     use crate::handler::Handler;
-    use crate::modules::code::checkpoint_store::CodeCheckpointStore;
-    use crate::modules::code::checkpoint_store::CodeIndexingCheckpoint;
-    use crate::modules::code::checkpoint_store::test_utils::MockCodeCheckpointStore;
+    use crate::modules::code::checkpoint::CodeCheckpointStore;
+    use crate::modules::code::checkpoint::CodeIndexingCheckpoint;
+    use crate::modules::code::checkpoint::test_utils::MockCodeCheckpointStore;
     use crate::modules::code::metrics::CodeMetrics;
     use crate::modules::code::repository::RepositoryResolver;
     use crate::modules::code::repository::cache::LocalRepositoryCache;
@@ -614,5 +619,13 @@ mod tests {
         let ctx = TestContext::new();
         let subscription = ctx.handler.subscription();
         assert!(subscription.dead_letter_on_exhaustion);
+    }
+
+    #[test]
+    fn project_lock_key_formats_correctly() {
+        assert_eq!(
+            project_lock_key(42, "refs/heads/main"),
+            "project.42.cmVmcy9oZWFkcy9tYWlu"
+        );
     }
 }

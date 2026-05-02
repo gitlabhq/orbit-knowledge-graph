@@ -26,6 +26,8 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, source_id, relationship_kind]
+        settings:
+          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -72,6 +74,8 @@ settings:
       storage:
         index_granularity: 1024
         primary_key: [traversal_path, source_id, relationship_kind]
+        settings:
+          auto_statistics_types: "'minmax, uniq, countmin'"
         columns:
           - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
           - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -105,6 +109,48 @@ settings:
           # Mirrors `gl_edge.agg_counts` for the inverse direction
           # (`count(source) GROUP BY target` — e.g. files importing a given
           # definition via IMPORTS).
+          - type: aggregate
+            name: agg_counts_by_target
+            select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
+            group_by: [relationship_kind, source_kind, target_id, traversal_path]
+    gl_ci_edge:
+      sort_key: [traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind]
+      columns:
+        - {name: traversal_path, type: string}
+        - {name: relationship_kind, type: string}
+        - {name: source_id, type: int64}
+        - {name: source_kind, type: string}
+        - {name: target_id, type: int64}
+        - {name: target_kind, type: string}
+      storage:
+        index_granularity: 1024
+        primary_key: [traversal_path, source_id, relationship_kind]
+        columns:
+          - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
+          - {name: source_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+          - {name: source_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: relationship_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+          - {name: target_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+          - {name: target_kind, type: "LowCardinality(String)", codec: ["LZ4"]}
+        indexes:
+          - {name: idx_relationship, column: relationship_kind, type: "set(50)", granularity: 2}
+        projections:
+          - type: reorder
+            name: by_source
+            order_by: [source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_target
+            order_by: [target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind]
+          - type: reorder
+            name: by_rel_source_kind
+            order_by: [relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind]
+          - type: reorder
+            name: by_rel_target_kind
+            order_by: [relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind]
+          - type: aggregate
+            name: agg_counts_by_source
+            select: [relationship_kind, target_kind, source_id, traversal_path, "count()"]
+            group_by: [relationship_kind, target_kind, source_id, traversal_path]
           - type: aggregate
             name: agg_counts_by_target
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]

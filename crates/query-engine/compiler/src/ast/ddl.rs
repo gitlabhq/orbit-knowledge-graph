@@ -84,6 +84,12 @@ pub enum IndexType {
     /// ClickHouse 26.2+ full-text index with inverted posting lists.
     /// Stores the raw parameter string (e.g. `tokenizer = splitByNonAlpha`).
     Text(String),
+    /// N-gram bloom filter for substring matching (`LIKE '%pattern%'`).
+    /// Stores the raw parameter string (e.g. `3, 256, 2, 0`).
+    NgramBF(String),
+    /// Token bloom filter for token matching.
+    /// Stores the raw parameter string (e.g. `256, 2, 0`).
+    TokenBF(String),
 }
 
 /// A materialized projection over table data.

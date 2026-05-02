@@ -180,6 +180,14 @@ fn parse_index_type(s: &str) -> IndexType {
             let inner = &s[5..s.len() - 1];
             IndexType::Text(inner.to_string())
         }
+        _ if lower.starts_with("ngrambf_v1(") => {
+            let inner = &s[11..s.len() - 1];
+            IndexType::NgramBF(inner.to_string())
+        }
+        _ if lower.starts_with("tokenbf_v1(") => {
+            let inner = &s[11..s.len() - 1];
+            IndexType::TokenBF(inner.to_string())
+        }
         _ => IndexType::MinMax,
     }
 }
