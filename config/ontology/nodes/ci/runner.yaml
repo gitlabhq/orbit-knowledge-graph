@@ -37,13 +37,13 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Human-readable runner name."
 
   description:
     type: string
     source: description
-    nullable: true
+    nullable: false
     description: "Maintainer-provided description."
 
   active:
@@ -105,11 +105,13 @@ etl:
 
 storage:
   primary_key: [id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: runner_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: description, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: description, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: active, type: "Bool", default: "true"}
     - {name: locked, type: "Bool", default: "false"}
     - {name: run_untagged, type: "Bool", default: "true"}
@@ -122,6 +124,7 @@ storage:
     - {name: idx_runner_type, column: runner_type, type: "set(4)", granularity: 2}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_runner_type, order_by: [runner_type, id]}

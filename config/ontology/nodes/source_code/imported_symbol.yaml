@@ -106,6 +106,7 @@ properties:
 storage:
   settings:
     index_granularity: "1024"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
@@ -123,9 +124,11 @@ storage:
     - {name: end_byte, type: "Int64", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
-    - {name: idx_identifier_name, column: identifier_name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_identifier_name, column: identifier_name, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_file_path, column: file_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_file_path_ngram, column: file_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_import_path, column: import_path, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_import_path_ngram, column: import_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_import_type, column: import_type, type: "set(10)", granularity: 2}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}

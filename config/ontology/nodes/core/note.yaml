@@ -26,7 +26,7 @@ properties:
   note:
     type: string
     source: note
-    nullable: true
+    nullable: false
     description: "The text content of the note (markdown)."
 
   noteable_type:
@@ -145,9 +145,10 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: note, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: noteable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: line_code, type: "Nullable(String)", codec: ["ZSTD(1)"]}
@@ -166,6 +167,7 @@ storage:
     - {name: idx_confidential, column: confidential, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_note, column: note, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_note_ngram, column: note, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_discussion_id, column: discussion_id, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}

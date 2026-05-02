@@ -26,7 +26,7 @@ properties:
   name:
     type: string
     source: name
-    nullable: true
+    nullable: false
     description: "Name of the job as defined in .gitlab-ci.yml."
 
   status:
@@ -53,7 +53,7 @@ properties:
   ref:
     type: string
     source: ref
-    nullable: true
+    nullable: false
     description: "Branch or tag name the job runs for."
 
   tag:
@@ -71,19 +71,19 @@ properties:
   coverage:
     type: string
     source: coverage
-    nullable: true
+    nullable: false
     description: "Code coverage percentage reported by the job."
 
   environment:
     type: string
     source: environment
-    nullable: true
+    nullable: false
     description: "Deployment environment name (e.g., production, staging)."
 
   when:
     type: string
     source: when
-    nullable: true
+    nullable: false
     description: "Condition that determines when the job runs."
     enum_type: string
     values:
@@ -102,7 +102,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: true
+    nullable: false
     description: "Reason the job failed, if applicable."
     values:
       0: unknown_failure
@@ -190,7 +190,7 @@ properties:
   timeout_source:
     type: enum
     source: timeout_source
-    nullable: true
+    nullable: false
     description: "Origin of the effective timeout: project, runner, or job."
     values:
       1: unknown_timeout_source
@@ -207,7 +207,7 @@ properties:
   scheduling_type:
     type: enum
     source: scheduling_type
-    nullable: true
+    nullable: false
     description: "Whether the job is stage-scheduled or DAG-scheduled."
     values:
       0: stage
@@ -270,18 +270,19 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: name, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: ref, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: tag, type: "Nullable(Bool)"}
     - {name: allow_failure, type: "Bool", default: "false"}
-    - {name: coverage, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: environment, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: "`when`", type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: coverage, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: environment, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: "`when`", type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: retried, type: "Nullable(Bool)"}
-    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -289,9 +290,9 @@ storage:
     - {name: type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: runner_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: timeout, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: timeout_source, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: timeout_source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: exit_code, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: scheduling_type, type: "LowCardinality(Nullable(String))", codec: ["LZ4"]}
+    - {name: scheduling_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
@@ -301,7 +302,9 @@ storage:
     - {name: idx_retried, column: retried, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}

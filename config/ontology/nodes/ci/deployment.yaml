@@ -82,7 +82,7 @@ properties:
   on_stop:
     type: string
     source: on_stop
-    nullable: true
+    nullable: false
     description: "Name of the job that stops this deployment, if defined."
 
   archived:
@@ -138,6 +138,7 @@ storage:
   primary_key: [traversal_path, id]
   settings:
     add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: iid, type: "Int64", codec: ["ZSTD(1)"]}
@@ -148,7 +149,7 @@ storage:
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: deployable_type, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: deployable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: on_stop, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: on_stop, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: archived, type: "Bool", default: "false"}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -159,6 +160,7 @@ storage:
     - {name: idx_archived, column: archived, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}

@@ -50,7 +50,7 @@ properties:
   new_path:
     type: string
     source: new_path
-    nullable: true
+    nullable: false
     description: "Path to the file after the change."
 
   old_path:
@@ -157,13 +157,15 @@ etl:
 
 storage:
   primary_key: [traversal_path, id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: merge_request_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: merge_request_diff_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
     - {name: too_large, type: "Bool", default: "false"}
-    - {name: new_path, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: new_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: old_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: new_file, type: "Bool", default: "false"}
     - {name: renamed_file, type: "Bool", default: "false"}
@@ -181,7 +183,9 @@ storage:
     - {name: idx_binary, column: binary, type: "minmax", granularity: 1}
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_new_path, column: new_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_new_path_ngram, column: new_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_old_path, column: old_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
+    - {name: idx_old_path_ngram, column: old_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
