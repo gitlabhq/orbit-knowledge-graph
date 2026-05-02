@@ -5,64 +5,80 @@ description: Project association for entities
 variants:
   - from_node: { type: Note, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Note belongs to project."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Merge request targets project."
 
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Pipeline belongs to project."
 
   - from_node: { type: Stage, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Stage belongs to project."
 
   - from_node: { type: Job, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Job belongs to project."
 
   - from_node: { type: Vulnerability, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Vulnerability found in project."
 
   - from_node: { type: Finding, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Finding detected in project."
 
   - from_node: { type: VulnerabilityIdentifier, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Vulnerability identifier found in project."
 
   - from_node: { type: WorkItem, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Work item belongs to project."
 
   - from_node: { type: Milestone, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Milestone belongs to project."
 
   - from_node: { type: Label, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Label belongs to project."
 
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Security scan belongs to project."
 
   - from_node: { type: Branch, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Branch belongs to project."
 
   - from_node: { type: Deployment, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Deployment belongs to project."
 
   - from_node: { type: Environment, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Environment belongs to project."
 
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: Project, id: id }
+    fk_column: project_id
     description: "Merge request diff belongs to project."
