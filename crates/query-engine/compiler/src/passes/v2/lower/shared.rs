@@ -279,6 +279,39 @@ pub fn inject_node_constraints_on_edges(
 // Node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
+pub fn hydration_strategy(node: &InputNode, input: &Input) -> HydrationStrategy {
+    let is_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(&node.id));
+
+    let is_agg_property_target = input.aggregations.iter().any(|a| {
+        a.target.as_deref() == Some(&node.id)
+            && a.property.is_some()
+            && !matches!(a.function, AggFunction::Count)
+    });
+
+    let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == node.id);
+
+    if is_group_by || is_agg_property_target || is_order_by_target {
+        return HydrationStrategy::Join;
+    }
+
+    let has_non_denorm_filters = node.filters.iter().any(|(prop, _)| {
+        let entity = node.entity.as_deref().unwrap_or("");
+        let k1 = (entity.to_string(), prop.clone(), "source".to_string());
+        let k2 = (entity.to_string(), prop.clone(), "target".to_string());
+        !input.compiler.denormalized_columns.contains_key(&k1)
+            && !input.compiler.denormalized_columns.contains_key(&k2)
+    });
+
+    if has_non_denorm_filters {
+        return HydrationStrategy::Subquery;
+    }
+
+    HydrationStrategy::Skip
+}
+
 pub fn hydrate_nodes(
     mut from: TableRef,
     input: &Input,
