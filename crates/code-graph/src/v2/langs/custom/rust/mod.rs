@@ -159,6 +159,9 @@ impl LanguagePipeline for RustPipeline {
         }
         let parsed = output.parsed;
         let mut graph = build_graph(root_path, &parsed);
+        if ctx.config.emit_file_inventory_graph {
+            graph.mark_parsed_only();
+        }
 
         for file in &parsed {
             for edge in &file.edge_candidates {

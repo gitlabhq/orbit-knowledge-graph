@@ -512,7 +512,7 @@
     {
       "otel_name": "gkg.indexer.code.repository.source.size",
       "prom_name": "gkg_indexer_code_repository_source_size_bytes",
-      "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+      "description": "Total bytes of repository files discovered during one code indexing run.",
       "kind": "histogram_u64",
       "unit": "By",
       "labels": [],

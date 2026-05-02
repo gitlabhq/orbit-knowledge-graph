@@ -63,7 +63,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
-              "respect_gitignore": true,
               "worker_threads": 0
             },
             "retry_interval_secs": null
@@ -369,10 +368,6 @@
           "default": 5000,
           "minimum": 0
         },
-        "respect_gitignore": {
-          "type": "boolean",
-          "default": true
-        },
         "worker_threads": {
           "type": "integer",
           "format": "uint",
@@ -411,7 +406,6 @@
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
             "per_file_timeout_ms": 5000,
-            "respect_gitignore": true,
             "worker_threads": 0
           }
         },
@@ -512,7 +506,6 @@
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "per_file_timeout_ms": 5000,
-                "respect_gitignore": true,
                 "worker_threads": 0
               },
               "retry_interval_secs": null
@@ -724,7 +717,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
-              "respect_gitignore": true,
               "worker_threads": 0
             },
             "retry_interval_secs": null

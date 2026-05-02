@@ -4615,7 +4615,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+               "description": "Total bytes of repository files discovered during one code indexing run.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
@@ -4684,7 +4684,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+               "description": "Total bytes of repository files discovered during one code indexing run.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {

@@ -90,6 +90,7 @@ register_v2_pipelines! {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::v2::pipeline::GraphStatsCounters;
     use crate::v2::pipeline::PipelineConfig;
     use std::sync::atomic::AtomicUsize;
 
@@ -118,13 +119,20 @@ mod tests {
         let ctx = test_ctx();
         let conv = NoopConverter;
         let (tx, _rx) = crossbeam_channel::unbounded();
-        let (d, i, e) = (
+        let (dirs, files, d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
         let errors = std::sync::Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
+        let btx = BatchTx::new(
+            &tx,
+            &conv,
+            &errors,
+            GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
+        );
         assert!(dispatch_language(Language::JavaScript, &[], &ctx, &btx).is_some());
     }
 
@@ -133,13 +141,20 @@ mod tests {
         let ctx = test_ctx();
         let conv = NoopConverter;
         let (tx, _rx) = crossbeam_channel::unbounded();
-        let (d, i, e) = (
+        let (dirs, files, d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
         let errors = std::sync::Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
+        let btx = BatchTx::new(
+            &tx,
+            &conv,
+            &errors,
+            GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
+        );
         assert!(dispatch_language(Language::TypeScript, &[], &ctx, &btx).is_some());
     }
 
@@ -148,13 +163,20 @@ mod tests {
         let ctx = test_ctx();
         let conv = NoopConverter;
         let (tx, _rx) = crossbeam_channel::unbounded();
-        let (d, i, e) = (
+        let (dirs, files, d, i, e) = (
+            AtomicUsize::new(0),
+            AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
             AtomicUsize::new(0),
         );
         let errors = std::sync::Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, &conv, &errors, &d, &i, &e);
+        let btx = BatchTx::new(
+            &tx,
+            &conv,
+            &errors,
+            GraphStatsCounters::new(&dirs, &files, &d, &i, &e),
+        );
         assert!(dispatch_by_tag("js", &[], &ctx, &btx).is_some());
     }
 }

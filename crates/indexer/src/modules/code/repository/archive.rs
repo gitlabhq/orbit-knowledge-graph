@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
+use code_graph::v2::FileInventoryEntry;
 use flate2::read::GzDecoder;
 use tracing::{trace, warn};
 
@@ -42,7 +43,7 @@ fn looks_like_truncated_stream(err: &std::io::Error) -> bool {
 
 #[cfg(test)]
 fn extract_tar_gz(data: &[u8], target_dir: &Path) -> Result<(), ArchiveError> {
-    extract_tar_gz_from_reader(data, target_dir, accept_all_filter)
+    extract_tar_gz_from_reader(data, target_dir, accept_all_filter).map(|_| ())
 }
 
 #[cfg(test)]
@@ -56,7 +57,7 @@ pub fn extract_tar_gz_from_reader<R: Read, F>(
     reader: R,
     target_dir: &Path,
     filter: F,
-) -> Result<(), ArchiveError>
+) -> Result<Vec<FileInventoryEntry>, ArchiveError>
 where
     F: Fn(&Path, u64) -> bool,
 {
@@ -64,7 +65,11 @@ where
     unpack_tar(decoder, target_dir, filter)
 }
 
-fn unpack_tar<R: Read, F>(reader: R, target_dir: &Path, filter: F) -> Result<(), ArchiveError>
+fn unpack_tar<R: Read, F>(
+    reader: R,
+    target_dir: &Path,
+    filter: F,
+) -> Result<Vec<FileInventoryEntry>, ArchiveError>
 where
     F: Fn(&Path, u64) -> bool,
 {
@@ -85,6 +90,7 @@ where
     // extraction loop, so create_dir_all and dest.exists() can never follow
     // a symlink that resolves outside the target directory.
     let mut deferred_symlinks: Vec<(PathBuf, PathBuf)> = Vec::new();
+    let mut inventory = Vec::new();
 
     // Tracks whether `entries.next()` has yielded an Ok item (including
     // skipped PAX headers). False + a truncation-shaped error means the body
@@ -144,10 +150,15 @@ where
         if relative_path.as_os_str().is_empty() {
             continue;
         }
+        reject_unsafe_relative_path(&relative_path)?;
 
         let dest = target_canonical.join(&relative_path);
 
         if entry_type == tar::EntryType::Symlink || entry_type == tar::EntryType::Link {
+            inventory.push(FileInventoryEntry {
+                path: relative_path.to_string_lossy().to_string(),
+                size: entry.header().size().unwrap_or(0),
+            });
             let link_target = entry
                 .link_name()
                 .map_err(|e| ArchiveError::Archive(e.to_string()))?
@@ -159,6 +170,10 @@ where
 
         if entry_type == tar::EntryType::Regular {
             let declared_size = entry.header().size().unwrap_or(0);
+            inventory.push(FileInventoryEntry {
+                path: relative_path.to_string_lossy().to_string(),
+                size: declared_size,
+            });
             if !filter(&relative_path, declared_size) {
                 trace!(
                     path = %relative_path.display(),
@@ -203,7 +218,7 @@ where
     gkg_utils::fs::validate_symlinks(&target_canonical)
         .map_err(|e| ArchiveError::Archive(e.to_string()))?;
 
-    Ok(())
+    Ok(inventory)
 }
 
 /// Strip the Gitaly archive root prefix from a path during extraction.
@@ -238,6 +253,24 @@ fn strip_archive_root(
     }
 
     Ok(components.as_path().to_path_buf())
+}
+
+fn reject_unsafe_relative_path(path: &Path) -> Result<(), ArchiveError> {
+    if path.components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::CurDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err(ArchiveError::Archive(format!(
+            "path traversal detected: {}",
+            path.display()
+        )));
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -614,11 +647,13 @@ mod tests {
             Entry::File("project-main/Cargo.lock", b"# lockfile"),
         ]);
 
-        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
+        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _size| {
             path.extension().and_then(|e| e.to_str()) == Some("rs")
         })
         .unwrap();
 
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/main.rs", "assets/logo.png", "Cargo.lock"]);
         assert!(dir.path().join("src/main.rs").exists());
         assert!(!dir.path().join("assets/logo.png").exists());
         assert!(!dir.path().join("Cargo.lock").exists());
@@ -649,11 +684,13 @@ mod tests {
             Entry::Symlink("project-main/bin/run", "../src/lib.rs"),
         ]);
 
-        extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
+        let inventory = extract_tar_gz_from_reader(&data[..], dir.path(), |path, _| {
             path.extension().and_then(|e| e.to_str()) == Some("rs")
         })
         .unwrap();
 
+        let paths: Vec<_> = inventory.iter().map(|entry| entry.path.as_str()).collect();
+        assert_eq!(paths, vec!["src/lib.rs", "bin/run"]);
         assert!(dir.path().join("src/lib.rs").exists());
         assert!(dir.path().join("bin/run").exists());
     }
@@ -692,12 +729,20 @@ mod tests {
     use code_graph::v2::linker::graph::GraphNode;
     use code_graph::v2::types::EdgeKind;
     use code_graph::v2::{
-        BatchSink, GraphConverter, NullSink, Pipeline, PipelineConfig, SinkError,
+        BatchSink, FileInventoryEntry, GraphConverter, NullSink, Pipeline, PipelineConfig,
+        SinkError,
     };
     use std::sync::{Arc, Mutex};
 
     struct CapturingConverter {
         graphs: Mutex<Vec<CodeGraph>>,
+    }
+
+    struct CapturedPipelineRun {
+        graphs: Vec<CodeGraph>,
+        files_discovered: usize,
+        files_indexed: usize,
+        files_parsed: usize,
     }
 
     impl GraphConverter for CapturingConverter {
@@ -713,7 +758,10 @@ mod tests {
     /// Stand up the archive endpoint, fetch via reqwest, stream into
     /// `extract_tar_gz_from_reader` with the production exclusion
     /// filter. Mirrors `LocalRepositoryCache::store_archive` end-to-end.
-    async fn extract_via_archive_endpoint(entries: &[Entry<'_>], target: &Path) {
+    async fn extract_via_archive_endpoint(
+        entries: &[Entry<'_>],
+        target: &Path,
+    ) -> Vec<FileInventoryEntry> {
         use axum::Router;
         use axum::body::Body;
         use axum::http::header;
@@ -755,19 +803,23 @@ mod tests {
         );
         let target = target.to_path_buf();
         let handle = tokio::runtime::Handle::current();
-        tokio::task::spawn_blocking(move || {
+        let inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(async_reader, handle);
             extract_tar_gz_from_reader(bridge, &target, |rel, _size| {
                 !is_excluded_from_indexing(rel)
             })
-            .unwrap();
+            .unwrap()
         })
         .await
         .unwrap();
         server.abort();
+        inventory
     }
 
-    async fn run_pipeline(root: &Path) -> Vec<CodeGraph> {
+    async fn run_pipeline(
+        root: &Path,
+        file_inventory: Vec<FileInventoryEntry>,
+    ) -> CapturedPipelineRun {
         let capturer = Arc::new(CapturingConverter {
             graphs: Mutex::new(Vec::new()),
         });
@@ -777,6 +829,7 @@ mod tests {
             let sink: Arc<dyn BatchSink> = Arc::new(NullSink);
             Pipeline::run(
                 &root,
+                Arc::from(file_inventory),
                 PipelineConfig::default(),
                 capturer_for_pipeline as Arc<dyn GraphConverter>,
                 sink,
@@ -789,12 +842,21 @@ mod tests {
             "pipeline errors: {:#?}",
             result.errors
         );
-        Arc::try_unwrap(capturer)
+        let files_discovered = result.stats.files_discovered;
+        let files_indexed = result.stats.files_indexed;
+        let files_parsed = result.stats.files_parsed;
+        let graphs = Arc::try_unwrap(capturer)
             .ok()
             .expect("capturer still has outstanding refs")
             .graphs
             .into_inner()
-            .unwrap()
+            .unwrap();
+        CapturedPipelineRun {
+            graphs,
+            files_discovered,
+            files_indexed,
+            files_parsed,
+        }
     }
 
     fn has_def(graphs: &[CodeGraph], file: &str, name: &str) -> bool {
@@ -824,6 +886,13 @@ mod tests {
                     .count()
             })
             .sum()
+    }
+
+    fn file_language(graphs: &[CodeGraph], path: &str) -> Option<&'static str> {
+        graphs
+            .iter()
+            .flat_map(|g| g.files())
+            .find_map(|(_, file)| (file.path == path).then(|| file.language_name()))
     }
 
     /// Mirrors the cargo workspace YAML suites: cross-crate `lib::greet`
@@ -858,7 +927,7 @@ mod tests {
             Entry::File("root/assets/logo.png", b"\x89PNG"),
             Entry::File("root/dist/build.zip", b"PK"),
         ];
-        extract_via_archive_endpoint(&entries, dir.path()).await;
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
 
         // Resolver inputs survived.
         assert!(dir.path().join("Cargo.toml").exists());
@@ -868,18 +937,57 @@ mod tests {
         assert!(!dir.path().join("assets/logo.png").exists());
         assert!(!dir.path().join("dist/build.zip").exists());
 
-        let graphs = run_pipeline(dir.path()).await;
+        let run = run_pipeline(dir.path(), file_inventory).await;
         assert!(
-            has_def(&graphs, "crates/lib/src/lib.rs", "greet"),
+            has_def(&run.graphs, "crates/lib/src/lib.rs", "greet"),
             "Rust workspace resolver missed lib::greet"
         );
         assert!(
-            has_def(&graphs, "crates/app/src/main.rs", "main"),
+            has_def(&run.graphs, "crates/app/src/main.rs", "main"),
             "Rust workspace resolver missed app::main"
         );
         assert!(
-            edge_count(&graphs, EdgeKind::Calls) > 0,
+            edge_count(&run.graphs, EdgeKind::Calls) > 0,
             "no Calls edges emitted; cross-crate resolution likely failed"
+        );
+    }
+
+    #[tokio::test]
+    async fn excluded_archive_entries_are_not_materialized_or_parsed() {
+        let dir = tempfile::tempdir().unwrap();
+        let entries = [
+            Entry::File("root/src/app.ts", b"export function run() { return 1; }\n"),
+            Entry::File("root/assets/logo.png", b"\x89PNG"),
+            Entry::File("root/dist/build.zip", b"PK"),
+        ];
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
+        let inventory_paths: Vec<_> = file_inventory
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert!(inventory_paths.contains(&"src/app.ts"));
+        assert!(inventory_paths.contains(&"assets/logo.png"));
+        assert!(inventory_paths.contains(&"dist/build.zip"));
+
+        assert!(dir.path().join("src/app.ts").exists());
+        assert!(!dir.path().join("assets/logo.png").exists());
+        assert!(!dir.path().join("dist/build.zip").exists());
+
+        let run = run_pipeline(dir.path(), file_inventory).await;
+        assert_eq!(run.files_discovered, 3);
+        assert_eq!(run.files_indexed, 3);
+        assert_eq!(run.files_parsed, 1);
+        assert_eq!(
+            file_language(&run.graphs, "assets/logo.png"),
+            Some("unknown")
+        );
+        assert_eq!(
+            file_language(&run.graphs, "dist/build.zip"),
+            Some("unknown")
+        );
+        assert!(
+            has_def(&run.graphs, "src/app.ts", "run"),
+            "materialized source file should still be parsed"
         );
     }
 
@@ -910,7 +1018,7 @@ mod tests {
             Entry::File("root/static/banner.gif", b"GIF89a"),
             Entry::File("root/fonts/Inter.woff2", b""),
         ];
-        extract_via_archive_endpoint(&entries, dir.path()).await;
+        let file_inventory = extract_via_archive_endpoint(&entries, dir.path()).await;
 
         // Resolver inputs survived.
         assert!(dir.path().join("package.json").exists());
@@ -919,17 +1027,17 @@ mod tests {
         assert!(!dir.path().join("static/banner.gif").exists());
         assert!(!dir.path().join("fonts/Inter.woff2").exists());
 
-        let graphs = run_pipeline(dir.path()).await;
+        let run = run_pipeline(dir.path(), file_inventory).await;
         assert!(
-            has_def(&graphs, "src/utils.ts", "helper"),
+            has_def(&run.graphs, "src/utils.ts", "helper"),
             "JS resolver missed utils::helper"
         );
         assert!(
-            has_def(&graphs, "src/main.ts", "run"),
+            has_def(&run.graphs, "src/main.ts", "run"),
             "JS resolver missed main::run"
         );
         assert!(
-            edge_count(&graphs, EdgeKind::Imports) > 0,
+            edge_count(&run.graphs, EdgeKind::Imports) > 0,
             "no Imports edges emitted; tsconfig alias likely failed to resolve"
         );
     }
