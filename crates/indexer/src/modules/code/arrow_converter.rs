@@ -8,7 +8,7 @@
 use arrow::error::ArrowError;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
-use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, ImportRow};
+use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphOutput, ImportRow};
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
@@ -80,53 +80,41 @@ pub fn convert_code_graph(
     ontology: &Ontology,
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
+    match graph.output {
+        GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, ontology),
+        GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, ontology),
+    }
+}
 
+fn convert_repository_graph(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    envelope: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<ConvertedGraphData, ArrowError> {
     Ok(ConvertedGraphData {
-        branch: convert_branch(envelope)?,
-        directories: convert_entity(graph, &ids, envelope, ontology, "Directory", |g, ids| {
-            g.directories()
-                .map(|(idx, dir)| DirectoryRow {
-                    dir,
-                    id: ids[idx.index()],
-                })
-                .collect()
-        })?,
-        files: convert_entity(graph, &ids, envelope, ontology, "File", |g, ids| {
-            g.files()
-                .map(|(idx, file)| FileRow {
-                    file,
-                    id: ids[idx.index()],
-                })
-                .collect()
-        })?,
-        definitions: convert_entity(graph, &ids, envelope, ontology, "Definition", |g, ids| {
-            g.definitions()
-                .map(|(idx, file_path, def)| DefinitionRow {
-                    file_path,
-                    def,
-                    pool: &g.strings,
-                    id: ids[idx.index()],
-                })
-                .collect()
-        })?,
-        imported_symbols: convert_entity(
-            graph,
-            &ids,
-            envelope,
-            ontology,
-            "ImportedSymbol",
-            |g, ids| {
-                g.imports_iter()
-                    .map(|(idx, file_path, import)| ImportRow {
-                        file_path,
-                        import,
-                        pool: &g.strings,
-                        id: ids[idx.index()],
-                    })
-                    .collect()
-            },
-        )?,
-        edges: convert_edges(graph, &ids, envelope, ontology)?,
+        branch: convert_branch_row(envelope)?,
+        directories: convert_directories(graph, ids, envelope, ontology)?,
+        files: convert_files(graph, ids, envelope, ontology)?,
+        definitions: convert_definitions(graph, ids, envelope, ontology)?,
+        imported_symbols: convert_imports(graph, ids, envelope, ontology)?,
+        edges: convert_repository_edges(graph, ids, envelope, ontology)?,
+    })
+}
+
+fn convert_semantic_graph(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    envelope: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<ConvertedGraphData, ArrowError> {
+    Ok(ConvertedGraphData {
+        branch: convert_empty_branch()?,
+        directories: convert_empty_directories(envelope, ontology)?,
+        files: convert_empty_files(envelope, ontology)?,
+        definitions: convert_definitions(graph, ids, envelope, ontology)?,
+        imported_symbols: convert_imports(graph, ids, envelope, ontology)?,
+        edges: convert_semantic_edges(graph, ids, envelope, ontology)?,
     })
 }
 
@@ -238,10 +226,99 @@ fn convert_entity<'a, R: AsRecordBatch<IndexerEnvelope>>(
     R::to_record_batch(&rows, &specs, env)
 }
 
-fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
-    let branch_id = compute_branch_id(env.project_id, &env.branch);
-    // Branch has a fixed schema (not driven by row types).
-    let specs = vec![
+fn convert_empty_entity<R: AsRecordBatch<IndexerEnvelope>>(
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+    entity_name: &str,
+) -> Result<RecordBatch, ArrowError> {
+    let rows: Vec<R> = Vec::new();
+    R::to_record_batch(&rows, &entity_specs(ontology, entity_name), env)
+}
+
+fn convert_directories(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_entity(graph, ids, env, ontology, "Directory", |g, ids| {
+        g.directories()
+            .map(|(idx, dir)| DirectoryRow {
+                dir,
+                id: ids[idx.index()],
+            })
+            .collect()
+    })
+}
+
+fn convert_empty_directories(
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_empty_entity::<DirectoryRow<'_>>(env, ontology, "Directory")
+}
+
+fn convert_files(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_entity(graph, ids, env, ontology, "File", |g, ids| {
+        g.files()
+            .map(|(idx, file)| FileRow {
+                file,
+                id: ids[idx.index()],
+            })
+            .collect()
+    })
+}
+
+fn convert_empty_files(
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_empty_entity::<FileRow<'_>>(env, ontology, "File")
+}
+
+fn convert_definitions(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_entity(graph, ids, env, ontology, "Definition", |g, ids| {
+        g.definitions()
+            .map(|(idx, file_path, def)| DefinitionRow {
+                file_path,
+                def,
+                pool: &g.strings,
+                id: ids[idx.index()],
+            })
+            .collect()
+    })
+}
+
+fn convert_imports(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    convert_entity(graph, ids, env, ontology, "ImportedSymbol", |g, ids| {
+        g.imports_iter()
+            .map(|(idx, file_path, import)| ImportRow {
+                file_path,
+                import,
+                pool: &g.strings,
+                id: ids[idx.index()],
+            })
+            .collect()
+    })
+}
+
+fn branch_specs() -> Vec<ColumnSpec> {
+    vec![
         ColumnSpec {
             name: "id".into(),
             col_type: ColumnType::Int,
@@ -277,87 +354,50 @@ fn convert_branch(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
             col_type: ColumnType::Bool,
             nullable: false,
         },
-    ];
-
-    struct BranchRow<'a> {
-        id: i64,
-        env: &'a IndexerEnvelope,
-    }
-    impl AsRecordBatch for BranchRow<'_> {
-        fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
-            b.col("id")?.push_int(self.id)?;
-            b.col("traversal_path")?
-                .push_str(&self.env.traversal_path)?;
-            b.col("project_id")?.push_int(self.env.project_id)?;
-            b.col("name")?.push_str(&self.env.branch)?;
-            b.col("is_default")?.push_bool(true)?;
-            b.col("_version")?
-                .push_timestamp_micros(self.env.version_micros)?;
-            b.col("_deleted")?.push_bool(false)?;
-            Ok(())
-        }
-    }
-
-    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &specs, &())
+    ]
 }
 
-fn convert_edges(
+struct BranchRow<'a> {
+    id: i64,
+    env: &'a IndexerEnvelope,
+}
+
+impl AsRecordBatch for BranchRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
+        b.col("id")?.push_int(self.id)?;
+        b.col("traversal_path")?
+            .push_str(&self.env.traversal_path)?;
+        b.col("project_id")?.push_int(self.env.project_id)?;
+        b.col("name")?.push_str(&self.env.branch)?;
+        b.col("is_default")?.push_bool(true)?;
+        b.col("_version")?
+            .push_timestamp_micros(self.env.version_micros)?;
+        b.col("_deleted")?.push_bool(false)?;
+        Ok(())
+    }
+}
+
+fn convert_branch_row(env: &IndexerEnvelope) -> Result<RecordBatch, ArrowError> {
+    let branch_id = compute_branch_id(env.project_id, &env.branch);
+    BranchRow::to_record_batch(&[BranchRow { id: branch_id, env }], &branch_specs(), &())
+}
+
+fn convert_empty_branch() -> Result<RecordBatch, ArrowError> {
+    let rows: Vec<BranchRow<'_>> = Vec::new();
+    BranchRow::to_record_batch(&rows, &branch_specs(), &())
+}
+
+fn convert_repository_edges(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
     ontology: &Ontology,
 ) -> Result<RecordBatch, ArrowError> {
     let specs = edge_specs(ontology);
-
-    let denorm_cols: Vec<String> = {
-        let mut seen = std::collections::HashSet::new();
-        let mut cols = Vec::new();
-        for table_name in ontology.edge_tables() {
-            if let Some(config) = ontology.edge_table_config(table_name) {
-                for col in &config.storage.denormalized_columns {
-                    if seen.insert(col.name.clone()) {
-                        cols.push(col.name.clone());
-                    }
-                }
-            }
-        }
-        cols
-    };
-
-    struct IndexerEdgeRow<'a> {
-        env: &'a IndexerEnvelope,
-        source_id: i64,
-        target_id: i64,
-        edge_kind: &'a str,
-        source_node_kind: &'a str,
-        target_node_kind: &'a str,
-        denormalized_column_names: &'a [String],
-    }
-
-    impl AsRecordBatch for IndexerEdgeRow<'_> {
-        fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
-            b.col("traversal_path")?
-                .push_str(&self.env.traversal_path)?;
-            b.col("source_id")?.push_int(self.source_id)?;
-            b.col("source_kind")?.push_str(self.source_node_kind)?;
-            b.col("relationship_kind")?.push_str(self.edge_kind)?;
-            b.col("target_id")?.push_int(self.target_id)?;
-            b.col("target_kind")?.push_str(self.target_node_kind)?;
-            for col_name in self.denormalized_column_names {
-                b.col(col_name)?.push_empty_str_list()?;
-            }
-            b.col("_version")?
-                .push_timestamp_micros(self.env.version_micros)?;
-            b.col("_deleted")?.push_bool(false)?;
-            Ok(())
-        }
-    }
-
+    let denorm_cols = denormalized_edge_columns(ontology);
     let branch_id = compute_branch_id(env.project_id, &env.branch);
-
     let mut edge_rows: Vec<IndexerEdgeRow<'_>> = Vec::new();
 
-    // Branch --IN_PROJECT--> Project
     edge_rows.push(IndexerEdgeRow {
         env,
         source_id: branch_id,
@@ -368,49 +408,156 @@ fn convert_edges(
         denormalized_column_names: &denorm_cols,
     });
 
-    // Branch --CONTAINS--> root-level directories and files
-    for (idx, dir) in graph.directories() {
-        if dir.path != "." && !dir.path.contains('/') {
-            edge_rows.push(IndexerEdgeRow {
-                env,
-                source_id: branch_id,
-                target_id: ids[idx.index()],
-                edge_kind: "CONTAINS",
-                source_node_kind: "Branch",
-                target_node_kind: "Directory",
-                denormalized_column_names: &denorm_cols,
-            });
-        }
-    }
-    for (idx, file) in graph.files() {
-        if !file.path.contains('/') {
-            edge_rows.push(IndexerEdgeRow {
-                env,
-                source_id: branch_id,
-                target_id: ids[idx.index()],
-                edge_kind: "CONTAINS",
-                source_node_kind: "Branch",
-                target_node_kind: "File",
-                denormalized_column_names: &denorm_cols,
-            });
-        }
-    }
+    edge_rows.extend(branch_contains_directory_rows(
+        graph,
+        ids,
+        env,
+        branch_id,
+        &denorm_cols,
+    ));
+    edge_rows.extend(branch_contains_file_rows(
+        graph,
+        ids,
+        env,
+        branch_id,
+        &denorm_cols,
+    ));
+    edge_rows.extend(graph_edge_rows(graph, ids, env, &denorm_cols));
 
-    // Graph edges (CONTAINS, DEFINES, CALLS, etc.)
+    edge_row_batch(edge_rows, &specs)
+}
+
+fn convert_semantic_edges(
+    graph: &code_graph::v2::linker::CodeGraph,
+    ids: &[i64],
+    env: &IndexerEnvelope,
+    ontology: &Ontology,
+) -> Result<RecordBatch, ArrowError> {
+    let specs = edge_specs(ontology);
+    let denorm_cols = denormalized_edge_columns(ontology);
+    let edge_rows: Vec<_> = graph_edge_rows(graph, ids, env, &denorm_cols)
+        .into_iter()
+        .filter(|row| row.edge_kind != "CONTAINS")
+        .collect();
+
+    edge_row_batch(edge_rows, &specs)
+}
+
+fn denormalized_edge_columns(ontology: &Ontology) -> Vec<String> {
+    let mut seen = std::collections::HashSet::new();
+    let mut cols = Vec::new();
+    for table_name in ontology.edge_tables() {
+        if let Some(config) = ontology.edge_table_config(table_name) {
+            for col in &config.storage.denormalized_columns {
+                if seen.insert(col.name.clone()) {
+                    cols.push(col.name.clone());
+                }
+            }
+        }
+    }
+    cols
+}
+
+struct IndexerEdgeRow<'a> {
+    env: &'a IndexerEnvelope,
+    source_id: i64,
+    target_id: i64,
+    edge_kind: &'a str,
+    source_node_kind: &'a str,
+    target_node_kind: &'a str,
+    denormalized_column_names: &'a [String],
+}
+
+impl AsRecordBatch for IndexerEdgeRow<'_> {
+    fn write_row(&self, b: &mut BatchBuilder, _ctx: &()) -> Result<(), ArrowError> {
+        b.col("traversal_path")?
+            .push_str(&self.env.traversal_path)?;
+        b.col("source_id")?.push_int(self.source_id)?;
+        b.col("source_kind")?.push_str(self.source_node_kind)?;
+        b.col("relationship_kind")?.push_str(self.edge_kind)?;
+        b.col("target_id")?.push_int(self.target_id)?;
+        b.col("target_kind")?.push_str(self.target_node_kind)?;
+        for col_name in self.denormalized_column_names {
+            b.col(col_name)?.push_empty_str_list()?;
+        }
+        b.col("_version")?
+            .push_timestamp_micros(self.env.version_micros)?;
+        b.col("_deleted")?.push_bool(false)?;
+        Ok(())
+    }
+}
+
+fn branch_contains_directory_rows<'a>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &'a [i64],
+    env: &'a IndexerEnvelope,
+    branch_id: i64,
+    denorm_cols: &'a [String],
+) -> Vec<IndexerEdgeRow<'a>> {
+    graph
+        .directories()
+        .filter(|(_, dir)| dir.path != "." && !dir.path.contains('/'))
+        .map(|(idx, _)| IndexerEdgeRow {
+            env,
+            source_id: branch_id,
+            target_id: ids[idx.index()],
+            edge_kind: "CONTAINS",
+            source_node_kind: "Branch",
+            target_node_kind: "Directory",
+            denormalized_column_names: denorm_cols,
+        })
+        .collect()
+}
+
+fn branch_contains_file_rows<'a>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &'a [i64],
+    env: &'a IndexerEnvelope,
+    branch_id: i64,
+    denorm_cols: &'a [String],
+) -> Vec<IndexerEdgeRow<'a>> {
+    graph
+        .files()
+        .filter(|(_, file)| !file.path.contains('/'))
+        .map(|(idx, _)| IndexerEdgeRow {
+            env,
+            source_id: branch_id,
+            target_id: ids[idx.index()],
+            edge_kind: "CONTAINS",
+            source_node_kind: "Branch",
+            target_node_kind: "File",
+            denormalized_column_names: denorm_cols,
+        })
+        .collect()
+}
+
+fn graph_edge_rows<'a>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &'a [i64],
+    env: &'a IndexerEnvelope,
+    denorm_cols: &'a [String],
+) -> Vec<IndexerEdgeRow<'a>> {
+    let mut rows = Vec::new();
     for ei in graph.graph.edge_indices() {
         let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
         let edge = &graph.graph[ei];
-        edge_rows.push(IndexerEdgeRow {
+        rows.push(IndexerEdgeRow {
             env,
             source_id: ids[src.index()],
             target_id: ids[tgt.index()],
             edge_kind: edge.relationship.edge_kind.as_ref(),
             source_node_kind: edge.relationship.source_node.as_ref(),
             target_node_kind: edge.relationship.target_node.as_ref(),
-            denormalized_column_names: &denorm_cols,
+            denormalized_column_names: denorm_cols,
         });
     }
+    rows
+}
 
+fn edge_row_batch(
+    mut edge_rows: Vec<IndexerEdgeRow<'_>>,
+    specs: &[ColumnSpec],
+) -> Result<RecordBatch, ArrowError> {
     // Sort edges by low-cardinality columns so run-length encoding
     // (and dictionary encoding) on relationship_kind, source_kind,
     // target_kind produce long runs of identical values.
@@ -421,7 +568,7 @@ fn convert_edges(
             .then_with(|| a.target_node_kind.cmp(b.target_node_kind))
     });
 
-    IndexerEdgeRow::to_record_batch(&edge_rows, &specs, &())
+    IndexerEdgeRow::to_record_batch(&edge_rows, specs, &())
 }
 
 fn compute_branch_id(project_id: i64, branch: &str) -> i64 {
