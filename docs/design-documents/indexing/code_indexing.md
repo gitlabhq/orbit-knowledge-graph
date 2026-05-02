@@ -221,7 +221,7 @@ For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` 
 
 The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
 
-1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from Gitaly archive metadata for the indexed revision before extraction filters run; local CLI indexing reads present, non-ignored files from `git ls-files --cached --others --exclude-standard`.
+1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from Gitaly archive metadata for the indexed revision before extraction filters run; local CLI indexing reads present, non-ignored files from Gitalisk.
 2. **Directory walking** discovers the files that were materialized on disk and can be read by parsers and resolvers.
 3. **Extension filtering** runs `parsable_language` over materialized files, then groups parseable files by language.
 4. **Structural graph emission** creates `Directory`, `File`, and containment edges from the repository inventory. Non-parsable files use `language = "unknown"` and do not produce definitions or imports.

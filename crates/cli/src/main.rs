@@ -7,6 +7,7 @@ mod workspace;
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand};
+use gitalisk_core::repository::gitalisk_repository::{CoreGitaliskRepository, IterFileOptions};
 use ontology::Ontology;
 use query_engine::compiler::SecurityContext;
 use query_engine::formatters::{self, ResultFormatter};
@@ -655,7 +656,7 @@ async fn index_repo(
     let start_time = std::time::Instant::now();
 
     let tracer = code_graph::v2::trace::Tracer::new(false);
-    pipeline_config.file_inventory = Some(git_file_inventory(&git.repo_path)?);
+    pipeline_config.file_inventory = Some(gitalisk_file_inventory(&git.repo_path)?);
 
     let db_path = store.db_path();
     let client =
@@ -736,51 +737,43 @@ async fn index_repo(
     })
 }
 
-fn git_file_inventory(
+fn gitalisk_file_inventory(
     repo_path: &std::path::Path,
 ) -> Result<Arc<[code_graph::v2::FileInventoryEntry]>> {
-    let output = std::process::Command::new("git")
-        .args([
-            "-C",
-            repo_path.to_str().context("repository path is not UTF-8")?,
-            "ls-files",
-            "-z",
-            "--cached",
-            "--others",
-            "--exclude-standard",
-        ])
-        .output()
-        .with_context(|| format!("failed to list git tree files in {}", repo_path.display()))?;
-    if !output.status.success() {
-        anyhow::bail!(
-            "git ls-files failed in {}: {}",
-            repo_path.display(),
-            String::from_utf8_lossy(&output.stderr)
-        );
-    }
+    let path_str = repo_path
+        .to_str()
+        .context("repository path is not UTF-8")?
+        .to_string();
+    let repo = CoreGitaliskRepository::new(path_str.clone(), path_str);
+    let files = repo
+        .get_repo_files(IterFileOptions {
+            include_ignored: false,
+            include_hidden: true,
+            exclude_patterns: Vec::new(),
+        })
+        .with_context(|| {
+            format!(
+                "failed to list repository files with Gitalisk in {}",
+                repo_path.display()
+            )
+        })?;
 
-    let entries: Vec<_> = output
-        .stdout
-        .split(|b| *b == 0)
-        .filter(|path| !path.is_empty())
-        .filter_map(|path| {
-            let path = String::from_utf8_lossy(path).to_string();
-            let metadata = match std::fs::symlink_metadata(repo_path.join(&path)) {
-                Ok(metadata) => metadata,
-                Err(error) if error.kind() == std::io::ErrorKind::NotFound => return None,
-                Err(error) => {
-                    return Some(Err(error).with_context(|| {
-                        format!(
-                            "failed to read metadata for git inventory entry {}",
-                            repo_path.join(&path).display()
-                        )
-                    }));
-                }
-            };
-            Some(Ok(code_graph::v2::FileInventoryEntry {
-                path,
-                size: metadata.len(),
-            }))
+    let entries: Vec<_> = files
+        .into_iter()
+        .map(|file| {
+            let path = file.path();
+            let relative_path = path
+                .strip_prefix(repo_path)
+                .unwrap_or(path)
+                .to_string_lossy()
+                .to_string();
+            let size = std::fs::symlink_metadata(path)
+                .with_context(|| format!("failed to read metadata for {}", path.display()))?
+                .len();
+            Ok(code_graph::v2::FileInventoryEntry {
+                path: relative_path,
+                size,
+            })
         })
         .collect::<Result<_>>()?;
     Ok(Arc::from(entries))
