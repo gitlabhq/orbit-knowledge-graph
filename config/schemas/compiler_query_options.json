@@ -24,5 +24,10 @@
     "type": "boolean",
     "description": "Emit SELECT DISTINCT on cascade and hop frontier CTEs. When false (default), IN already deduplicates internally and DISTINCT adds a blocking barrier.",
     "default": false
+  },
+  "use_v2": {
+    "type": "boolean",
+    "description": "Use the v2 skeleton-first compiler. Edges drive, nodes are lazy lookups, zero CTEs. Falls back to v1 for PathFinding and Neighbors.",
+    "default": false
   }
 }

@@ -69,6 +69,11 @@ pub struct QueryOptions {
     /// blocking hash aggregation barrier that prevents pipelining.
     #[serde(default)]
     pub cascade_distinct: bool,
+    /// When true, uses the v2 skeleton-first compiler pipeline. Edges drive,
+    /// nodes are lazy lookups, zero CTEs for the common case. Falls back to
+    /// v1 for PathFinding and Neighbors.
+    #[serde(default)]
+    pub use_v2: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
