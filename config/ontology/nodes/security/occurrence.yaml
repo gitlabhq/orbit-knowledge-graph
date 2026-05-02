@@ -157,6 +157,8 @@ etl:
 
 storage:
   primary_key: [traversal_path, id]
+  settings:
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: uuid, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -176,8 +178,9 @@ storage:
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_description, column: description, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
-    - {name: idx_cve, column: cve, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
+    - {name: idx_description, column: description, type: "bloom_filter(0.01)", granularity: 1}
+    - {name: idx_cve, column: cve, type: "bloom_filter(0.01)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
