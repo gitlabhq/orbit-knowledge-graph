@@ -6,8 +6,8 @@ use async_trait::async_trait;
 use siphon_proto::replication_event::Operation;
 use tracing::{debug, info, warn};
 
-use super::config::subjects;
-use super::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
+use crate::modules::code::config::subjects;
+use crate::modules::code::siphon_decoder::{ColumnExtractor, decode_logical_replication_events};
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};

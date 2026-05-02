@@ -440,7 +440,7 @@ mod tests {
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::plan::ExtractQuery;
     use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
-    use crate::modules::sdlc::test_fixtures::test_metrics;
+    use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
@@ -533,8 +533,8 @@ mod tests {
         .unwrap()
     }
 
-    use crate::modules::sdlc::test_fixtures::EmptyDatalake;
-    use crate::modules::sdlc::test_fixtures::FailingDatalake;
+    use crate::modules::sdlc::test_helpers::EmptyDatalake;
+    use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
 
     struct MultiBatchDatalake {

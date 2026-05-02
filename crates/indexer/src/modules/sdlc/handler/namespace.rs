@@ -124,7 +124,7 @@ impl Handler for NamespaceHandler {
 mod tests {
     use super::*;
     use crate::modules::sdlc::plan::build_plans;
-    use crate::modules::sdlc::test_fixtures::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::Ontology;
