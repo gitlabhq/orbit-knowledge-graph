@@ -209,6 +209,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 from_node: rel.from.clone(),
                 to_node: rel.to.clone(),
                 direction: rel.direction,
+                min_hops: rel.min_hops,
                 max_hops: rel.max_hops,
                 fk,
             }
@@ -405,10 +406,19 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
 
+        let is_multi_hop = hop.max_hops > 1;
+
         if let Some(prev_from) = from.take() {
             let prev_alias = &edge_aliases[i - 1];
             let prev_end = skeleton.hops[i - 1].direction.edge_columns().1;
-            let right = TableRef::scan(&hop.edge_table, &alias);
+            let right = if is_multi_hop {
+                let (union, union_wheres) =
+                    build_multi_hop_union(hop, &alias, &skeleton.nodes);
+                where_parts.extend(union_wheres);
+                union
+            } else {
+                TableRef::scan(&hop.edge_table, &alias)
+            };
             let join_on = Expr::eq(
                 Expr::col(prev_alias, prev_end),
                 Expr::col(&alias, start_col),
@@ -419,19 +429,28 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                 right: Box::new(right),
                 on: join_on,
             });
+        } else if is_multi_hop {
+            let (union, union_wheres) =
+                build_multi_hop_union(hop, &alias, &skeleton.nodes);
+            from = Some(union);
+            where_parts.extend(union_wheres);
         } else {
             from = Some(TableRef::scan(&hop.edge_table, &alias));
         }
 
-        // Edge predicates.
-        push_edge_predicates(
-            &mut where_parts,
-            &alias,
-            hop,
-            &skeleton.nodes,
-            start_col,
-            end_col,
-        );
+        if !is_multi_hop {
+            // Single-hop: edge predicates on the outer WHERE.
+            push_edge_predicates(
+                &mut where_parts,
+                &alias,
+                hop,
+                &skeleton.nodes,
+                start_col,
+                end_col,
+            );
+        }
+        // Multi-hop: entity kind + _deleted predicates already added by
+        // build_multi_hop_union; relationship kind filters are inside each arm.
 
         // Denorm tags.
         emit_denorm_tags(
@@ -1257,6 +1276,12 @@ fn denorm_tag_exprs_from_plan(
 // ─────────────────────────────────────────────────────────────────────────────
 
 pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
+    edge_select_columns_with_prefix(alias, alias)
+}
+
+/// Edge metadata SELECT with a custom output prefix. Used by multi-hop
+/// traversals that use `hop_e0_` prefix instead of `e0_`.
+pub fn edge_select_columns_with_prefix(alias: &str, prefix: &str) -> Vec<SelectExpr> {
     [
         (RELATIONSHIP_KIND_COLUMN, EDGE_TYPE_SUFFIX),
         (SOURCE_ID_COLUMN, EDGE_SRC_SUFFIX),
@@ -1265,7 +1290,7 @@ pub fn edge_select_columns(alias: &str) -> Vec<SelectExpr> {
         (TARGET_KIND_COLUMN, EDGE_DST_TYPE_SUFFIX),
     ]
     .iter()
-    .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{alias}_{suffix}")))
+    .map(|(col, suffix)| SelectExpr::new(Expr::col(alias, *col), format!("{prefix}_{suffix}")))
     .collect()
 }
 
@@ -1422,4 +1447,185 @@ pub fn id_range_predicate(alias: &str, range: &InputIdRange) -> Expr {
             Expr::int(range.end),
         ),
     )
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Variable-length: UNION ALL of edge chains
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// Build a UNION ALL subquery for variable-length traversals (min_hops..=max_hops).
+/// Each arm is a chain of `depth` edge JOINs. The output columns are normalized
+/// so all arms share the same schema.
+fn build_multi_hop_union(
+    hop: &Hop,
+    alias: &str,
+    nodes: &HashMap<String, NodePlan>,
+) -> (TableRef, Vec<Expr>) {
+    let start = hop.min_hops.max(1);
+    let (start_col, end_col) = hop.direction.edge_columns();
+    let end_type_col = match hop.direction {
+        Direction::Outgoing | Direction::Both => TARGET_KIND_COLUMN,
+        Direction::Incoming => SOURCE_KIND_COLUMN,
+    };
+
+    let type_filter: Option<Vec<String>> = if hop.rel_types.is_empty()
+        || (hop.rel_types.len() == 1 && hop.rel_types[0] == "*")
+    {
+        None
+    } else {
+        Some(hop.rel_types.clone())
+    };
+
+    let queries: Vec<Query> = (start..=hop.max_hops)
+        .map(|depth| {
+            build_depth_arm(
+                depth,
+                &hop.edge_table,
+                start_col,
+                end_col,
+                end_type_col,
+                hop.direction,
+                &type_filter,
+            )
+        })
+        .collect();
+
+    let union = TableRef::union_all(queries, alias);
+
+    // Edge predicates that go on the outer WHERE (entity kind filters).
+    // source_kind/target_kind filtering is done per-arm internally, but we
+    // also need it on the outer query for the normalized columns.
+    let mut where_parts = Vec::new();
+    if let Some(np) = nodes.get(&hop.from_node) {
+        if let Some(ref entity) = np.entity {
+            where_parts.push(Expr::eq(
+                Expr::col(alias, SOURCE_KIND_COLUMN),
+                Expr::string(entity),
+            ));
+        }
+    }
+    if let Some(np) = nodes.get(&hop.to_node) {
+        if let Some(ref entity) = np.entity {
+            where_parts.push(Expr::eq(
+                Expr::col(alias, TARGET_KIND_COLUMN),
+                Expr::string(entity),
+            ));
+        }
+    }
+    where_parts.push(Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+
+    (union, where_parts)
+}
+
+/// Build one arm of the UNION ALL: a chain of `depth` edge JOINs.
+fn build_depth_arm(
+    depth: u32,
+    edge_table: &str,
+    start_col: &str,
+    end_col: &str,
+    end_type_col: &str,
+    direction: Direction,
+    type_filter: &Option<Vec<String>>,
+) -> Query {
+    // First edge scan.
+    let mut from = TableRef::scan(edge_table, "e1");
+    let mut where_clause = None;
+
+    // Relationship kind filter on first edge.
+    if let Some(types) = type_filter {
+        where_clause = Expr::col_in(
+            "e1",
+            RELATIONSHIP_KIND_COLUMN,
+            ChType::String,
+            types
+                .iter()
+                .map(|t| serde_json::Value::String(t.clone()))
+                .collect(),
+        );
+    }
+
+    // Chain: e1 JOIN e2 ON e1.end = e2.start JOIN e3 ...
+    for i in 2..=depth {
+        let prev = format!("e{}", i - 1);
+        let curr = format!("e{i}");
+        let right = TableRef::scan(edge_table, &curr);
+        let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
+        // Relationship kind filter on chained edges.
+        if let Some(types) = type_filter {
+            if let Some(type_cond) = Expr::col_in(
+                &curr,
+                RELATIONSHIP_KIND_COLUMN,
+                ChType::String,
+                types
+                    .iter()
+                    .map(|t| serde_json::Value::String(t.clone()))
+                    .collect(),
+            ) {
+                join_on = Expr::and(join_on, type_cond);
+            }
+        }
+        from = TableRef::join(JoinType::Inner, from, right, join_on);
+    }
+
+    let last = format!("e{depth}");
+
+    // Determine source/target columns based on direction.
+    let (rel_kind_expr, src_id_expr, src_kind_expr, tgt_id_expr, tgt_kind_expr) = match direction {
+        Direction::Outgoing | Direction::Both => (
+            Expr::col("e1", RELATIONSHIP_KIND_COLUMN),
+            Expr::col("e1", SOURCE_ID_COLUMN),
+            Expr::col("e1", SOURCE_KIND_COLUMN),
+            Expr::col(&last, TARGET_ID_COLUMN),
+            Expr::col(&last, TARGET_KIND_COLUMN),
+        ),
+        Direction::Incoming => (
+            Expr::col(&last, RELATIONSHIP_KIND_COLUMN),
+            Expr::col(&last, SOURCE_ID_COLUMN),
+            Expr::col(&last, SOURCE_KIND_COLUMN),
+            Expr::col("e1", TARGET_ID_COLUMN),
+            Expr::col("e1", TARGET_KIND_COLUMN),
+        ),
+    };
+
+    // path_nodes: array of (end_id, end_kind) tuples for intermediate nodes.
+    let path_nodes_expr = Expr::func(
+        "array",
+        (1..=depth)
+            .map(|i| {
+                let e = format!("e{i}");
+                Expr::func(
+                    "tuple",
+                    vec![Expr::col(&e, end_col), Expr::col(&e, end_type_col)],
+                )
+            })
+            .collect(),
+    );
+
+    Query {
+        select: vec![
+            // Normalized edge columns that match a single-hop scan.
+            SelectExpr::new(Expr::col("e1", start_col), start_col),
+            SelectExpr::new(Expr::col(&last, end_col), end_col),
+            SelectExpr::new(rel_kind_expr, RELATIONSHIP_KIND_COLUMN),
+            SelectExpr::new(src_id_expr, SOURCE_ID_COLUMN),
+            SelectExpr::new(src_kind_expr, SOURCE_KIND_COLUMN),
+            SelectExpr::new(tgt_id_expr, TARGET_ID_COLUMN),
+            SelectExpr::new(tgt_kind_expr, TARGET_KIND_COLUMN),
+            SelectExpr::new(path_nodes_expr, PATH_NODES_COLUMN),
+            SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
+            // _deleted from first edge for outer filter.
+            SelectExpr::new(Expr::col("e1", DELETED_COLUMN), DELETED_COLUMN),
+            // traversal_path from first edge for security pass.
+            SelectExpr::new(
+                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
+                TRAVERSAL_PATH_COLUMN,
+            ),
+        ],
+        from,
+        where_clause,
+        ..Default::default()
+    }
 }

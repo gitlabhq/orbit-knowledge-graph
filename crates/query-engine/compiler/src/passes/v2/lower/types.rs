@@ -33,6 +33,8 @@ pub struct Hop {
     pub to_node: String,
     /// Edge direction (determines source_id vs target_id mapping).
     pub direction: Direction,
+    /// Min hops (1 = include depth-1, 2 = skip depth-1, etc.).
+    pub min_hops: u32,
     /// Max hops (1 for single-hop, >1 for variable-length).
     pub max_hops: u32,
     /// FK on a node table that encodes this relationship.

@@ -7,7 +7,8 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::shared::edge_select_columns;
+use crate::constants::*;
+use super::shared::{edge_select_columns, edge_select_columns_with_prefix};
 use super::types::Skeleton;
 
 pub fn lower_traversal(input: &mut Input) -> Result<Node> {
@@ -19,8 +20,22 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
     let output = skeleton.emit(input)?;
 
     let mut select = Vec::new();
-    for ea in &output.edge_aliases {
-        select.extend(edge_select_columns(ea));
+    for (i, ea) in output.edge_aliases.iter().enumerate() {
+        let is_multi = input
+            .relationships
+            .get(i)
+            .is_some_and(|r| r.max_hops > 1);
+        if is_multi {
+            // Multi-hop: use hop_ prefix and include path_nodes.
+            let prefix = format!("hop_{ea}");
+            select.extend(edge_select_columns_with_prefix(ea, &prefix));
+            select.push(SelectExpr::new(
+                Expr::col(ea, PATH_NODES_COLUMN),
+                format!("{prefix}_{PATH_NODES_COLUMN}"),
+            ));
+        } else {
+            select.extend(edge_select_columns(ea));
+        }
     }
 
     let order_by = input
