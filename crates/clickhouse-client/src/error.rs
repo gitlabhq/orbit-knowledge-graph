@@ -22,10 +22,17 @@ pub enum ClickHouseError {
     CircuitOpen { service: &'static str },
 }
 
+fn is_clickhouse_error_transient(error: &clickhouse::error::Error) -> bool {
+    matches!(
+        error,
+        clickhouse::error::Error::Network(_) | clickhouse::error::Error::TimedOut
+    )
+}
+
 impl ClickHouseError {
     pub fn is_transient(&self) -> bool {
         match self {
-            Self::Query(_) | Self::Insert(_) => true,
+            Self::Query(inner) | Self::Insert(inner) => is_clickhouse_error_transient(inner),
             Self::BadResponse { status, .. } => *status >= 500,
             _ => false,
         }
