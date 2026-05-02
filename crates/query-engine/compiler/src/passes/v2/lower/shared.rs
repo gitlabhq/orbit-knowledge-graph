@@ -125,6 +125,8 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                 selectivity: Selectivity::from_node(n),
                 hydration: HydrationStrategy::Skip, // set later
                 id_source: None,                    // set later
+                has_traversal_path: n.has_traversal_path,
+                redaction_id_column: n.redaction_id_column.clone(),
                 filters: n.filters.clone().into_iter().collect(),
                 node_ids: n.node_ids.clone(),
                 id_range: n.id_range.clone(),
@@ -492,8 +494,86 @@ fn emit_node_join(
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
     let alias = &np.alias;
 
+    // Determine which columns we need first — this drives both the
+    // dedup subquery SELECT and the outer SELECT.
+    let is_group_by = input
+        .aggregations
+        .iter()
+        .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
+
+    let needed_cols: Vec<String> = if is_group_by || input.query_type != QueryType::Aggregation {
+        requested_columns(&np.columns)
+    } else {
+        let mut cols = Vec::new();
+        if let Some(ref ob) = input.order_by {
+            if ob.node == *alias && !cols.contains(&ob.property) {
+                cols.push(ob.property.clone());
+            }
+        }
+        cols
+    };
+
+    // Build dedup subquery with only the columns we need.
+    let mut dedup_cols = vec![
+        SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
+        SelectExpr::new(Expr::col(alias, VERSION_COLUMN), VERSION_COLUMN),
+    ];
+    if np.has_traversal_path {
+        dedup_cols.push(SelectExpr::new(
+            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+            TRAVERSAL_PATH_COLUMN,
+        ));
+    }
+    for col in &needed_cols {
+        if col != DEFAULT_PRIMARY_KEY && col != VERSION_COLUMN && col != TRAVERSAL_PATH_COLUMN {
+            dedup_cols.push(SelectExpr::new(Expr::col(alias, col), col.as_str()));
+        }
+    }
+    for (prop, _) in &np.filters {
+        if !dedup_cols
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(prop.as_str()))
+        {
+            dedup_cols.push(SelectExpr::new(Expr::col(alias, prop), prop.as_str()));
+        }
+    }
+    // ORDER BY column.
+    if let Some(ref ob) = input.order_by {
+        if ob.node == *alias
+            && !dedup_cols
+                .iter()
+                .any(|s| s.alias.as_deref() == Some(ob.property.as_str()))
+        {
+            dedup_cols.push(SelectExpr::new(
+                Expr::col(alias, &ob.property),
+                ob.property.as_str(),
+            ));
+        }
+    }
+    // Enforce adds redaction_id_column — include it if it's not "id".
+    if np.redaction_id_column != DEFAULT_PRIMARY_KEY
+        && !dedup_cols
+            .iter()
+            .any(|s| s.alias.as_deref() == Some(np.redaction_id_column.as_str()))
+    {
+        dedup_cols.push(SelectExpr::new(
+            Expr::col(alias, &np.redaction_id_column),
+            np.redaction_id_column.as_str(),
+        ));
+    }
+    // _deleted needed for WHERE filter.
+    if !dedup_cols
+        .iter()
+        .any(|s| s.alias.as_deref() == Some(DELETED_COLUMN))
+    {
+        dedup_cols.push(SelectExpr::new(
+            Expr::col(alias, DELETED_COLUMN),
+            DELETED_COLUMN,
+        ));
+    }
+
     let dedup_query = Query {
-        select: vec![SelectExpr::star()],
+        select: dedup_cols,
         from: TableRef::scan(table, alias),
         order_by: vec![OrderExpr {
             expr: Expr::col(alias, VERSION_COLUMN),
@@ -510,29 +590,23 @@ fn emit_node_join(
             query: Box::new(dedup_query),
             alias: alias.to_string(),
         }),
-        on: Expr::eq(
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            Expr::col(edge_alias, edge_col),
-        ),
-    };
-
-    // Columns: group-by nodes get all requested columns, agg targets get none
-    // (their properties are inside aggregate functions only).
-    let is_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(alias.as_str()));
-
-    let needed_cols: Vec<String> = if is_group_by || input.query_type != QueryType::Aggregation {
-        requested_columns(&np.columns)
-    } else {
-        let mut cols = Vec::new();
-        if let Some(ref ob) = input.order_by {
-            if ob.node == *alias && !cols.contains(&ob.property) {
-                cols.push(ob.property.clone());
+        on: {
+            let id_join = Expr::eq(
+                Expr::col(alias, DEFAULT_PRIMARY_KEY),
+                Expr::col(edge_alias, edge_col),
+            );
+            if np.has_traversal_path {
+                Expr::and(
+                    id_join,
+                    Expr::eq(
+                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
+                    ),
+                )
+            } else {
+                id_join
             }
-        }
-        cols
+        },
     };
 
     let selects: Vec<SelectExpr> = needed_cols

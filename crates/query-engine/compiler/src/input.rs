@@ -364,6 +364,9 @@ pub struct InputNode {
     /// Virtual columns stripped by normalize, consumed by the hydration plan.
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
+    /// Whether the node table has a traversal_path column. Set during normalization.
+    #[serde(skip)]
+    pub has_traversal_path: bool,
 }
 
 impl Default for InputNode {
@@ -379,6 +382,7 @@ impl Default for InputNode {
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
+            has_traversal_path: false,
         }
     }
 }

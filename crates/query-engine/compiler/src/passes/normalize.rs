@@ -162,6 +162,8 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
+        node.has_traversal_path = node_entity.has_traversal_path;
+
         // Expand column selections to explicit lists. Strip virtual columns
         // into node.virtual_columns for the hydration plan.
         // PathFinding/Neighbors handle virtuals in build_dynamic_specs.

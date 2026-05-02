@@ -52,6 +52,10 @@ pub struct NodePlan {
     pub node_ids: Vec<i64>,
     /// ID range filter.
     pub id_range: Option<InputIdRange>,
+    /// Whether the node table has a traversal_path column (most do; User/Runner don't).
+    pub has_traversal_path: bool,
+    /// Auth column (usually "id", but e.g. "project_id" for Definition).
+    pub redaction_id_column: String,
     /// Columns requested by the user.
     pub columns: Option<ColumnSelection>,
 }
