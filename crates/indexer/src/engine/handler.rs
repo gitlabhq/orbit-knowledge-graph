@@ -27,12 +27,14 @@ use async_trait::async_trait;
 use parking_lot::RwLock;
 use thiserror::Error;
 
-use crate::{
+use super::{
     destination::Destination,
+    types::{Envelope, Subscription},
+};
+use crate::{
     indexing_status::IndexingStatusStore,
     locking::LockService,
     nats::{NatsServices, ProgressNotifier},
-    types::{Envelope, Subscription},
 };
 use gkg_server_config::HandlerConfiguration;
 

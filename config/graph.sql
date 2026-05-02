@@ -909,6 +909,37 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
+CREATE TABLE IF NOT EXISTS gl_ci_edge (
+    traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), ZSTD(1)),
+    source_kind LowCardinality(String) CODEC(LZ4),
+    relationship_kind LowCardinality(String) CODEC(LZ4),
+    target_id Int64 CODEC(Delta(8), ZSTD(1)),
+    target_kind LowCardinality(String) CODEC(LZ4),
+    source_tags Array(LowCardinality(String)),
+    target_tags Array(LowCardinality(String)),
+    _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
+    _deleted Bool DEFAULT false,
+    INDEX idx_relationship relationship_kind TYPE set(50) GRANULARITY 2,
+    INDEX source_tags_idx source_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    INDEX target_tags_idx target_tags TYPE text(tokenizer = 'array') GRANULARITY 64,
+    PROJECTION by_source (SELECT * ORDER BY (source_id, relationship_kind, target_id, traversal_path, source_kind, target_kind)),
+    PROJECTION by_target (SELECT * ORDER BY (target_id, relationship_kind, source_id, traversal_path, source_kind, target_kind)),
+    PROJECTION by_rel_source_kind (SELECT * ORDER BY (relationship_kind, source_kind, source_id, target_id, traversal_path, target_kind)),
+    PROJECTION by_rel_target_kind (SELECT * ORDER BY (relationship_kind, target_kind, target_id, source_id, traversal_path, source_kind)),
+    PROJECTION agg_counts_by_source (
+      SELECT relationship_kind, target_kind, source_id, traversal_path, count()
+      GROUP BY relationship_kind, target_kind, source_id, traversal_path
+    ),
+    PROJECTION agg_counts_by_target (
+      SELECT relationship_kind, source_kind, target_id, traversal_path, count()
+      GROUP BY relationship_kind, source_kind, target_id, traversal_path
+    )
+) ENGINE = ReplacingMergeTree(_version, _deleted)
+ORDER BY (traversal_path, source_id, relationship_kind, target_id, source_kind, target_kind)
+PRIMARY KEY (traversal_path, source_id, relationship_kind)
+SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
+
 CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     source_id Int64 CODEC(Delta(8), ZSTD(1)),

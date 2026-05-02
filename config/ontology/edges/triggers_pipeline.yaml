@@ -1,6 +1,7 @@
 # config/ontology/edges/triggers_pipeline.yaml
 
 description: Bridge job triggered a downstream pipeline
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Job, id: id }
