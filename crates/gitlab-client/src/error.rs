@@ -1,3 +1,5 @@
+use circuit_breaker::CircuitBreakerError;
+
 #[derive(Debug, thiserror::Error)]
 pub enum GitlabClientError {
     #[error("HTTP request failed: {0}")]
@@ -23,4 +25,29 @@ pub enum GitlabClientError {
 
     #[error("unexpected response: {0}")]
     Unexpected(String),
+
+    #[error("circuit open for service {service}")]
+    CircuitOpen { service: &'static str },
+}
+
+impl GitlabClientError {
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Request(_) | Self::ServerError { .. } => true,
+            Self::Unauthorized
+            | Self::NotFound(_)
+            | Self::ForcePush(_)
+            | Self::JwtSigning(_)
+            | Self::InvalidSecret(_)
+            | Self::Unexpected(_)
+            | Self::CircuitOpen { .. } => false,
+        }
+    }
+
+    pub(crate) fn from_circuit_breaker(error: CircuitBreakerError<Self>) -> Self {
+        match error {
+            CircuitBreakerError::Open { service } => Self::CircuitOpen { service },
+            CircuitBreakerError::Inner(inner) => inner,
+        }
+    }
 }

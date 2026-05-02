@@ -5131,6 +5131,7 @@ dependencies = [
  "base64 0.22.1",
  "bytes",
  "chrono",
+ "circuit-breaker",
  "futures",
  "gkg-server-config",
  "jsonwebtoken 10.3.0",
