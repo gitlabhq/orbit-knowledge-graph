@@ -537,6 +537,19 @@ fn emit_node_join(
             dedup_cols.push(SelectExpr::new(Expr::col(alias, prop), prop.as_str()));
         }
     }
+    // Aggregate property columns (sum, avg, min, max targets).
+    for agg in &input.aggregations {
+        if agg.target.as_deref() == Some(alias) {
+            if let Some(ref prop) = agg.property {
+                if !dedup_cols
+                    .iter()
+                    .any(|s| s.alias.as_deref() == Some(prop.as_str()))
+                {
+                    dedup_cols.push(SelectExpr::new(Expr::col(alias, prop), prop.as_str()));
+                }
+            }
+        }
+    }
     // ORDER BY column.
     if let Some(ref ob) = input.order_by {
         if ob.node == *alias
