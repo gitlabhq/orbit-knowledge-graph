@@ -64,9 +64,9 @@ async fn setup_test_data(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte) VALUES
-         (6001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib::greet', 'greet', 'function', 1, 5, 0, 80),
-         (6002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main', 'main', 'function', 1, 10, 0, 120)",
+        "INSERT INTO {} (id, traversal_path, project_id, branch, file_path, fqn, name, definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char) VALUES
+         (6001, '1/100/1000/', 1000, 'main', 'src/lib.rs', 'lib::greet', 'greet', 'function', 1, 5, 0, 80, 0, 0),
+         (6002, '1/100/1000/', 1000, 'main', 'src/main.rs', 'main', 'main', 'function', 1, 10, 0, 120, 0, 0)",
         t("gl_definition")
     ))
     .await;

@@ -976,6 +976,8 @@ fn write_range(b: &mut BatchBuilder, range: &Range) -> Result<(), arrow::error::
     b.col("end_line")?.push_int(range.end.line as i64)?;
     b.col("start_byte")?.push_int(range.byte_offset.0 as i64)?;
     b.col("end_byte")?.push_int(range.byte_offset.1 as i64)?;
+    b.col("start_char")?.push_int(range.start.column as i64)?;
+    b.col("end_char")?.push_int(range.end.column as i64)?;
     Ok(())
 }
 
