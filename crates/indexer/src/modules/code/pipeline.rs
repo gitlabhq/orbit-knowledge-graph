@@ -8,7 +8,7 @@ use gkg_server_config::CodeIndexingPipelineConfig;
 use tracing::{info, warn};
 
 use super::arrow_converter::{self, IndexerEnvelope};
-use super::checkpoint_store::{CodeCheckpointStore, CodeIndexingCheckpoint};
+use super::checkpoint::{CodeCheckpointStore, CodeIndexingCheckpoint};
 use super::config::CodeTableNames;
 use super::metrics::{CodeMetrics, RecordStageError};
 use super::repository::{RepositoryResolver, ResolveError};
