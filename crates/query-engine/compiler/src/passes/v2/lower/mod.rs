@@ -1,8 +1,8 @@
 //! V2 query lowerer: skeleton-first, edge chain drives, nodes are lazy.
 
 pub mod aggregation;
+pub mod shared;
 pub mod traversal;
-pub mod types;
 
 use crate::ast::Node;
 use crate::error::Result;
