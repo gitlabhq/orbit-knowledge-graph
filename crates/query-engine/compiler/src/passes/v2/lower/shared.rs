@@ -409,8 +409,9 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
         let is_multi_hop = hop.max_hops > 1;
 
         if let Some(prev_from) = from.take() {
+            let prev_hop = &skeleton.hops[i - 1];
             let prev_alias = &edge_aliases[i - 1];
-            let prev_end = skeleton.hops[i - 1].direction.edge_columns().1;
+            let (prev_start, prev_end) = prev_hop.direction.edge_columns();
             let right = if is_multi_hop {
                 let (union, union_wheres) =
                     build_multi_hop_union(hop, &alias, &skeleton.nodes);
@@ -419,9 +420,29 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
             } else {
                 TableRef::scan(&hop.edge_table, &alias)
             };
+            // Determine which columns to join on by finding the shared node
+            // between consecutive hops. Handles fan-in (both edges point to
+            // the same target) and reverse chains.
+            let (prev_join_col, curr_join_col) =
+                if prev_hop.to_node == hop.from_node {
+                    // Linear: prev→shared→curr (most common)
+                    (prev_end, start_col)
+                } else if prev_hop.to_node == hop.to_node {
+                    // Fan-in: both edges target the shared node
+                    (prev_end, end_col)
+                } else if prev_hop.from_node == hop.from_node {
+                    // Fan-out: both edges source from the shared node
+                    (prev_start, start_col)
+                } else if prev_hop.from_node == hop.to_node {
+                    // Reverse: prev←shared←curr
+                    (prev_start, end_col)
+                } else {
+                    // Fallback: assume linear chain
+                    (prev_end, start_col)
+                };
             let join_on = Expr::eq(
-                Expr::col(prev_alias, prev_end),
-                Expr::col(&alias, start_col),
+                Expr::col(prev_alias, prev_join_col),
+                Expr::col(&alias, curr_join_col),
             );
             from = Some(TableRef::Join {
                 join_type: JoinType::Inner,
