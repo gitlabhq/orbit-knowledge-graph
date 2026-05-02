@@ -22,6 +22,7 @@ use oxc::syntax::symbol::SymbolId;
 use crate::v2::dsl::ssa::{BlockId, SsaEngine, SsaValue};
 use crate::v2::types::{ExpressionStep, ssa::ParseValue};
 
+use super::super::frameworks::react::jsx::{self, JsxInvocation};
 use super::super::types::{
     JsCallEdge, JsCallSite, JsCallTarget, JsDef, JsDefKind, JsImport, JsImportedBinding,
     JsImportedCall, JsInvocationKind, JsPendingLocalCall,
@@ -29,9 +30,8 @@ use super::super::types::{
 use super::analyzer::Ctx;
 use super::calls::{
     binding_from_identifier_reference, build_import_binding_map,
-    imported_call_from_member_expression,
+    imported_call_from_jsx_member_expression, imported_call_from_member_expression,
 };
-use super::jsx::{self, JsxInvocation};
 
 pub(super) fn extract_call_edges<'a>(
     ctx: &Ctx,
@@ -504,7 +504,20 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
     }
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
-        match jsx::invocation_from_name(self.ctx, &it.name, &self.import_bindings) {
+        match jsx::invocation_from_name(
+            &it.name,
+            |identifier| {
+                binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
+            },
+            |member| {
+                imported_call_from_jsx_member_expression(
+                    self.ctx,
+                    member,
+                    &self.import_bindings,
+                    JsInvocationKind::Jsx,
+                )
+            },
+        ) {
             Some(JsxInvocation::Imported(imported_call)) => {
                 self.record_imported_call(imported_call);
             }

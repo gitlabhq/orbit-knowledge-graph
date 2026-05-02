@@ -1,15 +1,12 @@
-use std::collections::HashMap;
-
-use oxc::ast::ast::{JSXElementName, JSXMemberExpressionObject};
-use oxc::syntax::symbol::SymbolId;
+use oxc::ast::ast::{
+    IdentifierReference, JSXElementName, JSXMemberExpression, JSXMemberExpressionObject,
+};
 
 use crate::v2::types::ExpressionStep;
 
-use super::super::types::{JsImportedBinding, JsImportedCall, JsInvocationKind};
-use super::analyzer::Ctx;
-use super::calls::{binding_from_identifier_reference, imported_call_from_jsx_member_expression};
+use super::super::super::types::{JsImportedBinding, JsImportedCall, JsInvocationKind};
 
-pub(super) enum JsxInvocation {
+pub(in crate::v2::langs::custom::js) enum JsxInvocation {
     Imported(JsImportedCall),
     Local {
         name: String,
@@ -17,10 +14,10 @@ pub(super) enum JsxInvocation {
     },
 }
 
-pub(super) fn invocation_from_name<'a>(
-    ctx: &Ctx,
+pub(in crate::v2::langs::custom::js) fn invocation_from_name<'a>(
     name: &JSXElementName<'a>,
-    import_bindings: &HashMap<SymbolId, JsImportedBinding>,
+    mut identifier_binding: impl FnMut(&IdentifierReference<'a>) -> Option<JsImportedBinding>,
+    mut member_imported_call: impl FnMut(&JSXMemberExpression<'a>) -> Option<JsImportedCall>,
 ) -> Option<JsxInvocation> {
     match name {
         JSXElementName::IdentifierReference(identifier) => {
@@ -28,9 +25,7 @@ pub(super) fn invocation_from_name<'a>(
                 return None;
             }
 
-            if let Some(binding) =
-                binding_from_identifier_reference(ctx, identifier, import_bindings)
-            {
+            if let Some(binding) = identifier_binding(identifier) {
                 return Some(JsxInvocation::Imported(JsImportedCall {
                     binding,
                     member_path: Vec::new(),
@@ -44,12 +39,7 @@ pub(super) fn invocation_from_name<'a>(
             })
         }
         JSXElementName::MemberExpression(member) => {
-            if let Some(imported_call) = imported_call_from_jsx_member_expression(
-                ctx,
-                member,
-                import_bindings,
-                JsInvocationKind::Jsx,
-            ) {
+            if let Some(imported_call) = member_imported_call(member) {
                 return Some(JsxInvocation::Imported(imported_call));
             }
 

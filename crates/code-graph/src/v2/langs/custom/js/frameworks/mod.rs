@@ -5,6 +5,7 @@
 //! calls `has_embedded_scripts` / `extract_scripts` / `combine_scripts`
 //! and the per-framework analyzer hooks re-exported below.
 
+pub(in crate::v2::langs::custom::js) mod react;
 mod vue;
 
 use oxc_linter::loader::{JavaScriptSource, PartialLoader};
