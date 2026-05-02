@@ -41,6 +41,18 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
 fn lower_single_node(input: &mut Input) -> Result<Node> {
     let skeleton = Skeleton::plan(input);
     let output = skeleton.emit(input)?;
-    let q = output.into_query(vec![], vec![], vec![], input.limit);
+
+    let order_by = input
+        .order_by
+        .as_ref()
+        .map(|ob| {
+            vec![OrderExpr {
+                expr: Expr::col(&ob.node, &ob.property),
+                desc: matches!(ob.direction, OrderDirection::Desc),
+            }]
+        })
+        .unwrap_or_default();
+
+    let q = output.into_query(vec![], vec![], order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
 }

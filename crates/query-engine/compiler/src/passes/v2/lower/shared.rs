@@ -163,31 +163,45 @@ fn build_hops(input: &Input) -> Vec<Hop> {
         .iter()
         .map(|rel| {
             let edge_table = resolve_edge_table(input, &rel.types);
-            let fk = rel.fk_column.as_ref().map(|col| {
+            let fk = rel.fk_column.as_ref().and_then(|col| {
                 // Resolve which node has the FK column by checking node tables.
+                // If neither node has the column, skip FK optimization.
+                let from_table = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.from)
+                    .and_then(|n| n.table.as_deref())
+                    .unwrap_or("");
+                let to_table = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.to)
+                    .and_then(|n| n.table.as_deref())
+                    .unwrap_or("");
+
                 let from_has_col = input
                     .compiler
                     .table_columns
-                    .get(
-                        input
-                            .nodes
-                            .iter()
-                            .find(|n| n.id == rel.from)
-                            .and_then(|n| n.table.as_deref())
-                            .unwrap_or(""),
-                    )
+                    .get(from_table)
+                    .is_some_and(|cols| cols.contains(col));
+                let to_has_col = input
+                    .compiler
+                    .table_columns
+                    .get(to_table)
                     .is_some_and(|cols| cols.contains(col));
 
                 let (fk_node, target_node) = if from_has_col {
                     (rel.from.clone(), rel.to.clone())
-                } else {
+                } else if to_has_col {
                     (rel.to.clone(), rel.from.clone())
+                } else {
+                    return None;
                 };
-                HopFk {
+                Some(HopFk {
                     fk_node,
                     fk_column: col.clone(),
                     target_node,
-                }
+                })
             });
             Hop {
                 rel_types: rel.types.clone(),
@@ -270,7 +284,13 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
 
     let is_order_by_target = input.order_by.as_ref().is_some_and(|ob| ob.node == *alias);
 
-    if is_group_by || is_agg_property_target || is_order_by_target {
+    // For traversal queries, nodes with requested columns need a hydration
+    // JOIN so their properties appear in the main result. Without this, the
+    // formatter only sees the node's ID from the edge and properties are empty.
+    let needs_columns = input.query_type != QueryType::Aggregation
+        && matches!(&node_plan.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty());
+
+    if is_group_by || is_agg_property_target || is_order_by_target || needs_columns {
         return HydrationStrategy::Join;
     }
 
@@ -306,15 +326,31 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
         .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node_plan.alias)))?;
     let alias = &node_plan.alias;
 
-    let mut select = vec![SelectExpr::new(Expr::col(alias, "id"), "id")];
-    for col in requested_columns(&node_plan.columns) {
-        if col != "id" {
-            select.push(SelectExpr::new(Expr::col(alias, &col), col.clone()));
-        }
-    }
+    // Dedup subquery: ReplacingMergeTree may have unmerged duplicates.
+    // SELECT * because enforce/check may add columns we can't predict
+    // (cursor tie-breakers, _gkg_* identity columns).
+    let dedup = Query {
+        select: vec![SelectExpr::star()],
+        from: TableRef::scan(table, alias),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
+    };
 
-    let from = TableRef::scan(table, alias);
+    let from = TableRef::Subquery {
+        query: Box::new(dedup),
+        alias: alias.to_string(),
+    };
+
     let mut where_parts = Vec::new();
+
+    where_parts.push(Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
 
     for (prop, filter) in &node_plan.filters {
         where_parts.push(filter_to_expr(alias, prop, filter));
@@ -325,6 +361,23 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
     if let Some(ref range) = node_plan.id_range {
         where_parts.push(id_range_predicate(alias, range));
     }
+
+    // Node columns go into skeleton SELECT only for non-aggregation queries.
+    // Aggregation builds its own SELECT via build_aggregation(); adding node
+    // columns here would violate GROUP BY constraints.
+    // The graph formatter expects columns aliased as `{alias}_{col}`.
+    let select = if input.query_type != QueryType::Aggregation {
+        let mut s = Vec::new();
+        for col in requested_columns(&node_plan.columns) {
+            s.push(SelectExpr::new(
+                Expr::col(alias, &col),
+                format!("{alias}_{col}"),
+            ));
+        }
+        s
+    } else {
+        vec![]
+    };
 
     Ok(SkeletonOutput {
         from,
