@@ -3,4 +3,5 @@
 //! Edges drive, nodes are lazy lookups. Zero CTEs for the common case.
 //! Replaces `lower` + `optimize` + `deduplicate` with a single `lower` pass.
 
+pub mod enforce;
 pub mod lower;
