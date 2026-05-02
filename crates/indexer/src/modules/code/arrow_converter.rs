@@ -81,12 +81,12 @@ pub fn convert_code_graph(
 ) -> Result<ConvertedGraphData, ArrowError> {
     let ids = graph.assign_ids(envelope.project_id, &envelope.branch);
     match graph.output {
-        GraphOutput::Complete => convert_repository_graph(graph, &ids, envelope, ontology),
+        GraphOutput::Complete => convert_file_inventory_graph(graph, &ids, envelope, ontology),
         GraphOutput::ParsedOnly => convert_semantic_graph(graph, &ids, envelope, ontology),
     }
 }
 
-fn convert_repository_graph(
+fn convert_file_inventory_graph(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     envelope: &IndexerEnvelope,
@@ -98,7 +98,7 @@ fn convert_repository_graph(
         files: convert_files(graph, ids, envelope, ontology)?,
         definitions: convert_definitions(graph, ids, envelope, ontology)?,
         imported_symbols: convert_imports(graph, ids, envelope, ontology)?,
-        edges: convert_repository_edges(graph, ids, envelope, ontology)?,
+        edges: convert_file_inventory_edges(graph, ids, envelope, ontology)?,
     })
 }
 
@@ -387,7 +387,7 @@ fn convert_empty_branch() -> Result<RecordBatch, ArrowError> {
     BranchRow::to_record_batch(&rows, &branch_specs(), &())
 }
 
-fn convert_repository_edges(
+fn convert_file_inventory_edges(
     graph: &code_graph::v2::linker::CodeGraph,
     ids: &[i64],
     env: &IndexerEnvelope,
