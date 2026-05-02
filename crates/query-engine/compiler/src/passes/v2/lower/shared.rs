@@ -188,6 +188,19 @@ fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     w
 }
 
+/// Whether an entity requires a higher access level than the default (20).
+/// Only these entities need a FilterOnly subquery in edge-based queries so
+/// the security pass can enforce their stricter min_access_level.
+fn has_elevated_access_level(np: &NodePlan, input: &Input) -> bool {
+    let Some(ref entity) = np.entity else {
+        return false;
+    };
+    input
+        .entity_auth
+        .get(entity)
+        .is_some_and(|cfg| cfg.required_access_level > crate::types::DEFAULT_PATH_ACCESS_LEVEL)
+}
+
 /// IN-list predicate: `alias.col IN (ids)` or `alias.col = id` for single.
 fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
     if ids.len() == 1 {
@@ -560,9 +573,18 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                     where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                 }
                 HydrationStrategy::Skip => {
-                    // Nodes with has_traversal_path need a FilterOnly subquery
-                    // so the security pass can enforce per-entity min_access_level.
-                    if np.has_traversal_path && np.table.is_some() {
+                    // Only emit a FilterOnly subquery when the entity requires
+                    // a higher access level than the edge table's default.
+                    // Most entities (Project, MR, Pipeline, Definition, etc.)
+                    // use the default level and don't need this — the edge
+                    // table's security filter is sufficient. Only elevated
+                    // entities like Vulnerability (requires SecurityManager)
+                    // need their own node table in the query so the security
+                    // pass can apply the stricter min_access_level.
+                    if np.has_traversal_path
+                        && np.table.is_some()
+                        && has_elevated_access_level(np, input)
+                    {
                         where_parts
                             .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }
