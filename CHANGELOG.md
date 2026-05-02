@@ -1,3 +1,21 @@
+## [0.43.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.42.0...v0.43.0) (2026-05-02)
+
+### Features
+
+* **ontology:** separate CI edges into dedicated gl_ci_edge table ([97609e5](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/97609e5127e71b045ada9a44636dce7dedb793f5)) by Michael Usachenko
+
+### Performance
+
+* **schema:** add ngram skip indexes and auto column statistics ([1af5814](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1af5814b010f8b84a00e376734b445faea26738a)) by Michael Usachenko
+
+### Other
+
+* **indexer:** restructure top-level files into engine/ and config modules ([4256cbd](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4256cbd3f58761d4384ea55727556b52b3db0c7d)) by Jean-Gabriel Doyon
+* update landing page ([8d45d50](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8d45d502a9f8d3717c8661c0ac5ca1c0af525bfb)) by Phillip Wells
+* update mcp tools ([517de22](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/517de2258ca166cf03a762a663335573ede09751)) by Phillip Wells
+* update query language fields ([2080468](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2080468434207ac46d24d5fc7d903c21be48d690)) by Phillip Wells
+* update troubleshooting ([2cce45d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2cce45d95c0635abefabb46947341ffb9ef7d1bf)) by phillipwells
+
 ## [0.42.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.41.1...v0.42.0) (2026-05-01)
 
 ### Features
