@@ -871,9 +871,9 @@ impl JsAnalyzer {
         // Ensure Vue SFC default export binding exists and points to the virtual class.
         // OXC's module_record may not include `export default { ... }` for anonymous
         // object expressions, so we synthesize the binding if a Vue virtual class exists.
-        if let Some(vc) = defs
-            .iter()
-            .find(|d| d.kind == JsDefKind::Class && d.is_exported)
+        if is_vue_like_path(relative_path)
+            && let Some(default_range) = module_info.exports.get("default").map(|b| b.range)
+            && let Some(vc) = vue_default_component_def(&defs, default_range)
         {
             module_info
                 .exports
@@ -903,4 +903,14 @@ impl JsAnalyzer {
             module_info,
         })
     }
+}
+
+fn is_vue_like_path(relative_path: &str) -> bool {
+    relative_path.ends_with(".vue") || relative_path.contains(".vue.")
+}
+
+fn vue_default_component_def(defs: &[JsDef], default_range: Range) -> Option<&JsDef> {
+    defs.iter()
+        .filter(|def| def.kind == JsDefKind::Class && def.is_exported)
+        .find(|def| def.range.is_contained_within(default_range))
 }

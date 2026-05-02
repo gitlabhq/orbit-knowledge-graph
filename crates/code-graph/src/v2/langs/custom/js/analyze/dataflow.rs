@@ -29,7 +29,7 @@ use super::super::types::{
 use super::analyzer::Ctx;
 use super::calls::{
     binding_from_identifier_reference, build_import_binding_map,
-    imported_call_from_member_expression,
+    imported_call_from_jsx_member_expression, imported_call_from_member_expression,
 };
 
 pub(super) fn extract_call_edges<'a>(
@@ -386,6 +386,46 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
         self.append_invocation(name, chain, invocation_kind);
     }
 
+    fn record_jsx_invocation_from_name(&mut self, name: &JSXElementName<'a>) {
+        match name {
+            JSXElementName::IdentifierReference(identifier) => {
+                if is_intrinsic_jsx_name(identifier.name.as_str()) {
+                    return;
+                }
+
+                if let Some(binding) =
+                    binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
+                {
+                    self.record_imported_call(JsImportedCall {
+                        binding,
+                        member_path: Vec::new(),
+                        invocation_kind: JsInvocationKind::Jsx,
+                    });
+                    return;
+                }
+
+                self.append_invocation(identifier.name.to_string(), None, JsInvocationKind::Jsx);
+            }
+            JSXElementName::MemberExpression(member) => {
+                if let Some(imported_call) = imported_call_from_jsx_member_expression(
+                    self.ctx,
+                    member,
+                    &self.import_bindings,
+                    JsInvocationKind::Jsx,
+                ) {
+                    self.record_imported_call(imported_call);
+                    return;
+                }
+
+                if let Some((name, chain)) = jsx_invocation_target(name) {
+                    self.append_invocation(name, chain, JsInvocationKind::Jsx);
+                }
+            }
+            JSXElementName::ThisExpression(_) => {}
+            _ => {}
+        }
+    }
+
     fn walk_if_statement_manual(&mut self, it: &IfStatement<'a>) {
         self.visit_expression(&it.test);
         let pre_block = self.current_block;
@@ -503,9 +543,7 @@ impl<'a> Visit<'a> for CallExtractor<'a, '_> {
     }
 
     fn visit_jsx_opening_element(&mut self, it: &JSXOpeningElement<'a>) {
-        if let Some((name, chain)) = jsx_invocation_target(&it.name) {
-            self.append_invocation(name, chain, JsInvocationKind::Jsx);
-        }
+        self.record_jsx_invocation_from_name(&it.name);
         walk::walk_jsx_opening_element(self, it);
     }
 
@@ -638,6 +676,12 @@ fn bare_invocation_steps(callee: &Expression<'_>) -> Option<Vec<ExpressionStep>>
         }
         _ => None,
     }
+}
+
+fn is_intrinsic_jsx_name(name: &str) -> bool {
+    name.chars()
+        .next()
+        .is_some_and(|ch| ch.is_ascii_lowercase())
 }
 
 fn jsx_invocation_target(

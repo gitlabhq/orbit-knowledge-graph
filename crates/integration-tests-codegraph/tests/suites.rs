@@ -66,6 +66,20 @@ yaml_test!(
     typescript_type_only_and_definitions,
     "typescript/type_only_and_definitions.yaml"
 );
+yaml_test!(
+    react_jsx_component_matrix,
+    "react/jsx_component_matrix.yaml"
+);
+yaml_test!(react_tsx_type_props, "react/tsx_type_props.yaml");
+yaml_test!(next_app_router_patterns, "next/app_router_patterns.yaml");
+yaml_test!(
+    next_pages_router_patterns,
+    "next/pages_router_patterns.yaml"
+);
+yaml_test!(
+    next_router_matrix_expansion,
+    "next/router_matrix_expansion.yaml"
+);
 
 // Python
 yaml_test!(python_simple_call, "python/simple_call.yaml");
