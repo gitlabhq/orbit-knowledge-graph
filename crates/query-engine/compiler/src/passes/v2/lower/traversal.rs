@@ -15,10 +15,11 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
         return lower_single_node(input);
     }
 
-    let skeleton = Skeleton::build(input)?;
+    let skeleton = Skeleton::plan(input);
+    let output = skeleton.emit(input)?;
 
     let mut select = Vec::new();
-    for ea in &skeleton.edge_aliases {
+    for ea in &output.edge_aliases {
         select.extend(edge_select_columns(ea));
     }
 
@@ -33,48 +34,26 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
         })
         .unwrap_or_default();
 
-    let q = skeleton.into_query(select, vec![], order_by, input.limit);
+    let q = output.into_query(select, vec![], order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
 }
 
 fn lower_single_node(input: &mut Input) -> Result<Node> {
+    let skeleton = Skeleton::plan(input);
+    let output = skeleton.emit(input)?;
+
     let node = input
         .nodes
         .first()
         .ok_or_else(|| QueryError::Lowering("no nodes in query".into()))?;
-    let table = node
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.id)))?;
-    let alias = &node.id;
 
-    let mut select = vec![SelectExpr::new(Expr::col(alias, "id"), "id")];
-    for col in requested_columns(node) {
+    let mut select = vec![SelectExpr::new(Expr::col(&node.id, "id"), "id")];
+    for col in requested_columns(&node.columns) {
         if col != "id" {
-            select.push(SelectExpr::new(Expr::col(alias, &col), col.clone()));
+            select.push(SelectExpr::new(Expr::col(&node.id, &col), col.clone()));
         }
     }
 
-    let from = TableRef::scan(table, alias);
-    let mut where_parts = Vec::new();
-
-    for (prop, filter) in &node.filters {
-        where_parts.push(filter_to_expr(alias, prop, filter));
-    }
-    if !node.node_ids.is_empty() {
-        where_parts.push(node_ids_predicate(alias, &node.node_ids));
-    }
-    if let Some(ref range) = node.id_range {
-        where_parts.push(id_range_predicate(alias, range));
-    }
-
-    let q = Query {
-        select,
-        from,
-        where_clause: Expr::conjoin(where_parts),
-        limit: Some(input.limit),
-        ..Default::default()
-    };
-
+    let q = output.into_query(select, vec![], vec![], input.limit);
     Ok(Node::Query(Box::new(q)))
 }

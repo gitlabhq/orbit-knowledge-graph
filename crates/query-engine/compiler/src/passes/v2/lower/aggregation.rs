@@ -7,7 +7,7 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::shared::*;
+use super::shared::requested_columns;
 use super::types::*;
 
 pub fn lower_aggregation(input: &mut Input) -> Result<Node> {
@@ -15,10 +15,11 @@ pub fn lower_aggregation(input: &mut Input) -> Result<Node> {
         return super::traversal::lower_traversal(input);
     }
 
-    let skeleton = Skeleton::build(input)?;
+    let skeleton = Skeleton::plan(input);
+    let output = skeleton.emit(input)?;
     let (agg_select, group_by, order_by) = build_aggregation(input)?;
 
-    let q = skeleton.into_query(agg_select, group_by, order_by, input.limit);
+    let q = output.into_query(agg_select, group_by, order_by, input.limit);
     Ok(Node::Query(Box::new(q)))
 }
 
@@ -54,7 +55,7 @@ fn build_aggregation(input: &Input) -> Result<(Vec<SelectExpr>, Vec<Expr>, Vec<O
         if let Some(ref gb) = agg.group_by
             && let Some(gb_node) = input.nodes.iter().find(|n| n.id == *gb)
         {
-            for col in requested_columns(gb_node) {
+            for col in requested_columns(&gb_node.columns) {
                 let expr = Expr::col(gb, &col);
                 if !group_by.contains(&expr) {
                     group_by.push(expr);
