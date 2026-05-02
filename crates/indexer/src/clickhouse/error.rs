@@ -22,6 +22,9 @@ impl From<ClickHouseError> for DestinationError {
             ClickHouseError::BadResponse { status, body } => {
                 DestinationError::Write(format!("bad response ({status}): {body}"), None)
             }
+            ClickHouseError::CircuitOpen { service } => {
+                DestinationError::Connection(format!("circuit open for {service}"), None)
+            }
         }
     }
 }

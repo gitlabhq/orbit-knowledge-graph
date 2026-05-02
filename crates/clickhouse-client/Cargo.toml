@@ -9,6 +9,7 @@ default = []
 testkit = []
 
 [dependencies]
+circuit-breaker = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 arrow = { workspace = true }

@@ -2092,6 +2092,7 @@ dependencies = [
  "arrow 58.1.0",
  "arrow-ipc 58.1.0",
  "bytes",
+ "circuit-breaker",
  "clickhouse",
  "futures",
  "gkg-server-config",

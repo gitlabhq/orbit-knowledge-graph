@@ -1,3 +1,4 @@
+use circuit_breaker::CircuitBreakerError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -16,4 +17,24 @@ pub enum ClickHouseError {
 
     #[error("bad response ({status}): {body}")]
     BadResponse { status: u16, body: String },
+
+    #[error("circuit open for service {service}")]
+    CircuitOpen { service: &'static str },
+}
+
+impl ClickHouseError {
+    pub fn is_transient(&self) -> bool {
+        match self {
+            Self::Query(_) | Self::Insert(_) => true,
+            Self::BadResponse { status, .. } => *status >= 500,
+            _ => false,
+        }
+    }
+
+    pub(crate) fn from_circuit_breaker(error: CircuitBreakerError<Self>) -> Self {
+        match error {
+            CircuitBreakerError::Open { service } => Self::CircuitOpen { service },
+            CircuitBreakerError::Inner(inner) => inner,
+        }
+    }
 }
