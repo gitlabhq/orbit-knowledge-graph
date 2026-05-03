@@ -25,7 +25,14 @@ fn build_aggregation(input: &Input) -> Result<(Vec<SelectExpr>, Vec<Expr>, Vec<O
 
     for agg in &input.aggregations {
         let agg_expr = match agg.function {
-            AggFunction::Count => Expr::func("COUNT", vec![]),
+            AggFunction::Count => {
+                if let (Some(target), Some(prop)) = (agg.target.as_deref(), agg.property.as_deref())
+                {
+                    Expr::func("COUNT", vec![Expr::col(target, prop)])
+                } else {
+                    Expr::func("COUNT", vec![])
+                }
+            }
             AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max => {
                 let target = agg.target.as_deref().unwrap_or("*");
                 let prop = agg.property.as_deref().unwrap_or("id");

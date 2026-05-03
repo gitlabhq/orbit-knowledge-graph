@@ -20,12 +20,17 @@ use super::types::*;
 
 impl Skeleton {
     /// Build the skeleton plan from query input.
-    pub fn plan(input: &Input) -> Self {
+    pub fn plan(input: &mut Input) -> Self {
         let hops = build_hops(input);
         let nodes = build_node_plans(input);
 
         // Reorder chain so the most selective node drives the scan.
-        let hops = reorder_by_selectivity(hops, &nodes);
+        // Also reorder input.relationships to stay in sync — the enforce
+        // pass uses relationship index to build EdgeMeta (e0_, e1_, etc.).
+        let (hops, reversed) = reorder_by_selectivity(hops, &nodes);
+        if reversed {
+            input.relationships.reverse();
+        }
 
         let mut nodes = nodes;
         assign_id_sources(&hops, &mut nodes);
@@ -257,9 +262,12 @@ fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     Some(first_center.clone())
 }
 
-fn reorder_by_selectivity(mut hops: Vec<Hop>, nodes: &HashMap<String, NodePlan>) -> Vec<Hop> {
+fn reorder_by_selectivity(
+    mut hops: Vec<Hop>,
+    nodes: &HashMap<String, NodePlan>,
+) -> (Vec<Hop>, bool) {
     if hops.len() <= 1 {
-        return hops;
+        return (hops, false);
     }
     let start_sel = nodes
         .get(&hops[0].from_node)
@@ -280,8 +288,10 @@ fn reorder_by_selectivity(mut hops: Vec<Hop>, nodes: &HashMap<String, NodePlan>)
                 Direction::Both => Direction::Both,
             };
         }
+        (hops, true)
+    } else {
+        (hops, false)
     }
-    hops
 }
 
 fn build_hops(input: &Input) -> Vec<Hop> {
@@ -948,9 +958,16 @@ fn emit_node_ids_on_edge(
     end_col: &str,
 ) {
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-        if let Some(np) = nodes.get(node_alias)
-            && !np.node_ids.is_empty()
-        {
+        let Some(np) = nodes.get(node_alias) else {
+            continue;
+        };
+        if let Some(ref range) = np.id_range {
+            where_parts.push(Expr::and(
+                Expr::binary(Op::Ge, Expr::col(alias, id_col), Expr::int(range.start)),
+                Expr::binary(Op::Le, Expr::col(alias, id_col), Expr::int(range.end)),
+            ));
+        }
+        if !np.node_ids.is_empty() {
             where_parts.push(id_list_predicate(alias, id_col, &np.node_ids));
         }
     }
