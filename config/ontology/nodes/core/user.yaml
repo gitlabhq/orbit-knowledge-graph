@@ -152,14 +152,14 @@ properties:
       4: service_user
       5: ghost
       6: project_bot
-      7: security_bot
-      8: automation_bot
-      9: security_policy_bot
-      10: admin_bot
-      11: service_account
-      12: placeholder
-      13: duo_code_review_bot
-      14: import_user
+      8: security_bot
+      9: automation_bot
+      10: security_policy_bot
+      11: admin_bot
+      13: service_account
+      15: placeholder
+      16: duo_code_review_bot
+      17: import_user
 
 etl:
   type: table

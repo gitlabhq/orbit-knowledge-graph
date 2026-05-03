@@ -590,7 +590,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     source LowCardinality(String) DEFAULT '' CODEC(LZ4),
     tag Bool DEFAULT false,
     duration Nullable(Int64) CODEC(ZSTD(1)),
-    failure_reason String DEFAULT '' CODEC(ZSTD(1)),
+    failure_reason Nullable(String) CODEC(ZSTD(1)),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     started_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),

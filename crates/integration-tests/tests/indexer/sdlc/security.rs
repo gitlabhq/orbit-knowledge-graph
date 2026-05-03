@@ -21,7 +21,7 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
             (1, 'SQL Injection in login', 'Critical SQL injection vulnerability', 1000, 1, 4, 7, 0,
              false, true, 'uuid-001',
              '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-            (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 1, 4, 3,
+            (2, 'XSS in comments', 'Cross-site scripting vulnerability', 1000, 2, 1, 5, 9,
              false, true, 'uuid-002',
              '1/100/', '2024-01-16 10:00:00', '2024-01-16 10:00:00', '2024-01-20 12:00:00')",
     )
@@ -37,7 +37,7 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
 
     let result = ctx
         .query(&format!(
-            "SELECT title, state, severity FROM {} FINAL ORDER BY id",
+            "SELECT title, state, severity, report_type FROM {} FINAL ORDER BY id",
             t("gl_vulnerability")
         ))
         .await;
@@ -57,6 +57,11 @@ pub async fn processes_vulnerabilities(ctx: &TestContext) {
         ArrowUtils::get_column_by_name::<StringArray>(batch, "severity").expect("severity column");
     assert_eq!(severities.value(0), "critical");
     assert_eq!(severities.value(1), "medium");
+
+    let report_types = ArrowUtils::get_column_by_name::<StringArray>(batch, "report_type")
+        .expect("report_type column");
+    assert_eq!(report_types.value(0), "sast");
+    assert_eq!(report_types.value(1), "sarif");
 
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Vulnerability", "Project", "1/100/", 2)
         .await;
@@ -173,8 +178,8 @@ pub async fn processes_findings(ctx: &TestContext) {
         "INSERT INTO siphon_security_findings
             (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
         VALUES
-            (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+            (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 7, true, '{\"name\": \"SQL Injection\", \"description\": \"A SQL injection vulnerability\", \"solution\": \"Use parameterized queries\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
+            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 5, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -566,7 +571,8 @@ pub async fn processes_security_scans(ctx: &TestContext) {
              traversal_path, created_at, updated_at, _siphon_replicated_at)
         VALUES
             (1, 600, 1, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
-            (2, 600, 2, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
+            (2, 600, 2, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00'),
+            (3, 600, 9, 1, true, 1000, 500, '1/100/', '2024-01-15 10:00:00', '2024-01-15 10:00:00', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -576,7 +582,7 @@ pub async fn processes_security_scans(ctx: &TestContext) {
         .await
         .unwrap();
 
-    assert_node_count(ctx, "gl_security_scan", 2).await;
+    assert_node_count(ctx, "gl_security_scan", 3).await;
 
     let result = ctx
         .query(&format!(
@@ -590,22 +596,25 @@ pub async fn processes_security_scans(ctx: &TestContext) {
         .expect("scan_type column");
     assert_eq!(scan_types.value(0), "sast");
     assert_eq!(scan_types.value(1), "dependency_scanning");
+    assert_eq!(scan_types.value(2), "sarif");
 
     let statuses =
         ArrowUtils::get_column_by_name::<StringArray>(batch, "status").expect("status column");
     assert_eq!(statuses.value(0), "succeeded");
     assert_eq!(statuses.value(1), "succeeded");
+    assert_eq!(statuses.value(2), "succeeded");
 
     let latest_values =
         ArrowUtils::get_column_by_name::<BooleanArray>(batch, "latest").expect("latest column");
     assert!(latest_values.value(0));
     assert!(latest_values.value(1));
+    assert!(latest_values.value(2));
 
-    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "SecurityScan", "Project", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "SecurityScan", "Project", "1/100/", 3)
         .await;
-    assert_edges_have_traversal_path(ctx, "IN_PIPELINE", "SecurityScan", "Pipeline", "1/100/", 2)
+    assert_edges_have_traversal_path(ctx, "IN_PIPELINE", "SecurityScan", "Pipeline", "1/100/", 3)
         .await;
-    assert_edges_have_traversal_path(ctx, "RAN_BY", "SecurityScan", "Job", "1/100/", 2).await;
+    assert_edges_have_traversal_path(ctx, "RAN_BY", "SecurityScan", "Job", "1/100/", 3).await;
 }
 
 pub async fn processes_security_scan_finding_edges(ctx: &TestContext) {
@@ -632,7 +641,7 @@ pub async fn processes_security_scan_finding_edges(ctx: &TestContext) {
             (id, uuid, scan_id, scanner_id, severity, deduplicated, finding_data, project_id, traversal_path, _siphon_replicated_at)
         VALUES
             (1, '00000000-0000-0000-0000-000000000f01', 100, 1, 5, true, '{\"name\": \"SQL Injection\"}', 1000, '1/100/', '2024-01-20 12:00:00'),
-            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 3, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
+            (2, '00000000-0000-0000-0000-000000000f02', 100, 1, 4, false, '{\"name\": \"XSS\"}', 1000, '1/100/', '2024-01-20 12:00:00')",
     )
     .await;
 

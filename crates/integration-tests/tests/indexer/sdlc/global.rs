@@ -21,6 +21,9 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
          '2023-06-15', '2024-01-10', '2024-01-20 12:00:00'),
         (3, 'charlie', 'charlie@test.com', 'Charlie Brown', 'Charlie', 'Brown', 'blocked',
          '', 'fr', '2024-01-05', false, false, true, false, 4,
+         '2023-09-20', '2024-01-05', '2024-01-20 12:00:00'),
+        (4, 'service-account', 'service-account@test.com', 'Service Account', 'Service', 'Account', 'active',
+         '', 'en', '2024-01-07', false, false, false, false, 13,
          '2023-09-20', '2024-01-05', '2024-01-20 12:00:00')",
     )
     .await;
@@ -31,7 +34,7 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
         .await
         .expect("handler should succeed");
 
-    assert_node_count(ctx, "gl_user", 3).await;
+    assert_node_count(ctx, "gl_user", 4).await;
 
     let result = ctx
         .query(&format!("SELECT * FROM {} FINAL ORDER BY id", t("gl_user")))
@@ -43,6 +46,7 @@ pub async fn processes_and_transforms_users(ctx: &TestContext) {
     assert_eq!(user_type.value(0), "human");
     assert_eq!(user_type.value(1), "support_bot");
     assert_eq!(user_type.value(2), "service_user");
+    assert_eq!(user_type.value(3), "service_account");
 
     let is_admin =
         ArrowUtils::get_column_by_name::<BooleanArray>(batch, "is_admin").expect("is_admin column");
