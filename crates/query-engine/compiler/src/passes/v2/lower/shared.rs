@@ -43,12 +43,6 @@ impl Skeleton {
             Strategy::SingleNode
         } else if let Some(center) = detect_fk_star(&hops) {
             Strategy::FkStar { center }
-        } else if hops.iter().all(|h| h.fk.is_some()) {
-            // All hops have FK but no common center — linear FK chain.
-            // Use FkStar with the first hop's FK node as center.
-            Strategy::FkStar {
-                center: hops[0].fk.as_ref().unwrap().fk_node.clone(),
-            }
         } else {
             Strategy::Flat
         };
