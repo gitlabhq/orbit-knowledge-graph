@@ -106,8 +106,8 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: build_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: build_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: interruptible, type: "Nullable(Bool)"}
     - {name: timeout, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: timeout_source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

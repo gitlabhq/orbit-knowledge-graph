@@ -140,7 +140,7 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: merge_request_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: state, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: base_commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}

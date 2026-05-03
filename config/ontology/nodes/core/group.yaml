@@ -124,7 +124,7 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: visibility_level, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}

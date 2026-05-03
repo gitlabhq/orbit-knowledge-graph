@@ -140,7 +140,7 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: iid, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}

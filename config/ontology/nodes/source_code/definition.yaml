@@ -111,9 +111,9 @@ storage:
     index_granularity: "1024"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", codec: ["ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: branch, type: "String", codec: ["ZSTD(1)"]}
     - {name: commit_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: file_path, type: "String", codec: ["ZSTD(3)"]}
