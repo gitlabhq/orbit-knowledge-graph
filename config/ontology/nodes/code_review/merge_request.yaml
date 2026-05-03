@@ -401,6 +401,7 @@ etl:
       GROUP BY traversal_path, merge_request_id
     ) AS approvals ON m.traversal_path = approvals._ap_tp AND m.id = approvals._ap_mr
   watermark: m._siphon_replicated_at
+  table_alias: m
   deleted: m._siphon_deleted
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]

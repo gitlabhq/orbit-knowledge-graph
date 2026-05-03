@@ -473,11 +473,9 @@ fn resolve_standalone_edge(
         let fk_col = &endpoint.id_column;
 
         // For Query-type ETLs the `from` is a JOIN expression and bare `id`
-        // is ambiguous. The `deleted` column is already qualified with the
-        // main table alias (e.g. `namespace._siphon_deleted`), so extract
-        // that prefix to qualify `id` the same way.
-        let qualified_id = if let Some(prefix) = deleted_col.rsplit_once('.').map(|(p, _)| p) {
-            format!("{prefix}.id")
+        // is ambiguous. Use the explicit table_alias to qualify `id`.
+        let qualified_id = if let Some(alias) = etl.table_alias() {
+            format!("{alias}.id")
         } else {
             "id".to_string()
         };

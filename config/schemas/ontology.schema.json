@@ -271,6 +271,10 @@
               "type": "string",
               "description": "Custom traversal_path filter expression for namespace scoping. When set, replaces the default startsWith(traversal_path, ...) filter. Must contain {traversal_path:String} placeholder."
             },
+            "table_alias": {
+              "type": "string",
+              "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+            },
             "edges": {
               "type": "object",
               "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges.",

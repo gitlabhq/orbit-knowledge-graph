@@ -108,6 +108,7 @@ etl:
   where: "namespace.id IN (SELECT id FROM namespace_traversal_paths WHERE startsWith(traversal_path, {traversal_path:String}))"
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: namespace._siphon_replicated_at
+  table_alias: namespace
   deleted: namespace._siphon_deleted
   edges:
     owner_id:
