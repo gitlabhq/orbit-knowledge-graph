@@ -528,8 +528,8 @@ code-indexing-benchmark-build:
     paths:
       - temp/
     policy: pull-push
-    unprotect: true
   variables:
+    CACHE_FALLBACK_KEY: "benchmark-repos-${GROUP}-v2-protected"
     SCENARIO: index
   script:
     - |
