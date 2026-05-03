@@ -7,7 +7,9 @@ pub use specifier::JsCrossFileResolver;
 use std::sync::OnceLock;
 
 use crate::v2::linker::rules::{ReceiverMode, ResolveStage};
-use crate::v2::linker::{CodeGraph, FileResolver, GraphEdge, ResolutionRules, ResolveSettings};
+use crate::v2::linker::{
+    CodeGraph, FileResolver, GraphEdge, GraphImport, ResolutionRules, ResolveSettings,
+};
 use crate::v2::types::{
     DefKind, EdgeKind, ImportBindingKind, ImportMode, NodeKind, Relationship, ssa::ParseValue,
 };
@@ -15,9 +17,11 @@ use petgraph::graph::NodeIndex;
 use rustc_hash::{FxHashMap, FxHashSet};
 
 use super::analyze::invocation::invocation_support_for_graph_def_kind;
+use super::types::{JsCallSite, JsImportedBinding};
 use super::{
-    JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex, JsPhase1FileInfo,
-    JsResolutionMode, JsResolvedCallRelationship, WorkspaceProbe, extract::ResolvedJsFile,
+    ImportedName, JsCallEdge, JsCallTarget, JsExportName, JsFileAnalysis, JsModuleIndex,
+    JsPhase1FileInfo, JsResolutionMode, JsResolvedCallRelationship, WorkspaceProbe,
+    extract::ResolvedJsFile,
 };
 
 pub fn attach_resolution_edges(
@@ -66,19 +70,24 @@ pub fn attach_resolution_edges(
         .imports_iter()
         .map(|(node, file_path, _)| (node, file_path.as_ref().to_string()))
         .collect();
+    let mut locally_resolved_imports = FxHashSet::default();
     for (source_node, source_path) in import_nodes {
-        add_import_edge(
+        if add_import_edge(
             graph,
             modules_index,
             &resolver,
             source_node,
             &source_path,
             &mut seen,
-        );
+        ) {
+            locally_resolved_imports.insert(source_node);
+        }
     }
+    let import_lookup = ImportedSymbolLookup::from_graph(graph, &locally_resolved_imports);
     for relationship in resolver.resolve_calls(&imported_calls, modules_index) {
         add_call_relationship_edge(graph, &lookup, &relationship, &mut seen);
     }
+    add_unresolved_imported_call_edges(graph, &lookup, &import_lookup, &imported_calls, &mut seen);
 }
 
 fn add_local_call_edges(
@@ -251,11 +260,11 @@ fn add_import_edge(
     source_node: NodeIndex,
     source_path: &str,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
-) {
+) -> bool {
     let Some((target_node, target_node_kind, target_def_kind)) =
         import_target(graph, modules, resolver, source_node, source_path)
     else {
-        return;
+        return false;
     };
 
     add_edge(
@@ -273,6 +282,7 @@ fn add_import_edge(
             },
         },
     );
+    true
 }
 
 fn import_target(
@@ -470,6 +480,86 @@ fn add_call_relationship_edge(
     );
 }
 
+fn add_unresolved_imported_call_edges(
+    graph: &mut CodeGraph,
+    lookup: &GraphLookup,
+    import_lookup: &ImportedSymbolLookup,
+    calls_by_file: &[(String, Vec<JsCallEdge>)],
+    seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
+) {
+    for (source_path, calls) in calls_by_file {
+        for call in calls {
+            let JsCallTarget::ImportedCall { imported_call } = &call.callee;
+            let Some(source) = source_node_for_call(lookup, source_path, call) else {
+                continue;
+            };
+            let Some(target_node) = import_lookup.unresolved_import_node(
+                source_path,
+                &imported_call.fallback_binding,
+                source.definition_node,
+            ) else {
+                continue;
+            };
+
+            add_edge(
+                graph,
+                seen,
+                source.node,
+                target_node,
+                GraphEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node: source.node_kind,
+                        target_node: NodeKind::ImportedSymbol,
+                        source_def_kind: source.def_kind,
+                        target_def_kind: None,
+                    },
+                },
+            );
+        }
+    }
+}
+
+struct SourceCallNode {
+    node: NodeIndex,
+    node_kind: NodeKind,
+    def_kind: Option<DefKind>,
+    definition_node: Option<NodeIndex>,
+}
+
+fn source_node_for_call(
+    lookup: &GraphLookup,
+    source_path: &str,
+    call: &JsCallEdge,
+) -> Option<SourceCallNode> {
+    match call.caller {
+        JsCallSite::Definition { range, .. } => {
+            let node = lookup
+                .def_by_file_and_range
+                .get(&(source_path.to_string(), range.byte_offset))
+                .copied()?;
+            Some(SourceCallNode {
+                node,
+                node_kind: NodeKind::Definition,
+                def_kind: Some(lookup.def_kind_by_node[&node]),
+                definition_node: Some(node),
+            })
+        }
+        JsCallSite::ModuleLevel => {
+            lookup
+                .file_by_path
+                .get(source_path)
+                .copied()
+                .map(|node| SourceCallNode {
+                    node,
+                    node_kind: NodeKind::File,
+                    def_kind: None,
+                    definition_node: None,
+                })
+        }
+    }
+}
+
 fn add_edge(
     graph: &mut CodeGraph,
     seen: &mut FxHashSet<(usize, usize, EdgeKind)>,
@@ -483,10 +573,142 @@ fn add_edge(
     }
 }
 
+#[derive(Hash, PartialEq, Eq)]
+struct ImportSymbolKey {
+    file_path: String,
+    specifier: String,
+    mode: ImportMode,
+    binding_kind: ImportBindingKind,
+    name: Option<String>,
+    alias: Option<String>,
+}
+
+#[derive(Default)]
+struct ImportedSymbolLookup {
+    unresolved_by_key: FxHashMap<ImportSymbolKey, Vec<ImportedSymbolEntry>>,
+}
+
+struct ImportedSymbolEntry {
+    node: NodeIndex,
+    enclosing_definition: Option<NodeIndex>,
+}
+
+impl ImportedSymbolLookup {
+    fn from_graph(graph: &CodeGraph, locally_resolved_imports: &FxHashSet<NodeIndex>) -> Self {
+        let mut lookup = Self::default();
+        for (node, file_path, import) in graph.imports_iter() {
+            if import.is_type_only
+                || import.wildcard
+                || matches!(import.binding_kind, ImportBindingKind::SideEffect)
+                || locally_resolved_imports.contains(&node)
+            {
+                continue;
+            }
+            let enclosing_definition = graph.enclosing_definition_for_range(
+                file_path.as_ref(),
+                import.range.byte_offset.0 as u32,
+                import.range.byte_offset.1 as u32,
+            );
+            lookup
+                .unresolved_by_key
+                .entry(import_symbol_key_for_graph_import(
+                    graph,
+                    file_path.as_ref(),
+                    import,
+                ))
+                .or_default()
+                .push(ImportedSymbolEntry {
+                    node,
+                    enclosing_definition,
+                });
+        }
+        lookup
+    }
+
+    fn unresolved_import_node(
+        &self,
+        source_path: &str,
+        binding: &JsImportedBinding,
+        source_definition: Option<NodeIndex>,
+    ) -> Option<NodeIndex> {
+        let entries = self
+            .unresolved_by_key
+            .get(&import_symbol_key_for_binding(source_path, binding))?;
+
+        if let Some(source_definition) = source_definition {
+            let scoped = entries
+                .iter()
+                .filter(|entry| entry.enclosing_definition == Some(source_definition))
+                .map(|entry| entry.node)
+                .collect::<Vec<_>>();
+            if scoped.len() == 1 {
+                return Some(scoped[0]);
+            }
+            if scoped.len() > 1 {
+                return None;
+            }
+        }
+
+        let unscoped = entries
+            .iter()
+            .filter(|entry| entry.enclosing_definition.is_none())
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        (unscoped.len() == 1).then(|| unscoped[0])
+    }
+}
+
+fn import_symbol_key_for_graph_import(
+    graph: &CodeGraph,
+    file_path: &str,
+    import: &GraphImport,
+) -> ImportSymbolKey {
+    ImportSymbolKey {
+        file_path: file_path.to_string(),
+        specifier: graph.str(import.path).to_string(),
+        mode: import.mode,
+        binding_kind: import.binding_kind,
+        name: import.name.map(|name| graph.str(name).to_string()),
+        alias: import.alias.map(|alias| graph.str(alias).to_string()),
+    }
+}
+
+fn import_symbol_key_for_binding(
+    source_path: &str,
+    binding: &JsImportedBinding,
+) -> ImportSymbolKey {
+    let (binding_kind, name) = match &binding.fallback_imported_name {
+        ImportedName::Named(name) => (ImportBindingKind::Named, Some(name.clone())),
+        ImportedName::Default => (ImportBindingKind::Primary, Some("default".to_string())),
+        ImportedName::Namespace => (ImportBindingKind::Namespace, None),
+    };
+    let alias = match &binding.fallback_imported_name {
+        ImportedName::Named(name) => {
+            (binding.import_local_name != *name).then(|| binding.import_local_name.clone())
+        }
+        ImportedName::Default => {
+            (binding.import_local_name != "default").then(|| binding.import_local_name.clone())
+        }
+        ImportedName::Namespace => Some(binding.import_local_name.clone()),
+    };
+    ImportSymbolKey {
+        file_path: source_path.to_string(),
+        specifier: binding.specifier.clone(),
+        mode: match binding.resolution_mode {
+            JsResolutionMode::Import => ImportMode::Declarative,
+            JsResolutionMode::Require => ImportMode::Runtime,
+        },
+        binding_kind,
+        name,
+        alias,
+    }
+}
+
 #[derive(Default)]
 struct GraphLookup {
     file_by_path: FxHashMap<String, NodeIndex>,
     def_by_file_and_range: FxHashMap<(String, (usize, usize)), NodeIndex>,
+    def_kind_by_node: FxHashMap<NodeIndex, DefKind>,
 }
 
 impl GraphLookup {
@@ -502,6 +724,7 @@ impl GraphLookup {
             lookup
                 .def_by_file_and_range
                 .insert((file_path, definition.range.byte_offset), node);
+            lookup.def_kind_by_node.insert(node, definition.kind);
         }
 
         lookup

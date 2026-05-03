@@ -27,6 +27,7 @@ pub(in crate::v2::langs::custom::js) fn invocation_from_name<'a>(
 
             if let Some(binding) = identifier_binding(identifier) {
                 return Some(JsxInvocation::Imported(JsImportedCall {
+                    fallback_binding: binding.clone(),
                     binding,
                     member_path: Vec::new(),
                     invocation_kind: JsInvocationKind::Jsx,

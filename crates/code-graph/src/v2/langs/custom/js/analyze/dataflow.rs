@@ -362,6 +362,7 @@ impl<'a, 'ctx> CallExtractor<'a, 'ctx> {
                 binding_from_identifier_reference(self.ctx, identifier, &self.import_bindings)
         {
             self.record_imported_call(JsImportedCall {
+                fallback_binding: binding.clone(),
                 binding,
                 member_path: Vec::new(),
                 invocation_kind,
