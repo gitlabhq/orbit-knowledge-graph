@@ -12,6 +12,7 @@
 use petgraph::graph::NodeIndex;
 
 use super::graph::CodeGraph;
+use crate::v2::types::ExpressionStep;
 
 pub trait HasRules {
     fn rules() -> ResolutionRules;
@@ -138,6 +139,15 @@ impl Default for ImportedSymbolFallbackPolicy {
 
 pub type ExternalImportTypeHook = fn(&CodeGraph, NodeIndex) -> Option<String>;
 
+#[derive(Debug, Clone, Copy)]
+pub struct ImportedSymbolFallbackContext<'a> {
+    pub name: &'a str,
+    pub chain: Option<&'a [ExpressionStep]>,
+}
+
+pub type ImportedSymbolFallbackCandidatesHook =
+    fn(&CodeGraph, &[NodeIndex], ImportedSymbolFallbackContext<'_>) -> Vec<NodeIndex>;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -153,6 +163,10 @@ pub struct ResolverHooks {
     /// Ambient fallback names to suppress for language built-ins. Explicit
     /// reaching imports are still eligible.
     pub excluded_ambient_imported_symbol_names: &'static [&'static str],
+    /// Language-owned candidates for unresolved `Definition -> ImportedSymbol`
+    /// fallback edges. The generic resolver supplies unresolved ref data and
+    /// same-file imports, but language modules own their matching semantics.
+    pub imported_symbol_candidates: Option<ImportedSymbolFallbackCandidatesHook>,
     /// Derive a synthetic external base type for unresolved import chains.
     /// Language modules own any source-language semantics here.
     pub external_import_type: Option<ExternalImportTypeHook>,

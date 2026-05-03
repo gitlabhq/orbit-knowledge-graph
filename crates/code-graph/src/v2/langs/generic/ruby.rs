@@ -12,7 +12,9 @@ use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
 use treesitter_visit::predicate::*;
 
-use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
+use crate::v2::linker::rules::{
+    ImportStrategy, ImportedSymbolFallbackContext, ReceiverMode, ResolveStage, ResolverHooks,
+};
 use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 
 /// Methods that act as constructors — `Class.method(args)` returns a
@@ -291,8 +293,6 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
         return true;
     };
 
-    let name = ruby_constant_name_from_require(&path);
-
     let import_type = if method == "require_relative" {
         "RequireRelative"
     } else {
@@ -301,10 +301,10 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
 
     imports.push(CanonicalImport {
         import_type,
-        binding_kind: ImportBindingKind::Named,
+        binding_kind: ImportBindingKind::SideEffect,
         mode: ImportMode::Runtime,
         path,
-        name,
+        name: None,
         alias: None,
         scope_fqn: None,
         range: crate::v2::types::Range::empty(),
@@ -315,39 +315,80 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
     true
 }
 
-fn ruby_constant_name_from_require(path: &str) -> Option<String> {
-    match path.strip_suffix(".rb").unwrap_or(path) {
-        "json" => return Some("JSON".to_string()),
-        "net/http" => return Some("Net::HTTP".to_string()),
-        "uri" => return Some("URI".to_string()),
-        "csv" => return Some("CSV".to_string()),
-        "yaml" | "psych/yaml" => return Some("YAML".to_string()),
-        _ => {}
-    }
+fn ruby_imported_symbol_candidates(
+    graph: &CodeGraph,
+    import_nodes: &[NodeIndex],
+    ctx: ImportedSymbolFallbackContext<'_>,
+) -> Vec<NodeIndex> {
+    let Some(require_path) = ctx.chain.and_then(ruby_require_path_from_chain) else {
+        return Vec::new();
+    };
 
-    let leaf = path
-        .rsplit('/')
-        .next()
-        .map(|segment| segment.strip_suffix(".rb").unwrap_or(segment))?;
-    let mut name = String::new();
-    for part in leaf.split('_').filter(|part| !part.is_empty()) {
-        let mut chars = part.chars();
-        if let Some(first) = chars.next() {
-            name.extend(first.to_uppercase());
-            name.push_str(chars.as_str());
-        }
-    }
-    (!name.is_empty()).then_some(name)
+    import_nodes
+        .iter()
+        .copied()
+        .filter(|&import_node| {
+            let imp = graph.import(import_node);
+            matches!(imp.import_type, "Require" | "RequireRelative")
+                && matches!(imp.binding_kind, ImportBindingKind::SideEffect)
+                && ruby_require_paths_match(graph.str(imp.path), &require_path)
+        })
+        .collect()
 }
 
-fn ruby_external_import_type(graph: &CodeGraph, import_node: NodeIndex) -> Option<String> {
-    let imp = graph.import(import_node);
-    if imp.wildcard || matches!(imp.binding_kind, ImportBindingKind::SideEffect) {
-        return None;
+fn ruby_require_path_from_chain(chain: &[crate::v2::types::ExpressionStep]) -> Option<String> {
+    let first = chain.first()?;
+    let constant = match first {
+        crate::v2::types::ExpressionStep::Ident(name)
+        | crate::v2::types::ExpressionStep::Call(name) => name.as_str(),
+        _ => return None,
+    };
+    ruby_constant_to_require_path(constant)
+}
+
+fn ruby_constant_to_require_path(constant: &str) -> Option<String> {
+    let mut segments = Vec::new();
+    for segment in constant.split("::") {
+        if segment.is_empty() {
+            return None;
+        }
+        let path_segment = ruby_constant_segment_to_path_segment(segment);
+        if path_segment.is_empty() {
+            return None;
+        }
+        segments.push(path_segment);
     }
-    imp.name
-        .map(|id| graph.str(id).to_string())
-        .or_else(|| imp.alias.map(|id| graph.str(id).to_string()))
+    (!segments.is_empty()).then(|| segments.join("/"))
+}
+
+fn ruby_constant_segment_to_path_segment(segment: &str) -> String {
+    let mut output = String::new();
+    let chars: Vec<char> = segment.chars().collect();
+    for (idx, ch) in chars.iter().enumerate() {
+        if ch.is_uppercase() {
+            let prev_is_lower_or_digit = idx > 0
+                && chars
+                    .get(idx - 1)
+                    .is_some_and(|prev| prev.is_lowercase() || prev.is_ascii_digit());
+            let next_is_lower = chars.get(idx + 1).is_some_and(|next| next.is_lowercase());
+            if !output.is_empty() && (prev_is_lower_or_digit || next_is_lower) {
+                output.push('_');
+            }
+            output.extend(ch.to_lowercase());
+        } else {
+            output.push(*ch);
+        }
+    }
+    output
+}
+
+fn ruby_require_paths_match(import_path: &str, expected_path: &str) -> bool {
+    let mut import_path = import_path.strip_suffix(".rb").unwrap_or(import_path);
+    import_path = import_path.strip_prefix("./").unwrap_or(import_path);
+    import_path == expected_path
+        || import_path
+            .strip_suffix(expected_path)
+            .is_some_and(|prefix| prefix.ends_with('/'))
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -380,8 +421,60 @@ impl HasRules for RubyRules {
         )
         .with_hooks(ResolverHooks {
             constructor_methods: CONSTRUCTOR_METHODS,
-            external_import_type: Some(ruby_external_import_type),
+            imported_symbol_candidates: Some(ruby_imported_symbol_candidates),
             ..Default::default()
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::v2::trace::Tracer;
+
+    fn parse(
+        code: &str,
+    ) -> Result<crate::v2::dsl::engine::ParsedDefs, crate::v2::pipeline::PipelineError> {
+        RubyDsl::spec()
+            .parse_full_collect(
+                code.as_bytes(),
+                "test.rb",
+                Language::Ruby,
+                &Tracer::new(false),
+            )
+            .map(|r| crate::v2::dsl::engine::ParsedDefs {
+                definitions: r.definitions,
+                imports: r.imports,
+            })
+            .map_err(|e| crate::v2::pipeline::PipelineError::parse("test.rb", format!("{e:?}")))
+    }
+
+    #[test]
+    fn require_extracts_runtime_side_effect_imports() {
+        let result = parse("require \"json\"\nrequire_relative \"app/models/user.rb\"\n").unwrap();
+
+        assert_eq!(result.imports.len(), 2);
+        assert!(result.imports.iter().all(|import| {
+            import.binding_kind == ImportBindingKind::SideEffect
+                && import.mode == ImportMode::Runtime
+                && import.name.is_none()
+                && import.alias.is_none()
+        }));
+    }
+
+    #[test]
+    fn constants_convert_to_require_paths_without_stdlib_map() {
+        assert_eq!(
+            ruby_constant_to_require_path("JSON").as_deref(),
+            Some("json")
+        );
+        assert_eq!(
+            ruby_constant_to_require_path("Net::HTTP").as_deref(),
+            Some("net/http")
+        );
+        assert_eq!(
+            ruby_constant_to_require_path("ExternalClient").as_deref(),
+            Some("external_client")
+        );
     }
 }

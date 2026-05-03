@@ -1022,6 +1022,7 @@ impl LanguageSpec {
                     }
                 );
                 if !imp.wildcard
+                    && !matches!(imp.binding_kind, ImportBindingKind::SideEffect)
                     && let Some(effective_name) = effective_name
                 {
                     if let Some(target_path) = imported_target_path(&self.hooks, imp, sep) {

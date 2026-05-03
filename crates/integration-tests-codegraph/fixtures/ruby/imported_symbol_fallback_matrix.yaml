@@ -57,7 +57,7 @@ fixtures:
       end
 
 tests:
-  - name: "gem requires target imported symbols"
+  - name: "gem requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::fetch'
@@ -65,9 +65,9 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::fetch", path: "faraday", name: "Faraday", import_type: "Require" } }
+      - { row: { caller: "ApiRunner::fetch", path: "faraday", name: null, import_type: "Require" } }
 
-  - name: "underscored requires target camelized imported symbols"
+  - name: "underscored requires target side-effect imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::connect'
@@ -75,9 +75,9 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::connect", path: "external_client", name: "ExternalClient", import_type: "Require" } }
+      - { row: { caller: "ApiRunner::connect", path: "external_client", name: null, import_type: "Require" } }
 
-  - name: "stdlib acronym requires target imported symbols"
+  - name: "observed acronym constants match require paths without path-derived names"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'ApiRunner::parse'
@@ -85,7 +85,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "ApiRunner::parse", path: "json", name: "JSON", import_type: "Require" } }
+      - { row: { caller: "ApiRunner::parse", path: "json", name: null, import_type: "Require" } }
 
   - name: "require_relative target imported symbols"
     query: |
@@ -95,7 +95,7 @@ tests:
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
     assert:
       - { row_count: 1 }
-      - { row: { caller: "RelativeRunner::connect", path: "services/external_client", name: "ExternalClient", import_type: "RequireRelative" } }
+      - { row: { caller: "RelativeRunner::connect", path: "services/external_client", name: null, import_type: "RequireRelative" } }
 
   - name: "locally resolved require constants do not emit imported-symbol fallback"
     queries:

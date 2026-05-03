@@ -17,7 +17,9 @@ use std::sync::Arc;
 
 use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{ImportResolver, ResolveSettings};
-use super::rules::{AmbientImportFallback, ResolutionRules, ResolveStage};
+use super::rules::{
+    AmbientImportFallback, ImportedSymbolFallbackContext, ResolutionRules, ResolveStage,
+};
 use super::state::ScratchBuf;
 
 /// Borrowed reference data for resolution. No allocations.
@@ -202,6 +204,27 @@ impl<'a> FileResolver<'a> {
 
         let policy = self.ctx.rules.hooks.imported_symbol_fallback;
 
+        if let Some(candidate_hook) = self.ctx.rules.hooks.imported_symbol_candidates {
+            let candidates = candidate_hook(
+                self.ctx.graph,
+                self.ctx.import_nodes,
+                ImportedSymbolFallbackContext {
+                    name: r.name,
+                    chain: r.chain,
+                },
+            );
+            let mut emitted = false;
+            for import_node in candidates {
+                if !self.ctx.import_resolves_locally(import_node) {
+                    self.push_imported_symbol_edge(src, import_node, rel);
+                    emitted = true;
+                }
+            }
+            if emitted {
+                return;
+            }
+        }
+
         let mut saw_explicit_import = false;
         if policy.explicit_reaching_imports {
             for pv in r.reaching {
@@ -378,6 +401,23 @@ impl<'a> ResolveCtx<'a> {
 
     fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
         !self.resolve_import_cached(import_node).is_empty()
+    }
+
+    fn has_imported_symbol_candidates(&self, r: &RefData<'_>) -> bool {
+        self.rules
+            .hooks
+            .imported_symbol_candidates
+            .is_some_and(|hook| {
+                !hook(
+                    self.graph,
+                    self.import_nodes,
+                    ImportedSymbolFallbackContext {
+                        name: r.name,
+                        chain: r.chain,
+                    },
+                )
+                .is_empty()
+            })
     }
 
     fn has_unresolved_import_ref(&mut self, reaching: &[ParseValue]) -> bool {
@@ -794,7 +834,7 @@ impl<'a> ResolveCtx<'a> {
         );
 
         if current_types.is_empty() {
-            if base_has_unresolved_import_ref {
+            if base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
                 return Ok(vec![]);
             }
             return self.chain_fallback(r, chain);
@@ -907,7 +947,7 @@ impl<'a> ResolveCtx<'a> {
             current_types = next_types;
         }
 
-        if base_has_unresolved_import_ref {
+        if base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
             return Ok(vec![]);
         }
 
