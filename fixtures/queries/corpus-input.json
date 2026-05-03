@@ -1,0 +1,2556 @@
+{
+  "Q1 - DEFINES traversal (File ends_with .rb)": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "f",
+        "entity": "File",
+        "filters": {
+          "path": {
+            "op": "ends_with",
+            "value": ".rb"
+          }
+        }
+      },
+      {
+        "id": "d",
+        "entity": "Definition",
+        "filters": {
+          "name": {
+            "op": "starts_with",
+            "value": "process"
+          }
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "DEFINES",
+        "from": "f",
+        "to": "d"
+      }
+    ],
+    "limit": 20
+  },
+  "Q2 - DateTime range filter on MR": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "merged_at": {
+            "op": "gte",
+            "value": "2026-03-01T00:00:00Z"
+          },
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "merged_at",
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "Q3 - Bidirectional neighbors on Project": {
+    "query_type": "neighbors",
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "node_ids": [
+        278964
+      ]
+    },
+    "neighbors": {
+      "node": "p",
+      "direction": "both",
+      "rel_types": [
+        "CONTAINS",
+        "IN_PROJECT"
+      ]
+    },
+    "limit": 20
+  },
+  "Q4 - 3-node agg MR count per author": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "u",
+        "alias": "mr_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "Q5 - Source-side MR count": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "p",
+        "alias": "mr_count"
+      }
+    ],
+    "limit": 10
+  },
+  "Q6 - User MRs in project traversal": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "username": "stanhu"
+        }
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "merged_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q7 - Path finding User to Project": {
+    "query_type": "path_finding",
+    "nodes": [
+      {
+        "id": "start",
+        "entity": "User",
+        "node_ids": [
+          64248
+        ]
+      },
+      {
+        "id": "end",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "path": {
+      "type": "shortest",
+      "from": "start",
+      "to": "end",
+      "max_depth": 3
+    },
+    "limit": 10
+  },
+  "Q8 - token_match on MR title": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "title": {
+            "op": "token_match",
+            "value": "security"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "updated_at",
+      "direction": "DESC"
+    },
+    "limit": 15
+  },
+  "Q9 - contains on MR description": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "description": {
+            "op": "contains",
+            "value": "performance regression"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "created_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q10 - Multi-hop Group CONTAINS": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p",
+        "min_hops": 1,
+        "max_hops": 3
+      }
+    ],
+    "limit": 20
+  },
+  "Q11 - 4-node User MR Pipeline Project": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "username": "stanhu"
+        }
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "success"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      },
+      {
+        "type": "HAS_HEAD_PIPELINE",
+        "from": "mr",
+        "to": "pipe"
+      }
+    ],
+    "limit": 10
+  },
+  "Q12 - Failed pipelines per project in group": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "failed"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      },
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      },
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "pipe",
+        "group_by": "p",
+        "alias": "fail_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q13 - all_tokens on WorkItem title": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "wi",
+        "entity": "WorkItem",
+        "filters": {
+          "title": {
+            "op": "all_tokens",
+            "value": "memory leak production"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "wi",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "wi",
+      "property": "updated_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q14 - Multi-agg avg diff_size + count": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "avg",
+        "target": "mr",
+        "property": "diff_size",
+        "group_by": "u",
+        "alias": "avg_diff"
+      },
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "u",
+        "alias": "mr_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 1,
+      "direction": "DESC"
+    },
+    "limit": 15
+  },
+  "Q15 - Neighbors many rel_types": {
+    "query_type": "neighbors",
+    "node": {
+      "id": "u",
+      "entity": "User",
+      "node_ids": [
+        64248
+      ]
+    },
+    "neighbors": {
+      "node": "u",
+      "direction": "both",
+      "rel_types": [
+        "AUTHORED",
+        "REVIEWER",
+        "APPROVED",
+        "MERGED",
+        "ASSIGNED",
+        "TRIGGERED",
+        "MEMBER_OF"
+      ]
+    },
+    "limit": 20
+  },
+  "Q16 - Reviewer count per MR": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "opened"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "REVIEWER",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "u",
+        "group_by": "mr",
+        "alias": "reviewer_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q17 - Path finding User to User": {
+    "query_type": "path_finding",
+    "nodes": [
+      {
+        "id": "start",
+        "entity": "User",
+        "node_ids": [
+          64248
+        ]
+      },
+      {
+        "id": "end",
+        "entity": "User",
+        "node_ids": [
+          128633
+        ]
+      }
+    ],
+    "path": {
+      "type": "all_shortest",
+      "from": "start",
+      "to": "end",
+      "max_depth": 3
+    },
+    "limit": 10
+  },
+  "Q18 - Wide DateTime pipeline agg": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "created_at": {
+            "op": "gte",
+            "value": "2025-01-01T00:00:00Z"
+          },
+          "status": "failed"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "pipe",
+        "group_by": "p",
+        "alias": "fail_count"
+      }
+    ],
+    "limit": 10
+  },
+  "Q19 - Code DEFINES by node_id": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "f",
+        "entity": "File",
+        "node_ids": [
+          1
+        ]
+      },
+      {
+        "id": "d",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "DEFINES",
+        "from": "f",
+        "to": "d"
+      }
+    ],
+    "limit": 20
+  },
+  "Q20 - Vulnerability count in project": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "v",
+        "entity": "Vulnerability"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "v",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "v",
+        "group_by": "p",
+        "alias": "vuln_count"
+      }
+    ],
+    "limit": 10
+  },
+  "Q21 - CALLS aggregation": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "d1",
+        "entity": "Definition",
+        "filters": {
+          "name": {
+            "op": "starts_with",
+            "value": "create"
+          }
+        }
+      },
+      {
+        "id": "d2",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CALLS",
+        "from": "d1",
+        "to": "d2"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "d2",
+        "group_by": "d1",
+        "alias": "call_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q22 - IMPORTS traversal": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "f",
+        "entity": "File",
+        "filters": {
+          "path": {
+            "op": "ends_with",
+            "value": "controller.rb"
+          }
+        }
+      },
+      {
+        "id": "imp",
+        "entity": "ImportedSymbol"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IMPORTS",
+        "from": "f",
+        "to": "imp"
+      }
+    ],
+    "limit": 15
+  },
+  "Q23 - Path finding with filters": {
+    "query_type": "path_finding",
+    "nodes": [
+      {
+        "id": "start",
+        "entity": "User",
+        "filters": {
+          "username": "stanhu"
+        }
+      },
+      {
+        "id": "end",
+        "entity": "Project",
+        "filters": {
+          "full_path": "gitlab-org/gitlab"
+        }
+      }
+    ],
+    "path": {
+      "type": "shortest",
+      "from": "start",
+      "to": "end",
+      "max_depth": 2,
+      "rel_types": [
+        "AUTHORED",
+        "IN_PROJECT",
+        "MEMBER_OF",
+        "REVIEWER"
+      ]
+    },
+    "limit": 5
+  },
+  "Q24 - Job Pipeline Project agg": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "j",
+        "entity": "Job",
+        "filters": {
+          "status": "failed",
+          "failure_reason": "script_failure",
+          "created_at": {
+            "op": "gte",
+            "value": "2026-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "pipe",
+        "entity": "Pipeline"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PIPELINE",
+        "from": "j",
+        "to": "pipe"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "j",
+        "group_by": "pipe",
+        "alias": "fail_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q25 - MR Diff Project traversal": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged",
+          "merged_at": {
+            "op": "gte",
+            "value": "2026-04-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "diff",
+        "entity": "MergeRequestDiff"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_LATEST_DIFF",
+        "from": "mr",
+        "to": "diff"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "merged_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q26 - CALLS with token_match": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "d1",
+        "entity": "Definition",
+        "filters": {
+          "name": {
+            "op": "token_match",
+            "value": "initialize"
+          }
+        }
+      },
+      {
+        "id": "d2",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CALLS",
+        "from": "d1",
+        "to": "d2"
+      }
+    ],
+    "limit": 10
+  },
+  "Q28 - Multi-hop CONTAINS agg": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p",
+        "min_hops": 1,
+        "max_hops": 3
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "p",
+        "group_by": "g",
+        "alias": "project_count"
+      }
+    ],
+    "limit": 10
+  },
+  "Q29 - WorkItem with label filter": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "wi",
+        "entity": "WorkItem",
+        "filters": {
+          "state": "opened",
+          "work_item_type": "issue"
+        }
+      },
+      {
+        "id": "l",
+        "entity": "Label",
+        "filters": {
+          "title": {
+            "op": "contains",
+            "value": "bug"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_LABEL",
+        "from": "wi",
+        "to": "l"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "wi",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "Q30 - Pipeline Job CI chain": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "failed",
+          "source": "push"
+        }
+      },
+      {
+        "id": "j",
+        "entity": "Job",
+        "filters": {
+          "status": "failed"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_JOB",
+        "from": "pipe",
+        "to": "j"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "pipe",
+      "property": "created_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q31 - ON_BRANCH code edge": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "d",
+        "entity": "Definition",
+        "filters": {
+          "name": {
+            "op": "token_match",
+            "value": "Application"
+          }
+        }
+      },
+      {
+        "id": "b",
+        "entity": "Branch",
+        "filters": {
+          "name": "main"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "ON_BRANCH",
+        "from": "d",
+        "to": "b"
+      }
+    ],
+    "limit": 10
+  },
+  "Q32 - EXTENDS traversal": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "d1",
+        "entity": "Definition",
+        "filters": {
+          "name": {
+            "op": "token_match",
+            "value": "BaseService"
+          }
+        }
+      },
+      {
+        "id": "d2",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "EXTENDS",
+        "from": "d2",
+        "to": "d1"
+      }
+    ],
+    "limit": 10
+  },
+  "Q33 - Vulnerability Finding chain": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "v",
+        "entity": "Vulnerability",
+        "filters": {
+          "state": {
+            "op": "in",
+            "value": [
+              "detected",
+              "confirmed"
+            ]
+          }
+        }
+      },
+      {
+        "id": "f",
+        "entity": "Finding"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_FINDING",
+        "from": "v",
+        "to": "f"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "v",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "Q34 - any_tokens on MR description": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "description": {
+            "op": "any_tokens",
+            "value": "timeout regression slowdown"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "updated_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "Q35 - Group Project MR agg": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "opened"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "p",
+        "alias": "open_mrs"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "A1 - Note count per project in group": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "n",
+        "entity": "Note"
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      },
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "n",
+        "to": "p"
+      },
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "n",
+        "group_by": "p",
+        "alias": "note_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "A2 - Stage count per Pipeline": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "s",
+        "entity": "Stage"
+      },
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "success"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_STAGE",
+        "from": "pipe",
+        "to": "s"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "s",
+        "group_by": "pipe",
+        "alias": "stage_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "A3 - User membership count": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User"
+      },
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "MEMBER_OF",
+        "from": "u",
+        "to": "g"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "u",
+        "group_by": "g",
+        "alias": "member_count"
+      }
+    ],
+    "limit": 10
+  },
+  "B1 - Incoming REVIEWER for user": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "opened"
+        }
+      },
+      {
+        "id": "u",
+        "entity": "User",
+        "node_ids": [
+          64248
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "REVIEWER",
+        "from": "u",
+        "to": "mr"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "updated_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "B2 - Bidirectional neighbors Group": {
+    "query_type": "neighbors",
+    "node": {
+      "id": "g",
+      "entity": "Group",
+      "node_ids": [
+        9970
+      ]
+    },
+    "neighbors": {
+      "node": "g",
+      "direction": "both"
+    },
+    "limit": 20
+  },
+  "C1 - Triple filter MR": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "opened",
+          "draft": true,
+          "created_at": {
+            "op": "gte",
+            "value": "2026-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "C2 - Large IN list 50 pipeline IDs": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "node_ids": [
+          2488635266,
+          2488620209,
+          2488501837,
+          2488000000,
+          2487000000,
+          2486000000,
+          2485000000,
+          2484000000,
+          2483000000,
+          2482000000,
+          2481000000,
+          2480000000,
+          2479000000,
+          2478000000,
+          2477000000,
+          2476000000,
+          2475000000,
+          2474000000,
+          2473000000,
+          2472000000,
+          2471000000,
+          2470000000,
+          2469000000,
+          2468000000,
+          2467000000,
+          2466000000,
+          2465000000,
+          2464000000,
+          2463000000,
+          2462000000,
+          2461000000,
+          2460000000,
+          2459000000,
+          2458000000,
+          2457000000,
+          2456000000,
+          2455000000,
+          2454000000,
+          2453000000,
+          2452000000,
+          2451000000,
+          2450000000,
+          2449000000,
+          2448000000,
+          2447000000,
+          2446000000,
+          2445000000,
+          2444000000,
+          2443000000,
+          2442000000
+        ]
+      },
+      {
+        "id": "j",
+        "entity": "Job",
+        "filters": {
+          "status": "failed"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_JOB",
+        "from": "pipe",
+        "to": "j"
+      }
+    ],
+    "limit": 20
+  },
+  "C3 - MR source_branch contains": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "source_branch": {
+            "op": "contains",
+            "value": "fix"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "mr",
+      "property": "created_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "C4 - WorkItem multi text filter": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "wi",
+        "entity": "WorkItem",
+        "filters": {
+          "title": {
+            "op": "any_tokens",
+            "value": "security vulnerability CVE exploit"
+          },
+          "state": "opened",
+          "work_item_type": "issue"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "wi",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "D1 - 4-hop User MR Pipeline Job": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User",
+        "filters": {
+          "username": "stanhu"
+        }
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "pipe",
+        "entity": "Pipeline"
+      },
+      {
+        "id": "j",
+        "entity": "Job",
+        "filters": {
+          "status": "failed"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "HAS_HEAD_PIPELINE",
+        "from": "mr",
+        "to": "pipe"
+      },
+      {
+        "type": "HAS_JOB",
+        "from": "pipe",
+        "to": "j"
+      }
+    ],
+    "limit": 10
+  },
+  "D2 - Group Project MR User authors": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged",
+          "merged_at": {
+            "op": "gte",
+            "value": "2026-04-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "u",
+        "entity": "User"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "g",
+        "to": "p"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      },
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      }
+    ],
+    "limit": 10
+  },
+  "D3 - MR Pipeline Job Runner": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "node_ids": [
+          476930746
+        ]
+      },
+      {
+        "id": "pipe",
+        "entity": "Pipeline"
+      },
+      {
+        "id": "j",
+        "entity": "Job"
+      },
+      {
+        "id": "r",
+        "entity": "Runner"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_HEAD_PIPELINE",
+        "from": "mr",
+        "to": "pipe"
+      },
+      {
+        "type": "HAS_JOB",
+        "from": "pipe",
+        "to": "j"
+      },
+      {
+        "type": "RUNS_ON",
+        "from": "j",
+        "to": "r"
+      }
+    ],
+    "limit": 20
+  },
+  "D4 - Vulnerability Finding SecurityScan": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "v",
+        "entity": "Vulnerability"
+      },
+      {
+        "id": "f",
+        "entity": "Finding"
+      },
+      {
+        "id": "scan",
+        "entity": "SecurityScan"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_FINDING",
+        "from": "v",
+        "to": "f"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "v",
+        "to": "p"
+      },
+      {
+        "type": "RAN_BY",
+        "from": "scan",
+        "to": "f"
+      }
+    ],
+    "limit": 10
+  },
+  "E1 - avg+count Pipeline duration": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline",
+        "filters": {
+          "status": "success",
+          "created_at": {
+            "op": "gte",
+            "value": "2026-04-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "avg",
+        "target": "pipe",
+        "property": "duration",
+        "group_by": "p",
+        "alias": "avg_dur"
+      },
+      {
+        "function": "count",
+        "target": "pipe",
+        "group_by": "p",
+        "alias": "pipe_count"
+      }
+    ],
+    "limit": 5
+  },
+  "E2 - sum lines per user": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "u",
+        "entity": "User"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged",
+          "merged_at": {
+            "op": "gte",
+            "value": "2026-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTHORED",
+        "from": "u",
+        "to": "mr"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "sum",
+        "target": "mr",
+        "property": "added_lines",
+        "group_by": "u",
+        "alias": "total_added"
+      },
+      {
+        "function": "sum",
+        "target": "mr",
+        "property": "removed_lines",
+        "group_by": "u",
+        "alias": "total_removed"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "F1 - WorkItem epic CONTAINS": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "parent",
+        "entity": "WorkItem",
+        "filters": {
+          "work_item_type": "epic"
+        }
+      },
+      {
+        "id": "child",
+        "entity": "WorkItem"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "parent",
+        "to": "child"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "parent",
+        "to": "p"
+      }
+    ],
+    "limit": 15
+  },
+  "F2 - Milestone MR count": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "m",
+        "entity": "Milestone"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_MILESTONE",
+        "from": "mr",
+        "to": "m"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "m",
+        "alias": "mr_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "G1 - 3-hop code chain File Def Def": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "f",
+        "entity": "File",
+        "filters": {
+          "path": {
+            "op": "eq",
+            "value": "app/models/user.rb"
+          }
+        }
+      },
+      {
+        "id": "d1",
+        "entity": "Definition"
+      },
+      {
+        "id": "d2",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "DEFINES",
+        "from": "f",
+        "to": "d1"
+      },
+      {
+        "type": "CALLS",
+        "from": "d1",
+        "to": "d2"
+      }
+    ],
+    "limit": 10
+  },
+  "G2 - Directory File count": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "dir",
+        "entity": "Directory",
+        "filters": {
+          "path": {
+            "op": "starts_with",
+            "value": "app/"
+          }
+        }
+      },
+      {
+        "id": "f",
+        "entity": "File"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CONTAINS",
+        "from": "dir",
+        "to": "f"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "f",
+        "group_by": "dir",
+        "alias": "file_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "G3 - ImportedSymbol resolve": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "imp",
+        "entity": "ImportedSymbol",
+        "filters": {
+          "identifier_name": "ApplicationController"
+        }
+      },
+      {
+        "id": "def",
+        "entity": "Definition"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IMPORTS",
+        "from": "imp",
+        "to": "def"
+      }
+    ],
+    "limit": 10
+  },
+  "H1 - Path finding Group to Group": {
+    "query_type": "path_finding",
+    "nodes": [
+      {
+        "id": "start",
+        "entity": "Group",
+        "node_ids": [
+          9970
+        ]
+      },
+      {
+        "id": "end",
+        "entity": "Group",
+        "node_ids": [
+          3887963
+        ]
+      }
+    ],
+    "path": {
+      "type": "shortest",
+      "from": "start",
+      "to": "end",
+      "max_depth": 3
+    },
+    "limit": 5
+  },
+  "H3 - Pipeline CHILD_OF Pipeline": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "parent",
+        "entity": "Pipeline",
+        "filters": {
+          "source": "push",
+          "status": "success"
+        }
+      },
+      {
+        "id": "child",
+        "entity": "Pipeline"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "CHILD_OF",
+        "from": "child",
+        "to": "parent"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "parent",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "parent",
+      "property": "created_at",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "H4 - Job AUTO_CANCELED_BY Job": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "j1",
+        "entity": "Job",
+        "filters": {
+          "status": "canceled"
+        }
+      },
+      {
+        "id": "j2",
+        "entity": "Job"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "AUTO_CANCELED_BY",
+        "from": "j1",
+        "to": "j2"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "j1",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "H5 - Deployment Environment": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "dep",
+        "entity": "Deployment"
+      },
+      {
+        "id": "env",
+        "entity": "Environment"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_ENVIRONMENT",
+        "from": "dep",
+        "to": "env"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "dep",
+        "to": "p"
+      }
+    ],
+    "order_by": {
+      "node": "dep",
+      "property": "id",
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "H6 - Runner RUNS_FOR_GROUP": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "r",
+        "entity": "Runner"
+      },
+      {
+        "id": "g",
+        "entity": "Group",
+        "filters": {
+          "full_path": "gitlab-org"
+        }
+      }
+    ],
+    "relationships": [
+      {
+        "type": "RUNS_FOR_GROUP",
+        "from": "r",
+        "to": "g"
+      }
+    ],
+    "limit": 20
+  },
+  "H7 - MR Diff DiffFile chain": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "node_ids": [
+          476930746
+        ]
+      },
+      {
+        "id": "diff",
+        "entity": "MergeRequestDiff"
+      },
+      {
+        "id": "df",
+        "entity": "MergeRequestDiffFile"
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_LATEST_DIFF",
+        "from": "mr",
+        "to": "diff"
+      },
+      {
+        "type": "HAS_FILE",
+        "from": "diff",
+        "to": "df"
+      }
+    ],
+    "limit": 20
+  },
+  "H8 - WorkItem RELATED_TO WorkItem": {
+    "query_type": "traversal",
+    "nodes": [
+      {
+        "id": "wi1",
+        "entity": "WorkItem",
+        "filters": {
+          "state": "opened"
+        }
+      },
+      {
+        "id": "wi2",
+        "entity": "WorkItem"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "RELATED_TO",
+        "from": "wi1",
+        "to": "wi2"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "wi1",
+        "to": "p"
+      }
+    ],
+    "limit": 10
+  },
+  "I1 - Job count by failure": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "j",
+        "entity": "Job",
+        "filters": {
+          "status": "failed"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "j",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "j",
+        "group_by": "j",
+        "alias": "fail_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "I2 - MR count by target_branch": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged",
+          "merged_at": {
+            "op": "gte",
+            "value": "2025-01-01T00:00:00Z"
+          }
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "mr",
+        "group_by": "mr",
+        "alias": "mr_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "I3 - Pipeline count by source": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "pipe",
+        "entity": "Pipeline"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "IN_PROJECT",
+        "from": "pipe",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "pipe",
+        "group_by": "pipe",
+        "alias": "pipe_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 20
+  },
+  "I4 - VulnOccurrence per Vulnerability": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "occ",
+        "entity": "VulnerabilityOccurrence"
+      },
+      {
+        "id": "v",
+        "entity": "Vulnerability"
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "OCCURRENCE_OF",
+        "from": "occ",
+        "to": "v"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "v",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "occ",
+        "group_by": "v",
+        "alias": "occ_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "I5 - Note count per MR": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "n",
+        "entity": "Note"
+      },
+      {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "state": "merged"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_NOTE",
+        "from": "mr",
+        "to": "n"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "mr",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "n",
+        "group_by": "mr",
+        "alias": "note_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  },
+  "I6 - Label usage WorkItem per Label": {
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "id": "l",
+        "entity": "Label"
+      },
+      {
+        "id": "wi",
+        "entity": "WorkItem",
+        "filters": {
+          "state": "opened"
+        }
+      },
+      {
+        "id": "p",
+        "entity": "Project",
+        "node_ids": [
+          278964
+        ]
+      }
+    ],
+    "relationships": [
+      {
+        "type": "HAS_LABEL",
+        "from": "wi",
+        "to": "l"
+      },
+      {
+        "type": "IN_PROJECT",
+        "from": "wi",
+        "to": "p"
+      }
+    ],
+    "aggregations": [
+      {
+        "function": "count",
+        "target": "wi",
+        "group_by": "l",
+        "alias": "wi_count"
+      }
+    ],
+    "aggregation_sort": {
+      "agg_index": 0,
+      "direction": "DESC"
+    },
+    "limit": 10
+  }
+}
