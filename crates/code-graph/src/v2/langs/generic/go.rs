@@ -299,7 +299,10 @@ impl HasRules for GoRules {
         )
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
-            excluded_ambient_imported_symbol_names: &["print", "println"],
+            excluded_ambient_imported_symbol_names: &[
+                "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len",
+                "make", "max", "min", "new", "panic", "print", "println", "real", "recover",
+            ],
             ..Default::default()
         })
     }

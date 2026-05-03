@@ -160,8 +160,8 @@ pub struct ResolverHooks {
     /// Controls when unresolved references materialize
     /// `Definition -> ImportedSymbol` fallback edges.
     pub imported_symbol_fallback: ImportedSymbolFallbackPolicy,
-    /// Ambient fallback names to suppress for language built-ins. Explicit
-    /// reaching imports are still eligible.
+    /// Ambient fallback names to suppress for language built-ins. Named
+    /// reaching imports are still eligible, but wildcard imports are not.
     pub excluded_ambient_imported_symbol_names: &'static [&'static str],
     /// Language-owned candidates for unresolved `Definition -> ImportedSymbol`
     /// fallback edges. The generic resolver supplies unresolved ref data and

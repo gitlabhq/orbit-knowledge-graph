@@ -26,6 +26,10 @@ fixtures:
           println("debug")
       }
 
+      func builtinLen() {
+          _ = len("debug")
+      }
+
   - path: worker.go
     content: |
       package main
@@ -77,10 +81,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.dotImportCall", path: "github.com/acme/dotpkg", name: "dotpkg", import_type: "Import" } }
 
-  - name: "println does not target dot imports"
+  - name: "built-ins do not target dot imports"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
-      WHERE caller.fqn = 'main.builtinPrintln'
+      WHERE caller.fqn IN ['main.builtinLen', 'main.builtinPrintln']
         AND e.edge_kind = 'Calls'
       RETURN sym.path AS path
     assert:

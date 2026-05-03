@@ -11,6 +11,8 @@ fixtures:
       from local_models import LocalClient
       from wildcard_sdk import *
 
+      helper_run()
+
       def package_import_call():
           requests.get("https://example.com")
           external_httpx.post("https://example.com")
@@ -29,6 +31,9 @@ fixtures:
 
       def builtin_print_call():
           print("debug")
+
+      def builtin_len_call():
+          len([1, 2])
 
   - path: local_models.py
     content: |
@@ -63,6 +68,17 @@ tests:
       - { row: { caller: "main.from_import_call", path: "sdk.client", name: "Client", alias: null } }
       - { row: { caller: "main.from_import_call", path: "sdk.helpers", name: "run", alias: "helper_run" } }
 
+  - name: "top-level imported calls target imported symbols from the file"
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'main.py'
+        AND e.edge_kind = 'Calls'
+        AND sym.path = 'sdk.helpers'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "main.py", path: "sdk.helpers", name: "run", alias: "helper_run" } }
+
   - name: "locally resolved imports do not emit imported-symbol fallback"
     queries:
       - query: |
@@ -91,10 +107,10 @@ tests:
       - { row_count: 1 }
       - { row: { caller: "main.wildcard_import_call", path: "wildcard_sdk", name: "*", import_type: "WildcardImport" } }
 
-  - name: "built-in print does not target wildcard imports"
+  - name: "built-ins do not target wildcard imports"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
-      WHERE caller.name = 'builtin_print_call'
+      WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
         AND e.edge_kind = 'Calls'
       RETURN sym.path AS path
     assert:

@@ -337,6 +337,7 @@ impl HasRules for CSharpRules {
         )
         .with_hooks(ResolverHooks {
             imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &["Read", "ReadLine", "Write", "WriteLine"],
             ..Default::default()
         })
         .with_settings(ResolveSettings::default())

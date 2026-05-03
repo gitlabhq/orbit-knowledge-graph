@@ -45,6 +45,21 @@ fixtures:
           }
       }
 
+  - path: ConsoleRunner.cs
+    content: |
+      using System;
+
+      namespace App
+      {
+          public class ConsoleRunner
+          {
+              public void Log()
+              {
+                  Console.WriteLine("debug");
+              }
+          }
+      }
+
 tests:
   - name: "namespace using directives target wildcard imported symbols"
     query: |
@@ -75,3 +90,12 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "App.AliasRunner.Serialize", path: "Newtonsoft.Json.JsonConvert", name: null, alias: "Json", import_type: "AliasedImport" } }
+
+  - name: "console logging calls do not target ambient namespace imports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'App.ConsoleRunner.Log'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path
+    assert:
+      - { empty: true }

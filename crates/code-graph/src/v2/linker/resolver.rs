@@ -185,24 +185,34 @@ impl<'a> FileResolver<'a> {
         Ok(())
     }
 
-    /// Emit Definition → ImportedSymbol edges for external (unresolved) refs.
+    /// Emit source → ImportedSymbol edges for external (unresolved) refs.
     fn emit_imported_symbol_edges(&mut self, r: &RefData<'_>) {
-        let Some(enc) = r.enclosing_def else { return };
-        let Some(&src) = self.ctx.def_nodes.get(enc as usize) else {
-            return;
-        };
-        let src_def_kind = self.ctx.graph.graph[src]
-            .def_id()
-            .map(|did| self.ctx.graph.defs[did.0 as usize].kind);
+        let graph = self.ctx.graph;
+        let src = r
+            .enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize).copied())
+            .unwrap_or(self.ctx.file_node);
+        let (source_node_kind, source_def_kind) = r
+            .enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
+            .unwrap_or((NodeKind::File, None));
         let rel = Relationship {
             edge_kind: EdgeKind::Calls,
-            source_node: NodeKind::Definition,
+            source_node: source_node_kind,
             target_node: NodeKind::ImportedSymbol,
-            source_def_kind: src_def_kind,
+            source_def_kind,
             target_def_kind: None,
         };
 
         let policy = self.ctx.rules.hooks.imported_symbol_fallback;
+        let excluded_ambient_name = self
+            .ctx
+            .rules
+            .hooks
+            .excluded_ambient_imported_symbol_names
+            .contains(&r.name);
 
         if let Some(candidate_hook) = self.ctx.rules.hooks.imported_symbol_candidates {
             let candidates = candidate_hook(
@@ -232,6 +242,10 @@ impl<'a> FileResolver<'a> {
                     && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
                 {
                     saw_explicit_import = true;
+                    let import = self.ctx.graph.import(import_node);
+                    if excluded_ambient_name && import.wildcard {
+                        continue;
+                    }
                     if !self.ctx.import_resolves_locally(import_node) {
                         self.push_imported_symbol_edge(src, import_node, rel);
                     }
@@ -239,14 +253,7 @@ impl<'a> FileResolver<'a> {
             }
         }
 
-        if saw_explicit_import
-            || self
-                .ctx
-                .rules
-                .hooks
-                .excluded_ambient_imported_symbol_names
-                .contains(&r.name)
-        {
+        if saw_explicit_import || excluded_ambient_name {
             return;
         }
 

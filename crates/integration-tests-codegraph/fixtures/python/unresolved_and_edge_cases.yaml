@@ -46,6 +46,11 @@ fixtures:
       def fstring_caller():
           f"Name: {get_name()}, Age: {get_age()}"
 
+      from requests import get as http_get
+
+      def external_import_caller():
+          return http_get("https://example.com")
+
 tests:
   - name: "D3: undefined_function produces no call edge"
     query: |
@@ -100,3 +105,13 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "main.fstring_caller", callee: "main.get_age" } }
+
+  - name: "external imported calls point at imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'external_import_caller'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.external_import_caller", path: "requests", name: "get", alias: "http_get" } }
