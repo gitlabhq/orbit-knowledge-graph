@@ -1,3 +1,27 @@
+## [0.44.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.43.0...v0.44.0) (2026-05-03)
+
+### Features
+
+* **code-graph:** add initial C language support ([04433ee](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/04433eef78da872995e5df7927e88ab436c63416)) by Michael Usachenko
+* **code-graph:** bind property types in C# ([f809a26](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f809a26f2c0e586001b1553e9b40f36fa933af1c)) by Anthony Juckel
+* **code-graph:** create File nodes for all git tree files ([50558ea](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/50558eae458a78959872b6385d08b5731ff854aa)) by Michael Angelo Rivera
+* **code-graph:** preserve custom imported calls ([c23e54d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c23e54de6532a3b5ff1c133964e81b0f11da2b59)) by Michael Angelo Rivera
+* **code-graph:** support JSX React and Next calls ([7bdabfe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7bdabfe8efda3073b908ef2bde837dd0f3d69c3c)) by Michael Angelo Rivera
+* **ontology:** add FK metadata to edge variants ([7a22824](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a22824705d889c270dbf395f295d591e2030037)) by Michael Usachenko
+* **ontology:** denormalize all low-cardinality node properties onto edges ([01c5b48](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/01c5b48c8b7ef012b57a31cc2c73a2dd303722c5)) by Michael Usachenko
+
+### Fixes
+
+* **ci:** preserve null job failure reasons ([52b20e6](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/52b20e6cf5c1fd5528ae12455051d98cd1a8a5af)) by Michael Angelo Rivera
+* **code-graph:** preserve generic imported calls ([58584df](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/58584df9e94329cb4911f89c6713b166debe65dc)) by Michael Angelo Rivera
+* **e2e:** align fixture counts and namespace dispatch ([5308025](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/53080255ec2fa3a05cdcf05d6cb63c23a8546428)) by michaelangeloio
+
+### Other
+
+* **indexer:** restructure crate layout and align module conventions ([b6c9421](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b6c94219a1290901c78b09c624b010418050f851)) by Jean-Gabriel Doyon
+* **ontology:** add missing delta+l4z codec to Int64 columns ([bc7af72](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bc7af7268fea595ca883350dfd5aa35763177e91)) by Michael Usachenko
+* **ontology:** switch remaining Int64 Delta+ZSTD columns to Delta+LZ4 ([6540773](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6540773de15d9872209a8255cc58a1466a1db8dc)) by Michael Usachenko
+
 ## [0.43.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.42.0...v0.43.0) (2026-05-02)
 
 ### Features
