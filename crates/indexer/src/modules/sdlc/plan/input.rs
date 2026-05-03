@@ -41,6 +41,7 @@ pub(in crate::modules::sdlc) enum NodeColumn {
         source: String,
         target: String,
         values: BTreeMap<i64, String>,
+        nullable: bool,
     },
 }
 
@@ -233,6 +234,7 @@ fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
                     source: col.to_string(),
                     target: field.name.clone(),
                     values: field.enum_values.clone().unwrap(),
+                    nullable: field.nullable,
                 });
             }
             Some(if col == field.name {

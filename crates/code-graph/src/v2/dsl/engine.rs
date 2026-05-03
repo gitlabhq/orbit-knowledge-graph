@@ -549,6 +549,13 @@ impl LanguageSpec {
                     name: module.clone()
                 }
             );
+        } else if self.file_scope {
+            // Use filename without extension as root scope (C, C++).
+            let stem = std::path::Path::new(file_path)
+                .file_stem()
+                .and_then(|s| s.to_str())
+                .unwrap_or(file_path);
+            state.scope_stack.push(Arc::from(stem));
         }
         state.top_level_depth = state.scope_stack.len();
 

@@ -593,7 +593,7 @@ code-indexing-benchmark-v2-linux:
     SCENARIO: v2
   parallel:
     matrix:
-      - GROUP: [python, java, kotlin, csharp, ruby, go, rust]
+      - GROUP: [python, java, kotlin, csharp, ruby, go, rust, c]
 
 .code-indexing-benchmark-analyze-template:
   stage: benchmark

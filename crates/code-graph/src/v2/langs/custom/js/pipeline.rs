@@ -64,6 +64,9 @@ impl LanguagePipeline for JsPipeline {
         let probe = WorkspaceProbe::load(Path::new(root_path), files);
 
         let (mut graph, modules) = builder.into_parts();
+        if ctx.config.emit_file_inventory_graph {
+            graph.mark_parsed_only();
+        }
         attach_resolution_edges(
             &mut graph,
             &resolved_files,
@@ -84,6 +87,7 @@ impl LanguagePipeline for JsPipeline {
 mod tests {
     use super::*;
     use crate::v2::langs::custom::js::extract::MAX_FILE_BYTES;
+    use crate::v2::pipeline::GraphStatsCounters;
     use crate::v2::pipeline::PipelineConfig;
     use crate::v2::sink::GraphConverter;
     use arrow::record_batch::RecordBatch;
@@ -113,11 +117,18 @@ mod tests {
     fn run_js(ctx: &Arc<PipelineContext>, files: &[FileInput]) {
         let conv = NoopConverter;
         let (tx, _rx) = crossbeam_channel::unbounded();
+        let dirs = AtomicUsize::new(0);
+        let files_count = AtomicUsize::new(0);
         let d = AtomicUsize::new(0);
         let i = AtomicUsize::new(0);
         let e = AtomicUsize::new(0);
         let errs = Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, &conv, &errs, &d, &i, &e);
+        let btx = BatchTx::new(
+            &tx,
+            &conv,
+            &errs,
+            GraphStatsCounters::new(&dirs, &files_count, &d, &i, &e),
+        );
         // We expect this not to return Err — at least one file must be
         // analyzable so the pipeline produces a graph and reaches the
         // skip recording path.

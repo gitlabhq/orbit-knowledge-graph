@@ -61,6 +61,7 @@ pub fn convert_v2_graph(
         commit_sha,
     };
     let ids = graph.assign_ids(project_id, branch);
+    let write_repository_structure = graph.output.writes_repository_structure();
     let mut tables = Vec::new();
 
     for entity_name in ontology.local_entity_names() {
@@ -73,23 +74,31 @@ pub fn convert_v2_graph(
         let specs = entity_specs(ontology, entity_name);
         let batch = match entity_name {
             "Directory" => {
-                let rows: Vec<_> = graph
-                    .directories()
-                    .map(|(idx, dir)| DirectoryRow {
-                        dir,
-                        id: ids[idx.index()],
-                    })
-                    .collect();
+                let rows: Vec<_> = if write_repository_structure {
+                    graph
+                        .directories()
+                        .map(|(idx, dir)| DirectoryRow {
+                            dir,
+                            id: ids[idx.index()],
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 DirectoryRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "File" => {
-                let rows: Vec<_> = graph
-                    .files()
-                    .map(|(idx, file)| FileRow {
-                        file,
-                        id: ids[idx.index()],
-                    })
-                    .collect();
+                let rows: Vec<_> = if write_repository_structure {
+                    graph
+                        .files()
+                        .map(|(idx, file)| FileRow {
+                            file,
+                            id: ids[idx.index()],
+                        })
+                        .collect()
+                } else {
+                    Vec::new()
+                };
                 FileRow::to_record_batch(&rows, &specs, &ctx)?
             }
             "Definition" => {
@@ -131,6 +140,10 @@ pub fn convert_v2_graph(
     let mut edge_rows: Vec<_> = graph
         .graph
         .edge_indices()
+        .filter(|&ei| {
+            write_repository_structure
+                || graph.graph[ei].relationship.edge_kind.as_ref() != "CONTAINS"
+        })
         .map(|ei| {
             let (src, tgt) = graph.graph.edge_endpoints(ei).unwrap();
             let edge = &graph.graph[ei];

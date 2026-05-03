@@ -1,0 +1,355 @@
+name: "Next.js pages router graph patterns"
+pipeline: js
+fixtures:
+  - path: pages/_app.tsx
+    content: |
+      import type { AppProps } from 'next/app';
+      import Layout from '../components/Layout';
+
+      export default function App({ Component, pageProps }: AppProps) {
+        return (
+          <Layout>
+            <Component {...pageProps} />
+          </Layout>
+        );
+      }
+
+  - path: pages/index.tsx
+    content: |
+      import Hero from '../components/Hero';
+      import { loadHome } from '../lib/home';
+
+      export async function getStaticProps() {
+        const home = await loadHome();
+        return { props: { home } };
+      }
+
+      export default function IndexPage() {
+        return <Hero />;
+      }
+
+  - path: pages/api/users.ts
+    content: |
+      import type { NextApiRequest, NextApiResponse } from 'next';
+      import { listUsers } from '../../lib/users';
+
+      export default async function handler(
+        req: NextApiRequest,
+        res: NextApiResponse,
+      ) {
+        const users = await listUsers();
+        res.json(users);
+      }
+
+  - path: pages/_document.tsx
+    content: |
+      import { Html, Head, Main, NextScript } from 'next/document';
+
+      export default function Document() {
+        return (
+          <Html>
+            <Head />
+            <body>
+              <Main />
+              <NextScript />
+            </body>
+          </Html>
+        );
+      }
+
+  - path: pages/_error.tsx
+    content: |
+      import Hero from '../components/Hero';
+
+      export default function ErrorPage() {
+        return <Hero />;
+      }
+
+  - path: pages/404.tsx
+    content: |
+      import Hero from '../components/Hero';
+
+      export default function NotFoundPage() {
+        return <Hero />;
+      }
+
+  - path: pages/500.tsx
+    content: |
+      import Hero from '../components/Hero';
+
+      export default function ServerErrorPage() {
+        return <Hero />;
+      }
+
+  - path: pages/blog/[slug].tsx
+    content: |
+      import Hero from '../../components/Hero';
+      import { loadHome } from '../../lib/home';
+
+      export async function getServerSideProps() {
+        const home = await loadHome();
+        return { props: { home } };
+      }
+
+      export default function BlogPage() {
+        return <Hero />;
+      }
+
+  - path: pages/docs/[...slug].tsx
+    content: |
+      import Hero from '../../components/Hero';
+
+      export async function getStaticPaths() {
+        return { paths: [], fallback: false };
+      }
+
+      export default function DocsPage() {
+        return <Hero />;
+      }
+
+  - path: pages/shop/[[...filters]].tsx
+    content: |
+      import Layout from '../../components/Layout';
+
+      export default function ShopPage() {
+        return <Layout />;
+      }
+
+  - path: pages/api/users/[id].ts
+    content: |
+      import type { NextApiRequest, NextApiResponse } from 'next';
+      import { listUsers } from '../../../lib/users';
+
+      export default async function userHandler(
+        _req: NextApiRequest,
+        res: NextApiResponse,
+      ) {
+        const users = await listUsers();
+        res.json(users);
+      }
+
+  - path: components/Layout.tsx
+    content: |
+      export default function Layout({ children }) {
+        return <main>{children}</main>;
+      }
+
+  - path: components/Hero.tsx
+    content: |
+      export default function Hero() {
+        return <section />;
+      }
+
+  - path: lib/home.ts
+    content: |
+      export function loadHome() {
+        return { title: 'Home' };
+      }
+
+  - path: lib/users.ts
+    content: |
+      export function listUsers() {
+        return [{ id: 1 }];
+      }
+
+tests:
+  - name: Next pages router files are indexed as ordinary module definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path
+    assert:
+      - { row_count: 3 }
+      - { row: { file_path: "pages/_app.tsx", fqn: "pages/_app.tsx", type: "Module" } }
+      - { row: { file_path: "pages/index.tsx", fqn: "pages/index.tsx", type: "Module" } }
+      - { row: { file_path: "pages/api/users.ts", fqn: "pages/api/users.ts", type: "Module" } }
+
+  - name: Next pages router default pages and data functions are definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+        AND d.fqn IN ['App', 'IndexPage', 'getStaticProps', 'handler']
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path, fqn
+    assert:
+      - { row_count: 4 }
+      - { row: { file_path: "pages/_app.tsx", fqn: "App", type: "Function" } }
+      - { row: { file_path: "pages/index.tsx", fqn: "IndexPage", type: "Function" } }
+      - { row: { file_path: "pages/index.tsx", fqn: "getStaticProps", type: "Function" } }
+      - { row: { file_path: "pages/api/users.ts", fqn: "handler", type: "Function" } }
+
+  - name: Next pages router local imports resolve
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 4 }
+      - { row: { file_path: "pages/_app.tsx", path: "../components/Layout", name: "default", is_type_only: false, target: "components/Layout.tsx::default" } }
+      - { row: { file_path: "pages/index.tsx", path: "../components/Hero", name: "default", is_type_only: false, target: "components/Hero.tsx::default" } }
+      - { row: { file_path: "pages/index.tsx", path: "../lib/home", name: "loadHome", is_type_only: false, target: "lib/home.ts::loadHome" } }
+      - { row: { file_path: "pages/api/users.ts", path: "../../lib/users", name: "listUsers", is_type_only: false, target: "lib/users.ts::listUsers" } }
+
+  - name: Next pages router package type imports remain unresolved
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
+        AND i.path IN ['next/app', 'next']
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 3 }
+      - { row: { file_path: "pages/_app.tsx", path: "next/app", name: "AppProps", is_type_only: true } }
+      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiRequest", is_type_only: true } }
+      - { row: { file_path: "pages/api/users.ts", path: "next", name: "NextApiResponse", is_type_only: true } }
+
+  - name: Next pages router package type imports have no local targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN ['pages/_app.tsx', 'pages/api/users.ts']
+        AND i.path IN ['next/app', 'next']
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: Next pages router cross-file calls resolve JSX components and helpers
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN ['pages/_app.tsx', 'pages/index.tsx', 'pages/api/users.ts']
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee_file, callee
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "App", callee_file: "components/Layout.tsx", callee: "Layout" } }
+      - { row: { caller: "IndexPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "getStaticProps", callee_file: "lib/home.ts", callee: "loadHome" } }
+      - { row: { caller: "handler", callee_file: "lib/users.ts", callee: "listUsers" } }
+
+  - name: Prop-supplied Next page Component is not fabricated as a code edge
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.fqn = 'App'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "App", callee: "Layout" } }
+      - { not: true, row: { callee: "Component" } }
+
+  - name: Next pages router dynamic and special files are indexed as modules
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'pages/_document.tsx',
+        'pages/_error.tsx',
+        'pages/404.tsx',
+        'pages/500.tsx',
+        'pages/blog/[slug].tsx',
+        'pages/docs/[...slug].tsx',
+        'pages/shop/[[...filters]].tsx',
+        'pages/api/users/[id].ts'
+      ]
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path
+    assert:
+      - { row_count: 8 }
+      - { row: { file_path: "pages/_document.tsx", fqn: "pages/_document.tsx", type: "Module" } }
+      - { row: { file_path: "pages/_error.tsx", fqn: "pages/_error.tsx", type: "Module" } }
+      - { row: { file_path: "pages/404.tsx", fqn: "pages/404.tsx", type: "Module" } }
+      - { row: { file_path: "pages/500.tsx", fqn: "pages/500.tsx", type: "Module" } }
+      - { row: { file_path: "pages/blog/[slug].tsx", fqn: "pages/blog/[slug].tsx", type: "Module" } }
+      - { row: { file_path: "pages/docs/[...slug].tsx", fqn: "pages/docs/[...slug].tsx", type: "Module" } }
+      - { row: { file_path: "pages/shop/[[...filters]].tsx", fqn: "pages/shop/[[...filters]].tsx", type: "Module" } }
+      - { row: { file_path: "pages/api/users/[id].ts", fqn: "pages/api/users/[id].ts", type: "Module" } }
+
+  - name: Next pages router dynamic page and data functions are definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN [
+        'pages/_document.tsx',
+        'pages/_error.tsx',
+        'pages/404.tsx',
+        'pages/500.tsx',
+        'pages/blog/[slug].tsx',
+        'pages/docs/[...slug].tsx',
+        'pages/shop/[[...filters]].tsx',
+        'pages/api/users/[id].ts'
+      ]
+        AND d.fqn IN [
+          'Document',
+          'ErrorPage',
+          'NotFoundPage',
+          'ServerErrorPage',
+          'BlogPage',
+          'getServerSideProps',
+          'DocsPage',
+          'getStaticPaths',
+          'ShopPage',
+          'userHandler'
+        ]
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path, fqn
+    assert:
+      - { row_count: 10 }
+      - { row: { file_path: "pages/_document.tsx", fqn: "Document", type: "Function" } }
+      - { row: { file_path: "pages/_error.tsx", fqn: "ErrorPage", type: "Function" } }
+      - { row: { file_path: "pages/404.tsx", fqn: "NotFoundPage", type: "Function" } }
+      - { row: { file_path: "pages/500.tsx", fqn: "ServerErrorPage", type: "Function" } }
+      - { row: { file_path: "pages/blog/[slug].tsx", fqn: "BlogPage", type: "Function" } }
+      - { row: { file_path: "pages/blog/[slug].tsx", fqn: "getServerSideProps", type: "Function" } }
+      - { row: { file_path: "pages/docs/[...slug].tsx", fqn: "DocsPage", type: "Function" } }
+      - { row: { file_path: "pages/docs/[...slug].tsx", fqn: "getStaticPaths", type: "Function" } }
+      - { row: { file_path: "pages/shop/[[...filters]].tsx", fqn: "ShopPage", type: "Function" } }
+      - { row: { file_path: "pages/api/users/[id].ts", fqn: "userHandler", type: "Function" } }
+
+  - name: Next pages router dynamic and special files resolve local calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
+          'pages/_error.tsx',
+          'pages/404.tsx',
+          'pages/500.tsx',
+          'pages/blog/[slug].tsx',
+          'pages/docs/[...slug].tsx',
+          'pages/shop/[[...filters]].tsx',
+          'pages/api/users/[id].ts'
+        ]
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee_file, callee
+    assert:
+      - { row_count: 8 }
+      - { row: { caller: "ErrorPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "NotFoundPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "ServerErrorPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "BlogPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "getServerSideProps", callee_file: "lib/home.ts", callee: "loadHome" } }
+      - { row: { caller: "DocsPage", callee_file: "components/Hero.tsx", callee: "Hero" } }
+      - { row: { caller: "ShopPage", callee_file: "components/Layout.tsx", callee: "Layout" } }
+      - { row: { caller: "userHandler", callee_file: "lib/users.ts", callee: "listUsers" } }
+
+  - name: Next pages router document imports stay external
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path = 'pages/_document.tsx'
+        AND i.path = 'next/document'
+      RETURN i.path AS path, i.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 4 }
+      - { row: { path: "next/document", name: "Head" } }
+      - { row: { path: "next/document", name: "Html" } }
+      - { row: { path: "next/document", name: "Main" } }
+      - { row: { path: "next/document", name: "NextScript" } }
+
+  - name: Next pages router document imports have no local targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path = 'pages/_document.tsx'
+        AND i.path = 'next/document'
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { empty: true }

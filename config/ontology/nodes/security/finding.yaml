@@ -54,12 +54,12 @@ properties:
     nullable: false
     description: "Severity level of the finding."
     values:
-      0: info
-      1: unknown
-      2: low
-      3: medium
-      4: high
-      5: critical
+      1: info
+      2: unknown
+      4: low
+      5: medium
+      6: high
+      7: critical
 
   deduplicated:
     type: boolean
