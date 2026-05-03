@@ -149,6 +149,19 @@ fixtures:
       const { init } = require('external-sdk');
 
       init();
+  - path: external/module_level_globals.js
+    content: |
+      const { init } = require('external-sdk');
+
+      console.log("ready");
+      JSON.parse("{}");
+  - path: external/imported_reference_only.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportReference() {
+        return track;
+      }
   - path: external/shadowed.js
     content: |
       const { track } = require('external-tracker');
@@ -353,6 +366,15 @@ tests:
       - { row_count: 1 }
       - { row: { file: "external/module_level.js", path: "external-sdk", name: "init" } }
 
+  - name: Module-level global CommonJS calls do not target unrelated imports
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level_globals.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -371,12 +393,13 @@ tests:
     assert:
       - { empty: true }
 
-  - name: Side-effect shadowed and global CommonJS calls avoid imported-symbol fallbacks
+  - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.file_path IN [
         'side_effect/main.js',
         'external/shadowed.js',
+        'external/imported_reference_only.js',
         'external/globals.js'
       ]
         AND e.edge_kind = 'Calls'

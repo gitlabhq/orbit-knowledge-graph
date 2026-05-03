@@ -14,6 +14,12 @@ fixtures:
 
           pub fn helper() {}
 
+          pub struct LocalClient;
+
+          impl LocalClient {
+              pub fn do_work(&self) {}
+          }
+
           pub struct Service;
 
           pub trait Pinger {
@@ -38,6 +44,7 @@ fixtures:
       }
 
       use crate::dep::{Pinger, Service};
+      use crate::dep::LocalClient;
       use crate::dep as dep_mod;
       use external_actions;
       use external_actions as actions;
@@ -74,6 +81,14 @@ fixtures:
           renamed_work();
       }
 
+      pub fn imported_function_reference_only() {
+          let _handler = do_work;
+      }
+
+      pub fn imported_module_constant_reference() {
+          let _ = external_actions::READY;
+      }
+
       pub fn scoped_import_user() {
           use external_actions::scoped;
           scoped();
@@ -103,6 +118,8 @@ fixtures:
 
       pub fn builtin_macro_and_std_calls() {
           println!("debug");
+          let _ = format!("debug");
+          let _ = vec![1, 2, 3];
           let _ = Vec::<u8>::new();
       }
 
@@ -136,6 +153,11 @@ fixtures:
       pub fn inherent_call() {
           let service = Service::new();
           service.inherent_ping();
+      }
+
+      pub fn local_method_same_name_as_external_import() {
+          let client = LocalClient;
+          client.do_work();
       }
 
 tests:
@@ -232,20 +254,23 @@ tests:
         'fn_pointer_from_assoc',
         'generic_trait_bound',
         'trait_default_dispatch',
-        'inherent_call'
+        'inherent_call',
+        'local_method_same_name_as_external_import'
       ]
         AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
-  - name: "Rust built-ins std calls and wildcard imports do not emit imported-symbol fallback"
+  - name: "Rust built-ins references std calls and wildcard imports do not emit imported-symbol fallback"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name IN [
         'external_only',
         'builtin_macro_and_std_calls',
         'explicit_std_import_user',
+        'imported_function_reference_only',
+        'imported_module_constant_reference',
         'wildcard_external_import_user'
       ]
         AND e.edge_kind = 'Calls'
