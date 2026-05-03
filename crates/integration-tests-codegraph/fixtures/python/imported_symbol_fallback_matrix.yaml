@@ -1,0 +1,117 @@
+name: "Python: imported-symbol fallback matrix"
+fixtures:
+  - path: main.py
+    content: |
+      import requests
+      import httpx as external_httpx
+      import urllib.parse
+      import xml.etree.ElementTree as ET
+      from sdk.client import Client
+      from sdk.helpers import run as helper_run
+      from local_models import LocalClient
+      from wildcard_sdk import *
+
+      helper_run()
+
+      def package_import_call():
+          requests.get("https://example.com")
+          external_httpx.post("https://example.com")
+          urllib.parse.urlparse("https://example.com")
+          ET.fromstring("<root/>")
+
+      def from_import_call():
+          Client()
+          helper_run()
+
+      def local_import_call():
+          LocalClient()
+
+      def wildcard_import_call():
+          wildcard_func()
+
+      def builtin_print_call():
+          print("debug")
+
+      def builtin_len_call():
+          len([1, 2])
+
+  - path: local_models.py
+    content: |
+      class LocalClient:
+          def ping(self):
+              pass
+
+tests:
+  - name: "package, aliased, and dotted package imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'package_import_call'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "main.package_import_call", path: "httpx", name: null, alias: "external_httpx" } }
+      - { row: { caller: "main.package_import_call", path: "requests", name: null, alias: null } }
+      - { row: { caller: "main.package_import_call", path: "urllib.parse", name: null, alias: null } }
+      - { row: { caller: "main.package_import_call", path: "xml.etree.ElementTree", name: null, alias: "ET" } }
+
+  - name: "from imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'from_import_call'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "main.from_import_call", path: "sdk.client", name: "Client", alias: null } }
+      - { row: { caller: "main.from_import_call", path: "sdk.helpers", name: "run", alias: "helper_run" } }
+
+  - name: "top-level imported calls target imported symbols from the file"
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'main.py'
+        AND e.edge_kind = 'Calls'
+        AND sym.path = 'sdk.helpers'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "main.py", path: "sdk.helpers", name: "run", alias: "helper_run" } }
+
+  - name: "locally resolved imports do not emit imported-symbol fallback"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.name = 'local_import_call'
+            AND callee.fqn = 'local_models.LocalClient'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.name = 'local_import_call'
+            AND e.edge_kind = 'Calls'
+          RETURN sym.path AS path
+        assert:
+          - { empty: true }
+
+  - name: "wildcard imports target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'wildcard_import_call'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.wildcard_import_call", path: "wildcard_sdk", name: "*", import_type: "WildcardImport" } }
+
+  - name: "built-ins do not target wildcard imports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['builtin_len_call', 'builtin_print_call']
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path
+    assert:
+      - { empty: true }

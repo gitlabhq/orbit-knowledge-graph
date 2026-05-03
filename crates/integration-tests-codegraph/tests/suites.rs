@@ -158,6 +158,10 @@ yaml_test!(
     python_v1_interfile_resolution,
     "python/v1_interfile_resolution.yaml"
 );
+yaml_test!(
+    python_imported_symbol_fallback_matrix,
+    "python/imported_symbol_fallback_matrix.yaml"
+);
 
 // Java
 yaml_test!(java_call_resolution, "java_resolution.yaml");
@@ -173,6 +177,10 @@ yaml_test!(
     java_annotation_references,
     "java/annotation_references.yaml"
 );
+yaml_test!(
+    java_imported_symbol_fallback_matrix,
+    "java/imported_symbol_fallback_matrix.yaml"
+);
 
 // Kotlin
 yaml_test!(kotlin_call_resolution, "kotlin_resolution.yaml");
@@ -185,6 +193,10 @@ yaml_test!(
     "kotlin/annotation_references.yaml"
 );
 yaml_test!(kotlin_companion_object, "kotlin/companion_object.yaml");
+yaml_test!(
+    kotlin_imported_symbol_fallback_matrix,
+    "kotlin/imported_symbol_fallback_matrix.yaml"
+);
 
 // Go
 yaml_test!(go_method_call, "go/method_call.yaml");
@@ -198,6 +210,10 @@ yaml_test!(go_scope_and_branching, "go/scope_and_branching.yaml");
 yaml_test!(go_multiple_embedding, "go/multiple_embedding.yaml");
 yaml_test!(go_higher_order, "go/higher_order.yaml");
 yaml_test!(go_var_reassignment, "go/var_reassignment.yaml");
+yaml_test!(
+    go_imported_symbol_fallback_matrix,
+    "go/imported_symbol_fallback_matrix.yaml"
+);
 
 // Java v1 parity
 yaml_test!(java_v1_main_resolution, "java/v1_main_resolution.yaml");
@@ -223,6 +239,10 @@ yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 // C
 yaml_test!(c_resolution, "c/resolution.yaml");
 yaml_test!(c_hardcore, "c/hardcore.yaml");
+yaml_test!(
+    c_imported_symbol_fallback_matrix,
+    "c/imported_symbol_fallback_matrix.yaml"
+);
 
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
@@ -231,10 +251,18 @@ yaml_test!(
     "csharp/advanced_resolution.yaml"
 );
 yaml_test!(csharp_edge_cases, "csharp/edge_cases.yaml");
+yaml_test!(
+    csharp_imported_symbol_fallback_matrix,
+    "csharp/imported_symbol_fallback_matrix.yaml"
+);
 
 // Ruby
 yaml_test!(ruby_v1_resolution, "ruby/v1_resolution.yaml");
 yaml_test!(ruby_e2e_weather_app, "ruby/e2e_weather_app.yaml");
+yaml_test!(
+    ruby_imported_symbol_fallback_matrix,
+    "ruby/imported_symbol_fallback_matrix.yaml"
+);
 
 // Rust
 yaml_test!(rust_intrafile_resolution, "rust/intrafile_resolution.yaml");
