@@ -141,7 +141,7 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: archived, type: "Nullable(Bool)"}
-    - {name: star_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: star_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: last_activity_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:

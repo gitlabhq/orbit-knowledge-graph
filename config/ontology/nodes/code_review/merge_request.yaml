@@ -463,7 +463,7 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: source_branch, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -477,7 +477,7 @@ storage:
     - {name: merge_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: merged_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: squash_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -488,13 +488,13 @@ storage:
     - {name: first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: diff_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: diff_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: commits_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: added_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: removed_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: added_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: removed_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_contribution, type: "Bool", default: "false"}
     - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}

@@ -150,7 +150,7 @@ storage:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: note, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: noteable_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
-    - {name: noteable_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: noteable_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: line_code, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: commit_id, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: st_diff, type: "Nullable(String)", codec: ["ZSTD(3)"]}
