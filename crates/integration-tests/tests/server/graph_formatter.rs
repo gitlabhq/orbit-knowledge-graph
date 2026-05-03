@@ -125,25 +125,25 @@ async fn seed(ctx: &TestContext) {
     .await;
 
     ctx.execute(&format!(
-        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
-         ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group'),
-         ('1/101/', 1, 'User', 'MEMBER_OF', 101, 'Group'),
-         ('1/101/', 2, 'User', 'MEMBER_OF', 101, 'Group'),
-         ('1/102/', 3, 'User', 'MEMBER_OF', 102, 'Group'),
-         ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group'),
-         ('1/100/', 5, 'User', 'MEMBER_OF', 100, 'Group'),
-         ('1/200/', 100, 'Group', 'MEMBER_OF', 200, 'Group'),
-         ('1/300/', 200, 'Group', 'MEMBER_OF', 300, 'Group'),
-         ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project'),
-         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project'),
-         ('1/102/', 102, 'Group', 'CONTAINS', 1002, 'Project'),
-         ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest'),
-         ('1/101/1001/', 2, 'User', 'AUTHORED', 2001, 'MergeRequest'),
-         ('1/102/1002/', 3, 'User', 'AUTHORED', 2002, 'MergeRequest'),
-         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note'),
-         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note'),
-         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note'),
-         ('1/101/1001/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note')",
+        "INSERT INTO {} (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+         ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', ['state:active', 'user_type:human'], ['visibility_level:public']),
+         ('1/101/', 1, 'User', 'MEMBER_OF', 101, 'Group', ['state:active', 'user_type:human'], ['visibility_level:private']),
+         ('1/101/', 2, 'User', 'MEMBER_OF', 101, 'Group', ['state:active', 'user_type:human'], ['visibility_level:private']),
+         ('1/102/', 3, 'User', 'MEMBER_OF', 102, 'Group', ['state:active', 'user_type:human'], ['visibility_level:internal']),
+         ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group', ['state:blocked', 'user_type:project_bot'], ['visibility_level:internal']),
+         ('1/100/', 5, 'User', 'MEMBER_OF', 100, 'Group', ['state:active', 'user_type:human'], ['visibility_level:public']),
+         ('1/200/', 100, 'Group', 'MEMBER_OF', 200, 'Group', ['visibility_level:public'], ['visibility_level:public']),
+         ('1/300/', 200, 'Group', 'MEMBER_OF', 300, 'Group', ['visibility_level:public'], ['visibility_level:public']),
+         ('1/100/', 100, 'Group', 'CONTAINS', 1000, 'Project', [], []),
+         ('1/101/', 101, 'Group', 'CONTAINS', 1001, 'Project', [], []),
+         ('1/102/', 102, 'Group', 'CONTAINS', 1002, 'Project', [], []),
+         ('1/100/1000/', 1, 'User', 'AUTHORED', 2000, 'MergeRequest', [], []),
+         ('1/101/1001/', 2, 'User', 'AUTHORED', 2001, 'MergeRequest', [], []),
+         ('1/102/1002/', 3, 'User', 'AUTHORED', 2002, 'MergeRequest', [], []),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3000, 'Note', [], []),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3002, 'Note', [], []),
+         ('1/100/1000/', 2000, 'MergeRequest', 'HAS_NOTE', 3003, 'Note', [], []),
+         ('1/101/1001/', 2001, 'MergeRequest', 'HAS_NOTE', 3001, 'Note', [], [])",
         t("gl_edge")
     ))
     .await;

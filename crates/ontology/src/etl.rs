@@ -66,6 +66,10 @@ pub enum EtlConfig {
         deleted: String,
         order_by: Vec<String>,
         traversal_path_filter: Option<String>,
+        /// Alias of the main table in the `from` JOIN expression.
+        /// Used to qualify bare column references (e.g. `id`) that would
+        /// otherwise be ambiguous across JOINed tables.
+        table_alias: Option<String>,
         /// Edges keyed by source column name. Each column may declare one or
         /// more mappings.
         edges: BTreeMap<String, Vec<EdgeMapping>>,
@@ -91,6 +95,15 @@ impl EtlConfig {
         match self {
             EtlConfig::Table { watermark, .. } => watermark.as_str(),
             EtlConfig::Query { watermark, .. } => watermark.as_str(),
+        }
+    }
+
+    /// Returns the main table alias for Query-type ETLs, if set.
+    /// Table-type ETLs always return `None` (single table, no ambiguity).
+    pub fn table_alias(&self) -> Option<&str> {
+        match self {
+            EtlConfig::Table { .. } => None,
+            EtlConfig::Query { table_alias, .. } => table_alias.as_deref(),
         }
     }
 
@@ -157,6 +170,7 @@ mod tests {
             deleted: "_siphon_deleted".to_string(),
             order_by: vec!["id".to_string()],
             traversal_path_filter: traversal_path_filter.map(String::from),
+            table_alias: None,
             edges: BTreeMap::new(),
         }
     }

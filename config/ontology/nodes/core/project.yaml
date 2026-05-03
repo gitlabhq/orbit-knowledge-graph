@@ -117,6 +117,7 @@ etl:
     ) route ON project.id = route.source_id
   traversal_path_filter: "startsWith(traversal_paths.traversal_path, {traversal_path:String})"
   watermark: project._siphon_replicated_at
+  table_alias: project
   deleted: project._siphon_deleted
   edges:
     creator_id:
