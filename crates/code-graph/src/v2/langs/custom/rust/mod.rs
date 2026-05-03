@@ -536,18 +536,29 @@ impl RustImportedSymbolLookup {
         name: &str,
         source_node: NodeIndex,
     ) -> Option<NodeIndex> {
-        let visible_imports = self
+        let entries = self
             .imports_by_file_and_name
             .get(&(file_path.to_string(), name.to_string()))?
+            .as_slice();
+
+        let scoped_imports = entries
             .iter()
-            .filter(|entry| {
-                entry
-                    .enclosing_definition
-                    .is_none_or(|definition| definition == source_node)
-            })
+            .filter(|entry| entry.enclosing_definition == Some(source_node))
             .map(|entry| entry.node)
             .collect::<Vec<_>>();
-        (visible_imports.len() == 1).then(|| visible_imports[0])
+        if scoped_imports.len() == 1 {
+            return Some(scoped_imports[0]);
+        }
+        if scoped_imports.len() > 1 {
+            return None;
+        }
+
+        let top_level_imports = entries
+            .iter()
+            .filter(|entry| entry.enclosing_definition.is_none())
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        (top_level_imports.len() == 1).then(|| top_level_imports[0])
     }
 }
 
@@ -576,9 +587,15 @@ fn rust_import_path_is_external(path: &str) -> bool {
         || path == "crate"
         || path == "self"
         || path == "super"
+        || path == "std"
+        || path == "core"
+        || path == "alloc"
         || path.starts_with("crate::")
         || path.starts_with("self::")
-        || path.starts_with("super::"))
+        || path.starts_with("super::")
+        || path.starts_with("std::")
+        || path.starts_with("core::")
+        || path.starts_with("alloc::"))
 }
 
 struct ResolvedEdgeCollector<'a> {

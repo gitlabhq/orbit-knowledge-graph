@@ -46,6 +46,7 @@ fixtures:
       use external_actions::*;
       use external_macros as macros;
       use serde_json::json;
+      use top_level_actions::shared;
       use tracing::info;
 
       pub fn module_alias_call() {
@@ -87,6 +88,15 @@ fixtures:
           scoped();
       }
 
+      pub fn top_level_import_user() {
+          shared();
+      }
+
+      pub fn scoped_import_shadows_top_level() {
+          use other_external_actions::shared;
+          shared();
+      }
+
       pub fn wildcard_external_import_user() {
           globbed();
       }
@@ -94,6 +104,14 @@ fixtures:
       pub fn builtin_macro_and_std_calls() {
           println!("debug");
           let _ = Vec::<u8>::new();
+      }
+
+      pub fn explicit_std_import_user() {
+          use core::mem::align_of;
+          use std::mem::size_of;
+
+          let _ = size_of::<usize>();
+          let _ = align_of::<usize>();
       }
 
       pub fn qualified_external_imported_calls() {
@@ -181,6 +199,18 @@ tests:
       - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
       - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
 
+  - name: "function-scoped Rust imports shadow top-level imports with the same name"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "scoped_import_shadows_top_level", path: "other_external_actions::shared", name: "shared" } }
+      - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
+
   - name: "qualified Rust external imports target imported symbols"
     query: |
       MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
@@ -215,6 +245,7 @@ tests:
       WHERE caller.name IN [
         'external_only',
         'builtin_macro_and_std_calls',
+        'explicit_std_import_user',
         'wildcard_external_import_user'
       ]
         AND e.edge_kind = 'Calls'

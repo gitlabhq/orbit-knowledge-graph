@@ -490,27 +490,28 @@ fn add_unresolved_imported_call_edges(
     for (source_path, calls) in calls_by_file {
         for call in calls {
             let JsCallTarget::ImportedCall { imported_call } = &call.callee;
-            let Some(source_node) = source_definition_node_for_call(lookup, source_path, call)
-            else {
+            let Some(source) = source_node_for_call(lookup, source_path, call) else {
                 continue;
             };
-            let Some(target_node) =
-                import_lookup.unresolved_import_node(source_path, &imported_call.fallback_binding)
-            else {
+            let Some(target_node) = import_lookup.unresolved_import_node(
+                source_path,
+                &imported_call.fallback_binding,
+                source.definition_node,
+            ) else {
                 continue;
             };
 
             add_edge(
                 graph,
                 seen,
-                source_node,
+                source.node,
                 target_node,
                 GraphEdge {
                     relationship: Relationship {
                         edge_kind: EdgeKind::Calls,
-                        source_node: NodeKind::Definition,
+                        source_node: source.node_kind,
                         target_node: NodeKind::ImportedSymbol,
-                        source_def_kind: Some(graph.def(source_node).kind),
+                        source_def_kind: source.def_kind,
                         target_def_kind: None,
                     },
                 },
@@ -519,17 +520,43 @@ fn add_unresolved_imported_call_edges(
     }
 }
 
-fn source_definition_node_for_call(
+struct SourceCallNode {
+    node: NodeIndex,
+    node_kind: NodeKind,
+    def_kind: Option<DefKind>,
+    definition_node: Option<NodeIndex>,
+}
+
+fn source_node_for_call(
     lookup: &GraphLookup,
     source_path: &str,
     call: &JsCallEdge,
-) -> Option<NodeIndex> {
+) -> Option<SourceCallNode> {
     match call.caller {
-        JsCallSite::Definition { range, .. } => lookup
-            .def_by_file_and_range
-            .get(&(source_path.to_string(), range.byte_offset))
-            .copied(),
-        JsCallSite::ModuleLevel => None,
+        JsCallSite::Definition { range, .. } => {
+            let node = lookup
+                .def_by_file_and_range
+                .get(&(source_path.to_string(), range.byte_offset))
+                .copied()?;
+            Some(SourceCallNode {
+                node,
+                node_kind: NodeKind::Definition,
+                def_kind: Some(lookup.def_kind_by_node[&node]),
+                definition_node: Some(node),
+            })
+        }
+        JsCallSite::ModuleLevel => {
+            lookup
+                .file_by_path
+                .get(source_path)
+                .copied()
+                .map(|node| SourceCallNode {
+                    node,
+                    node_kind: NodeKind::File,
+                    def_kind: None,
+                    definition_node: None,
+                })
+        }
     }
 }
 
@@ -558,7 +585,12 @@ struct ImportSymbolKey {
 
 #[derive(Default)]
 struct ImportedSymbolLookup {
-    unresolved_by_key: FxHashMap<ImportSymbolKey, NodeIndex>,
+    unresolved_by_key: FxHashMap<ImportSymbolKey, Vec<ImportedSymbolEntry>>,
+}
+
+struct ImportedSymbolEntry {
+    node: NodeIndex,
+    enclosing_definition: Option<NodeIndex>,
 }
 
 impl ImportedSymbolLookup {
@@ -572,10 +604,23 @@ impl ImportedSymbolLookup {
             {
                 continue;
             }
-            lookup.unresolved_by_key.insert(
-                import_symbol_key_for_graph_import(graph, file_path.as_ref(), import),
-                node,
+            let enclosing_definition = graph.enclosing_definition_for_range(
+                file_path.as_ref(),
+                import.range.byte_offset.0 as u32,
+                import.range.byte_offset.1 as u32,
             );
+            lookup
+                .unresolved_by_key
+                .entry(import_symbol_key_for_graph_import(
+                    graph,
+                    file_path.as_ref(),
+                    import,
+                ))
+                .or_default()
+                .push(ImportedSymbolEntry {
+                    node,
+                    enclosing_definition,
+                });
         }
         lookup
     }
@@ -584,10 +629,32 @@ impl ImportedSymbolLookup {
         &self,
         source_path: &str,
         binding: &JsImportedBinding,
+        source_definition: Option<NodeIndex>,
     ) -> Option<NodeIndex> {
-        self.unresolved_by_key
-            .get(&import_symbol_key_for_binding(source_path, binding))
-            .copied()
+        let entries = self
+            .unresolved_by_key
+            .get(&import_symbol_key_for_binding(source_path, binding))?;
+
+        if let Some(source_definition) = source_definition {
+            let scoped = entries
+                .iter()
+                .filter(|entry| entry.enclosing_definition == Some(source_definition))
+                .map(|entry| entry.node)
+                .collect::<Vec<_>>();
+            if scoped.len() == 1 {
+                return Some(scoped[0]);
+            }
+            if scoped.len() > 1 {
+                return None;
+            }
+        }
+
+        let unscoped = entries
+            .iter()
+            .filter(|entry| entry.enclosing_definition.is_none())
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        (unscoped.len() == 1).then(|| unscoped[0])
     }
 }
 
@@ -641,6 +708,7 @@ fn import_symbol_key_for_binding(
 struct GraphLookup {
     file_by_path: FxHashMap<String, NodeIndex>,
     def_by_file_and_range: FxHashMap<(String, (usize, usize)), NodeIndex>,
+    def_kind_by_node: FxHashMap<NodeIndex, DefKind>,
 }
 
 impl GraphLookup {
@@ -656,6 +724,7 @@ impl GraphLookup {
             lookup
                 .def_by_file_and_range
                 .insert((file_path, definition.range.byte_offset), node);
+            lookup.def_kind_by_node.insert(node, definition.kind);
         }
 
         lookup

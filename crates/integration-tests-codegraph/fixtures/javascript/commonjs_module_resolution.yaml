@@ -144,6 +144,11 @@ fixtures:
         firstTrack();
         secondTrack();
       }
+  - path: external/module_level.js
+    content: |
+      const { init } = require('external-sdk');
+
+      init();
   - path: external/shadowed.js
     content: |
       const { track } = require('external-tracker');
@@ -337,6 +342,16 @@ tests:
       - { row_count: 2 }
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
+
+  - name: Module-level external CommonJS calls target imported symbols from the file
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "external/module_level.js", path: "external-sdk", name: "init" } }
 
   - name: Resolved CommonJS calls do not emit imported-symbol fallback
     query: |
