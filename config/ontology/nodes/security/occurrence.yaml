@@ -183,5 +183,5 @@ storage:
     - {name: idx_description, column: description, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_cve, column: cve, type: "bloom_filter(0.01)", granularity: 1}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

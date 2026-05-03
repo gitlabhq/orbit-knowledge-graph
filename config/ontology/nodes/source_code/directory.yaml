@@ -80,5 +80,6 @@ storage:
     - {name: idx_path, column: path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_path_ngram, column: path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

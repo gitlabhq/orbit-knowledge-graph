@@ -516,7 +516,8 @@ storage:
     - {name: idx_target_branch_ngram, column: target_branch, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: reorder, name: by_state_id, order_by: [state, id]}
     - {type: reorder, name: by_project_state, order_by: [traversal_path, project_id, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

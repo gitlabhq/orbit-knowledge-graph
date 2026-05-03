@@ -114,6 +114,7 @@ storage:
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
   projections:
-    - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_pipeline_id, order_by: [pipeline_id]}
     - {type: reorder, name: by_pipeline, order_by: [traversal_path, pipeline_id, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
