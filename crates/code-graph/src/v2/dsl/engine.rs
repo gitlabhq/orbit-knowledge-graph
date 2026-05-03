@@ -22,6 +22,50 @@ pub struct ParsedDefs {
     pub imports: Vec<CanonicalImport>,
 }
 
+fn default_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
+    imp.alias.clone().or_else(|| imp.name.clone()).or_else(|| {
+        (!imp.path.is_empty()).then(|| {
+            imp.path
+                .rsplit_once(sep)
+                .map_or(imp.path.as_str(), |(_, name)| name)
+                .to_string()
+        })
+    })
+}
+
+fn import_scope_name(
+    hooks: &super::types::LanguageHooks,
+    imp: &CanonicalImport,
+    sep: &str,
+) -> Option<String> {
+    hooks
+        .import_scope_name
+        .and_then(|f| f(imp, sep))
+        .or_else(|| default_import_scope_name(imp, sep))
+}
+
+fn default_imported_target_path(imp: &CanonicalImport, sep: &str) -> Option<String> {
+    if imp.path.is_empty() {
+        return imp.name.clone();
+    }
+
+    Some(match imp.name.as_deref() {
+        Some(name) => format!("{}{}{}", imp.path, sep, name),
+        None => imp.path.clone(),
+    })
+}
+
+fn imported_target_path(
+    hooks: &super::types::LanguageHooks,
+    imp: &CanonicalImport,
+    sep: &str,
+) -> Option<String> {
+    hooks
+        .import_target_path
+        .and_then(|f| f(imp, sep))
+        .or_else(|| default_imported_target_path(imp, sep))
+}
+
 /// A ref collected during the full AST walk, with SSA reaching values
 /// already resolved to owned `ParseValue`s. Ready for cross-file
 /// resolution without re-parsing the source.
@@ -402,14 +446,22 @@ impl LanguageSpec {
                     if let Some(name_node) = child.field("name") {
                         let alias = child.field("alias").map(|a| a.text().to_string());
                         let name = name_node.text().to_string();
-                        let binding_kind =
-                            infer_import_binding_kind(Some(name.as_str()), alias.as_deref(), false);
+                        let (path, name) = if base_path.is_empty() {
+                            (name, None)
+                        } else {
+                            (base_path.clone(), Some(name))
+                        };
+                        let binding_kind = if !path.is_empty() {
+                            ImportBindingKind::Named
+                        } else {
+                            infer_import_binding_kind(name.as_deref(), alias.as_deref(), false)
+                        };
                         imports.push(CanonicalImport {
                             import_type: label,
-                            path: base_path.clone(),
+                            path,
                             binding_kind,
                             mode: ImportMode::Declarative,
-                            name: Some(name),
+                            name,
                             alias,
                             scope_fqn: None,
                             range,
@@ -427,7 +479,11 @@ impl LanguageSpec {
                     } else {
                         (base_path.clone(), Some(child_text))
                     };
-                    let binding_kind = infer_import_binding_kind(name.as_deref(), None, false);
+                    let binding_kind = if !path.is_empty() {
+                        ImportBindingKind::Named
+                    } else {
+                        infer_import_binding_kind(name.as_deref(), None, false)
+                    };
                     imports.push(CanonicalImport {
                         import_type: label,
                         binding_kind,
@@ -463,15 +519,19 @@ impl LanguageSpec {
             } else {
                 raw_path
             };
+            let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
             // `using MyApp.Models;` imports all types in the namespace).
-            let has_wildcard_child = rule.always_wildcard
-                || rule
-                    .wildcard_child_kind
-                    .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
+            // Rules that extract aliases are named imports even if the language
+            // also marks regular imports from the same AST node as wildcards.
+            let has_wildcard_child = rule
+                .wildcard_child_kind
+                .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
+            let is_wildcard_import =
+                has_wildcard_child || (rule.always_wildcard && alias.is_none());
 
-            if has_wildcard_child {
+            if is_wildcard_import {
                 // Wildcard import: path is the full extracted name, no split needed.
                 imports.push(CanonicalImport {
                     import_type: label,
@@ -491,7 +551,6 @@ impl LanguageSpec {
                 } else {
                     (full_path, rule.extract_symbol(node))
                 };
-                let alias = rule.extract_alias(node);
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
@@ -949,7 +1008,7 @@ impl LanguageSpec {
             for idx in import_count_before..state.imports.len() {
                 let imp = &state.imports[idx];
                 let import_idx = idx as u32;
-                let effective_name = imp.alias.as_deref().or(imp.name.as_deref()).unwrap_or("");
+                let effective_name = import_scope_name(&self.hooks, imp, sep);
                 trace!(
                     state.tracer,
                     ImportRecorded {
@@ -957,24 +1016,23 @@ impl LanguageSpec {
                         name: imp.name.as_deref().unwrap_or("").to_string(),
                         alias: imp.alias.clone(),
                         wildcard: imp.wildcard,
-                        ssa_name: if !imp.wildcard
-                            && !imp.path.is_empty()
-                            && !effective_name.is_empty()
-                        {
-                            Some(effective_name.to_string())
+                        ssa_name: if !imp.wildcard {
+                            effective_name.clone()
                         } else {
                             None
                         },
                         block_id: state.current_block.0,
                     }
                 );
-                if !imp.wildcard && !imp.path.is_empty() && !effective_name.is_empty() {
-                    state.import_map.insert(
-                        effective_name.to_string(),
-                        format!("{}{}{}", imp.path, sep, effective_name),
-                    );
+                if !imp.wildcard
+                    && !matches!(imp.binding_kind, ImportBindingKind::SideEffect)
+                    && let Some(effective_name) = effective_name
+                {
+                    if let Some(target_path) = imported_target_path(&self.hooks, imp, sep) {
+                        state.import_map.insert(effective_name.clone(), target_path);
+                    }
                     // Write import to SSA so alias chasing finds it
-                    let ssa_name = state.arena.alloc_str(effective_name);
+                    let ssa_name = state.arena.alloc_str(&effective_name);
                     state.ssa.write_variable(
                         ssa_name,
                         state.current_block,

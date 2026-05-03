@@ -97,12 +97,21 @@ impl<'a> ImportResolver<'a> {
             .or(import.name)
             .map(|id| self.graph.str(id))
             .unwrap_or("");
-        if symbol_name.is_empty() {
-            return vec![];
-        }
 
         let sep = self.sep();
         let imp_path = self.graph.str(import.path);
+        if symbol_name.is_empty() {
+            if imp_path.is_empty() {
+                return vec![];
+            }
+            let by_path = self
+                .graph
+                .indexes
+                .by_fqn
+                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+            return by_path.to_vec();
+        }
+
         let key = if imp_path.is_empty() {
             self.scratch.clear();
             self.scratch.push_str(symbol_name);

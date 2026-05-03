@@ -1,0 +1,59 @@
+name: "Kotlin: imported-symbol fallback matrix"
+fixtures:
+  - path: com/example/App.kt
+    content: |
+      package com.example
+
+      import external.analytics.track
+      import external.analytics.emit as fire
+
+      fun namedAndAliasedImports() {
+          track()
+          fire()
+      }
+
+  - path: com/example/WildcardApp.kt
+    content: |
+      package com.example
+
+      import external.factories.*
+
+      fun wildcardImport() {
+          MissingFactory()
+      }
+
+      fun builtinPrintln() {
+          println("debug")
+      }
+
+tests:
+  - name: "named and aliased imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.namedAndAliasedImports'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY name, alias
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "com.example.namedAndAliasedImports", path: "external.analytics", name: "emit", alias: "fire" } }
+      - { row: { caller: "com.example.namedAndAliasedImports", path: "external.analytics", name: "track", alias: null } }
+
+  - name: "wildcard imports target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.wildcardImport'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "com.example.wildcardImport", path: "external.factories", name: null, import_type: "WildcardImport" } }
+
+  - name: "println does not target wildcard imports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.builtinPrintln'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path
+    assert:
+      - { empty: true }

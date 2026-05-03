@@ -768,6 +768,8 @@ pub type ScopeHookFn = fn(
     &[std::sync::Arc<str>],
     &'static str,
 ) -> bool;
+pub type ImportScopeNameHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
+pub type ImportTargetPathHook = fn(&crate::v2::types::CanonicalImport, &str) -> Option<String>;
 
 /// Language-specific escape hatches. All fields default to `None`.
 /// The engine calls each hook if set, otherwise uses default behavior.
@@ -779,6 +781,10 @@ pub struct LanguageHooks {
     pub on_scope: Option<ScopeHookFn>,
     /// Override import extraction (e.g. Ruby require/require_relative).
     pub on_import: Option<fn(&N<'_>, &mut Vec<crate::v2::types::CanonicalImport>) -> bool>,
+    /// Override the identifier an import writes into SSA.
+    pub import_scope_name: Option<ImportScopeNameHook>,
+    /// Override the target FQN used by type-resolution import maps.
+    pub import_target_path: Option<ImportTargetPathHook>,
     /// Node kinds that are return statements. When encountered, the engine
     /// captures the SSA value of the returned expression and writes it as
     /// the enclosing function's inferred return type.
