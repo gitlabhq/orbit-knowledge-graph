@@ -37,7 +37,7 @@ Shared Namespace Is Enabled And Indexed
     Set Global Variable    ${SHARED_NAMESPACE_ID}    ${group["id"]}
     Set Global Variable    ${SHARED_NAMESPACE_NAME}    ${name}
     Enable Knowledge Graph    ${SHARED_NAMESPACE_ID}
-    Wait For Node Indexed    Group    ${SHARED_NAMESPACE_ID}    ${name}
+    Wait For Node Indexed    Group    ${SHARED_NAMESPACE_ID}    ${name}    timeout=300s
 
 Pipeline Is At Steady State
     [Documentation]    Create a canary project + issue + note in the shared namespace and wait for
