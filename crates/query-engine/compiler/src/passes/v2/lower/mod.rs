@@ -17,9 +17,8 @@ pub fn lower(input: &mut Input) -> Result<Node> {
         QueryType::Aggregation => aggregation::lower_aggregation(input),
         QueryType::Neighbors => neighbors::lower_neighbors(input),
         QueryType::PathFinding => pathfinding::lower_pathfinding(input),
-        _ => Err(QueryError::Validation(format!(
-            "unsupported query type '{}'",
-            input.query_type
-        ))),
+        // Hydration is an internal query type with its own shape —
+        // delegate to the legacy lowerer.
+        QueryType::Hydration => crate::passes::lower::lower(input),
     }
 }

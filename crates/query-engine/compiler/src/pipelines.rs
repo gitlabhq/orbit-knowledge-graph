@@ -6,7 +6,6 @@ use compiler_pipeline_macros::{PipelineEnv, PipelineState};
 use gkg_server_config::QueryConfig;
 use ontology::Ontology;
 
-use crate::CompilerPass;
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
@@ -155,29 +154,10 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
-/// V1 lower pass — used only by hydration and DuckDB pipelines that
-/// require the v1 Lower+Optimize+Deduplicate chain.
-struct LegacyLowerPass;
-
-impl<E, S> CompilerPass<E, S> for LegacyLowerPass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode,
-{
-    const NAME: &'static str = "lower";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let input = state.input_mut()?;
-        let node = crate::passes::lower::lower(input)?;
-        state.set_node(node);
-        Ok(())
-    }
-}
-
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
-/// Uses the v1 Lower+Optimize+Deduplicate chain since hydration queries
-/// have their own internal query shape.
+/// The lowerer delegates Hydration queries to the legacy lower path internally.
+/// Optimize and Deduplicate still run for hydration's CTE-based SQL shape.
 ///
 /// ```text
 /// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
@@ -185,7 +165,7 @@ where
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
-        .pass(LegacyLowerPass)
+        .pass(LowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
         .pass(DeduplicatePass)
@@ -201,7 +181,7 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
 /// ```
 pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
-        .pass(LegacyLowerPass)
+        .pass(LowerPass)
         .pass(EnforcePass)
         .pass(DuckDbCodegenPass)
         .build()
@@ -217,7 +197,7 @@ pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
         .pass(ValidatePass)
         .seal(SealJson)
         .pass(NormalizePass)
-        .pass(LegacyLowerPass)
+        .pass(LowerPass)
         .pass(EnforcePass)
         .pass(HydratePlanPass)
         .pass(DuckDbCodegenPass)
