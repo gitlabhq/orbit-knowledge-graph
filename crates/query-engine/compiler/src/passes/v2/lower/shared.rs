@@ -471,6 +471,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
+    let mut denorm_applied: HashSet<String> = HashSet::new();
 
     for (i, hop) in skeleton.hops.iter().enumerate() {
         let alias = format!("e{i}");
@@ -538,6 +539,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
             input,
             start_col,
             end_col,
+            &mut denorm_applied,
         );
         emit_node_ids_on_edge(
             &mut where_parts,
@@ -1065,11 +1067,20 @@ fn emit_denorm_tags(
     input: &Input,
     start_col: &str,
     end_col: &str,
+    applied: &mut HashSet<String>,
 ) {
     if input.compiler.denormalized_columns.is_empty() {
         return;
     }
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        // Only apply denorm tags on the first edge where this node appears.
+        // Later hops already join on the filtered IDs from the first edge,
+        // so re-applying the tag is redundant at best and incorrect when the
+        // edge type doesn't carry the tag (e.g. HAS_NOTE may not have
+        // MergeRequest state in source_tags).
+        if !applied.insert(node_alias.clone()) {
+            continue;
+        }
         if let Some(np) = nodes.get(node_alias) {
             let dir = if id_col == SOURCE_ID_COLUMN {
                 "source"
