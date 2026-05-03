@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Job, id: id }
     to_node: { type: Runner, id: id }
+    fk_column: runner_id
     description: "Job ran on this runner."
