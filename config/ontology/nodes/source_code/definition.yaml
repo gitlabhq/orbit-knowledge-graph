@@ -120,10 +120,10 @@ storage:
     - {name: fqn, type: "String", codec: ["ZSTD(3)"]}
     - {name: name, type: "String", codec: ["ZSTD(1)"]}
     - {name: definition_type, type: "LowCardinality(String)", codec: ["LZ4"]}
-    - {name: start_line, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: end_line, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: start_byte, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: end_byte, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: start_line, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: end_line, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: start_byte, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: end_byte, type: "Int64", codec: ["Delta(8)", "LZ4"]}
   indexes:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_name, column: name, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}

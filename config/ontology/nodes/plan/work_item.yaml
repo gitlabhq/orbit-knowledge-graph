@@ -150,7 +150,7 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: state, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
@@ -158,7 +158,7 @@ storage:
     - {name: confidential, type: "Bool", default: "false"}
     - {name: due_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
     - {name: start_date, type: "Nullable(Date32)", codec: ["Delta(4)", "ZSTD(1)"]}
-    - {name: weight, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: weight, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
