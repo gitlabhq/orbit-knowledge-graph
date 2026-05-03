@@ -73,8 +73,8 @@ pub async fn processes_pipelines(ctx: &TestContext) {
             (
                 5001,
                 &[
-                    "failure_reason:",
-                    "protected:",
+                    "failure_reason:null",
+                    "protected:null",
                     "source:dependency_management_security_update",
                     "status:success",
                     "tag:false",
@@ -84,7 +84,7 @@ pub async fn processes_pipelines(ctx: &TestContext) {
                 5002,
                 &[
                     "failure_reason:filtered_by_no_pipeline",
-                    "protected:",
+                    "protected:null",
                     "source:push",
                     "status:failed",
                     "tag:false",
@@ -393,8 +393,8 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         &[(
             5002,
             &[
-                "failure_reason:",
-                "protected:",
+                "failure_reason:null",
+                "protected:null",
                 "source:parent_pipeline",
                 "status:success",
                 "tag:false",
@@ -411,8 +411,8 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         &[(
             5001,
             &[
-                "failure_reason:",
-                "protected:",
+                "failure_reason:null",
+                "protected:null",
                 "source:push",
                 "status:success",
                 "tag:false",

@@ -321,7 +321,7 @@ pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
             (
                 10,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:can_be_merged",
                     "squash:false",
@@ -331,7 +331,7 @@ pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
             (
                 20,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:merged",
                     "squash:false",
@@ -386,7 +386,7 @@ pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
             (
                 10,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:merged",
                     "squash:false",
@@ -396,7 +396,7 @@ pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
             (
                 20,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:merged",
                     "squash:false",
@@ -450,7 +450,7 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
             (
                 10,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:can_be_merged",
                     "squash:false",
@@ -460,7 +460,7 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
             (
                 20,
                 &[
-                    "discussion_locked:",
+                    "discussion_locked:null",
                     "draft:false",
                     "merge_status:merged",
                     "squash:false",
