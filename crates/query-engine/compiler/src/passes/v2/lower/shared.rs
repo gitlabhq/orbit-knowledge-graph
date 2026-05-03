@@ -908,16 +908,35 @@ fn emit_node_join_inner(
 
     let dedup_cols = collect_dedup_columns(alias, np, input);
     let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols);
+
+    // Push user filters + node_ids + id_range INTO the dedup scan so
+    // ClickHouse can use them as prewhere predicates to skip granules.
+    // _deleted stays OUTSIDE (after LIMIT 1 BY) so a deleted latest
+    // version correctly suppresses the entity.
+    let mut scan_where = Vec::new();
+    for (prop, filter) in &np.filters {
+        scan_where.push(filter_to_expr(alias, prop, filter));
+    }
+    if !np.node_ids.is_empty() {
+        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+    }
+    if let Some(ref range) = np.id_range {
+        scan_where.push(id_range_predicate(alias, range));
+    }
+
     // IN-narrowing: restrict the dedup scan to IDs from the narrow CTE.
     if let Some(cte_name) = narrow_cte {
-        let in_pred = Expr::InSubquery {
+        scan_where.push(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
             cte_name: cte_name.to_string(),
             column: DEFAULT_PRIMARY_KEY.to_string(),
-        };
+        });
+    }
+
+    if let Some(combined) = Expr::conjoin(scan_where) {
         dedup_query.where_clause = match dedup_query.where_clause {
-            Some(existing) => Some(Expr::and(existing, in_pred)),
-            None => Some(in_pred),
+            Some(existing) => Some(Expr::and(existing, combined)),
+            None => Some(combined),
         };
     }
 
@@ -946,7 +965,12 @@ fn emit_node_join_inner(
     );
 
     let selects = node_select_columns(alias, np, input);
-    let wheres = node_where_predicates(alias, np);
+    // Only _deleted=false in the outer WHERE; user filters are already
+    // inside the dedup scan.
+    let wheres = vec![Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    )];
 
     Ok((joined, selects, wheres))
 }
