@@ -525,11 +525,12 @@ code-indexing-benchmark-build:
     key: "benchmark-repos-${GROUP}-v2"
     fallback_keys:
       - "benchmark-repos-${GROUP}"
+      - "benchmark-repos-${GROUP}-210ed76d4da4e7537dc26188e4e2782a08e62730"
     paths:
       - temp/
     policy: pull-push
   variables:
-    CACHE_FALLBACK_KEY: "benchmark-repos-${GROUP}-v2-protected"
+    CACHE_FALLBACK_KEY: "benchmark-repos-${GROUP}-210ed76d4da4e7537dc26188e4e2782a08e62730-protected"
     SCENARIO: index
   script:
     - |
