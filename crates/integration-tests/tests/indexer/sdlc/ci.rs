@@ -69,7 +69,10 @@ pub async fn processes_pipelines(ctx: &TestContext) {
         "Pipeline",
         "Project",
         "source_tags",
-        &[(5001, &["status:success"]), (5002, &["status:failed"])],
+        &[
+            (5001, &["failure_reason:", "protected:", "source:dependency_management_security_update", "status:success", "tag:false"]),
+            (5002, &["failure_reason:filtered_by_no_pipeline", "protected:", "source:push", "status:failed", "tag:false"]),
+        ],
     )
     .await;
 }
@@ -369,7 +372,7 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         "Pipeline",
         "Pipeline",
         "source_tags",
-        &[(5002, &["status:success"])],
+        &[(5002, &["failure_reason:", "protected:", "source:parent_pipeline", "status:success", "tag:false"])],
     )
     .await;
     assert_edge_tags_by_target(
@@ -378,7 +381,7 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         "Pipeline",
         "Pipeline",
         "target_tags",
-        &[(5001, &["status:success"])],
+        &[(5001, &["failure_reason:", "protected:", "source:push", "status:success", "tag:false"])],
     )
     .await;
 }
