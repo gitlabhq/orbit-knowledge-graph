@@ -12,6 +12,21 @@ pub async fn processes_and_transforms_groups(ctx: &TestContext) {
     create_namespace(ctx, 100, None, 0, "1/100/").await;
     create_namespace(ctx, 101, Some(100), 10, "1/100/101/").await;
     create_namespace(ctx, 102, Some(100), 20, "1/100/102/").await;
+    ctx.execute(
+        "INSERT INTO siphon_namespaces \
+         (id, name, path, type, visibility_level, parent_id, owner_id, traversal_ids, created_at, updated_at, _siphon_replicated_at) \
+         VALUES (1000, 'project-namespace', 'project-namespace', 'Project', 0, 100, 1, [1,100,1000], \
+                 '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO siphon_namespace_details (namespace_id, description) VALUES (1000, NULL)",
+    )
+    .await;
+    ctx.execute(
+        "INSERT INTO namespace_traversal_paths (id, traversal_path) VALUES (1000, '1/100/1000/')",
+    )
+    .await;
 
     namespace_handler(ctx)
         .await

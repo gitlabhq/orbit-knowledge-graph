@@ -40,8 +40,8 @@ pub async fn create_namespace_with_path(
     );
     ctx.execute(&format!(
         "INSERT INTO siphon_namespaces \
-         (id, name, path, visibility_level, parent_id, owner_id, traversal_ids, created_at, updated_at, _siphon_replicated_at) \
-         VALUES ({id}, '{path_slug}', '{path_slug}', {visibility_level}, {parent_val}, 1, \
+         (id, name, path, type, visibility_level, parent_id, owner_id, traversal_ids, created_at, updated_at, _siphon_replicated_at) \
+         VALUES ({id}, '{path_slug}', '{path_slug}', 'Group', {visibility_level}, {parent_val}, 1, \
                  {traversal_ids_str}, '2023-01-01', '2024-01-15', '2024-01-20 12:00:00')"
     ))
     .await;

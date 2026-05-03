@@ -136,12 +136,12 @@ etl:
     file.binary AS binary,
     file.generated AS generated,
     file.a_mode AS a_mode, file.b_mode AS b_mode,
-    file.traversal_path AS traversal_path,
+    diff.traversal_path AS traversal_path,
     file.relative_order AS relative_order
   from: >-
     siphon_merge_request_diff_files file
     INNER JOIN (
-      SELECT id, merge_request_id, project_id
+      SELECT id, merge_request_id, project_id, traversal_path
       FROM siphon_merge_request_diffs
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) diff ON file.merge_request_diff_id = diff.id
