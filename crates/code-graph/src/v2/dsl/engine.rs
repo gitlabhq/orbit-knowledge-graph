@@ -519,15 +519,19 @@ impl LanguageSpec {
             } else {
                 raw_path
             };
+            let alias = rule.extract_alias(node);
             // Check for wildcard: either a wildcard child node (e.g. `asterisk`
             // in `import com.example.*`) or the always_wildcard flag (e.g. C#
             // `using MyApp.Models;` imports all types in the namespace).
-            let has_wildcard_child = (rule.always_wildcard && label != "AliasedImport")
-                || rule
-                    .wildcard_child_kind
-                    .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
+            // Rules that extract aliases are named imports even if the language
+            // also marks regular imports from the same AST node as wildcards.
+            let has_wildcard_child = rule
+                .wildcard_child_kind
+                .is_some_and(|wk| node.has(Axis::Child, Match::Kind(wk)));
+            let is_wildcard_import =
+                has_wildcard_child || (rule.always_wildcard && alias.is_none());
 
-            if has_wildcard_child {
+            if is_wildcard_import {
                 // Wildcard import: path is the full extracted name, no split needed.
                 imports.push(CanonicalImport {
                     import_type: label,
@@ -547,7 +551,6 @@ impl LanguageSpec {
                 } else {
                     (full_path, rule.extract_symbol(node))
                 };
-                let alias = rule.extract_alias(node);
                 let is_wildcard = name.as_deref() == Some(rule.wildcard_symbol);
                 let binding_kind =
                     infer_import_binding_kind(name.as_deref(), alias.as_deref(), is_wildcard);
