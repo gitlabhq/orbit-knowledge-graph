@@ -9,6 +9,7 @@ use cargo_util_schemas::manifest as cargo_manifest;
 use either::Either;
 use globset::{Glob, GlobMatcher};
 use ignore::WalkBuilder;
+use petgraph::graph::NodeIndex;
 use ra_ap_cfg::CfgAtom;
 use ra_ap_hir::{
     CallableKind, ChangeWithProcMacros, HasSource, InFile, ModuleDef, PathResolution, Semantics,
@@ -42,10 +43,13 @@ pub(super) use triomphe::Arc;
 use crate::v2::config::Language;
 use crate::v2::dsl::ssa::{BlockId, ResolvedSite, SsaEngine, SsaValue};
 use crate::v2::error::{AnalyzerError, FileFault};
-use crate::v2::linker::CodeGraph;
+use crate::v2::linker::{CodeGraph, GraphEdge};
 
 use crate::v2::pipeline::{BatchTx, FileInput, LanguagePipeline, PipelineContext, PipelineError};
-use crate::v2::types::{CanonicalDefinition, CanonicalImport, DefKind, Fqn, Position, Range};
+use crate::v2::types::{
+    CanonicalDefinition, CanonicalImport, DefKind, EdgeKind, Fqn, ImportBindingKind, NodeKind,
+    Position, Range, Relationship,
+};
 
 type RustFileError = (String, AnalyzerError);
 
@@ -74,6 +78,7 @@ struct ParsedRustFile {
     definitions: Vec<CanonicalDefinition>,
     imports: Vec<CanonicalImport>,
     edge_candidates: Vec<ResolvedEdgeCandidate>,
+    unresolved_imported_calls: Vec<UnresolvedImportedCallCandidate>,
 }
 
 #[derive(Clone, Copy)]
@@ -97,6 +102,14 @@ struct ResolvedEdgeCandidate {
     target: DefinitionSite,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+struct UnresolvedImportedCallCandidate {
+    source_relative_path: String,
+    source_start: u32,
+    source_end: u32,
+    import_name: String,
+}
+
 struct ByteLineIndex {
     line_starts: Vec<usize>,
 }
@@ -107,6 +120,7 @@ struct LocalFlowIndex {
 
 struct EdgeCollectionResult {
     edge_candidates: Vec<ResolvedEdgeCandidate>,
+    unresolved_imported_calls: Vec<UnresolvedImportedCallCandidate>,
 }
 
 struct RustParseOutput {
@@ -184,6 +198,7 @@ impl LanguagePipeline for RustPipeline {
                 }
             }
         }
+        add_unresolved_imported_call_edges(&mut graph, &parsed);
         graph.finalize(tracer);
 
         btx.send_graph(graph);
@@ -352,6 +367,7 @@ fn parse_workspace_file(
             file_module_parts,
             crate_root_parts,
             edge_result.edge_candidates,
+            edge_result.unresolved_imported_calls,
             source_file,
             Some(&sema),
             Some(workspace),
@@ -407,6 +423,7 @@ fn parse_rust_file_standalone(
             file_module_parts,
             Vec::new(),
             edge_result.edge_candidates,
+            edge_result.unresolved_imported_calls,
             source_file.clone(),
             Some(&sema),
             Some(&workspace),
@@ -438,6 +455,149 @@ fn build_graph(root_path: &str, parsed: &[ParsedRustFile]) -> CodeGraph {
     graph
 }
 
+fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRustFile]) {
+    let import_lookup = RustImportedSymbolLookup::from_graph(graph);
+    let mut seen_edges = HashSet::new();
+
+    for file in parsed {
+        for call in &file.unresolved_imported_calls {
+            let Some(source_node) = graph.enclosing_definition_for_range(
+                &call.source_relative_path,
+                call.source_start,
+                call.source_end,
+            ) else {
+                continue;
+            };
+            let Some(target_node) = import_lookup.unambiguous_import_node(
+                &call.source_relative_path,
+                &call.import_name,
+                source_node,
+            ) else {
+                continue;
+            };
+            if !seen_edges.insert((source_node, target_node)) {
+                continue;
+            }
+
+            graph.graph.add_edge(
+                source_node,
+                target_node,
+                GraphEdge {
+                    relationship: Relationship {
+                        edge_kind: EdgeKind::Calls,
+                        source_node: NodeKind::Definition,
+                        target_node: NodeKind::ImportedSymbol,
+                        source_def_kind: Some(graph.def(source_node).kind),
+                        target_def_kind: None,
+                    },
+                },
+            );
+        }
+    }
+}
+
+#[derive(Default)]
+struct RustImportedSymbolLookup {
+    imports_by_file_and_name: HashMap<(String, String), Vec<RustImportedSymbolEntry>>,
+}
+
+struct RustImportedSymbolEntry {
+    node: NodeIndex,
+    enclosing_definition: Option<NodeIndex>,
+}
+
+impl RustImportedSymbolLookup {
+    fn from_graph(graph: &CodeGraph) -> Self {
+        let mut lookup = Self::default();
+        for (node, file_path, import) in graph.imports_iter() {
+            let Some(name) = rust_external_import_effective_name(graph, import) else {
+                continue;
+            };
+            let enclosing_definition = graph.enclosing_definition_for_range(
+                file_path.as_ref(),
+                import.range.byte_offset.0 as u32,
+                import.range.byte_offset.1 as u32,
+            );
+            lookup
+                .imports_by_file_and_name
+                .entry((file_path.as_ref().to_string(), name))
+                .or_default()
+                .push(RustImportedSymbolEntry {
+                    node,
+                    enclosing_definition,
+                });
+        }
+        lookup
+    }
+
+    fn unambiguous_import_node(
+        &self,
+        file_path: &str,
+        name: &str,
+        source_node: NodeIndex,
+    ) -> Option<NodeIndex> {
+        let entries = self
+            .imports_by_file_and_name
+            .get(&(file_path.to_string(), name.to_string()))?
+            .as_slice();
+
+        let scoped_imports = entries
+            .iter()
+            .filter(|entry| entry.enclosing_definition == Some(source_node))
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        if scoped_imports.len() == 1 {
+            return Some(scoped_imports[0]);
+        }
+        if scoped_imports.len() > 1 {
+            return None;
+        }
+
+        let top_level_imports = entries
+            .iter()
+            .filter(|entry| entry.enclosing_definition.is_none())
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        (top_level_imports.len() == 1).then(|| top_level_imports[0])
+    }
+}
+
+fn rust_external_import_effective_name(
+    graph: &CodeGraph,
+    import: &crate::v2::linker::GraphImport,
+) -> Option<String> {
+    if import.is_type_only
+        || import.wildcard
+        || matches!(import.binding_kind, ImportBindingKind::SideEffect)
+    {
+        return None;
+    }
+    let path = graph.str(import.path);
+    if !rust_import_path_is_external(path) {
+        return None;
+    }
+    import
+        .alias
+        .or(import.name)
+        .map(|name| graph.str(name).to_string())
+}
+
+fn rust_import_path_is_external(path: &str) -> bool {
+    !(path.is_empty()
+        || path == "crate"
+        || path == "self"
+        || path == "super"
+        || path == "std"
+        || path == "core"
+        || path == "alloc"
+        || path.starts_with("crate::")
+        || path.starts_with("self::")
+        || path.starts_with("super::")
+        || path.starts_with("std::")
+        || path.starts_with("core::")
+        || path.starts_with("alloc::"))
+}
+
 struct ResolvedEdgeCollector<'a> {
     relative_path: &'a str,
     sema: &'a Semantics<'a, RootDatabase>,
@@ -445,9 +605,11 @@ struct ResolvedEdgeCollector<'a> {
     paths_by_file_id: &'a HashMap<FileId, String>,
     local_flow: LocalFlowIndex,
     seen_edges: HashSet<ResolvedEdgeCandidate>,
+    seen_unresolved_imported_calls: HashSet<UnresolvedImportedCallCandidate>,
     seen_expanded_nodes: HashSet<SyntaxNodePtr>,
     seen_expanded_sites: HashSet<(u32, u32, u32, SyntaxKind)>,
     edges: Vec<ResolvedEdgeCandidate>,
+    unresolved_imported_calls: Vec<UnresolvedImportedCallCandidate>,
     macro_depth: u32,
     expanded_macro_nodes: usize,
 }
@@ -589,6 +751,16 @@ impl<'a> ResolvedEdgeCollector<'a> {
             targets.push(target);
         }
 
+        if targets.is_empty()
+            && !expr_resolves_to_local_callable(self.sema, &expr)
+            && let Some(import_name) = path_expr_import_name(&expr)
+        {
+            self.push_unresolved_imported_call(
+                source_range.unwrap_or_else(|| call_expr.syntax().text_range()),
+                import_name,
+            );
+        }
+
         self.push_targets(
             source_range.unwrap_or_else(|| call_expr.syntax().text_range()),
             targets,
@@ -669,6 +841,14 @@ impl<'a> ResolvedEdgeCollector<'a> {
             .and_then(|macro_def| {
                 hir_def_to_definition_site(self.db, self.paths_by_file_id, macro_def)
             });
+        if target.is_none()
+            && let Some(import_name) = macro_call.path().and_then(|path| path_import_name(&path))
+        {
+            self.push_unresolved_imported_call(
+                source_range.unwrap_or_else(|| macro_call.syntax().text_range()),
+                import_name,
+            );
+        }
         self.push_target(
             source_range.unwrap_or_else(|| macro_call.syntax().text_range()),
             target,
@@ -741,6 +921,18 @@ impl<'a> ResolvedEdgeCollector<'a> {
             self.edges.push(edge);
         }
     }
+
+    fn push_unresolved_imported_call(&mut self, call_range: TextRange, import_name: String) {
+        let edge = UnresolvedImportedCallCandidate {
+            source_relative_path: self.relative_path.to_string(),
+            source_start: u32::from(call_range.start()),
+            source_end: u32::from(call_range.end()),
+            import_name,
+        };
+        if self.seen_unresolved_imported_calls.insert(edge.clone()) {
+            self.unresolved_imported_calls.push(edge);
+        }
+    }
 }
 
 fn record_expr_is_stored_value(record_expr: &ast::RecordExpr) -> bool {
@@ -788,22 +980,83 @@ fn collect_resolved_edge_candidates(
     relative_path: &str,
 ) -> EdgeCollectionResult {
     let local_flow = build_local_flow_index(source_file, sema, db, paths_by_file_id);
-    let edge_candidates = ResolvedEdgeCollector {
+    let edge_collector = ResolvedEdgeCollector {
         relative_path,
         sema,
         db,
         paths_by_file_id,
         local_flow,
         seen_edges: HashSet::new(),
+        seen_unresolved_imported_calls: HashSet::new(),
         seen_expanded_nodes: HashSet::new(),
         seen_expanded_sites: HashSet::new(),
         edges: Vec::new(),
+        unresolved_imported_calls: Vec::new(),
         macro_depth: 0,
         expanded_macro_nodes: 0,
     }
     .collect(source_file);
+    let ResolvedEdgeCollector {
+        edges,
+        unresolved_imported_calls,
+        ..
+    } = edge_collector;
     EdgeCollectionResult {
-        edge_candidates: edge_candidates.edges,
+        edge_candidates: edges,
+        unresolved_imported_calls,
+    }
+}
+
+fn path_expr_import_name(expr: &ast::Expr) -> Option<String> {
+    let ast::Expr::PathExpr(path_expr) = expr else {
+        return None;
+    };
+    path_import_name(&path_expr.path()?)
+}
+
+fn expr_resolves_to_local_callable(sema: &Semantics<'_, RootDatabase>, expr: &ast::Expr) -> bool {
+    if sema.resolve_expr_as_callable(expr).is_some_and(|callable| {
+        matches!(
+            callable.kind(),
+            CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_)
+        )
+    }) {
+        return true;
+    }
+
+    let ast::Expr::PathExpr(path_expr) = expr else {
+        return false;
+    };
+    let Some(path) = path_expr.path() else {
+        return false;
+    };
+
+    sema.resolve_path(&path)
+        .is_some_and(path_resolution_is_local)
+        || sema.resolve_path_per_ns(&path).is_some_and(|resolution| {
+            [resolution.value_ns, resolution.type_ns, resolution.macro_ns]
+                .into_iter()
+                .flatten()
+                .any(path_resolution_is_local)
+        })
+}
+
+fn path_resolution_is_local(resolution: PathResolution) -> bool {
+    matches!(
+        resolution,
+        PathResolution::Local(_)
+            | PathResolution::TypeParam(_)
+            | PathResolution::ConstParam(_)
+            | PathResolution::SelfType(_)
+    )
+}
+
+fn path_import_name(path: &ast::Path) -> Option<String> {
+    let mut segments = path.segments();
+    let segment = segments.next()?;
+    match segment.kind()? {
+        ast::PathSegmentKind::Name(name_ref) => Some(name_ref.text().to_string()),
+        _ => None,
     }
 }
 

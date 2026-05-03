@@ -166,11 +166,14 @@ pub enum ImportedName {
 pub struct JsImportedBinding {
     pub specifier: String,
     pub imported_name: ImportedName,
+    pub fallback_imported_name: ImportedName,
+    pub import_local_name: String,
     pub resolution_mode: JsResolutionMode,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsImportedCall {
+    pub fallback_binding: JsImportedBinding,
     pub binding: JsImportedBinding,
     pub member_path: Vec<String>,
     pub invocation_kind: JsInvocationKind,
