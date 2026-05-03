@@ -13,10 +13,10 @@ pub async fn uses_watermark_for_incremental_processing(ctx: &TestContext) {
     .await;
 
     ctx.execute(
-        "INSERT INTO siphon_namespaces (id, name, path, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
+        "INSERT INTO siphon_namespaces (id, name, path, type, visibility_level, parent_id, owner_id, created_at, updated_at, _siphon_replicated_at)
         VALUES
-        (100, 'org1', 'org1', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-18 12:00:00'),
-        (101, 'new-team', 'new-team', 10, 100, NULL, '2024-01-19', '2024-01-20', '2024-01-20 12:00:00')",
+        (100, 'org1', 'org1', 'Group', 0, NULL, 1, '2023-01-01', '2024-01-15', '2024-01-18 12:00:00'),
+        (101, 'new-team', 'new-team', 'Group', 10, 100, NULL, '2024-01-19', '2024-01-20', '2024-01-20 12:00:00')",
     )
     .await;
 
