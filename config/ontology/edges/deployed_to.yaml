@@ -15,7 +15,7 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked, metric_first_contribution]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]
     to:
       id: deployment_id
       type: Deployment
