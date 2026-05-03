@@ -40,6 +40,8 @@ pub struct Hop {
     /// FK on a node table that encodes this relationship.
     /// When set, the skeleton can join node tables directly without the edge table.
     pub fk: Option<HopFk>,
+    /// Edge-level filters from the query (e.g. relationship property predicates).
+    pub filters: Vec<(String, InputFilter)>,
 }
 
 /// FK info for a hop — which node has the FK column.

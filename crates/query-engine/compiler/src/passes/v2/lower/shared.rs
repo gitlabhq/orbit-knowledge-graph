@@ -337,6 +337,7 @@ fn build_hops(input: &Input) -> Vec<Hop> {
                 min_hops: rel.min_hops,
                 max_hops: rel.max_hops,
                 fk,
+                filters: rel.filters.clone().into_iter().collect(),
             }
         })
         .collect()
@@ -512,6 +513,11 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                 start_col,
                 end_col,
             );
+        }
+
+        // Relationship-level filters (edge property predicates from the query).
+        for (prop, filter) in &hop.filters {
+            where_parts.push(filter_to_expr(&alias, prop, filter));
         }
 
         emit_denorm_tags(
@@ -698,9 +704,75 @@ fn emit_fk_star(
         }
     }
 
+    // Synthesize edge metadata columns for the graph formatter.
+    // FK paths have no edge table, but traversal queries need e0_type,
+    // e0_src, e0_src_type, e0_dst, e0_dst_type for each relationship.
+    // Aggregation queries don't need edge columns — they use GROUP BY
+    // and the enforce pass handles identity columns separately.
+    let mut edge_aliases = Vec::new();
+    if input.query_type == QueryType::Aggregation {
+        return Ok(SkeletonOutput {
+            from,
+            edge_aliases,
+            where_parts,
+            select: selects,
+            ctes,
+        });
+    }
+    for (i, hop) in skeleton.hops.iter().enumerate() {
+        let ea = format!("e{i}");
+        let fk = hop.fk.as_ref().unwrap();
+        let from_np = skeleton.nodes.get(&hop.from_node);
+        let to_np = skeleton.nodes.get(&hop.to_node);
+        let from_entity = from_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
+        let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
+        let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
+
+        // Source ID/kind and target ID/kind from the FK relationship.
+        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == hop.from_node {
+            // FK node is from_node: from.id is source, from.fk_column is target ID
+            (
+                Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
+                from_entity,
+                Expr::col(center_alias, &fk.fk_column),
+                to_entity,
+            )
+        } else {
+            // FK node is to_node: to.fk_column is source ID, from.id is target
+            (
+                Expr::col(center_alias, &fk.fk_column),
+                from_entity,
+                Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
+                to_entity,
+            )
+        };
+
+        selects.push(SelectExpr::new(
+            Expr::string(rel_type),
+            format!("{ea}_{EDGE_TYPE_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            src_id_expr,
+            format!("{ea}_{EDGE_SRC_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::string(src_kind),
+            format!("{ea}_{EDGE_SRC_TYPE_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            tgt_id_expr,
+            format!("{ea}_{EDGE_DST_SUFFIX}"),
+        ));
+        selects.push(SelectExpr::new(
+            Expr::string(tgt_kind),
+            format!("{ea}_{EDGE_DST_TYPE_SUFFIX}"),
+        ));
+        edge_aliases.push(ea);
+    }
+
     Ok(SkeletonOutput {
         from,
-        edge_aliases: vec![],
+        edge_aliases,
         where_parts,
         select: selects,
         ctes,
@@ -775,20 +847,23 @@ fn emit_filter_subquery(
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    let inner_where = node_where_predicates(alias, np);
+    // Dedup first (pick latest version per ID), THEN apply _deleted +
+    // user filters. This ensures a deleted latest version isn't skipped,
+    // which would let a stale older version leak through.
+    let dedup = build_dedup_subquery(alias, table, vec![SelectExpr::star()]);
+    let dedup_from = TableRef::Subquery {
+        query: Box::new(dedup),
+        alias: alias.to_string(),
+    };
+    let filter_where = node_where_predicates(alias, np);
 
     let inner = Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, DEFAULT_PRIMARY_KEY),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(inner_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
+        from: dedup_from,
+        where_clause: Expr::conjoin(filter_where),
         ..Default::default()
     };
 
