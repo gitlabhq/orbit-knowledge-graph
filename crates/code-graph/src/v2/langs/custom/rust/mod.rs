@@ -468,9 +468,11 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
             ) else {
                 continue;
             };
-            let Some(target_node) = import_lookup
-                .unambiguous_import_node(&call.source_relative_path, &call.import_name)
-            else {
+            let Some(target_node) = import_lookup.unambiguous_import_node(
+                &call.source_relative_path,
+                &call.import_name,
+                source_node,
+            ) else {
                 continue;
             };
             if !seen_edges.insert((source_node, target_node)) {
@@ -496,7 +498,12 @@ fn add_unresolved_imported_call_edges(graph: &mut CodeGraph, parsed: &[ParsedRus
 
 #[derive(Default)]
 struct RustImportedSymbolLookup {
-    imports_by_file_and_name: HashMap<(String, String), Vec<NodeIndex>>,
+    imports_by_file_and_name: HashMap<(String, String), Vec<RustImportedSymbolEntry>>,
+}
+
+struct RustImportedSymbolEntry {
+    node: NodeIndex,
+    enclosing_definition: Option<NodeIndex>,
 }
 
 impl RustImportedSymbolLookup {
@@ -506,20 +513,41 @@ impl RustImportedSymbolLookup {
             let Some(name) = rust_external_import_effective_name(graph, import) else {
                 continue;
             };
+            let enclosing_definition = graph.enclosing_definition_for_range(
+                file_path.as_ref(),
+                import.range.byte_offset.0 as u32,
+                import.range.byte_offset.1 as u32,
+            );
             lookup
                 .imports_by_file_and_name
                 .entry((file_path.as_ref().to_string(), name))
                 .or_default()
-                .push(node);
+                .push(RustImportedSymbolEntry {
+                    node,
+                    enclosing_definition,
+                });
         }
         lookup
     }
 
-    fn unambiguous_import_node(&self, file_path: &str, name: &str) -> Option<NodeIndex> {
-        let imports = self
+    fn unambiguous_import_node(
+        &self,
+        file_path: &str,
+        name: &str,
+        source_node: NodeIndex,
+    ) -> Option<NodeIndex> {
+        let visible_imports = self
             .imports_by_file_and_name
-            .get(&(file_path.to_string(), name.to_string()))?;
-        (imports.len() == 1).then_some(imports[0])
+            .get(&(file_path.to_string(), name.to_string()))?
+            .iter()
+            .filter(|entry| {
+                entry
+                    .enclosing_definition
+                    .is_none_or(|definition| definition == source_node)
+            })
+            .map(|entry| entry.node)
+            .collect::<Vec<_>>();
+        (visible_imports.len() == 1).then(|| visible_imports[0])
     }
 }
 
@@ -707,7 +735,8 @@ impl<'a> ResolvedEdgeCollector<'a> {
         }
 
         if targets.is_empty()
-            && let Some(import_name) = simple_path_expr_name(&expr)
+            && !expr_resolves_to_local_callable(self.sema, &expr)
+            && let Some(import_name) = path_expr_import_name(&expr)
         {
             self.push_unresolved_imported_call(
                 source_range.unwrap_or_else(|| call_expr.syntax().text_range()),
@@ -796,7 +825,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
                 hir_def_to_definition_site(self.db, self.paths_by_file_id, macro_def)
             });
         if target.is_none()
-            && let Some(import_name) = macro_call.path().and_then(|path| simple_path_name(&path))
+            && let Some(import_name) = macro_call.path().and_then(|path| path_import_name(&path))
         {
             self.push_unresolved_imported_call(
                 source_range.unwrap_or_else(|| macro_call.syntax().text_range()),
@@ -961,19 +990,53 @@ fn collect_resolved_edge_candidates(
     }
 }
 
-fn simple_path_expr_name(expr: &ast::Expr) -> Option<String> {
+fn path_expr_import_name(expr: &ast::Expr) -> Option<String> {
     let ast::Expr::PathExpr(path_expr) = expr else {
         return None;
     };
-    simple_path_name(&path_expr.path()?)
+    path_import_name(&path_expr.path()?)
 }
 
-fn simple_path_name(path: &ast::Path) -> Option<String> {
+fn expr_resolves_to_local_callable(sema: &Semantics<'_, RootDatabase>, expr: &ast::Expr) -> bool {
+    if sema.resolve_expr_as_callable(expr).is_some_and(|callable| {
+        matches!(
+            callable.kind(),
+            CallableKind::Closure(_) | CallableKind::FnPtr | CallableKind::FnImpl(_)
+        )
+    }) {
+        return true;
+    }
+
+    let ast::Expr::PathExpr(path_expr) = expr else {
+        return false;
+    };
+    let Some(path) = path_expr.path() else {
+        return false;
+    };
+
+    sema.resolve_path(&path)
+        .is_some_and(path_resolution_is_local)
+        || sema.resolve_path_per_ns(&path).is_some_and(|resolution| {
+            [resolution.value_ns, resolution.type_ns, resolution.macro_ns]
+                .into_iter()
+                .flatten()
+                .any(path_resolution_is_local)
+        })
+}
+
+fn path_resolution_is_local(resolution: PathResolution) -> bool {
+    matches!(
+        resolution,
+        PathResolution::Local(_)
+            | PathResolution::TypeParam(_)
+            | PathResolution::ConstParam(_)
+            | PathResolution::SelfType(_)
+    )
+}
+
+fn path_import_name(path: &ast::Path) -> Option<String> {
     let mut segments = path.segments();
     let segment = segments.next()?;
-    if segments.next().is_some() {
-        return None;
-    }
     match segment.kind()? {
         ast::PathSegmentKind::Name(name_ref) => Some(name_ref.text().to_string()),
         _ => None,

@@ -272,6 +272,30 @@ fixtures:
       export function inspectImports() {
         return [missingDefault(), missingNamed()];
       }
+  - path: unresolved/external_aliases.ts
+    content: |
+      import { track as firstTrack, track as secondTrack } from '@external/analytics';
+      import * as Tracking from '@external/tracking';
+
+      const emit = Tracking.emit;
+
+      export function inspectExternalAliases() {
+        firstTrack();
+        secondTrack();
+        emit();
+      }
+  - path: namespace_missing/util.ts
+    content: |
+      export function existing(): string {
+        return 'ok';
+      }
+  - path: namespace_missing/main.ts
+    content: |
+      import * as util from './util';
+
+      export function inspectMissingMember() {
+        return util.missing();
+      }
   - path: ambiguous/left.ts
     content: |
       export const shared = 'left';
@@ -564,14 +588,37 @@ tests:
 
   - name: Missing default and named export calls point at imported symbols
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'unresolved/main.ts'
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.import_type AS import_type, sym.name AS name
       ORDER BY import_type, name
     assert:
       - { row_count: 2 }
       - { row: { caller: "inspectImports", import_type: "DefaultImport", name: "default" } }
       - { row: { caller: "inspectImports", import_type: "NamedImport", name: "missingNamed" } }
+
+  - name: External aliases preserve exact imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'unresolved/external_aliases.ts'
+        AND e.edge_kind = 'Calls'
+      RETURN DISTINCT caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, alias
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "inspectExternalAliases", path: "@external/analytics", name: "track", alias: "firstTrack" } }
+      - { row: { caller: "inspectExternalAliases", path: "@external/analytics", name: "track", alias: "secondTrack" } }
+      - { row: { caller: "inspectExternalAliases", path: "@external/tracking", name: null, alias: "Tracking" } }
+
+  - name: Missing members on local namespace imports do not become external calls
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'namespace_missing/main.ts'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
 
   - name: Ambiguous star reexports do not pick an arbitrary target
     query: |

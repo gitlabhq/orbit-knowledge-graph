@@ -39,6 +39,11 @@ fixtures:
 
       use crate::dep::{Pinger, Service};
       use crate::dep as dep_mod;
+      use external_actions;
+      use external_actions as actions;
+      use external_actions::do_work;
+      use external_actions::renamed as renamed_work;
+      use external_macros as macros;
       use serde_json::json;
       use tracing::info;
 
@@ -51,6 +56,11 @@ fixtures:
           imported();
       }
 
+      pub fn local_callable_shadows_external_import() {
+          let info = || {};
+          info();
+      }
+
       pub fn external_only() {
           let _ = std::mem::size_of::<usize>();
       }
@@ -58,6 +68,28 @@ fixtures:
       pub fn external_imported_calls() {
           info!("ready");
           let _ = json!({ "ok": true });
+          do_work();
+          renamed_work();
+      }
+
+      pub fn scoped_import_user() {
+          use external_actions::scoped;
+          scoped();
+      }
+
+      pub fn another_scoped_import_user() {
+          use other_external_actions::scoped;
+          scoped();
+      }
+
+      pub fn scoped_import_out_of_scope() {
+          scoped();
+      }
+
+      pub fn qualified_external_imported_calls() {
+          external_actions::do_work();
+          actions::renamed();
+          macros::ready!();
       }
 
       pub fn fn_pointer_from_assoc() {
@@ -106,14 +138,51 @@ tests:
 
   - name: "external imported Rust calls target imported symbols"
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.name = 'external_imported_calls'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, name, alias
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "external_imported_calls", path: "external_actions::do_work", name: "do_work", alias: null } }
+      - { row: { caller: "external_imported_calls", path: "external_actions::renamed", name: "renamed", alias: "renamed_work" } }
+      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json", alias: null } }
+      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
+
+  - name: "local callable shadowing does not target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'local_callable_shadows_external_import'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "function-scoped Rust imports only affect their own function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
+        AND e.edge_kind = 'Calls'
       RETURN caller.name AS caller, sym.path AS path, sym.name AS name
-      ORDER BY path, name
+      ORDER BY caller
     assert:
       - { row_count: 2 }
-      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json" } }
-      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info" } }
+      - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
+      - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
+
+  - name: "qualified Rust external imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'qualified_external_imported_calls'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, alias
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |

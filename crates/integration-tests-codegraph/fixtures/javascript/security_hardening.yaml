@@ -123,9 +123,10 @@ tests:
 
   - name: refused aliases preserve only imported-symbol call facts
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'src/consumer.js'
         AND caller.fqn IN ['runFs', 'runProc']
+        AND e.edge_kind = 'Calls'
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
       ORDER BY caller
     assert:

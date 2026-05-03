@@ -193,8 +193,9 @@ tests:
 
   - name: Vue unresolved external namespace calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND e.edge_kind = 'Calls'
         AND sym.path = '@external/tracking'
       RETURN caller.name AS caller, sym.import_type AS import_type, sym.alias AS alias
     assert:

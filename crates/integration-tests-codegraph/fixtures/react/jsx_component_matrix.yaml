@@ -224,8 +224,9 @@ tests:
 
   - name: External React and JSX package calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
       WHERE caller.fqn = 'Home'
+        AND e.edge_kind = 'Calls'
         AND sym.path IN ['react', '@external/ui']
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
       ORDER BY path, name

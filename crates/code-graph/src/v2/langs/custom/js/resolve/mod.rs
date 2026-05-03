@@ -553,6 +553,7 @@ struct ImportSymbolKey {
     mode: ImportMode,
     binding_kind: ImportBindingKind,
     name: Option<String>,
+    alias: Option<String>,
 }
 
 #[derive(Default)]
@@ -601,6 +602,7 @@ fn import_symbol_key_for_graph_import(
         mode: import.mode,
         binding_kind: import.binding_kind,
         name: import.name.map(|name| graph.str(name).to_string()),
+        alias: import.alias.map(|alias| graph.str(alias).to_string()),
     }
 }
 
@@ -608,10 +610,19 @@ fn import_symbol_key_for_binding(
     source_path: &str,
     binding: &JsImportedBinding,
 ) -> ImportSymbolKey {
-    let (binding_kind, name) = match &binding.imported_name {
+    let (binding_kind, name) = match &binding.fallback_imported_name {
         ImportedName::Named(name) => (ImportBindingKind::Named, Some(name.clone())),
         ImportedName::Default => (ImportBindingKind::Primary, Some("default".to_string())),
         ImportedName::Namespace => (ImportBindingKind::Namespace, None),
+    };
+    let alias = match &binding.fallback_imported_name {
+        ImportedName::Named(name) => {
+            (binding.import_local_name != *name).then(|| binding.import_local_name.clone())
+        }
+        ImportedName::Default => {
+            (binding.import_local_name != "default").then(|| binding.import_local_name.clone())
+        }
+        ImportedName::Namespace => Some(binding.import_local_name.clone()),
     };
     ImportSymbolKey {
         file_path: source_path.to_string(),
@@ -622,6 +633,7 @@ fn import_symbol_key_for_binding(
         },
         binding_kind,
         name,
+        alias,
     }
 }
 

@@ -353,8 +353,9 @@ tests:
 
   - name: Next external package calls target imported symbols
     query: |
-      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
-      WHERE sym.path IN ['next/server', 'next/navigation']
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE e.edge_kind = 'Calls'
+        AND sym.path IN ['next/server', 'next/navigation']
       RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
       ORDER BY caller, path, name
     assert:
