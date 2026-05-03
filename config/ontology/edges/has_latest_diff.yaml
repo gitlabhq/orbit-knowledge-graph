@@ -5,4 +5,5 @@ description: Merge request's most recent diff snapshot (points to the latest Mer
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: MergeRequestDiff, id: id }
+    fk_column: merge_request_id
     description: "Merge request has latest diff."
