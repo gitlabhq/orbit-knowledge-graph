@@ -297,14 +297,14 @@ fn lower_edge_select(
                     })
                     .collect();
                 format!(
-                    "if(isNull({col}), '{key}:null', concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END))",
+                    "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
                     key = d.tag_key,
                     cases = cases.join(" "),
                     col = d.source_column
                 )
             }
             None => format!(
-                "if(isNull({col}), '{key}:null', concat('{key}:', CAST({col} AS VARCHAR)))",
+                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
                 key = d.tag_key,
                 col = d.source_column
             ),
