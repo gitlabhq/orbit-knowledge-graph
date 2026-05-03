@@ -212,13 +212,13 @@ storage:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
-    - {name: duration, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -228,7 +228,7 @@ storage:
     - {name: before_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: yaml_errors, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: protected, type: "Nullable(Bool)"}
-    - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
