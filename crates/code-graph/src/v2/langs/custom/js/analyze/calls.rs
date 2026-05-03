@@ -113,16 +113,7 @@ pub(super) fn imported_call_from_member_expression(
                     binding_from_identifier_reference(ctx, identifier, import_bindings)?;
                 member_path.reverse();
 
-                if matches!(binding.imported_name, ImportedName::Namespace)
-                    || matches!(
-                        (binding.resolution_mode, &binding.imported_name),
-                        (JsResolutionMode::Require, ImportedName::Default)
-                    )
-                {
-                    let first_member = member_path.first()?.clone();
-                    binding.imported_name = ImportedName::Named(first_member);
-                    member_path.remove(0);
-                }
+                retarget_imported_member_binding(&mut binding, &mut member_path)?;
 
                 return Some(JsImportedCall {
                     binding,
@@ -133,6 +124,66 @@ pub(super) fn imported_call_from_member_expression(
             _ => return None,
         }
     }
+}
+
+pub(super) fn imported_call_from_jsx_member_expression(
+    ctx: &Ctx,
+    member: &oxc::ast::ast::JSXMemberExpression<'_>,
+    import_bindings: &HashMap<SymbolId, JsImportedBinding>,
+    invocation_kind: JsInvocationKind,
+) -> Option<JsImportedCall> {
+    let mut member_path = vec![member.property.name.to_string()];
+    let mut current = &member.object;
+
+    loop {
+        match current {
+            oxc::ast::ast::JSXMemberExpressionObject::MemberExpression(parent) => {
+                member_path.push(parent.property.name.to_string());
+                current = &parent.object;
+            }
+            oxc::ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
+                let mut binding =
+                    binding_from_identifier_reference(ctx, identifier, import_bindings)?;
+                member_path.reverse();
+
+                retarget_imported_member_binding(&mut binding, &mut member_path)?;
+
+                return Some(JsImportedCall {
+                    binding,
+                    member_path,
+                    invocation_kind,
+                });
+            }
+            oxc::ast::ast::JSXMemberExpressionObject::ThisExpression(_) => return None,
+        }
+    }
+}
+
+fn retarget_imported_member_binding(
+    binding: &mut JsImportedBinding,
+    member_path: &mut Vec<String>,
+) -> Option<()> {
+    if matches!(binding.imported_name, ImportedName::Namespace) {
+        let first_member = member_path.first()?.clone();
+        binding.imported_name = if first_member == "default" {
+            ImportedName::Default
+        } else {
+            ImportedName::Named(first_member)
+        };
+        member_path.remove(0);
+        return Some(());
+    }
+
+    if matches!(
+        (binding.resolution_mode, &binding.imported_name),
+        (JsResolutionMode::Require, ImportedName::Default)
+    ) {
+        let first_member = member_path.first()?.clone();
+        binding.imported_name = ImportedName::Named(first_member);
+        member_path.remove(0);
+    }
+
+    Some(())
 }
 
 fn imported_namespace_binding_from_require_call(

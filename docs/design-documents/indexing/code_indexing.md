@@ -188,7 +188,7 @@ Example NATS KV:
 
 After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
-The extractor uses the same parsability predicate as the parser (`code_graph::v2::config::is_parsable`) before unpacking each tar entry. Entries the parser would never accept — files whose extension no language claims, paths matching a per-language exclude suffix such as `*.min.js` or `*_test.go`, and entries whose declared size exceeds the configured per-file ceiling — are dropped from the tar stream so they never touch disk. Symlinks, hardlinks, and directories bypass the filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
+The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to avoid writing obvious binary/media/archive/document/datastore blobs or oversized blobs to disk. Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
 The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
 
@@ -199,7 +199,7 @@ The reason and byte volume of skipped entries are exposed via the `gkg.indexer.c
 The `code-graph` crate now contains both the v2 pipeline stack under `src/v2/` and the preserved legacy stack under `src/legacy/`. Across those paths, code indexing currently uses several parser and analysis backends:
 
 - **Ruby** uses native Prism bindings for high-fidelity AST parsing.
-- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
+- **JavaScript and TypeScript** in the v2 custom JS pipeline use OXC for parsing and semantic analysis. The same pipeline uses parser-side SSA for local value flow and member-call resolution, treats JSX/TSX component opening elements as call sites while ignoring intrinsic tags, uses `oxc_resolver` for cross-file module resolution, honors `tsconfig.json` and `jsconfig.json` path mappings, statically evaluates explicit webpack alias modules and their local `require()` dependencies, skips minified files, and keeps ESM `import` resolution separate from CommonJS `require()` resolution so package export conditions are evaluated in the correct mode.
 - **Vue** sources are handled by extracting script blocks into virtual JavaScript or TypeScript sources and routing them through the same OXC-based JS pipeline.
 - **File-backed JS ecosystem imports** such as GraphQL, GQL, and JSON are indexed as module-like files with a synthetic primary export that resolves back to the file node. This keeps module resolution accurate for frontend repositories without pretending those assets contain parsed code definitions.
 - **Webpack alias evaluation** is deliberately partial and bounded. It only evaluates explicit local config modules, enforces file-count, byte, statement, and recursion budgets, treats `process.env` as an empty object, and allows filesystem probes such as `fs.existsSync()` only for repo-contained paths that remain under the checkout root after normalization.
@@ -215,17 +215,20 @@ For each file, the parser extracts three categories of information:
 - **Imported symbols** with their import path, identifier, optional alias, and scope.
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
 
-For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity. A second OXC-driven pass records invocation sites, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
+For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity.
+A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
 
-##### Streaming indexing pipeline
+##### Inventory-driven indexing pipeline
 
-The indexing pipeline is fully streaming: files are processed as they are discovered, with no upfront collection step. The stages are:
+The indexing pipeline uses a repository inventory as the single file list. Pipeline callers must provide the inventory; the parser grouping, structural graph, and stats all derive from that same list. The stages are:
 
-1. **Directory walking** discovers files. Because non-parsable entries were already dropped at archive-extraction time, the walker mostly sees source files only.
-2. **Extension filtering** runs the same `is_parsable` predicate as the extractor as a defence-in-depth check, then groups files by language.
-3. **Async file reads** load file contents with bounded IO concurrency.
-4. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
-5. **Analysis** groups parsed results by language and builds the graph.
+1. **Repository inventory** supplies the complete set of file entries from the Git tree. Server indexing reads this from Gitaly archive metadata for the indexed revision before extraction filters run; local CLI indexing reads present, non-ignored files from Gitalisk.
+2. **Materialized-file checks** use the inventory paths to find files that were unpacked or are present on disk and can be read by parsers and resolvers. No second directory walk runs.
+3. **Extension filtering** runs `parsable_language` over materialized files, then groups parseable files by language.
+4. **Structural graph emission** creates `Directory`, `File`, and containment edges from the repository inventory. Non-parsable files use `language = "unknown"` and do not produce definitions or imports.
+5. **Async file reads** load parseable file contents with bounded IO concurrency.
+6. **CPU-bound parsing** runs on a thread pool with a semaphore to cap parallelism based on available cores.
+7. **Analysis** groups parsed results by language and builds definition, import, call, and inheritance relationships that attach to the structural file nodes.
 
 IO reads and CPU-bound parsing are bounded independently: file reads use a concurrency limit proportional to the worker thread count, while parsing uses a semaphore sized to the number of available CPU cores. This separation prevents IO-heavy repositories from starving the parser and vice versa. The pipeline outputs a graph structure consumed by the load phase. The defaults scale with the number of available cores.
 
@@ -236,7 +239,7 @@ After parsing, the analysis phase groups results by language and builds a graph 
 | Node type | Description |
 |---|---|
 | Directory | Directory in the repository tree |
-| File | Source file with path, language, extension |
+| File | Repository file with path, language, extension. Non-parsable files use `unknown` for language. |
 | Definition | Code definition with FQN, type, source range, file path |
 | Imported symbol | Import statement with path, type, identifier, source range |
 
@@ -319,7 +322,8 @@ Tasks with no `branch` field resolve the default branch via `GET /api/v4/interna
                            |- 4. Acquire distributed lock via NATS KV
                            |- 5. Download full repository archive
                            |- 6. Run indexing pipeline
-                           |       |- File discovery (respects .gitignore)
+                           |       |- Repository file inventory
+                           |       |- Parser file discovery
                            |       |- Async file reads
                            |       |- CPU-bound parsing (bounded parallelism)
                            |       |- Analysis phase -> graph

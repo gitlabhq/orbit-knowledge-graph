@@ -87,6 +87,7 @@ properties:
       16: container_registry_push
       17: duo_workflow
       18: pipeline_execution_policy_schedule
+      19: dependency_management_security_update
 
   tag:
     type: boolean
@@ -103,7 +104,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: false
+    nullable: true
     description: "Reason the pipeline failed, if applicable."
     values:
       0: unknown_failure
@@ -118,6 +119,7 @@ properties:
       27: filtered_by_workflow_rules
       28: composite_identity_forbidden
       29: pipeline_ref_creation_failure
+      30: filtered_by_no_pipeline
 
   created_at:
     type: timestamp
@@ -217,7 +219,7 @@ storage:
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
     - {name: duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
-    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

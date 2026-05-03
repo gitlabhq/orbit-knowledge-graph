@@ -1,7 +1,8 @@
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::Arc;
 
 use async_trait::async_trait;
-use code_graph::v2::config::is_excluded_from_indexing;
+use code_graph::v2::{FileInventoryEntry, config::is_excluded_from_indexing};
 use futures::StreamExt;
 use sha2::{Digest, Sha256};
 use tokio_util::io::{StreamReader, SyncIoBridge};
@@ -25,6 +26,20 @@ pub enum RepositoryCacheError {
     EmptyArchive,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CachedRepository {
+    pub path: PathBuf,
+    pub file_inventory: Arc<[FileInventoryEntry]>,
+}
+
+impl std::ops::Deref for CachedRepository {
+    type Target = Path;
+
+    fn deref(&self) -> &Self::Target {
+        &self.path
+    }
+}
+
 #[async_trait]
 pub trait RepositoryCache: Send + Sync {
     async fn extract_archive(
@@ -32,7 +47,7 @@ pub trait RepositoryCache: Send + Sync {
         project_id: i64,
         branch: &str,
         archive_stream: ByteStream,
-    ) -> Result<PathBuf, RepositoryCacheError>;
+    ) -> Result<CachedRepository, RepositoryCacheError>;
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError>;
 }
@@ -82,7 +97,7 @@ impl RepositoryCache for LocalRepositoryCache {
         project_id: i64,
         branch: &str,
         archive_stream: ByteStream,
-    ) -> Result<PathBuf, RepositoryCacheError> {
+    ) -> Result<CachedRepository, RepositoryCacheError> {
         let repo_dir = self.repository_dir(project_id, branch);
 
         match tokio::fs::remove_dir_all(&repo_dir).await {
@@ -97,7 +112,7 @@ impl RepositoryCache for LocalRepositoryCache {
         let repo_dir_owned = repo_dir.clone();
         let max_file_size = self.max_file_size;
         let metrics = self.metrics.clone();
-        tokio::task::spawn_blocking(move || {
+        let file_inventory = tokio::task::spawn_blocking(move || {
             let bridge = SyncIoBridge::new_with_handle(reader, handle);
             extract_tar_gz_from_reader(bridge, &repo_dir_owned, |rel_path, size| {
                 if size > max_file_size {
@@ -118,7 +133,10 @@ impl RepositoryCache for LocalRepositoryCache {
             other => RepositoryCacheError::Archive(other.to_string()),
         })?;
 
-        Ok(repo_dir)
+        Ok(CachedRepository {
+            path: repo_dir,
+            file_inventory: Arc::from(file_inventory),
+        })
     }
 
     async fn invalidate(&self, project_id: i64, branch: &str) -> Result<(), RepositoryCacheError> {
@@ -385,6 +403,19 @@ mod tests {
             .extract_archive(7, "main", archive_stream(archive))
             .await
             .unwrap();
+        let inventory_paths: Vec<_> = path
+            .file_inventory
+            .iter()
+            .map(|entry| entry.path.as_str())
+            .collect();
+        assert!(
+            inventory_paths.contains(&"assets/logo.png"),
+            "filtered files should still be present in archive inventory"
+        );
+        assert!(
+            inventory_paths.contains(&"README.md"),
+            "retained non-parsable files should be present in archive inventory"
+        );
 
         // Source kept.
         assert!(path.join("src/main.rs").exists());
@@ -417,6 +448,12 @@ mod tests {
             .await
             .unwrap();
 
+        assert!(
+            path.file_inventory
+                .iter()
+                .any(|entry| entry.path == "big.rs"),
+            "oversize files should still be present in archive inventory"
+        );
         assert!(path.join("small.rs").exists());
         assert!(
             !path.join("big.rs").exists(),

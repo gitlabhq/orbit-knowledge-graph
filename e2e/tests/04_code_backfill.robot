@@ -17,8 +17,8 @@ ${RUBY_FIXTURE_DIR}     /fixtures/ruby/weather-app
 ${JAVA_FIXTURE_DIR}     /fixtures/java/weather-app
 
 # Expected fixture cardinalities (must match e2e/fixtures/*/weather-app/).
-${RUBY_FILE_COUNT}      ${5}
-${JAVA_FILE_COUNT}      ${6}
+${RUBY_FILE_COUNT}      ${8}
+${JAVA_FILE_COUNT}      ${8}
 
 
 *** Test Cases ***

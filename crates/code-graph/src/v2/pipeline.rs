@@ -2,13 +2,12 @@ use crate::v2::config::{Language, parsable_language};
 use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
-use ignore::WalkBuilder;
 use indicatif::{ProgressBar, ProgressStyle};
 use rayon::prelude::*;
 use rustc_hash::FxHashMap;
 use std::any::Any;
 use std::marker::PhantomData;
-use std::path::Path;
+use std::path::{Component, Path};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
@@ -173,13 +172,61 @@ impl LanguageContext {
 /// Wraps a channel sender, converter reference, and stat counters.
 /// Language pipelines call `send_graph()` for graph-based output
 /// or `send_raw()` for pre-built Arrow batches.
+#[derive(Clone, Copy)]
+pub struct GraphStatsCounters<'a> {
+    directories: &'a AtomicUsize,
+    files: &'a AtomicUsize,
+    definitions: &'a AtomicUsize,
+    imports: &'a AtomicUsize,
+    edges: &'a AtomicUsize,
+}
+
+impl<'a> GraphStatsCounters<'a> {
+    pub fn new(
+        directories: &'a AtomicUsize,
+        files: &'a AtomicUsize,
+        definitions: &'a AtomicUsize,
+        imports: &'a AtomicUsize,
+        edges: &'a AtomicUsize,
+    ) -> Self {
+        Self {
+            directories,
+            files,
+            definitions,
+            imports,
+            edges,
+        }
+    }
+
+    fn record_graph(self, graph: &CodeGraph) {
+        if graph.output.writes_repository_structure() {
+            self.directories
+                .fetch_add(graph.directories().count(), Ordering::Relaxed);
+            self.files
+                .fetch_add(graph.files().count(), Ordering::Relaxed);
+        }
+        self.definitions
+            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
+        self.imports
+            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
+        let emitted_edges = if graph.output.writes_repository_structure() {
+            graph.edge_count()
+        } else {
+            graph
+                .graph
+                .edge_indices()
+                .filter(|&idx| graph.graph[idx].relationship.edge_kind.as_ref() != "CONTAINS")
+                .count()
+        };
+        self.edges.fetch_add(emitted_edges, Ordering::Relaxed);
+    }
+}
+
 pub struct BatchTx<'a> {
     tx: &'a Sender<(String, RecordBatch)>,
     converter: &'a dyn GraphConverter,
     errors: &'a Mutex<Vec<PipelineError>>,
-    definitions: &'a AtomicUsize,
-    imports: &'a AtomicUsize,
-    edges: &'a AtomicUsize,
+    stats: GraphStatsCounters<'a>,
 }
 
 impl<'a> BatchTx<'a> {
@@ -187,17 +234,13 @@ impl<'a> BatchTx<'a> {
         tx: &'a Sender<(String, RecordBatch)>,
         converter: &'a dyn GraphConverter,
         errors: &'a Mutex<Vec<PipelineError>>,
-        definitions: &'a AtomicUsize,
-        imports: &'a AtomicUsize,
-        edges: &'a AtomicUsize,
+        stats: GraphStatsCounters<'a>,
     ) -> Self {
         Self {
             tx,
             converter,
             errors,
-            definitions,
-            imports,
-            edges,
+            stats,
         }
     }
 }
@@ -206,11 +249,7 @@ impl BatchTx<'_> {
     /// Count graph stats, convert to Arrow batches, and send to the
     /// writer thread. Takes ownership — graph is dropped after conversion.
     pub fn send_graph(&self, graph: CodeGraph) {
-        self.definitions
-            .fetch_add(graph.definitions().count(), Ordering::Relaxed);
-        self.imports
-            .fetch_add(graph.imports_iter().count(), Ordering::Relaxed);
-        self.edges.fetch_add(graph.edge_count(), Ordering::Relaxed);
+        self.stats.record_graph(&graph);
         let batches = match self.converter.convert(graph) {
             Ok(batches) => batches,
             Err(error) => {
@@ -252,6 +291,40 @@ impl BatchTx<'_> {
     }
 }
 
+fn write_graph_direct(
+    graph: CodeGraph,
+    converter: &dyn GraphConverter,
+    sink: &dyn BatchSink,
+    errors: &Mutex<Vec<PipelineError>>,
+    stats: GraphStatsCounters<'_>,
+) {
+    stats.record_graph(&graph);
+    let batches = match converter.convert(graph) {
+        Ok(batches) => batches,
+        Err(error) => {
+            errors.lock().unwrap().push(
+                crate::v2::error::CodeGraphError::ArrowConversion {
+                    message: error.to_string(),
+                }
+                .into(),
+            );
+            return;
+        }
+    };
+    for (table, batch) in batches {
+        if let Err(error) = sink.write_batch(&table, &batch) {
+            errors.lock().unwrap().push(
+                crate::v2::error::CodeGraphError::SinkWrite {
+                    table,
+                    message: error.to_string(),
+                }
+                .into(),
+            );
+            return;
+        }
+    }
+}
+
 /// Trait for language-specific pipeline execution.
 ///
 /// All pipelines stream their output through a `BatchTx` handle.
@@ -271,7 +344,6 @@ pub struct PipelineConfig {
     /// Max language-supported files accepted for one pipeline run.
     /// 0 = no limit.
     pub max_files: usize,
-    pub respect_gitignore: bool,
     pub cancel: CancellationToken,
     /// Rayon threads per language. 0 = use all available cores.
     pub worker_threads: usize,
@@ -283,6 +355,10 @@ pub struct PipelineConfig {
     /// unless the language's own DSL rules specify a different value.
     /// `None` = no global timeout (language rules may still set one).
     pub per_file_timeout: Option<std::time::Duration>,
+    /// Internal switch set by `Pipeline::run_with_tracer` so parser graphs only
+    /// emit parsed nodes and relationships while a separate structural graph
+    /// owns repository file/directory rows.
+    pub emit_file_inventory_graph: bool,
 }
 
 impl Default for PipelineConfig {
@@ -290,13 +366,19 @@ impl Default for PipelineConfig {
         Self {
             max_file_size: 1_000_000,
             max_files: 0,
-            respect_gitignore: true,
             cancel: CancellationToken::new(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout: None,
+            emit_file_inventory_graph: false,
         }
     }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct FileInventoryEntry {
+    pub path: String,
+    pub size: u64,
 }
 
 pub struct PipelineResult {
@@ -311,6 +393,8 @@ pub struct PipelineResult {
 pub struct PipelineStats {
     pub files_discovered: usize,
     pub bytes_discovered: u64,
+    pub directories_indexed: usize,
+    pub files_indexed: usize,
     pub files_parsed: usize,
     pub files_skipped: usize,
     pub definitions_count: usize,
@@ -375,11 +459,19 @@ pub struct Pipeline;
 impl Pipeline {
     pub fn run(
         root: &Path,
+        file_inventory: Arc<[FileInventoryEntry]>,
         config: PipelineConfig,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
-        Self::run_with_tracer(root, config, Tracer::new(false), converter, sink)
+        Self::run_with_tracer(
+            root,
+            file_inventory,
+            config,
+            Tracer::new(false),
+            converter,
+            sink,
+        )
     }
 
     /// Run the pipeline. Each language gets its own CPU thread and a
@@ -390,33 +482,29 @@ impl Pipeline {
     /// Blocks until all languages finish processing and writing.
     pub fn run_with_tracer(
         root: &Path,
-        config: PipelineConfig,
+        file_inventory: Arc<[FileInventoryEntry]>,
+        mut config: PipelineConfig,
         tracer: Tracer,
         converter: Arc<dyn GraphConverter>,
         sink: Arc<dyn BatchSink>,
     ) -> PipelineResult {
         let root_str = root.to_string_lossy().to_string();
+        config.emit_file_inventory_graph = true;
 
-        // 1. Walk filesystem, group files by language
-        let pb_discover = spinner("Discovering files...");
-        let files_by_language = Self::walk_and_group(root, &config);
-        let total_files: usize = files_by_language.values().map(|f| f.len()).sum();
-        let total_bytes: u64 = files_by_language
-            .values()
-            .flatten()
-            .filter_map(|path| {
-                root.join(path)
-                    .metadata()
-                    .ok()
-                    .map(|metadata| metadata.len())
-            })
-            .sum();
+        // 1. Normalize the repository inventory, then group parseable files by language.
+        let pb_discover = spinner("Preparing file inventory...");
+        let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
+        let (files_by_language, parsed_file_languages) =
+            group_parseable_inventory(root, &file_inventory, &config);
+        let total_files = file_inventory.len();
+        let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
+        let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
         let lang_summary: Vec<String> = files_by_language
             .iter()
             .map(|(l, f)| format!("{l}: {}", f.len()))
             .collect();
         pb_discover.finish_with_message(format!(
-            "Found {total_files} files ({})",
+            "Found {total_files} files, {parsable_files} parseable ({})",
             lang_summary.join(", ")
         ));
 
@@ -436,12 +524,32 @@ impl Pipeline {
             0 => 2,
             n => n,
         };
+        let directories_count = AtomicUsize::new(0);
+        let files_count = AtomicUsize::new(0);
         let files_parsed = AtomicUsize::new(0);
         let files_skipped = AtomicUsize::new(0);
         let definitions_count = AtomicUsize::new(0);
         let imports_count = AtomicUsize::new(0);
         let edges_count = AtomicUsize::new(0);
         let all_errors = std::sync::Mutex::new(Vec::<PipelineError>::new());
+
+        if !file_inventory.is_empty() {
+            let structural_graph =
+                Self::build_file_inventory_graph(root, &file_inventory, &parsed_file_languages);
+            write_graph_direct(
+                structural_graph,
+                converter.as_ref(),
+                sink.as_ref(),
+                &all_errors,
+                GraphStatsCounters::new(
+                    &directories_count,
+                    &files_count,
+                    &definitions_count,
+                    &imports_count,
+                    &edges_count,
+                ),
+            );
+        }
 
         // Bounded channel as a semaphore: N permits = N concurrent languages
         let (sem_tx, sem_rx) = crossbeam_channel::bounded::<()>(max_langs);
@@ -460,6 +568,8 @@ impl Pipeline {
                 let sem_tx = &sem_tx;
                 let files_parsed = &files_parsed;
                 let files_skipped = &files_skipped;
+                let directories_count = &directories_count;
+                let files_count = &files_count;
                 let definitions_count = &definitions_count;
                 let imports_count = &imports_count;
                 let edges_count = &edges_count;
@@ -519,9 +629,13 @@ impl Pipeline {
                         tx: &tx,
                         converter: converter.as_ref(),
                         errors: all_errors,
-                        definitions: definitions_count,
-                        imports: imports_count,
-                        edges: edges_count,
+                        stats: GraphStatsCounters::new(
+                            directories_count,
+                            files_count,
+                            definitions_count,
+                            imports_count,
+                            edges_count,
+                        ),
                     };
 
                     tracing::info!(
@@ -617,6 +731,8 @@ impl Pipeline {
             stats: PipelineStats {
                 files_discovered: total_files,
                 bytes_discovered: total_bytes,
+                directories_indexed: directories_count.into_inner(),
+                files_indexed: files_count.into_inner(),
                 files_parsed: files_parsed.into_inner(),
                 files_skipped: files_skipped.into_inner(),
                 definitions_count: definitions_count.into_inner(),
@@ -631,56 +747,102 @@ impl Pipeline {
         }
     }
 
-    fn walk_and_group(root: &Path, config: &PipelineConfig) -> FxHashMap<Language, Vec<FileInput>> {
-        let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
-        let mut accepted_files = 0usize;
+    #[cfg(test)]
+    fn group_inventory(
+        root: &Path,
+        inventory: &[FileInventoryEntry],
+        config: &PipelineConfig,
+    ) -> FxHashMap<Language, Vec<FileInput>> {
+        group_parseable_inventory(root, inventory, config).0
+    }
 
-        let walker = WalkBuilder::new(root)
-            .git_ignore(config.respect_gitignore)
-            .hidden(true)
-            .build();
-
-        for entry in walker.filter_map(|result| match result {
-            Ok(entry) => Some(entry),
-            Err(e) => {
-                tracing::debug!(error = %e, "directory walk error, skipping entry");
-                None
-            }
-        }) {
-            if !entry.file_type().is_some_and(|ft| ft.is_file()) {
-                continue;
-            }
-
-            let path = entry.path();
-
-            if let Ok(metadata) = path.metadata()
-                && metadata.len() > config.max_file_size
-            {
-                continue;
-            }
-
-            let rel_path = path.strip_prefix(root).unwrap_or(path);
-            let Some(lang) = parsable_language(rel_path) else {
-                continue;
-            };
-
-            if config.max_files > 0 && accepted_files >= config.max_files {
-                break;
-            }
-
-            // Verify file is readable, but don't load yet.
-            if !path.is_file() {
-                continue;
-            }
-
-            accepted_files += 1;
-            groups
-                .entry(lang)
-                .or_default()
-                .push(rel_path.to_string_lossy().to_string());
+    fn build_file_inventory_graph(
+        root: &Path,
+        inventory: &[FileInventoryEntry],
+        parsed_file_languages: &FxHashMap<String, Language>,
+    ) -> CodeGraph {
+        let mut graph = CodeGraph::new_with_root(root.to_string_lossy().to_string());
+        for entry in inventory {
+            let language = parsed_file_languages.get(&entry.path).copied();
+            graph.add_unparsed_file(&entry.path, language, entry.size);
         }
 
-        groups
+        graph.drop_construction_indexes();
+        graph
+    }
+}
+
+fn group_parseable_inventory(
+    root: &Path,
+    inventory: &[FileInventoryEntry],
+    config: &PipelineConfig,
+) -> (
+    FxHashMap<Language, Vec<FileInput>>,
+    FxHashMap<String, Language>,
+) {
+    let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+    let mut parsed_file_languages = FxHashMap::default();
+    let mut accepted_files = 0usize;
+
+    for entry in inventory {
+        if entry.size > config.max_file_size {
+            continue;
+        }
+
+        let rel_path = Path::new(&entry.path);
+        let Some(lang) = parsable_language(rel_path) else {
+            continue;
+        };
+
+        if config.max_files > 0 && accepted_files >= config.max_files {
+            continue;
+        }
+
+        if !root.join(rel_path).is_file() {
+            continue;
+        }
+
+        accepted_files += 1;
+        parsed_file_languages.insert(entry.path.clone(), lang);
+        groups.entry(lang).or_default().push(entry.path.clone());
+    }
+
+    (groups, parsed_file_languages)
+}
+
+fn canonical_file_inventory(
+    entries: impl IntoIterator<Item = FileInventoryEntry>,
+) -> Vec<FileInventoryEntry> {
+    let mut by_path = FxHashMap::default();
+    for entry in entries {
+        let Some(path) = normalize_inventory_path(&entry.path) else {
+            continue;
+        };
+        by_path.entry(path).or_insert(entry.size);
+    }
+
+    let mut entries: Vec<_> = by_path
+        .into_iter()
+        .map(|(path, size)| FileInventoryEntry { path, size })
+        .collect();
+    entries.sort_by(|a, b| a.path.cmp(&b.path));
+    entries
+}
+
+fn normalize_inventory_path(path: &str) -> Option<String> {
+    let mut parts = Vec::new();
+    for component in Path::new(path).components() {
+        match component {
+            Component::Normal(part) => parts.push(part.to_string_lossy().into_owned()),
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => return None,
+        }
+    }
+
+    if parts.is_empty() {
+        None
+    } else {
+        Some(parts.join("/"))
     }
 }
 
@@ -841,6 +1003,9 @@ where
 
         let mut graph =
             CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
+        if ctx.config.emit_file_inventory_graph {
+            graph.mark_parsed_only();
+        }
         let mut total_defs = 0usize;
         let mut total_imports = 0usize;
         let mut files_with_refs: Vec<Option<FileWithRefs>> =
@@ -1153,11 +1318,18 @@ mod tests {
         });
         let capture = Arc::new(TestCapture::new());
         let (tx, _rx) = crossbeam_channel::unbounded();
+        let dirs = AtomicUsize::new(0);
+        let files = AtomicUsize::new(0);
         let defs = AtomicUsize::new(0);
         let imps = AtomicUsize::new(0);
         let edgs = AtomicUsize::new(0);
         let errors = Mutex::new(Vec::new());
-        let btx = BatchTx::new(&tx, capture.as_ref(), &errors, &defs, &imps, &edgs);
+        let btx = BatchTx::new(
+            &tx,
+            capture.as_ref(),
+            &errors,
+            GraphStatsCounters::new(&dirs, &files, &defs, &imps, &edgs),
+        );
         crate::v2::registry::dispatch_language(language, &[path.to_string()], &ctx, &btx)
             .unwrap_or_else(|| panic!("Language {language} not supported"))
             .unwrap_or_else(|e| panic!("Failed to parse: {e:?}"));
@@ -1167,14 +1339,29 @@ mod tests {
     }
 
     #[test]
-    fn walk_and_group_respects_max_files() {
+    fn inventory_grouping_respects_max_files() {
         let dir = tempfile::tempdir().expect("temp dir");
         std::fs::write(dir.path().join("a.java"), "class A {}").expect("write a");
         std::fs::write(dir.path().join("b.java"), "class B {}").expect("write b");
         std::fs::write(dir.path().join("c.java"), "class C {}").expect("write c");
 
-        let groups = Pipeline::walk_and_group(
+        let inventory = [
+            FileInventoryEntry {
+                path: "a.java".into(),
+                size: 10,
+            },
+            FileInventoryEntry {
+                path: "b.java".into(),
+                size: 10,
+            },
+            FileInventoryEntry {
+                path: "c.java".into(),
+                size: 10,
+            },
+        ];
+        let groups = Pipeline::group_inventory(
             dir.path(),
+            &inventory,
             &PipelineConfig {
                 max_files: 2,
                 ..PipelineConfig::default()
@@ -1183,6 +1370,112 @@ mod tests {
         let accepted = groups.values().map(Vec::len).sum::<usize>();
 
         assert_eq!(accepted, 2);
+    }
+
+    #[test]
+    fn file_inventory_emits_unparsed_file_nodes_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::create_dir_all(root.join("src")).unwrap();
+        std::fs::write(root.join("src/main.py"), "def hello(): pass\n").unwrap();
+
+        let inventory = vec![
+            FileInventoryEntry {
+                path: "src/main.py".into(),
+                size: 17,
+            },
+            FileInventoryEntry {
+                path: "README.md".into(),
+                size: 12,
+            },
+            FileInventoryEntry {
+                path: "./README.md".into(),
+                size: 12,
+            },
+            FileInventoryEntry {
+                path: "config/app.yml".into(),
+                size: 9,
+            },
+            FileInventoryEntry {
+                path: "assets/logo.png".into(),
+                size: 128,
+            },
+            FileInventoryEntry {
+                path: "vendor/jquery.min.js".into(),
+                size: 256,
+            },
+        ];
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(inventory),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0, "Should have no errors");
+        assert_eq!(result.stats.files_discovered, 5);
+        assert_eq!(result.stats.files_indexed, 5);
+        assert_eq!(result.stats.files_parsed, 1);
+
+        let graphs = capture.take();
+        let mut structural_files: Vec<_> = graphs
+            .iter()
+            .filter(|g| g.output.writes_repository_structure())
+            .flat_map(|g| {
+                g.files()
+                    .map(|(_, file)| (file.path.clone(), file.language_name()))
+            })
+            .collect();
+        structural_files.sort();
+
+        assert_eq!(
+            structural_files,
+            vec![
+                ("README.md".into(), "unknown"),
+                ("assets/logo.png".into(), "unknown"),
+                ("config/app.yml".into(), "unknown"),
+                ("src/main.py".into(), "python"),
+                ("vendor/jquery.min.js".into(), "unknown"),
+            ]
+        );
+    }
+
+    #[test]
+    fn supplied_inventory_is_the_only_file_list() {
+        let tmp = tempfile::tempdir().unwrap();
+        let root = tmp.path();
+        std::fs::write(root.join("listed.py"), "def listed(): pass\n").unwrap();
+        std::fs::write(root.join("unlisted.py"), "def unlisted(): pass\n").unwrap();
+
+        let capture = Arc::new(TestCapture::new());
+        let result = Pipeline::run_with_tracer(
+            root,
+            Arc::from(vec![FileInventoryEntry {
+                path: "listed.py".into(),
+                size: 19,
+            }]),
+            PipelineConfig::default(),
+            crate::v2::trace::Tracer::new(false),
+            capture.clone(),
+            Arc::new(NullSink),
+        );
+
+        assert_eq!(result.errors.len(), 0);
+        assert_eq!(result.stats.files_discovered, 1);
+        assert_eq!(result.stats.files_indexed, 1);
+        assert_eq!(result.stats.files_parsed, 1);
+
+        let structural_files: Vec<_> = capture
+            .take()
+            .iter()
+            .filter(|g| g.output.writes_repository_structure())
+            .flat_map(|g| g.files().map(|(_, file)| file.path.clone()))
+            .collect();
+        assert_eq!(structural_files, vec!["listed.py".to_string()]);
     }
 
     // ── Python fixture ──────────────────────────────────────────────
@@ -1342,6 +1635,24 @@ namespace MyApp {
         let sink = Arc::new(NullSink);
         let result = Pipeline::run_with_tracer(
             root,
+            Arc::from(vec![
+                FileInventoryEntry {
+                    path: "app.py".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "Service.java".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "App.kt".into(),
+                    size: 0,
+                },
+                FileInventoryEntry {
+                    path: "Controller.cs".into(),
+                    size: 0,
+                },
+            ]),
             PipelineConfig::default(),
             crate::v2::trace::Tracer::new(false),
             capture.clone(),
@@ -1352,8 +1663,16 @@ namespace MyApp {
         assert_eq!(result.errors.len(), 0, "Should have no errors");
 
         let graphs = capture.take();
-        let total_files: usize = graphs.iter().map(|g| g.files().count()).sum();
-        let total_dirs: usize = graphs.iter().map(|g| g.directories().count()).sum();
+        let total_files: usize = graphs
+            .iter()
+            .filter(|g| g.output.writes_repository_structure())
+            .map(|g| g.files().count())
+            .sum();
+        let total_dirs: usize = graphs
+            .iter()
+            .filter(|g| g.output.writes_repository_structure())
+            .map(|g| g.directories().count())
+            .sum();
         let total_edges: usize = graphs.iter().map(|g| g.edge_count()).sum();
         assert_eq!(total_files, 4);
         assert!(total_dirs > 0);

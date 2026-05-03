@@ -91,10 +91,10 @@ Permanent errors (`error_kind="permanent"` or `"deserialization"`) skip retries 
 | `gkg.indexer.code.repository.fetch.duration` | Histogram | s | | Duration of resolving a repository (cache check + optional download and extraction) |
 | `gkg.indexer.code.repository.resolution` | Counter | count | `strategy` (cache_hit, incremental, full_download, full_download_fallback) | Repository resolution strategy used |
 | `gkg.indexer.code.repository.indexing.completed` | Counter | count | `outcome` (indexed, empty_repository) | Repository indexing runs completed by the code indexing handler |
-| `gkg.indexer.code.repository.source.size` | Histogram | By | | Total bytes of language-supported source files discovered during one code indexing run |
+| `gkg.indexer.code.repository.source.size` | Histogram | By | | Total bytes of repository files discovered during one code indexing run |
 | `gkg.indexer.code.indexing.duration` | Histogram | s | | Duration of code-graph parsing and analysis |
 | `gkg.indexer.code.files.processed` | Counter | count | `outcome` (discovered, parsed, skipped, errored) | Total files seen by the code-graph indexer |
-| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (definition, imported_symbol, edge) | Total graph nodes and edges indexed |
+| `gkg.indexer.code.nodes.indexed` | Counter | count | `kind` (directory, file, definition, imported_symbol, edge) | Total graph nodes and edges indexed |
 | `gkg.indexer.code.errors` | Counter | count | `stage` (repository_fetch, checkpoint, thread_pool, sentinel, graph_node, arrow_conversion, sink_write, internal) | Task-level code indexing failures by pipeline stage. Increments only when a task ends with a fatal pipeline error. Per-file failures land in `file_faults` instead, so this rate is suitable for alerting. |
 | `gkg.indexer.code.files.skipped` | Counter | count | `reason` (oversize, oversize_combined, line_too_long, minified, not_utf8, non_regular_file, unsafe_path, timeout_sentinel) | Source files skipped by the code-graph indexer for policy or watchdog reasons. Tracked separately from `errors` so per-language byte/line ceilings and per-file watchdog kills do not skew error rates or page on noise. |
 | `gkg.indexer.code.file_faults` | Counter | count | `kind` (file_read, invalid_utf8, syntax_error, oxc_panic, oxc_semantic, analyzer_panic, unknown_source_type, embedded_script_parse, rust_workspace_missing) | Per-file failures during code indexing, by kind. The task itself completes; individual files were excluded from the graph. |

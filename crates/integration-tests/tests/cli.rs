@@ -6,7 +6,7 @@
 //!
 //! Run with: `cargo nextest run --test cli`
 
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::LazyLock;
 
 use integration_testkit::cli::{
@@ -209,6 +209,70 @@ fn reindex_idempotent() {
 
     let result = orbit_query(&q("files_simple"), data_dir.path());
     assert_eq!(nodes(&result).len(), 2);
+}
+
+#[test]
+fn indexes_non_parsable_git_tree_files() {
+    let data_dir = tempfile::TempDir::new().unwrap();
+    let workspace = tempfile::TempDir::new().unwrap();
+    let repo = workspace.path().join("repo");
+    init_repo_at(
+        &repo,
+        &[
+            ("src/main.py", "def hello(): pass\n"),
+            ("README.md", "# Project\n"),
+            ("config/app.yml", "enabled: true\n"),
+            ("Dockerfile", "FROM scratch\n"),
+            (".gitignore", "target/\n"),
+            ("assets/logo.png", "fake png bytes\n"),
+            ("docs/only/README.md", "# Nested\n"),
+            ("docs/deleted.md", "# Deleted\n"),
+        ],
+    );
+    std::fs::remove_file(repo.join("docs/deleted.md")).unwrap();
+    std::fs::create_dir_all(repo.join("notes")).unwrap();
+    std::fs::write(repo.join("notes/local.md"), "# Local\n").unwrap();
+    std::fs::create_dir_all(repo.join("target")).unwrap();
+    std::fs::write(repo.join("target/ignored.md"), "# Ignored\n").unwrap();
+
+    assert!(orbit_index(&repo, data_dir.path()));
+
+    let files = orbit_query(&q("files_simple"), data_dir.path());
+    let paths: Vec<_> = nodes(&files)
+        .into_iter()
+        .filter_map(|node| node["path"].as_str().map(str::to_string))
+        .collect();
+    let unique_paths: BTreeSet<_> = paths.iter().cloned().collect();
+    assert_eq!(
+        paths.len(),
+        unique_paths.len(),
+        "duplicate File nodes: {paths:?}"
+    );
+    assert_eq!(
+        unique_paths,
+        BTreeSet::from([
+            ".gitignore".to_string(),
+            "Dockerfile".to_string(),
+            "README.md".to_string(),
+            "assets/logo.png".to_string(),
+            "config/app.yml".to_string(),
+            "docs/only/README.md".to_string(),
+            "notes/local.md".to_string(),
+            "src/main.py".to_string(),
+        ])
+    );
+
+    let traversal = serde_json::json!({
+        "query_type": "traversal",
+        "nodes": [
+            {"id": "d", "entity": "Directory", "filters": {"path": "config"}, "columns": ["id", "path"]},
+            {"id": "f", "entity": "File", "filters": {"path": "config/app.yml"}, "columns": ["id", "path"]}
+        ],
+        "relationships": [{"type": "CONTAINS", "from": "d", "to": "f"}],
+        "limit": 5
+    });
+    let result = orbit_query(&serde_json::to_string(&traversal).unwrap(), data_dir.path());
+    assert_eq!(edge_count(&result), 1);
 }
 
 #[test]
