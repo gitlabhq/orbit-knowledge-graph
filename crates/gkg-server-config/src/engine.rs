@@ -167,7 +167,7 @@ impl Default for GlobalHandlerConfig {
 }
 
 fn default_max_concurrent_entities() -> usize {
-    8
+    3
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]

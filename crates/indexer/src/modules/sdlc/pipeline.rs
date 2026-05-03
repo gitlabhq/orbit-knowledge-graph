@@ -645,7 +645,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
         assert!(result.is_ok());
@@ -674,7 +674,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
 
@@ -701,7 +701,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
 
@@ -780,7 +780,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
 
@@ -820,7 +820,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -859,7 +859,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
 
@@ -894,7 +894,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
-                8,
+                3,
             )
             .await;
 
