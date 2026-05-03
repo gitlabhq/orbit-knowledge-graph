@@ -38,6 +38,7 @@ properties:
       6: coverage_fuzzing
       7: api_fuzzing
       8: cluster_image_scanning
+      9: sarif
 
   status:
     type: enum

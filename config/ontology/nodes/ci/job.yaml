@@ -102,10 +102,9 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: false
+    nullable: true
     description: "Reason the job failed, if applicable."
     values:
-      0: unknown_failure
       1: script_failure
       2: api_failure
       3: stuck_or_timeout_failure
@@ -129,11 +128,18 @@ properties:
       21: environment_creation_failure
       22: deployment_rejected
       23: failed_outdated_deployment_job
-      24: protected_environment_failure
-      25: insufficient_bridge_permissions
-      26: downstream_bridge_project_not_found
-      27: invalid_bridge_trigger
-      28: upstream_bridge_project_not_found
+      24: job_execution_server_timeout
+      25: stuck_pending_with_matching_runners
+      26: stuck_pending_no_matching_runners
+      27: no_updates_running
+      28: no_updates_canceling
+      29: server_timeout_running
+      30: server_timeout_canceling
+      1000: protected_environment_failure
+      1001: insufficient_bridge_permissions
+      1002: downstream_bridge_project_not_found
+      1003: invalid_bridge_trigger
+      1004: upstream_bridge_project_not_found
       1005: insufficient_upstream_permissions
       1006: bridge_pipeline_is_child_pipeline
       1007: downstream_pipeline_creation_failed
@@ -144,6 +150,7 @@ properties:
       1012: reached_downstream_pipeline_trigger_rate_limit
       1013: duo_workflow_not_allowed
       1014: job_router_failure
+      1015: job_token_expired
 
   created_at:
     type: timestamp
@@ -282,7 +289,7 @@ storage:
     - {name: environment, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: "`when`", type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: retried, type: "Nullable(Bool)"}
-    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
