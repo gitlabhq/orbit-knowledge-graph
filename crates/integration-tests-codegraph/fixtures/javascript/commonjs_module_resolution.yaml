@@ -144,6 +144,29 @@ fixtures:
         firstTrack();
         secondTrack();
       }
+  - path: external/shadowed.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportShadowed() {
+        const track = () => "local";
+        return track();
+      }
+  - path: external/globals.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportGlobals() {
+        console.log("ready");
+        return JSON.parse("{}");
+      }
+  - path: side_effect/main.js
+    content: |
+      require('external-polyfill');
+
+      function boot() {
+        return installPolyfill();
+      }
 
 tests:
   - name: Destructured require targets named export proxy
@@ -314,3 +337,34 @@ tests:
       - { row_count: 2 }
       - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
       - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
+
+  - name: Resolved CommonJS calls do not emit imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'named/main.js',
+        'namespace/main.js',
+        'alias/main.js',
+        'default/main.js',
+        'object/main.js',
+        'alias_chain/main.js',
+        'no_false_call/main.js',
+        'interop/main.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Side-effect shadowed and global CommonJS calls avoid imported-symbol fallbacks
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'side_effect/main.js',
+        'external/shadowed.js',
+        'external/globals.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }

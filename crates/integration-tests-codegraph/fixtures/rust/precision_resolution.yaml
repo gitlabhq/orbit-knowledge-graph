@@ -43,6 +43,7 @@ fixtures:
       use external_actions as actions;
       use external_actions::do_work;
       use external_actions::renamed as renamed_work;
+      use external_actions::*;
       use external_macros as macros;
       use serde_json::json;
       use tracing::info;
@@ -84,6 +85,15 @@ fixtures:
 
       pub fn scoped_import_out_of_scope() {
           scoped();
+      }
+
+      pub fn wildcard_external_import_user() {
+          globbed();
+      }
+
+      pub fn builtin_macro_and_std_calls() {
+          println!("debug");
+          let _ = Vec::<u8>::new();
       }
 
       pub fn qualified_external_imported_calls() {
@@ -183,6 +193,34 @@ tests:
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
       - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
       - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
+
+  - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN [
+        'module_alias_call',
+        'fn_pointer_from_assoc',
+        'generic_trait_bound',
+        'trait_default_dispatch',
+        'inherent_call'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "Rust built-ins std calls and wildcard imports do not emit imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN [
+        'external_only',
+        'builtin_macro_and_std_calls',
+        'wildcard_external_import_user'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |

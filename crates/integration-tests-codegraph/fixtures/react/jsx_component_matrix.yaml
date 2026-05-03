@@ -252,6 +252,22 @@ tests:
       - { row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "WarningIcon" } }
       - { not: true, row: { caller: "Home", callee_file: "src/components/icons.tsx", callee: "Icons" } }
 
+  - name: Resolved JSX component calls do not emit imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn IN [
+        'Home',
+        'FragmentHost',
+        'AliasDefaultHost',
+        'NamespaceDefaultHost',
+        'PlainJsx'
+      ]
+        AND e.edge_kind = 'Calls'
+        AND NOT sym.path IN ['react', '@external/ui']
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
   - name: Cross-file JSX calls resolve from default component internals
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

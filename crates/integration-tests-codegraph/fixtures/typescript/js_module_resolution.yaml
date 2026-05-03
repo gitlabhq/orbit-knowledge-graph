@@ -284,6 +284,36 @@ fixtures:
         secondTrack();
         emit();
       }
+  - path: unresolved/type_only_call.ts
+    content: |
+      import type { MissingFactory } from '@external/types';
+
+      export function inspectTypeOnlyCall() {
+        return MissingFactory();
+      }
+  - path: unresolved/side_effect_call.ts
+    content: |
+      import '@external/polyfill';
+
+      export function inspectSideEffectCall() {
+        return polyfillInit();
+      }
+  - path: unresolved/shadowed_external.ts
+    content: |
+      import { track } from '@external/analytics';
+
+      export function inspectShadowedExternal() {
+        const track = () => 'local';
+        return track();
+      }
+  - path: unresolved/global_calls.ts
+    content: |
+      import { track } from '@external/analytics';
+
+      export function inspectGlobalCalls() {
+        console.log('ready');
+        return fetch('/status');
+      }
   - path: namespace_missing/util.ts
     content: |
       export function existing(): string {
@@ -617,6 +647,39 @@ tests:
       WHERE caller.file_path = 'namespace_missing/main.ts'
         AND e.edge_kind = 'Calls'
       RETURN sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Resolved local ESM imports do not also emit imported-symbol fallbacks
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'named/main.ts',
+        'default/main.ts',
+        'namespace/main.ts',
+        'explicit/main.ts',
+        'star/main.ts',
+        'alias/main.ts',
+        'identity/consumer.ts',
+        'namespace_chain/consumer.ts',
+        'combo/consumer.ts'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Type-only side-effect shadowed and global calls avoid imported-symbol fallbacks
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'unresolved/type_only_call.ts',
+        'unresolved/side_effect_call.ts',
+        'unresolved/shadowed_external.ts',
+        'unresolved/global_calls.ts'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 
