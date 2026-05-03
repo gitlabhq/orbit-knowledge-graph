@@ -253,7 +253,7 @@ fn enforce_return_columns(
 
             if needs_separate_pk {
                 // JOIN node table for the auth column (e.g. merge_request_id).
-                // Skip if the alias already exists in FROM (v2 lowerer
+                // Skip if the alias already exists in FROM (the lowerer
                 // hydrates nodes inline with dedup subqueries).
                 let table = node.table.as_ref().ok_or_else(|| {
                     QueryError::Enforcement(format!(

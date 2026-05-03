@@ -1,4 +1,4 @@
-//! Aggregation query lowering (v2).
+//! Aggregation query lowering.
 //!
 //! No-edge: direct node table scan with GROUP BY.
 //! With edges: skeleton edge chain + GROUP BY + aggregate functions.

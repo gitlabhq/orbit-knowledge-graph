@@ -6,6 +6,7 @@ use compiler_pipeline_macros::{PipelineEnv, PipelineState};
 use gkg_server_config::QueryConfig;
 use ontology::Ontology;
 
+use crate::CompilerPass;
 use crate::ast::Node;
 use crate::error::{QueryError, Result};
 use crate::input::Input;
@@ -113,15 +114,13 @@ impl DuckDbState {
 // Pipeline presets
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Standard ClickHouse compilation pipeline.
+/// Standard ClickHouse compilation pipeline. Skeleton-first lowering
+/// produces flat edge-chain JOINs with inline dedup. No CTEs for the
+/// common case.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
+/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
 /// ```
-///
-/// Deduplicate runs before Security so that Security's subquery recursion
-/// injects `startsWith(traversal_path, ...)` directly into inner queries
-/// where the `gl_*` Scans live.
 pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(ValidatePass)
@@ -129,31 +128,6 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .pass(NormalizePass)
         .pass(RestrictPass)
         .pass(LowerPass)
-        .pass(OptimizePass)
-        .pass(EnforcePass)
-        .pass(DeduplicatePass)
-        .pass(SecurityPass)
-        .pass(CheckPass)
-        .pass(HydratePlanPass)
-        .pass(SettingsPass)
-        .pass(CodegenPass)
-        .build()
-}
-
-/// Skeleton-first v2 pipeline. Replaces Lower+Optimize+Deduplicate with
-/// a single LowerV2 pass that produces flat edge-chain JOINs with inline
-/// dedup. No CTEs for the common case.
-///
-/// ```text
-/// JSON → Validate → Normalize → Restrict → LowerV2 → Enforce → Security → Check → HydratePlan → Settings → Codegen
-/// ```
-pub fn clickhouse_v2() -> Pipeline<SecureEnv, QueryState> {
-    Pipeline::builder()
-        .pass(ValidatePass)
-        .seal(SealJson)
-        .pass(NormalizePass)
-        .pass(RestrictPass)
-        .pass(LowerV2Pass)
         .pass(EnforcePass)
         .pass(SecurityPass)
         .pass(CheckPass)
@@ -163,38 +137,16 @@ pub fn clickhouse_v2() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
-/// v2 pipeline from pre-built Input (for tests and profiler).
+/// Pipeline from pre-built Input (for tests and profiler).
 ///
 /// ```text
-/// Input → Restrict → LowerV2 → Enforce → Security → Check → HydratePlan → Settings → Codegen
-/// ```
-pub fn from_input_v2() -> Pipeline<SecureEnv, QueryState> {
-    Pipeline::builder()
-        .pass(RestrictPass)
-        .pass(LowerV2Pass)
-        .pass(EnforcePass)
-        .pass(SecurityPass)
-        .pass(CheckPass)
-        .pass(HydratePlanPass)
-        .pass(SettingsPass)
-        .pass(CodegenPass)
-        .build()
-}
-
-/// Compile from a pre-built [`Input`]. Runs full security and check passes.
-///
-/// Used by tests and the `compile_input()` public API for non-hydration queries.
-///
-/// ```text
-/// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Security → Check → HydratePlan → Settings → Codegen
+/// Input → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
         .pass(LowerPass)
-        .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(DeduplicatePass)
         .pass(SecurityPass)
         .pass(CheckPass)
         .pass(HydratePlanPass)
@@ -203,11 +155,29 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
         .build()
 }
 
+/// V1 lower pass — used only by hydration and DuckDB pipelines that
+/// require the v1 Lower+Optimize+Deduplicate chain.
+struct LegacyLowerPass;
+
+impl<E, S> CompilerPass<E, S> for LegacyLowerPass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasInput + HasNode,
+{
+    const NAME: &'static str = "lower";
+
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let input = state.input_mut()?;
+        let node = crate::passes::lower::lower(input)?;
+        state.set_node(node);
+        Ok(())
+    }
+}
+
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
-/// No `HydratePlanPass` means `CodegenPass` defaults to `HydrationPlan::None`,
-/// preventing recursive hydration. `DeduplicatePass` applies argMax dedup
-/// to each UNION ALL arm so hydration reads the latest non-deleted version.
+/// Uses the v1 Lower+Optimize+Deduplicate chain since hydration queries
+/// have their own internal query shape.
 ///
 /// ```text
 /// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
@@ -215,7 +185,7 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
-        .pass(LowerPass)
+        .pass(LegacyLowerPass)
         .pass(OptimizePass)
         .pass(EnforcePass)
         .pass(DeduplicatePass)
@@ -226,28 +196,18 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
 
 /// Local DuckDB hydration compilation pipeline.
 ///
-/// Compiles a programmatically-built hydration Input into DuckDB SQL.
-/// No validate/normalize (input is pre-built), no security, no
-/// hydrate-plan (prevents recursive hydration).
-///
 /// ```text
 /// Input → Lower → Enforce → DuckDbCodegen
 /// ```
 pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
-        .pass(LowerPass)
+        .pass(LegacyLowerPass)
         .pass(EnforcePass)
         .pass(DuckDbCodegenPass)
         .build()
 }
 
 /// Local DuckDB compilation pipeline.
-///
-/// Skips security, check, deduplicate, and optimize — those are
-/// ClickHouse/multi-tenant concerns. Enforce builds the ResultContext
-/// (node/edge column metadata) needed by formatters. HydratePlan
-/// generates a hydration plan for the local execution pipeline.
-/// Emits DuckDB-dialect SQL via [`DuckDbCodegenPass`].
 ///
 /// ```text
 /// JSON → Validate → Normalize → Lower → Enforce → HydratePlan → DuckDbCodegen
@@ -257,7 +217,7 @@ pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
         .pass(ValidatePass)
         .seal(SealJson)
         .pass(NormalizePass)
-        .pass(LowerPass)
+        .pass(LegacyLowerPass)
         .pass(EnforcePass)
         .pass(HydratePlanPass)
         .pass(DuckDbCodegenPass)

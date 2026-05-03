@@ -472,42 +472,6 @@ integration-test:
 
 # Temporary: run server integration tests through v2 skeleton-first compiler.
 # Remove once v2 is the default.
-integration-test-v2:
-  stage: test
-  extends:
-    - .test-template
-    - .mr-and-main-rules
-  tags:
-    - saas-linux-large-amd64
-  services:
-    - name: ${DEP_PROXY}docker:dind
-      alias: docker
-  variables:
-    DOCKER_HOST: tcp://docker:2375
-    DOCKER_TLS_CERTDIR: ""
-    TESTCONTAINERS_HOST_OVERRIDE: docker
-    GKG_TEST_V2: "1"
-  needs: []
-  allow_failure: true
-  before_script:
-    - !reference [.sccache-template, before_script]
-    - |
-      if [ -n "${CI_DEPENDENCY_PROXY_SERVER}" ] && [ -n "${DEP_PROXY}" ]; then
-        echo "$CI_DEPENDENCY_PROXY_PASSWORD" | docker login $CI_DEPENDENCY_PROXY_SERVER -u $CI_DEPENDENCY_PROXY_USER --password-stdin
-      fi
-    - |
-      docker pull ${DEP_PROXY}clickhouse/clickhouse-server:25.12 &
-      docker pull ${DEP_PROXY}nats:2.11-alpine &
-      wait
-    - |
-      if [ -n "${DEP_PROXY}" ]; then
-        docker tag ${DEP_PROXY}clickhouse/clickhouse-server:25.12 clickhouse/clickhouse-server:25.12
-        docker tag ${DEP_PROXY}nats:2.11-alpine nats:2.11-alpine
-      fi
-  script:
-    - cargo nextest run --profile ci --all-features --test containers -E 'test(data_correctness) | test(redaction_integration) | test(graph_formatter)'
-    - sccache --show-stats || true
-
 # Benchmark Stage
 #
 # Runs code indexing benchmarks when indexing crates change.

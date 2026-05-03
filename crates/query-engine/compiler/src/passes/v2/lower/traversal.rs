@@ -1,4 +1,4 @@
-//! Traversal query lowering (v2).
+//! Traversal query lowering.
 //!
 //! Single-node: direct node table scan.
 //! Multi-node: skeleton edge chain + edge metadata SELECT + ORDER BY.

@@ -1,4 +1,4 @@
-//! V2 PathFinding: bidirectional frontier expansion.
+//! PathFinding: bidirectional frontier expansion.
 //!
 //! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
 //! then combines via direct (depth-1) + intersection (forward meets backward).

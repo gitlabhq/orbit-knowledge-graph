@@ -69,9 +69,8 @@ pub struct QueryOptions {
     /// blocking hash aggregation barrier that prevents pipelining.
     #[serde(default)]
     pub cascade_distinct: bool,
-    /// When true, uses the v2 skeleton-first compiler pipeline. Edges drive,
-    /// nodes are lazy lookups, zero CTEs for the common case. Falls back to
-    /// v1 for PathFinding and Neighbors.
+    /// No longer used. Kept for backward compatibility with clients that
+    /// still send it in query JSON.
     #[serde(default)]
     pub use_v2: bool,
 }

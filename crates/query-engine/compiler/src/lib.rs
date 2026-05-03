@@ -105,8 +105,12 @@ use std::sync::Arc;
 /// The context contains the parameterized SQL, bind parameters, result context
 /// for redaction, hydration plan, and the validated input.
 ///
-/// Runs the full ClickHouse compilation pipeline:
-/// `JSON → Validate → Normalize → Lower → Optimize → Enforce → Deduplicate → Security → Check → Codegen`
+/// Runs the ClickHouse compilation pipeline. Skeleton-first lowering
+/// produces flat edge-chain JOINs with inline dedup.
+///
+/// ```text
+/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// ```
 #[must_use = "the compiled query context should be used"]
 pub fn compile(
     json_input: &str,
@@ -116,20 +120,6 @@ pub fn compile(
     let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
     let state = QueryState::from_json(json_input);
     let pipeline = pipelines::clickhouse().seal();
-    pipeline.execute(state, &env)?.into_output().count_err()
-}
-
-/// Compile using the skeleton-first v2 pipeline. Flat edge-chain JOINs,
-/// no CTEs, inline dedup. For Traversal and Aggregation queries.
-/// PathFinding and Neighbors fall back to v1.
-pub fn compile_v2(
-    json_input: &str,
-    ontology: &Ontology,
-    ctx: &SecurityContext,
-) -> Result<CompiledQueryContext> {
-    let env = SecureEnv::new(Arc::new(ontology.clone()), ctx.clone());
-    let state = QueryState::from_json(json_input);
-    let pipeline = pipelines::clickhouse_v2().seal();
     pipeline.execute(state, &env)?.into_output().count_err()
 }
 

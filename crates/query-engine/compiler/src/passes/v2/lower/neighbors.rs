@@ -1,4 +1,4 @@
-//! V2 Neighbors: single-hop edge scan for adjacent entities.
+//! Neighbors: single-hop edge scan for adjacent entities.
 //!
 //! For Direction::Both, produces outgoing UNION ALL incoming.
 //! The enforce pass handles _gkg_* column injection (Neighbors emits
@@ -41,9 +41,9 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
     let edge_table = input.compiler.resolve_edge_tables(&config.rel_types);
     let edge_alias = "e";
 
-    // V2 approach: resolve center node constraints directly on the edge
-    // where possible. Non-denorm filters get an inline dedup JOIN per arm
-    // instead of a shared CTE (avoids CTE inlining duplication).
+    // Resolve center node constraints directly on the edge where possible.
+    // Non-denorm filters get an inline dedup JOIN per arm instead of a
+    // shared CTE (avoids CTE inlining duplication).
     //
     // 1. node_ids → push directly on edge column
     // 2. denorm filters → push as tags on edge
@@ -181,7 +181,7 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
             Expr::string(&center_entity),
         ));
 
-        // V2: push node_ids directly on edge column.
+        // Push node_ids directly on edge column.
         if !center_node_ids.is_empty() {
             where_parts.push(super::shared::id_list_predicate(
                 edge_alias,
@@ -190,7 +190,7 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
             ));
         }
 
-        // V2: push denorm filters as tags directly on edge.
+        // Push denorm filters as tags directly on edge.
         let denorm_dir = if dir == Direction::Outgoing {
             "source"
         } else {
@@ -203,7 +203,7 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
             }
         }
 
-        // V2: push denorm filters as tags directly on edge — no CTE needed.
+        // Push denorm filters as tags directly on edge.
         let denorm_dir = if dir == Direction::Outgoing {
             "source"
         } else {
