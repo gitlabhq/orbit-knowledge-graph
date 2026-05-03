@@ -36,9 +36,9 @@ ORDER BY (traversal_path, project_id, branch)
 SETTINGS deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1;
 
 CREATE TABLE IF NOT EXISTS gl_branch (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     name String CODEC(ZSTD(1)),
     is_default Bool DEFAULT true,
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
@@ -56,9 +56,9 @@ ORDER BY (traversal_path, project_id, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_definition (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(3)),
@@ -89,7 +89,7 @@ ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_deployment (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     iid Int64 CODEC(Delta(8), LZ4),
     project_id Int64 CODEC(Delta(8), LZ4),
     ref String DEFAULT '' CODEC(ZSTD(1)),
@@ -122,9 +122,9 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_directory (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     path String CODEC(ZSTD(3)),
@@ -146,7 +146,7 @@ ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_environment (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     project_id Int64 CODEC(Delta(8), LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     slug String DEFAULT '' CODEC(ZSTD(1)),
@@ -184,9 +184,9 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_file (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     path String CODEC(ZSTD(3)),
@@ -210,7 +210,7 @@ ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_finding (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     uuid String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -236,7 +236,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_group (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
     visibility_level LowCardinality(String) DEFAULT '' CODEC(LZ4),
@@ -262,9 +262,9 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     traversal_path String CODEC(ZSTD(1)),
-    project_id Int64 CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     branch String CODEC(ZSTD(1)),
     commit_sha String DEFAULT '' CODEC(ZSTD(1)),
     file_path String CODEC(ZSTD(3)),
@@ -295,7 +295,7 @@ ORDER BY (traversal_path, project_id, branch, id)
 SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_job (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     ref String DEFAULT '' CODEC(ZSTD(1)),
@@ -341,8 +341,8 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_job_metadata (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
-    build_id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
+    build_id Int64 CODEC(Delta(8), LZ4),
     interruptible Nullable(Bool),
     timeout Nullable(Int64) CODEC(Delta(8), LZ4),
     timeout_source LowCardinality(String) DEFAULT '' CODEC(LZ4),
@@ -366,7 +366,7 @@ ORDER BY (traversal_path, build_id) PRIMARY KEY (traversal_path, build_id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_label (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
     color String DEFAULT '' CODEC(ZSTD(1)),
@@ -390,7 +390,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     iid Nullable(Int64) CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
@@ -455,7 +455,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     merge_request_id Int64 CODEC(Delta(8), LZ4),
     state String DEFAULT '' CODEC(ZSTD(1)),
     base_commit_sha String DEFAULT '' CODEC(ZSTD(1)),
@@ -483,7 +483,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     merge_request_id Int64 CODEC(Delta(8), LZ4),
     merge_request_diff_id Int64 CODEC(Delta(8), LZ4),
     project_id Int64 CODEC(Delta(8), LZ4),
@@ -520,7 +520,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_milestone (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     iid Nullable(Int64) CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
@@ -548,7 +548,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_note (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     note String DEFAULT '' CODEC(ZSTD(3)),
     noteable_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     noteable_id Nullable(Int64) CODEC(Delta(8), LZ4),
@@ -582,7 +582,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_pipeline (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     iid Nullable(Int64) CODEC(Delta(8), LZ4),
     sha String DEFAULT '' CODEC(ZSTD(1)),
     ref String DEFAULT '' CODEC(ZSTD(1)),
@@ -620,7 +620,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_project (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
     visibility_level LowCardinality(String) DEFAULT '' CODEC(LZ4),
@@ -650,7 +650,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_runner (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     runner_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(1)),
@@ -675,7 +675,7 @@ ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_security_scan (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     scan_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     latest Bool DEFAULT true,
@@ -696,7 +696,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_stage (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     name String DEFAULT '' CODEC(ZSTD(1)),
     status LowCardinality(String) DEFAULT '' CODEC(LZ4),
     position Nullable(Int64) CODEC(Delta(8), LZ4),
@@ -721,7 +721,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_user (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     username String DEFAULT '' CODEC(ZSTD(1)),
     email String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
@@ -756,7 +756,7 @@ ORDER BY (id) PRIMARY KEY (id)
 SETTINGS index_granularity = 2048, allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
     state LowCardinality(String) DEFAULT '' CODEC(LZ4),
@@ -793,7 +793,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, add_minmax_index_for_temporal_columns = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     external_type String DEFAULT '' CODEC(ZSTD(1)),
     external_id String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
@@ -820,7 +820,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     uuid String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     description Nullable(String) CODEC(ZSTD(3)),
@@ -852,7 +852,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     external_id String DEFAULT '' CODEC(ZSTD(1)),
     name String DEFAULT '' CODEC(ZSTD(1)),
     vendor LowCardinality(String) DEFAULT 'GitLab' CODEC(LZ4),
@@ -876,7 +876,7 @@ ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
 SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_work_item (
-    id Int64 CODEC(Delta(8), ZSTD(1)),
+    id Int64 CODEC(Delta(8), LZ4),
     iid Nullable(Int64) CODEC(Delta(8), LZ4),
     title String DEFAULT '' CODEC(ZSTD(1)),
     description String DEFAULT '' CODEC(ZSTD(3)),
@@ -911,10 +911,10 @@ SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild'
 
 CREATE TABLE IF NOT EXISTS gl_ci_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(Delta(8), ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), LZ4),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
-    target_id Int64 CODEC(Delta(8), ZSTD(1)),
+    target_id Int64 CODEC(Delta(8), LZ4),
     target_kind LowCardinality(String) CODEC(LZ4),
     source_tags Array(LowCardinality(String)),
     target_tags Array(LowCardinality(String)),
@@ -942,10 +942,10 @@ SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild'
 
 CREATE TABLE IF NOT EXISTS gl_code_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(Delta(8), ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), LZ4),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
-    target_id Int64 CODEC(Delta(8), ZSTD(1)),
+    target_id Int64 CODEC(Delta(8), LZ4),
     target_kind LowCardinality(String) CODEC(LZ4),
     source_tags Array(LowCardinality(String)),
     target_tags Array(LowCardinality(String)),
@@ -973,10 +973,10 @@ SETTINGS index_granularity = 1024, deduplicate_merge_projection_mode = 'rebuild'
 
 CREATE TABLE IF NOT EXISTS gl_edge (
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
-    source_id Int64 CODEC(Delta(8), ZSTD(1)),
+    source_id Int64 CODEC(Delta(8), LZ4),
     source_kind LowCardinality(String) CODEC(LZ4),
     relationship_kind LowCardinality(String) CODEC(LZ4),
-    target_id Int64 CODEC(Delta(8), ZSTD(1)),
+    target_id Int64 CODEC(Delta(8), LZ4),
     target_kind LowCardinality(String) CODEC(LZ4),
     source_tags Array(LowCardinality(String)),
     target_tags Array(LowCardinality(String)),
