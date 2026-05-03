@@ -204,6 +204,12 @@ impl DslLanguage for CSharpDsl {
                     )
                     .instance_attrs(&["this."]),
             ),
+            // Property declarations
+            csharp_type(
+                binding("property_declaration", BindingKind::Assignment)
+                    .name_from(&["name"])
+                    .no_value(),
+            ),
             // Method/constructor parameters
             csharp_type(
                 binding("parameter", BindingKind::Parameter)
