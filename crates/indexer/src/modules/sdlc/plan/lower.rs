@@ -297,15 +297,16 @@ fn lower_edge_select(
                     })
                     .collect();
                 format!(
-                    "concat('{}:', CASE {} ELSE CAST({} AS VARCHAR) END)",
-                    d.tag_key,
-                    cases.join(" "),
-                    d.source_column
+                    "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
+                    key = d.tag_key,
+                    cases = cases.join(" "),
+                    col = d.source_column
                 )
             }
             None => format!(
-                "concat('{}:', CAST({} AS VARCHAR))",
-                d.tag_key, d.source_column
+                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
+                key = d.tag_key,
+                col = d.source_column
             ),
         };
         tag_groups

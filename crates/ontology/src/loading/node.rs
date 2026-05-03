@@ -70,6 +70,8 @@ enum EtlYaml {
         #[serde(default)]
         traversal_path_filter: Option<String>,
         #[serde(default)]
+        table_alias: Option<String>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
@@ -457,6 +459,7 @@ impl EtlYaml {
                 deleted,
                 order_by,
                 traversal_path_filter,
+                table_alias,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
@@ -467,6 +470,7 @@ impl EtlYaml {
                 deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
                 order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
                 traversal_path_filter,
+                table_alias,
                 edges: convert_edge_mappings(edges)?,
             }),
         }
