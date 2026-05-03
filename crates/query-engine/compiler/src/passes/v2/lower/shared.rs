@@ -214,7 +214,7 @@ fn has_elevated_access_level(np: &NodePlan, input: &Input) -> bool {
 }
 
 /// IN-list predicate: `alias.col IN (ids)` or `alias.col = id` for single.
-fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
+pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
     if ids.len() == 1 {
         Expr::eq(Expr::col(alias, col), Expr::int(ids[0]))
     } else {
