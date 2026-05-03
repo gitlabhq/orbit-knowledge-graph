@@ -65,6 +65,7 @@ fixtures:
       <script>
       import { logError } from '~/lib/logger';
       import * as Tracking from '~/tracking';
+      import * as ExternalTracking from '@external/tracking';
       import getItemsQuery from '../graphql/get_items.query.graphql';
       import ChildBadge from './child_badge.vue';
 
@@ -92,6 +93,9 @@ fixtures:
           },
           emitTrack() {
             return Tracking.trackEvent('panel_loaded');
+          },
+          emitExternal() {
+            return ExternalTracking.emit('panel_loaded');
           },
         },
       };
@@ -186,3 +190,13 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "emitTrack", callee: "trackEvent" } }
+
+  - name: Vue unresolved external namespace calls target imported symbols
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND sym.path = '@external/tracking'
+      RETURN caller.name AS caller, sym.import_type AS import_type, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "emitExternal", import_type: "NamespaceImport", alias: "ExternalTracking" } }

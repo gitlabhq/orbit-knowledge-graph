@@ -171,6 +171,7 @@ pub struct JsImportedBinding {
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct JsImportedCall {
+    pub fallback_binding: JsImportedBinding,
     pub binding: JsImportedBinding,
     pub member_path: Vec<String>,
     pub invocation_kind: JsInvocationKind,

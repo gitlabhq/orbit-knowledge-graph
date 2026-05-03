@@ -121,6 +121,18 @@ tests:
     assert:
       - { empty: true }
 
+  - name: refused aliases preserve only imported-symbol call facts
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'src/consumer.js'
+        AND caller.fqn IN ['runFs', 'runProc']
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "runFs", path: "fsAlias", name: "default" } }
+      - { row: { caller: "runProc", path: "procAlias", name: "default" } }
+
   - name: Node package metadata resolves only through contained repo files
     query: |
       MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)

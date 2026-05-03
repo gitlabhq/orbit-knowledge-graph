@@ -75,6 +75,7 @@ fixtures:
       import { MissingExternal } from '@external/ui';
 
       export function Home() {
+        React.createElement('aside', null);
         return (
           <main>
             <Card />
@@ -220,6 +221,18 @@ tests:
       RETURN i.path AS path, d.fqn AS target
     assert:
       - { empty: true }
+
+  - name: External React and JSX package calls target imported symbols
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'Home'
+        AND sym.path IN ['react', '@external/ui']
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+      ORDER BY path, name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "Home", path: "@external/ui", name: "MissingExternal" } }
+      - { row: { caller: "Home", path: "react", name: "default" } }
 
   - name: Cross-file JSX calls resolve through named default namespace and star reexports
     query: |

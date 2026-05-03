@@ -39,6 +39,8 @@ fixtures:
 
       use crate::dep::{Pinger, Service};
       use crate::dep as dep_mod;
+      use serde_json::json;
+      use tracing::info;
 
       pub fn module_alias_call() {
           dep_mod::imported();
@@ -51,6 +53,11 @@ fixtures:
 
       pub fn external_only() {
           let _ = std::mem::size_of::<usize>();
+      }
+
+      pub fn external_imported_calls() {
+          info!("ready");
+          let _ = json!({ "ok": true });
       }
 
       pub fn fn_pointer_from_assoc() {
@@ -96,6 +103,17 @@ tests:
       RETURN callee.name AS callee
     assert:
       - { empty: true }
+
+  - name: "external imported Rust calls target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'external_imported_calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+      ORDER BY path, name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json" } }
+      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info" } }
 
   - name: "associated functions stored in fn pointers still resolve"
     query: |

@@ -10,6 +10,7 @@ pub(super) fn build_parsed_rust_file(
     file_module_parts: Vec<String>,
     crate_root_parts: Vec<String>,
     edge_candidates: Vec<ResolvedEdgeCandidate>,
+    unresolved_imported_calls: Vec<super::UnresolvedImportedCallCandidate>,
     source_file: ast::SourceFile,
     sema: Option<&Semantics<'_, RootDatabase>>,
     workspace: Option<&WorkspaceIndex>,
@@ -23,6 +24,7 @@ pub(super) fn build_parsed_rust_file(
         definitions,
         imports,
         edge_candidates,
+        unresolved_imported_calls,
     }
 }
 

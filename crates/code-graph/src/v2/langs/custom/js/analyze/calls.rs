@@ -111,11 +111,13 @@ pub(super) fn imported_call_from_member_expression(
             oxc::ast::ast::Expression::Identifier(identifier) => {
                 let mut binding =
                     binding_from_identifier_reference(ctx, identifier, import_bindings)?;
+                let fallback_binding = binding.clone();
                 member_path.reverse();
 
                 retarget_imported_member_binding(&mut binding, &mut member_path)?;
 
                 return Some(JsImportedCall {
+                    fallback_binding,
                     binding,
                     member_path,
                     invocation_kind,
@@ -144,11 +146,13 @@ pub(super) fn imported_call_from_jsx_member_expression(
             oxc::ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
                 let mut binding =
                     binding_from_identifier_reference(ctx, identifier, import_bindings)?;
+                let fallback_binding = binding.clone();
                 member_path.reverse();
 
                 retarget_imported_member_binding(&mut binding, &mut member_path)?;
 
                 return Some(JsImportedCall {
+                    fallback_binding,
                     binding,
                     member_path,
                     invocation_kind,
