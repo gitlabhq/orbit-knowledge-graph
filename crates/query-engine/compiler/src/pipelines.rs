@@ -156,19 +156,16 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 
 /// Hydration compilation — skips security, check, and hydration plan generation.
 ///
-/// The lowerer delegates Hydration queries to the legacy lower path internally.
-/// Optimize and Deduplicate still run for hydration's CTE-based SQL shape.
+/// Dedup is baked into the lowerer (LIMIT 1 BY + _deleted=false).
 ///
 /// ```text
-/// Input → Restrict → Lower → Optimize → Enforce → Deduplicate → Settings → Codegen
+/// Input → Restrict → Lower → Enforce → Settings → Codegen
 /// ```
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
         .pass(LowerPass)
-        .pass(OptimizePass)
         .pass(EnforcePass)
-        .pass(DeduplicatePass)
         .pass(SettingsPass)
         .pass(CodegenPass)
         .build()
