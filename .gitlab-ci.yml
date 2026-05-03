@@ -522,12 +522,12 @@ code-indexing-benchmark-build:
       vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
       token: $VAULT_ID_TOKEN
   cache:
-    key:
-      files:
-        - code-indexing-benchmark.yaml
-      prefix: "benchmark-repos-${GROUP}"
+    key: "benchmark-repos-${GROUP}-v2"
+    fallback_keys:
+      - "benchmark-repos-${GROUP}"
     paths:
       - temp/
+    policy: pull-push
   variables:
     SCENARIO: index
   script:
@@ -556,6 +556,18 @@ code-indexing-benchmark-v2-linux:
   parallel:
     matrix:
       - GROUP: [python, java, kotlin, csharp, ruby, go, rust, c]
+
+code-indexing-benchmark-v2-gitlab-monolith:
+  extends:
+    - .job-template
+    - .code-indexing-benchmark-template
+  allow_failure: true
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: "linux-x86_64"
+    SCENARIO: v2
+    GROUP: gitlab-monolith
 
 .code-indexing-benchmark-analyze-template:
   stage: benchmark

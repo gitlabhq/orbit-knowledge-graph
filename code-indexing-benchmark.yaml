@@ -9,7 +9,7 @@ repos:
     source: gitlab
     project: gitlab-org/gitlab
     version: v18.9.1-ee
-    groups: [ruby, typescript]
+    groups: [gitlab-monolith]
 
   - name: gitlab-shell
     source: gitlab
