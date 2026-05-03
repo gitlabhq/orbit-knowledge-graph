@@ -102,7 +102,7 @@ properties:
   failure_reason:
     type: enum
     source: failure_reason
-    nullable: false
+    nullable: true
     description: "Reason the job failed, if applicable."
     values:
       0: unknown_failure
@@ -282,7 +282,7 @@ storage:
     - {name: environment, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: "`when`", type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: retried, type: "Nullable(Bool)"}
-    - {name: failure_reason, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}

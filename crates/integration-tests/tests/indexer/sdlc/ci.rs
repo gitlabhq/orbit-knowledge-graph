@@ -1,4 +1,4 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
@@ -112,10 +112,10 @@ pub async fn processes_jobs(ctx: &TestContext) {
     .await;
 
     ctx.execute(
-        "INSERT INTO siphon_p_ci_builds (id, partition_id, stage_id, project_id, user_id, name, status, ref, tag, allow_failure, environment, `when`, retried, created_at, started_at, finished_at, queued_at, traversal_path, _siphon_replicated_at)
+        "INSERT INTO siphon_p_ci_builds (id, partition_id, stage_id, project_id, user_id, name, status, ref, tag, allow_failure, environment, `when`, retried, created_at, started_at, finished_at, queued_at, failure_reason, traversal_path, _siphon_replicated_at)
         VALUES
-        (7001, 1, 6001, 1000, 1, 'compile', 'success', 'main', false, false, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', '1/100/1000/', '2024-01-20 12:00:00'),
-        (7002, 1, 6001, 1000, 1, 'lint', 'success', 'main', false, true, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', '1/100/1000/', '2024-01-20 12:00:00')",
+        (7001, 1, 6001, 1000, 1, 'compile', 'success', 'main', false, false, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', NULL, '1/100/1000/', '2024-01-20 12:00:00'),
+        (7002, 1, 6001, 1000, 1, 'lint', 'success', 'main', false, true, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', 1, '1/100/1000/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -137,6 +137,18 @@ pub async fn processes_jobs(ctx: &TestContext) {
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "name").expect("name column");
     assert_eq!(name.value(0), "compile");
     assert_eq!(name.value(1), "lint");
+
+    let result = ctx
+        .query(&format!(
+            "SELECT failure_reason FROM {} FINAL ORDER BY id",
+            t("gl_job")
+        ))
+        .await;
+    let failure_reason =
+        ArrowUtils::get_column_by_name::<StringArray>(&result[0], "failure_reason")
+            .expect("failure_reason column");
+    assert!(failure_reason.is_null(0));
+    assert_eq!(failure_reason.value(1), "script_failure");
 
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Job", "Project", "1/100/1000/", 2).await;
     assert_edges_have_traversal_path(ctx, "HAS_JOB", "Stage", "Job", "1/100/1000/", 2).await;
