@@ -597,7 +597,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                                 Expr::col(edge_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
-                            from: TableRef::scan(&hop.edge_table, &format!("{edge_alias}n")),
+                            from: TableRef::scan(&hop.edge_table, format!("{edge_alias}n")),
                             where_clause: {
                                 let mut nw = Vec::new();
                                 push_edge_predicates(
@@ -714,9 +714,6 @@ fn emit_fk_star(
     );
 
     // Each hop: target node connected via FK column.
-    // For FkStar (common center), join_alias is always the center.
-    // For FkChain (linear chain), join_alias advances to each target.
-    let mut join_alias = center_alias.to_string();
     for hop in &skeleton.hops {
         let fk = hop
             .fk
@@ -770,9 +767,6 @@ fn emit_fk_star(
                 &mut ctes,
             )?);
         }
-
-        // Advance join alias for chain.
-        join_alias = fk.target_node.clone();
     }
 
     // Synthesize edge metadata columns for the graph formatter.
@@ -1059,6 +1053,7 @@ fn push_edge_predicates(
     ));
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_denorm_tags(
     where_parts: &mut Vec<Expr>,
     alias: &str,
@@ -1406,8 +1401,8 @@ fn build_depth_arm(
     let mut from = TableRef::scan(edge_table, "e1");
     // First edge: relationship kind + _deleted filter.
     let mut where_parts = Vec::new();
-    if let Some(types) = type_filter {
-        if let Some(f) = Expr::col_in(
+    if let Some(types) = type_filter
+        && let Some(f) = Expr::col_in(
             "e1",
             RELATIONSHIP_KIND_COLUMN,
             ChType::String,
@@ -1415,9 +1410,9 @@ fn build_depth_arm(
                 .iter()
                 .map(|t| serde_json::Value::String(t.clone()))
                 .collect(),
-        ) {
-            where_parts.push(f);
-        }
+        )
+    {
+        where_parts.push(f);
     }
     where_parts.push(Expr::eq(
         Expr::col("e1", DELETED_COLUMN),
