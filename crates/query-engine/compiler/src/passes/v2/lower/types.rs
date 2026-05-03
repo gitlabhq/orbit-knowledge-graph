@@ -19,6 +19,9 @@ pub struct Skeleton {
     pub nodes: HashMap<String, NodePlan>,
     /// Execution strategy for the edge chain.
     pub strategy: Strategy,
+    /// FK hops that were elided: (target_node, fk_node, fk_column).
+    /// Used by emit to populate node_edge_col for the enforce pass.
+    pub elided_fks: Vec<(String, String, String)>,
 }
 
 /// A single edge hop in the skeleton chain.

@@ -22,7 +22,14 @@ impl Skeleton {
     /// Build the skeleton plan from query input.
     pub fn plan(input: &mut Input) -> Self {
         let hops = build_hops(input);
-        let nodes = build_node_plans(input);
+        let mut nodes = build_node_plans(input);
+
+        // Partial FK elision: when a hop has an FK column and the far-end
+        // node is pinned (concrete node_ids), absorb the FK constraint as a
+        // filter on the FK-holding node and drop the hop entirely. This
+        // eliminates an edge table scan. E.g. IN_PROJECT with project_id FK
+        // becomes `mr.project_id = 278964` on the MR dedup, no edge needed.
+        let (hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
 
         // Reorder chain so the most selective node drives the scan.
         // Also reorder input.relationships to stay in sync — the enforce
@@ -32,7 +39,6 @@ impl Skeleton {
             input.relationships.reverse();
         }
 
-        let mut nodes = nodes;
         assign_id_sources(&hops, &mut nodes);
 
         for node_plan in nodes.values_mut() {
@@ -51,6 +57,7 @@ impl Skeleton {
             hops,
             nodes,
             strategy,
+            elided_fks,
         }
     }
 
@@ -250,6 +257,92 @@ fn fk_target_needs_join(np: &NodePlan, input: &Input) -> bool {
 // ─────────────────────────────────────────────────────────────────────────────
 // Plan builders
 // ─────────────────────────────────────────────────────────────────────────────
+
+/// Elide hops that have an FK column when the far-end node is pinned.
+/// Converts the FK into a node-level filter and removes the hop + its
+/// input.relationships entry so edge alias indices stay in sync.
+#[allow(clippy::type_complexity)]
+fn elide_fk_hops<'a>(
+    hops: Vec<Hop>,
+    nodes: &mut HashMap<String, NodePlan>,
+    input: &'a mut Input,
+) -> (Vec<Hop>, Vec<(String, String, String)>, &'a mut Input) {
+    let mut keep_hops = Vec::new();
+    let mut keep_rels = Vec::new();
+    let mut elided_fks = Vec::new();
+
+    for (i, hop) in hops.into_iter().enumerate() {
+        // Only elide if at least one non-FK hop would remain — otherwise
+        // the emit loop has no edges to populate node_edge_col from.
+        let remaining_non_fk = keep_hops.len();
+        let would_be_last = remaining_non_fk == 0;
+
+        let elide_info = hop.fk.as_ref().and_then(|fk| {
+            if would_be_last {
+                return None;
+            }
+            let np = nodes.get(&fk.target_node)?;
+            if np.selectivity == Selectivity::Pinned
+                && !np.node_ids.is_empty()
+                && hop.filters.is_empty()
+            {
+                Some((
+                    fk.fk_node.clone(),
+                    fk.fk_column.clone(),
+                    np.node_ids.clone(),
+                ))
+            } else {
+                None
+            }
+        });
+
+        let elided = if let Some((fk_node, fk_column, pinned_ids)) = elide_info.clone() {
+            if let Some(fk_np) = nodes.get_mut(&fk_node) {
+                let filter = if pinned_ids.len() == 1 {
+                    InputFilter {
+                        op: Some(FilterOp::Eq),
+                        value: Some(serde_json::Value::Number(pinned_ids[0].into())),
+                        data_type: None,
+                    }
+                } else {
+                    InputFilter {
+                        op: Some(FilterOp::In),
+                        value: Some(serde_json::Value::Array(
+                            pinned_ids
+                                .iter()
+                                .map(|&id| serde_json::Value::Number(id.into()))
+                                .collect(),
+                        )),
+                        data_type: None,
+                    }
+                };
+                fk_np.filters.push((fk_column, filter));
+                if fk_np.selectivity > Selectivity::Filtered {
+                    fk_np.selectivity = Selectivity::Filtered;
+                }
+                true
+            } else {
+                false
+            }
+        } else {
+            false
+        };
+
+        if elided {
+            let (fk_node, fk_column, _) = elide_info.unwrap();
+            let target_node = hop.fk.as_ref().map(|fk| fk.target_node.clone()).unwrap();
+            elided_fks.push((target_node, fk_node, fk_column));
+        } else {
+            keep_hops.push(hop);
+            if i < input.relationships.len() {
+                keep_rels.push(input.relationships[i].clone());
+            }
+        }
+    }
+
+    input.relationships = keep_rels;
+    (keep_hops, elided_fks, input)
+}
 
 fn detect_fk_star(hops: &[Hop]) -> Option<String> {
     let first_center = hops.first()?.fk.as_ref().map(|fk| &fk.fk_node)?;
@@ -564,6 +657,17 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
         edge_aliases.push(alias);
     }
 
+    // Populate node_edge_col for elided FK target nodes. The enforce pass
+    // needs to know where the target node's ID lives — it's on the FK-holding
+    // node's dedup subquery alias (e.g. mr.project_id for Project).
+    for (target_node, fk_node, fk_column) in &skeleton.elided_fks {
+        input
+            .compiler
+            .node_edge_col
+            .entry(target_node.clone())
+            .or_insert_with(|| (fk_node.clone(), fk_column.clone()));
+    }
+
     let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in skeleton".into()))?;
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
@@ -712,6 +816,15 @@ fn emit_fk_star(
         center_alias.to_string(),
         (center_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
     );
+
+    // Elided FK target nodes: map to the FK-holding node's FK column.
+    for (target_node, fk_node, fk_column) in &skeleton.elided_fks {
+        input
+            .compiler
+            .node_edge_col
+            .entry(target_node.clone())
+            .or_insert_with(|| (fk_node.clone(), fk_column.clone()));
+    }
 
     // Each hop: target node connected via FK column.
     for hop in &skeleton.hops {
