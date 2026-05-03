@@ -5,7 +5,8 @@ use treesitter_visit::extract::{Extract, field};
 use treesitter_visit::predicate::*;
 
 use crate::v2::linker::rules::{
-    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
+    ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
@@ -168,7 +169,13 @@ impl HasRules for CRules {
             &[],
             None,
         )
-        .with_hooks(ResolverHooks::default())
+        .with_hooks(ResolverHooks {
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy {
+                explicit_reaching_imports: false,
+                ..Default::default()
+            },
+            ..Default::default()
+        })
         .with_settings(ResolveSettings::default())
     }
 }

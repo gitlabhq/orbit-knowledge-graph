@@ -9,6 +9,10 @@
 //! The `RulesResolver` uses the resolution rules to chase imports.
 //!
 //!
+use petgraph::graph::NodeIndex;
+
+use super::graph::CodeGraph;
+
 pub trait HasRules {
     fn rules() -> ResolutionRules;
 }
@@ -98,6 +102,42 @@ pub enum ResolveStage {
 
 // ── Resolver hooks ──────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AmbientImportFallback {
+    #[default]
+    None,
+    Wildcard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportedSymbolFallbackPolicy {
+    pub explicit_reaching_imports: bool,
+    pub ambient: AmbientImportFallback,
+    pub max_ambient_candidates: usize,
+}
+
+impl ImportedSymbolFallbackPolicy {
+    pub const fn ambient_wildcard() -> Self {
+        Self {
+            explicit_reaching_imports: true,
+            ambient: AmbientImportFallback::Wildcard,
+            max_ambient_candidates: 1,
+        }
+    }
+}
+
+impl Default for ImportedSymbolFallbackPolicy {
+    fn default() -> Self {
+        Self {
+            explicit_reaching_imports: true,
+            ambient: AmbientImportFallback::None,
+            max_ambient_candidates: 1,
+        }
+    }
+}
+
+pub type ExternalImportTypeHook = fn(&CodeGraph, NodeIndex) -> Option<String>;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -107,6 +147,15 @@ pub struct ResolverHooks {
     /// Method names that act as constructors — `Call("new")` on a class
     /// returns an instance of that class. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
+    /// Controls when unresolved references materialize
+    /// `Definition -> ImportedSymbol` fallback edges.
+    pub imported_symbol_fallback: ImportedSymbolFallbackPolicy,
+    /// Ambient fallback names to suppress for language built-ins. Explicit
+    /// reaching imports are still eligible.
+    pub excluded_ambient_imported_symbol_names: &'static [&'static str],
+    /// Derive a synthetic external base type for unresolved import chains.
+    /// Language modules own any source-language semantics here.
+    pub external_import_type: Option<ExternalImportTypeHook>,
 }
 
 // ── Top-level config ────────────────────────────────────────────

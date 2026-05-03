@@ -1,0 +1,134 @@
+name: "Ruby: imported-symbol fallback matrix"
+fixtures:
+  - path: app/api_runner.rb
+    content: |
+      require "faraday"
+      require "external_client"
+      require "json"
+
+      class ApiRunner
+        def fetch
+          Faraday.get("https://example.com")
+        end
+
+        def connect
+          ExternalClient.connect
+        end
+
+        def parse
+          JSON.parse("{}")
+        end
+      end
+
+  - path: app/relative_runner.rb
+    content: |
+      require_relative "services/external_client"
+
+      class RelativeRunner
+        def connect
+          ExternalClient.connect
+        end
+      end
+
+  - path: app/local_external_client.rb
+    content: |
+      require "local_external_client"
+
+      class LocalExternalClient
+        def self.connect
+        end
+      end
+
+      class ShadowRunner
+        def connect
+          LocalExternalClient.connect
+        end
+      end
+
+  - path: app/local_runner.rb
+    content: |
+      class LocalRunner
+        def run
+          helper
+        end
+
+        def helper
+        end
+      end
+
+tests:
+  - name: "gem requires target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'ApiRunner::fetch'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "ApiRunner::fetch", path: "faraday", name: "Faraday", import_type: "Require" } }
+
+  - name: "underscored requires target camelized imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'ApiRunner::connect'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "ApiRunner::connect", path: "external_client", name: "ExternalClient", import_type: "Require" } }
+
+  - name: "stdlib acronym requires target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'ApiRunner::parse'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "ApiRunner::parse", path: "json", name: "JSON", import_type: "Require" } }
+
+  - name: "require_relative target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'RelativeRunner::connect'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "RelativeRunner::connect", path: "services/external_client", name: "ExternalClient", import_type: "RequireRelative" } }
+
+  - name: "locally resolved require constants do not emit imported-symbol fallback"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'ShadowRunner::connect'
+            AND callee.fqn = 'LocalExternalClient::connect'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'ShadowRunner::connect'
+            AND e.edge_kind = 'Calls'
+          RETURN sym.path AS path
+        assert:
+          - { empty: true }
+
+  - name: "resolved same-class calls do not emit imported-symbol fallback"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'LocalRunner::run'
+            AND callee.fqn = 'LocalRunner::helper'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'LocalRunner::run'
+            AND e.edge_kind = 'Calls'
+          RETURN sym.path AS path
+        assert:
+          - { empty: true }

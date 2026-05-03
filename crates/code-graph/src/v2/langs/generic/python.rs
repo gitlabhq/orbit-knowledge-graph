@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::DefKind;
+use crate::v2::types::{CanonicalImport, DefKind};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, no_extract, text};
@@ -13,7 +13,8 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
+    ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -92,6 +93,7 @@ impl DslLanguage for PythonDsl {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["decorator"],
             resolve_import_path: Some(resolve_python_relative_import),
+            import_scope_name: Some(python_import_scope_name),
             ..crate::v2::dsl::types::LanguageHooks::default()
         }
     }
@@ -303,6 +305,8 @@ impl HasRules for PythonRules {
         )
         .with_hooks(ResolverHooks {
             call_method: Some("__call__"),
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &["print"],
             ..Default::default()
         })
     }
@@ -358,6 +362,30 @@ fn python_module_from_path(file_path: &str, sep: &str) -> Option<String> {
         return None;
     }
     Some(module.to_string())
+}
+
+fn python_import_scope_name(imp: &CanonicalImport, sep: &str) -> Option<String> {
+    if let Some(alias) = &imp.alias {
+        return Some(alias.clone());
+    }
+
+    if imp.import_type == "Import" || imp.import_type == "AliasedImport" {
+        return imp
+            .path
+            .split(sep)
+            .next()
+            .filter(|segment| !segment.is_empty())
+            .map(ToString::to_string);
+    }
+
+    imp.name.clone().or_else(|| {
+        (!imp.path.is_empty()).then(|| {
+            imp.path
+                .rsplit_once(sep)
+                .map_or(imp.path.as_str(), |(_, name)| name)
+                .to_string()
+        })
+    })
 }
 
 #[cfg(test)]

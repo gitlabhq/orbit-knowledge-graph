@@ -1,0 +1,117 @@
+name: "Go: imported-symbol fallback matrix"
+fixtures:
+  - path: main.go
+    content: |
+      package main
+
+      import (
+          "github.com/acme/logger"
+          tracker "github.com/acme/tracker"
+          . "github.com/acme/dotpkg"
+      )
+
+      func packageImportCall() {
+          logger.Info("ready")
+      }
+
+      func aliasedPackageImportCall() {
+          tracker.Emit("ready")
+      }
+
+      func dotImportCall() {
+          DotFunc()
+      }
+
+      func builtinPrintln() {
+          println("debug")
+      }
+
+  - path: worker.go
+    content: |
+      package main
+
+      import (
+          "github.com/acme/audit"
+          metrics "github.com/acme/metrics"
+      )
+
+      func crossFilePackageImportCall() {
+          audit.Record("ready")
+          metrics.Count("ready")
+      }
+
+      func localHelperCall() {
+          helper()
+      }
+
+      func helper() {}
+
+tests:
+  - name: "package imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'main.packageImportCall'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.packageImportCall", path: "github.com/acme/logger", name: "logger", alias: null } }
+
+  - name: "aliased package imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'main.aliasedPackageImportCall'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.aliasedPackageImportCall", path: "github.com/acme/tracker", name: "tracker", alias: "tracker" } }
+
+  - name: "dot imports target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'main.dotImportCall'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main.dotImportCall", path: "github.com/acme/dotpkg", name: "dotpkg", import_type: "Import" } }
+
+  - name: "println does not target dot imports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'main.builtinPrintln'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path
+    assert:
+      - { empty: true }
+
+  - name: "package imports in another Go file target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'main.crossFilePackageImportCall'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "main.crossFilePackageImportCall", path: "github.com/acme/audit", name: "audit", alias: null } }
+      - { row: { caller: "main.crossFilePackageImportCall", path: "github.com/acme/metrics", name: "metrics", alias: "metrics" } }
+
+  - name: "resolved same-package calls do not emit imported-symbol fallback"
+    queries:
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+          WHERE caller.fqn = 'main.localHelperCall'
+            AND callee.fqn = 'main.helper'
+            AND e.edge_kind = 'Calls'
+          RETURN caller.fqn AS caller, callee.fqn AS callee
+        assert:
+          - { row_count: 1 }
+      - query: |
+          MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+          WHERE caller.fqn = 'main.localHelperCall'
+            AND e.edge_kind = 'Calls'
+          RETURN sym.path AS path
+        assert:
+          - { empty: true }

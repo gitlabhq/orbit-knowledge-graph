@@ -6,13 +6,14 @@ use crate::v2::dsl::types::{
     scope, scopes,
 };
 use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
+use petgraph::graph::NodeIndex;
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{field, no_extract, text};
 use treesitter_visit::predicate::*;
 
-use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
-use crate::v2::linker::{HasRules, ResolutionRules};
+use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage, ResolverHooks};
+use crate::v2::linker::{CodeGraph, HasRules, ResolutionRules};
 
 /// Methods that act as constructors — `Class.method(args)` returns a
 /// `Class` instance. Shared between `SsaConfig` (binding analysis) and
@@ -290,7 +291,7 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
         return true;
     };
 
-    let name = path.rsplit('/').next().map(|s| s.to_string());
+    let name = ruby_constant_name_from_require(&path);
 
     let import_type = if method == "require_relative" {
         "RequireRelative"
@@ -312,6 +313,41 @@ fn ruby_extract_imports(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> boo
     });
 
     true
+}
+
+fn ruby_constant_name_from_require(path: &str) -> Option<String> {
+    match path.strip_suffix(".rb").unwrap_or(path) {
+        "json" => return Some("JSON".to_string()),
+        "net/http" => return Some("Net::HTTP".to_string()),
+        "uri" => return Some("URI".to_string()),
+        "csv" => return Some("CSV".to_string()),
+        "yaml" | "psych/yaml" => return Some("YAML".to_string()),
+        _ => {}
+    }
+
+    let leaf = path
+        .rsplit('/')
+        .next()
+        .map(|segment| segment.strip_suffix(".rb").unwrap_or(segment))?;
+    let mut name = String::new();
+    for part in leaf.split('_').filter(|part| !part.is_empty()) {
+        let mut chars = part.chars();
+        if let Some(first) = chars.next() {
+            name.extend(first.to_uppercase());
+            name.push_str(chars.as_str());
+        }
+    }
+    (!name.is_empty()).then_some(name)
+}
+
+fn ruby_external_import_type(graph: &CodeGraph, import_node: NodeIndex) -> Option<String> {
+    let imp = graph.import(import_node);
+    if imp.wildcard || matches!(imp.binding_kind, ImportBindingKind::SideEffect) {
+        return None;
+    }
+    imp.name
+        .map(|id| graph.str(id).to_string())
+        .or_else(|| imp.alias.map(|id| graph.str(id).to_string()))
 }
 
 // ── Resolution rules ────────────────────────────────────────────
@@ -342,8 +378,9 @@ impl HasRules for RubyRules {
             &["self"],
             Some("super"),
         )
-        .with_hooks(crate::v2::linker::rules::ResolverHooks {
+        .with_hooks(ResolverHooks {
             constructor_methods: CONSTRUCTOR_METHODS,
+            external_import_type: Some(ruby_external_import_type),
             ..Default::default()
         })
     }
