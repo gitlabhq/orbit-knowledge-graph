@@ -22,7 +22,7 @@ etl:
     to:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked, metric_first_contribution]
   - scope: namespaced
     source: siphon_issue_assignees
     order_by: [traversal_path, issue_id, user_id]

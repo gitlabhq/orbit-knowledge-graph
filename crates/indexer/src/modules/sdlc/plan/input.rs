@@ -472,6 +472,16 @@ fn resolve_standalone_edge(
         let deleted_col = etl.deleted();
         let fk_col = &endpoint.id_column;
 
+        // For Query-type ETLs the `from` is a JOIN expression and bare `id`
+        // is ambiguous. The `deleted` column is already qualified with the
+        // main table alias (e.g. `namespace._siphon_deleted`), so extract
+        // that prefix to qualify `id` the same way.
+        let qualified_id = if let Some(prefix) = deleted_col.rsplit_once('.').map(|(p, _)| p) {
+            format!("{prefix}.id")
+        } else {
+            "id".to_string()
+        };
+
         let alias = format!("_e{enrich_idx}");
         enrich_idx += 1;
 
@@ -480,7 +490,7 @@ fn resolve_standalone_edge(
             .iter()
             .map(|c| format!("argMax({c}, {watermark_col}) AS {c}"))
             .collect();
-        let sub_cols = std::iter::once("id".to_string())
+        let sub_cols = std::iter::once(format!("{qualified_id} AS id"))
             .chain(agg_cols)
             .collect::<Vec<_>>()
             .join(", ");
@@ -488,8 +498,8 @@ fn resolve_standalone_edge(
         cte_defs.push(format!(
             "{alias} AS (SELECT {sub_cols} FROM {node_table} \
              WHERE {deleted_col} = false \
-             AND id IN (SELECT DISTINCT {fk_col} FROM _batch) \
-             GROUP BY id)"
+             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             GROUP BY {qualified_id})"
         ));
 
         join_clauses.push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));

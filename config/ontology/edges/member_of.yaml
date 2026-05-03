@@ -57,3 +57,4 @@ etl:
       type_mapping:
         Namespace: Group
         Project: Project
+      enrich: [visibility_level, archived]

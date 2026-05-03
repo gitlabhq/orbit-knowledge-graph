@@ -19,3 +19,4 @@ etl:
     to:
       id: namespace_id
       type: Group
+      enrich: [visibility_level]

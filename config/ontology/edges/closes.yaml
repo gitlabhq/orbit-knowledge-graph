@@ -14,7 +14,7 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id, merge_status, draft, squash, discussion_locked]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked, metric_first_contribution]
     to:
       id: issue_id
       type: WorkItem

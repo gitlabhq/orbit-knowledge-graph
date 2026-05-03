@@ -19,3 +19,4 @@ etl:
     to:
       id: project_id
       type: Project
+      enrich: [visibility_level, archived]
