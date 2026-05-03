@@ -87,6 +87,7 @@ impl Handler for NamespaceHandler {
                 &pipeline_context,
                 context.destination.as_ref(),
                 &context.progress,
+                self.config.max_concurrent_entities,
             )
             .await;
 

@@ -166,6 +166,10 @@ impl Default for GlobalHandlerConfig {
     }
 }
 
+fn default_max_concurrent_entities() -> usize {
+    8
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct NamespaceHandlerConfig {
     #[serde(flatten)]
@@ -176,6 +180,11 @@ pub struct NamespaceHandlerConfig {
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
+
+    /// Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)
+    /// to run concurrently within a single namespace indexing pass.
+    #[serde(default = "default_max_concurrent_entities")]
+    pub max_concurrent_entities: usize,
 }
 
 impl Default for NamespaceHandlerConfig {
@@ -184,6 +193,7 @@ impl Default for NamespaceHandlerConfig {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
+            max_concurrent_entities: default_max_concurrent_entities(),
         }
     }
 }

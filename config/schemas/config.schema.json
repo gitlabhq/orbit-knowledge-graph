@@ -84,6 +84,7 @@
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
+            "max_concurrent_entities": 8,
             "retry_interval_secs": null
           }
         },
@@ -527,6 +528,7 @@
               "concurrency_group": null,
               "datalake_batch_size": 1000000,
               "max_attempts": null,
+              "max_concurrent_entities": 8,
               "retry_interval_secs": null
             }
           }
@@ -747,6 +749,7 @@
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
+            "max_concurrent_entities": 8,
             "retry_interval_secs": null
           }
         }
@@ -972,6 +975,13 @@
           ],
           "format": "uint32",
           "default": null,
+          "minimum": 0
+        },
+        "max_concurrent_entities": {
+          "description": "Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)\nto run concurrently within a single namespace indexing pass.",
+          "type": "integer",
+          "format": "uint",
+          "default": 8,
           "minimum": 0
         },
         "retry_interval_secs": {

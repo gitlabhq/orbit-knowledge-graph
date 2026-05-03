@@ -74,6 +74,7 @@ impl Handler for GlobalHandler {
                 &pipeline_context,
                 context.destination.as_ref(),
                 &context.progress,
+                self.plans.len(),
             )
             .await;
 
