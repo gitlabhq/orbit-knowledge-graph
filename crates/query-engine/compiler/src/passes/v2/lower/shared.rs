@@ -43,6 +43,12 @@ impl Skeleton {
             Strategy::SingleNode
         } else if let Some(center) = detect_fk_star(&hops) {
             Strategy::FkStar { center }
+        } else if hops.iter().all(|h| h.fk.is_some()) {
+            // All hops have FK but no common center — linear FK chain.
+            // Use FkStar with the first hop's FK node as center.
+            Strategy::FkStar {
+                center: hops[0].fk.as_ref().unwrap().fk_node.clone(),
+            }
         } else {
             Strategy::Flat
         };
@@ -579,8 +585,52 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
             };
             match np.hydration {
                 HydrationStrategy::Join => {
-                    let (new_from, ns, nw) =
-                        emit_node_join(from, np, edge_alias, edge_col, input, false)?;
+                    // IN-narrowing: when the node has no user filters and the
+                    // hop has a FilterOnly CTE on the other side, narrow the
+                    // dedup by collecting edge IDs first. This reduces the
+                    // hash table from "all nodes in namespace" to "nodes
+                    // referenced by matching edges."
+                    let narrow_cte = if np.filters.is_empty()
+                        && np.node_ids.is_empty()
+                        && np.id_range.is_none()
+                        && ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
+                    {
+                        let narrow_name = format!("_narrow_{}", np.alias);
+                        let narrow_query = Query {
+                            select: vec![SelectExpr::new(
+                                Expr::col(edge_alias, edge_col),
+                                DEFAULT_PRIMARY_KEY,
+                            )],
+                            from: TableRef::scan(&hop.edge_table, &format!("{edge_alias}n")),
+                            where_clause: {
+                                let mut nw = Vec::new();
+                                push_edge_predicates(
+                                    &mut nw,
+                                    &format!("{edge_alias}n"),
+                                    hop,
+                                    &skeleton.nodes,
+                                    start_col,
+                                    end_col,
+                                );
+                                Expr::conjoin(nw)
+                            },
+                            ..Default::default()
+                        };
+                        ctes.push(Cte::new(&narrow_name, narrow_query));
+                        Some(narrow_name)
+                    } else {
+                        None
+                    };
+
+                    let (new_from, ns, nw) = emit_node_join_with_narrowing(
+                        from,
+                        np,
+                        edge_alias,
+                        edge_col,
+                        input,
+                        false,
+                        narrow_cte.as_deref(),
+                    )?;
                     from = new_from;
                     selects.extend(ns);
                     where_parts.extend(nw);
@@ -667,7 +717,10 @@ fn emit_fk_star(
         (center_alias.to_string(), DEFAULT_PRIMARY_KEY.to_string()),
     );
 
-    // Each hop: target node connected via FK column on center.
+    // Each hop: target node connected via FK column.
+    // For FkStar (common center), join_alias is always the center.
+    // For FkChain (linear chain), join_alias advances to each target.
+    let mut join_alias = center_alias.to_string();
     for hop in &skeleton.hops {
         let fk = hop
             .fk
@@ -677,16 +730,25 @@ fn emit_fk_star(
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
 
+        // Determine which alias carries the FK column. For a star,
+        // it's always the center. For a chain, it's the current node
+        // (which may be a previous hop's target, now joined).
+        let fk_alias = if fk.fk_node == center_alias {
+            center_alias.to_string()
+        } else {
+            fk.fk_node.clone()
+        };
+
         // Register target node ID mapping.
         input.compiler.node_edge_col.insert(
             fk.target_node.clone(),
-            (center_alias.to_string(), fk.fk_column.clone()),
+            (fk_alias.clone(), fk.fk_column.clone()),
         );
 
         // Pinned target IDs.
         if !target_np.node_ids.is_empty() {
             where_parts.push(id_list_predicate(
-                center_alias,
+                &fk_alias,
                 &fk.fk_column,
                 &target_np.node_ids,
             ));
@@ -695,7 +757,7 @@ fn emit_fk_star(
         // Target hydration.
         if fk_target_needs_join(target_np, input) {
             let (new_from, ns, nw) =
-                emit_node_join(from, target_np, center_alias, &fk.fk_column, input, true)?;
+                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, input, true)?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
@@ -707,11 +769,14 @@ fn emit_fk_star(
         {
             where_parts.extend(emit_filter_subquery(
                 target_np,
-                center_alias,
+                &fk_alias,
                 &fk.fk_column,
                 &mut ctes,
             )?);
         }
+
+        // Advance join alias for chain.
+        join_alias = fk.target_node.clone();
     }
 
     // Synthesize edge metadata columns for the graph formatter.
@@ -793,6 +858,26 @@ fn emit_fk_star(
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
+fn emit_node_join_with_narrowing(
+    from: TableRef,
+    np: &NodePlan,
+    edge_alias: &str,
+    edge_col: &str,
+    input: &Input,
+    use_traversal_path_join: bool,
+    narrow_cte: Option<&str>,
+) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
+    emit_node_join_inner(
+        from,
+        np,
+        edge_alias,
+        edge_col,
+        input,
+        use_traversal_path_join,
+        narrow_cte,
+    )
+}
+
 /// JOIN a node's dedup subquery into the FROM tree.
 ///
 /// `use_traversal_path_join`: true for FK paths (node-to-node), false for
@@ -805,6 +890,26 @@ fn emit_node_join(
     input: &Input,
     use_traversal_path_join: bool,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
+    emit_node_join_inner(
+        from,
+        np,
+        edge_alias,
+        edge_col,
+        input,
+        use_traversal_path_join,
+        None,
+    )
+}
+
+fn emit_node_join_inner(
+    from: TableRef,
+    np: &NodePlan,
+    edge_alias: &str,
+    edge_col: &str,
+    input: &Input,
+    use_traversal_path_join: bool,
+    narrow_cte: Option<&str>,
+) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = np
         .table
         .as_deref()
@@ -812,7 +917,19 @@ fn emit_node_join(
     let alias = &np.alias;
 
     let dedup_cols = collect_dedup_columns(alias, np, input);
-    let dedup_query = build_dedup_subquery(alias, table, dedup_cols);
+    let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols);
+    // IN-narrowing: restrict the dedup scan to IDs from the narrow CTE.
+    if let Some(cte_name) = narrow_cte {
+        let in_pred = Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+            cte_name: cte_name.to_string(),
+            column: DEFAULT_PRIMARY_KEY.to_string(),
+        };
+        dedup_query.where_clause = match dedup_query.where_clause {
+            Some(existing) => Some(Expr::and(existing, in_pred)),
+            None => Some(in_pred),
+        };
+    }
 
     let mut on = Expr::eq(
         Expr::col(alias, DEFAULT_PRIMARY_KEY),
