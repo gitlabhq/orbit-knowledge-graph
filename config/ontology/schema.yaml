@@ -156,15 +156,111 @@ settings:
             select: [relationship_kind, source_kind, target_id, traversal_path, "count()"]
             group_by: [relationship_kind, source_kind, target_id, traversal_path]
   denormalization:
-    - {node: Pipeline, property: status}
+    # --- Branch ---
+    - {node: Branch, property: is_default}
+    # --- Definition ---
+    - {node: Definition, property: definition_type}
+    # --- Deployment ---
+    - {node: Deployment, property: status}
+    - {node: Deployment, property: tag}
+    - {node: Deployment, property: archived}
+    # --- Environment ---
+    - {node: Environment, property: state}
+    - {node: Environment, property: tier}
+    - {node: Environment, property: auto_stop_setting}
+    # --- File ---
+    - {node: File, property: extension}
+    - {node: File, property: language}
+    # --- Finding ---
+    - {node: Finding, property: severity}
+    - {node: Finding, property: deduplicated}
+    # --- Group ---
+    - {node: Group, property: visibility_level}
+    # --- ImportedSymbol ---
+    - {node: ImportedSymbol, property: import_type}
+    # --- Job ---
+    - {node: Job, property: status}
+    - {node: Job, property: tag}
+    - {node: Job, property: allow_failure}
+    - {node: Job, property: when}
+    - {node: Job, property: retried}
+    - {node: Job, property: failure_reason}
+    - {node: Job, property: type}
+    - {node: Job, property: timeout_source}
+    - {node: Job, property: scheduling_type}
+    # --- JobMetadata ---
+    - {node: JobMetadata, property: interruptible}
+    - {node: JobMetadata, property: timeout_source}
+    - {node: JobMetadata, property: has_exposed_artifacts}
+    - {node: JobMetadata, property: debug_trace_enabled}
+    # --- MergeRequest ---
     - {node: MergeRequest, property: state}
-    - {node: WorkItem, property: state}
-    - {node: WorkItem, property: work_item_type, as: wi_type}
+    - {node: MergeRequest, property: merge_status}
+    - {node: MergeRequest, property: draft}
+    - {node: MergeRequest, property: squash}
+    - {node: MergeRequest, property: discussion_locked}
+    - {node: MergeRequest, property: first_contribution}
+    # --- MergeRequestDiff ---
+    - {node: MergeRequestDiff, property: diff_type}
+    - {node: MergeRequestDiff, property: stored_externally}
+    - {node: MergeRequestDiff, property: state}
+    # --- MergeRequestDiffFile ---
+    - {node: MergeRequestDiffFile, property: too_large}
+    - {node: MergeRequestDiffFile, property: new_file}
+    - {node: MergeRequestDiffFile, property: renamed_file}
+    - {node: MergeRequestDiffFile, property: deleted_file}
+    - {node: MergeRequestDiffFile, property: binary}
+    - {node: MergeRequestDiffFile, property: generated}
+    # --- Milestone ---
+    - {node: Milestone, property: state}
+    # --- Note ---
+    - {node: Note, property: noteable_type}
+    - {node: Note, property: internal}
+    - {node: Note, property: confidential}
+    # --- Pipeline ---
+    - {node: Pipeline, property: status}
+    - {node: Pipeline, property: source}
+    - {node: Pipeline, property: tag}
+    - {node: Pipeline, property: failure_reason}
+    - {node: Pipeline, property: protected}
+    # --- Project ---
+    - {node: Project, property: visibility_level}
+    - {node: Project, property: archived}
+    # --- Runner ---
+    - {node: Runner, property: runner_type}
+    - {node: Runner, property: active}
+    - {node: Runner, property: locked}
+    - {node: Runner, property: run_untagged}
+    - {node: Runner, property: access_level}
+    # --- SecurityScan ---
+    - {node: SecurityScan, property: scan_type}
+    - {node: SecurityScan, property: status}
+    - {node: SecurityScan, property: latest}
+    # --- Stage ---
+    - {node: Stage, property: status}
+    # --- User ---
+    - {node: User, property: state}
+    - {node: User, property: private_profile}
+    - {node: User, property: is_admin}
+    - {node: User, property: is_auditor}
+    - {node: User, property: is_external}
+    - {node: User, property: user_type}
+    # --- Vulnerability ---
     - {node: Vulnerability, property: state}
     - {node: Vulnerability, property: severity}
-    - {node: Job, property: status}
-    - {node: Deployment, property: status}
-    - {node: Finding, property: severity}
+    - {node: Vulnerability, property: report_type}
+    - {node: Vulnerability, property: resolved_on_default_branch}
+    - {node: Vulnerability, property: present_on_default_branch}
+    # --- VulnerabilityOccurrence ---
+    - {node: VulnerabilityOccurrence, property: severity}
+    - {node: VulnerabilityOccurrence, property: report_type}
+    - {node: VulnerabilityOccurrence, property: detection_method}
+    # --- VulnerabilityScanner ---
+    - {node: VulnerabilityScanner, property: vendor}
+    # --- WorkItem ---
+    - {node: WorkItem, property: state}
+    - {node: WorkItem, property: work_item_type, as: wi_type}
+    - {node: WorkItem, property: confidential}
   internal_column_prefix: "_gkg_"
   skip_security_filter_for_entities: [User, Runner]
   local_db:

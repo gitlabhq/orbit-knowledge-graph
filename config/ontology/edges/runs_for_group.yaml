@@ -15,6 +15,8 @@ etl:
     from:
       id: runner_id
       type: Runner
+      enrich: [runner_type, active, locked, run_untagged, access_level]
     to:
       id: namespace_id
       type: Group
+      enrich: [visibility_level]

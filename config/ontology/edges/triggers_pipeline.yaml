@@ -15,6 +15,8 @@ etl:
     from:
       id: source_job_id
       type: Job
+      enrich: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
     to:
       id: pipeline_id
       type: Pipeline
+      enrich: [status, source, tag, failure_reason, protected]

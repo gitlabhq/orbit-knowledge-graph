@@ -20,6 +20,7 @@ etl:
       type_column: target_type
       type_mapping:
         Issue: WorkItem
+      enrich: [state_id, work_item_type_id, confidential]
     to:
       id: label_id
       type: Label

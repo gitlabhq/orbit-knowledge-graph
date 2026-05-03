@@ -14,8 +14,8 @@ etl:
     from:
       id: pipeline_id
       type: Pipeline
-      enrich: [status]
+      enrich: [status, source, tag, failure_reason, protected]
     to:
       id: source_pipeline_id
       type: Pipeline
-      enrich: [status]
+      enrich: [status, source, tag, failure_reason, protected]
