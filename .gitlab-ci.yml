@@ -522,15 +522,11 @@ code-indexing-benchmark-build:
       vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
       token: $VAULT_ID_TOKEN
   cache:
-    key: "benchmark-repos-${GROUP}-v2"
-    fallback_keys:
-      - "benchmark-repos-${GROUP}"
-      - "benchmark-repos-${GROUP}-210ed76d4da4e7537dc26188e4e2782a08e62730"
+    key: "benchmark-repos-${GROUP}"
     paths:
       - temp/
     policy: pull-push
   variables:
-    CACHE_FALLBACK_KEY: "benchmark-repos-${GROUP}-210ed76d4da4e7537dc26188e4e2782a08e62730-protected"
     SCENARIO: index
   script:
     - |
