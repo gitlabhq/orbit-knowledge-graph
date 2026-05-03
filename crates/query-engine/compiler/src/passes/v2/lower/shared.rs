@@ -857,23 +857,49 @@ fn emit_filter_subquery(
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    // Dedup first (pick latest version per ID), THEN apply _deleted +
-    // user filters. This ensures a deleted latest version isn't skipped,
-    // which would let a stale older version leak through.
-    let dedup = build_dedup_subquery(alias, table, vec![SelectExpr::star()]);
-    let dedup_from = TableRef::Subquery {
-        query: Box::new(dedup),
-        alias: alias.to_string(),
+    // User filters + node_ids + id_range go INSIDE the scan so ClickHouse
+    // can use them as prewhere predicates and skip non-matching granules.
+    // _deleted goes OUTSIDE (after dedup) so a deleted latest version
+    // correctly suppresses the entity even if an older version matches.
+    let mut scan_where = Vec::new();
+    for (prop, filter) in &np.filters {
+        scan_where.push(filter_to_expr(alias, prop, filter));
+    }
+    if !np.node_ids.is_empty() {
+        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+    }
+    if let Some(ref range) = np.id_range {
+        scan_where.push(id_range_predicate(alias, range));
+    }
+
+    let dedup = Query {
+        select: vec![
+            SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
+            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+        ],
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(scan_where),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
+        ..Default::default()
     };
-    let filter_where = node_where_predicates(alias, np);
 
     let inner = Query {
         select: vec![SelectExpr::new(
             Expr::col(alias, DEFAULT_PRIMARY_KEY),
             DEFAULT_PRIMARY_KEY,
         )],
-        from: dedup_from,
-        where_clause: Expr::conjoin(filter_where),
+        from: TableRef::Subquery {
+            query: Box::new(dedup),
+            alias: alias.to_string(),
+        },
+        where_clause: Some(Expr::eq(
+            Expr::col(alias, DELETED_COLUMN),
+            Expr::param(ChType::Bool, false),
+        )),
         ..Default::default()
     };
 
