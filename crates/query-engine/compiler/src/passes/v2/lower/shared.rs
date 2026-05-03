@@ -1122,11 +1122,16 @@ fn build_multi_hop_union(
 
     let union = TableRef::union_all(queries, alias);
 
+    // For incoming edges, the from_node is on the target side and the
+    // to_node is on the source side (the depth arm already swaps the
+    // projected source/target columns, so the outer alias exposes
+    // source_id/source_kind as the "start" of the incoming traversal).
     let mut where_parts = Vec::new();
-    for (node_alias, kind_col) in [
-        (&hop.from_node, SOURCE_KIND_COLUMN),
-        (&hop.to_node, TARGET_KIND_COLUMN),
-    ] {
+    let (from_kind_col, to_kind_col) = match hop.direction {
+        Direction::Outgoing | Direction::Both => (SOURCE_KIND_COLUMN, TARGET_KIND_COLUMN),
+        Direction::Incoming => (TARGET_KIND_COLUMN, SOURCE_KIND_COLUMN),
+    };
+    for (node_alias, kind_col) in [(&hop.from_node, from_kind_col), (&hop.to_node, to_kind_col)] {
         if let Some(np) = nodes.get(node_alias)
             && let Some(ref entity) = np.entity
         {
@@ -1159,8 +1164,10 @@ fn build_depth_arm(
     type_filter: &Option<Vec<String>>,
 ) -> Query {
     let mut from = TableRef::scan(edge_table, "e1");
-    let where_clause = type_filter.as_ref().and_then(|types| {
-        Expr::col_in(
+    // First edge: relationship kind + _deleted filter.
+    let mut where_parts = Vec::new();
+    if let Some(types) = type_filter {
+        if let Some(f) = Expr::col_in(
             "e1",
             RELATIONSHIP_KIND_COLUMN,
             ChType::String,
@@ -1168,14 +1175,29 @@ fn build_depth_arm(
                 .iter()
                 .map(|t| serde_json::Value::String(t.clone()))
                 .collect(),
-        )
-    });
+        ) {
+            where_parts.push(f);
+        }
+    }
+    where_parts.push(Expr::eq(
+        Expr::col("e1", DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    ));
+    let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
         let right = TableRef::scan(edge_table, &curr);
         let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
+        // _deleted = false on every chained edge.
+        join_on = Expr::and(
+            join_on,
+            Expr::eq(
+                Expr::col(&curr, DELETED_COLUMN),
+                Expr::param(ChType::Bool, false),
+            ),
+        );
         if let Some(types) = type_filter
             && let Some(tc) = Expr::col_in(
                 &curr,
