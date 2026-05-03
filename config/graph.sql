@@ -47,7 +47,7 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -81,7 +81,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_file_path_ngram file_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -114,7 +114,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -140,7 +140,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -178,7 +178,7 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION by_tier_state (SELECT * ORDER BY (tier, state, id)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -206,7 +206,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_import_path_ngram import_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -337,9 +337,9 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_pipeline_id (SELECT pipeline_id ORDER BY pipeline_id),
-    PROJECTION by_runner_id (SELECT runner_id ORDER BY runner_id),
-    PROJECTION by_auto_canceled_by_id (SELECT auto_canceled_by_id ORDER BY auto_canceled_by_id),
+    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY pipeline_id),
+    PROJECTION by_runner_id (SELECT _part_offset ORDER BY runner_id),
+    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY auto_canceled_by_id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION by_pipeline_status (SELECT * ORDER BY (traversal_path, pipeline_id, status, id)),
     PROJECTION tp_count (
@@ -366,7 +366,7 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     _deleted Bool DEFAULT false,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_build_id (SELECT build_id ORDER BY build_id),
+    PROJECTION by_build_id (SELECT _part_offset ORDER BY build_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -454,7 +454,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_target_branch_ngram target_branch TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_merge_status merge_status TYPE set(8) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION by_state_id (SELECT * ORDER BY (state, id)),
     PROJECTION by_project_state (SELECT * ORDER BY (traversal_path, project_id, state, id)),
     PROJECTION tp_count (
@@ -485,8 +485,8 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_merge_request_id (SELECT merge_request_id ORDER BY merge_request_id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -524,9 +524,9 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_old_path old_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_old_path_ngram old_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_merge_request_id (SELECT merge_request_id ORDER BY merge_request_id),
-    PROJECTION by_merge_request_diff_id (SELECT merge_request_diff_id ORDER BY merge_request_diff_id),
-    PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
+    PROJECTION by_merge_request_id (SELECT _part_offset ORDER BY merge_request_id),
+    PROJECTION by_merge_request_diff_id (SELECT _part_offset ORDER BY merge_request_diff_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -626,7 +626,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_auto_canceled_by_id (SELECT auto_canceled_by_id ORDER BY auto_canceled_by_id),
+    PROJECTION by_auto_canceled_by_id (SELECT _part_offset ORDER BY auto_canceled_by_id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -728,7 +728,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
-    PROJECTION by_pipeline_id (SELECT pipeline_id ORDER BY pipeline_id),
+    PROJECTION by_pipeline_id (SELECT _part_offset ORDER BY pipeline_id),
     PROJECTION by_pipeline (SELECT * ORDER BY (traversal_path, pipeline_id, id)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)

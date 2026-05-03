@@ -184,13 +184,12 @@ fn emit_projection(proj: &ProjectionDef) -> String {
                 !order_by.is_empty(),
                 "Lightweight projection '{name}' has empty order_by"
             );
-            let cols = order_by.join(", ");
             let order = if order_by.len() == 1 {
                 order_by[0].clone()
             } else {
-                format!("({})", &cols)
+                format!("({})", order_by.join(", "))
             };
-            format!("    PROJECTION {name} (SELECT {cols} ORDER BY {order})")
+            format!("    PROJECTION {name} (SELECT _part_offset ORDER BY {order})")
         }
         ProjectionDef::Aggregate {
             name,
