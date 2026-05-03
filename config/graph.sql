@@ -82,6 +82,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -141,6 +142,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -207,6 +209,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -293,6 +296,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
+    PROJECTION by_branch (SELECT _part_offset ORDER BY branch),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path

@@ -82,3 +82,8 @@ variants:
     to_node: { type: Project, id: id }
     fk_column: project_id
     description: "Merge request diff belongs to project."
+
+  - from_node: { type: MergeRequestDiffFile, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    description: "Merge request diff file belongs to project."
