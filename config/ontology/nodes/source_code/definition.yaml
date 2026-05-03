@@ -134,6 +134,6 @@ storage:
     - {name: idx_file_path_ngram, column: file_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
     - {name: idx_definition_type, column: definition_type, type: "set(20)", granularity: 2}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

@@ -188,7 +188,7 @@ storage:
     - {name: idx_old_path, column: old_path, type: "text(tokenizer = splitByString(['/']))", granularity: 1}
     - {name: idx_old_path_ngram, column: old_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
     - {type: lightweight, name: by_merge_request_diff_id, order_by: [merge_request_diff_id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}

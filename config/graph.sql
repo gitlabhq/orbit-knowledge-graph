@@ -46,7 +46,7 @@ CREATE TABLE IF NOT EXISTS gl_branch (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -80,7 +80,7 @@ CREATE TABLE IF NOT EXISTS gl_definition (
     INDEX idx_file_path file_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_file_path_ngram file_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_definition_type definition_type TYPE set(20) GRANULARITY 2,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -113,7 +113,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
@@ -139,7 +139,7 @@ CREATE TABLE IF NOT EXISTS gl_directory (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -177,7 +177,7 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION by_tier_state (SELECT * ORDER BY (tier, state, id)),
     PROJECTION tp_count (
@@ -205,7 +205,7 @@ CREATE TABLE IF NOT EXISTS gl_file (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_path path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_path_ngram path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -232,7 +232,7 @@ CREATE TABLE IF NOT EXISTS gl_finding (
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_description description TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -258,7 +258,7 @@ CREATE TABLE IF NOT EXISTS gl_group (
     INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     INDEX idx_import_path import_path TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_import_path_ngram import_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_import_type import_type TYPE set(10) GRANULARITY 2,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -336,7 +336,7 @@ CREATE TABLE IF NOT EXISTS gl_job (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_pipeline_id (SELECT pipeline_id ORDER BY pipeline_id),
     PROJECTION by_runner_id (SELECT runner_id ORDER BY runner_id),
     PROJECTION by_auto_canceled_by_id (SELECT auto_canceled_by_id ORDER BY auto_canceled_by_id),
@@ -365,7 +365,7 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_build_id (SELECT build_id ORDER BY build_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -390,7 +390,7 @@ CREATE TABLE IF NOT EXISTS gl_label (
     INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -453,7 +453,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     INDEX idx_target_branch target_branch TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_target_branch_ngram target_branch TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_merge_status merge_status TYPE set(8) GRANULARITY 2,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION by_state_id (SELECT * ORDER BY (state, id)),
     PROJECTION by_project_state (SELECT * ORDER BY (traversal_path, project_id, state, id)),
@@ -484,7 +484,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff (
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_merge_request_id (SELECT merge_request_id ORDER BY merge_request_id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
     PROJECTION tp_count (
@@ -523,7 +523,7 @@ CREATE TABLE IF NOT EXISTS gl_merge_request_diff_file (
     INDEX idx_new_path_ngram new_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_old_path old_path TYPE text(tokenizer = splitByString(['/'])) GRANULARITY 1,
     INDEX idx_old_path_ngram old_path TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_merge_request_id (SELECT merge_request_id ORDER BY merge_request_id),
     PROJECTION by_merge_request_diff_id (SELECT merge_request_diff_id ORDER BY merge_request_diff_id),
     PROJECTION by_project_id (SELECT project_id ORDER BY project_id),
@@ -554,7 +554,7 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     INDEX idx_state state TYPE set(4) GRANULARITY 2,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -587,7 +587,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     INDEX idx_note note TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_note_ngram note TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_discussion_id discussion_id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_noteable (SELECT * ORDER BY (traversal_path, noteable_type, noteable_id, id)),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
@@ -625,7 +625,7 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     INDEX idx_source source TYPE set(20) GRANULARITY 2,
     INDEX idx_ref ref TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_ref_ngram ref TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_auto_canceled_by_id (SELECT auto_canceled_by_id ORDER BY auto_canceled_by_id),
     PROJECTION by_status_id (SELECT * ORDER BY (status, id)),
     PROJECTION tp_count (
@@ -657,7 +657,7 @@ CREATE TABLE IF NOT EXISTS gl_project (
     INDEX idx_full_path full_path TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -685,7 +685,7 @@ CREATE TABLE IF NOT EXISTS gl_runner (
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_runner_type (SELECT * ORDER BY (runner_type, id))
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (id) PRIMARY KEY (id)
@@ -703,7 +703,7 @@ CREATE TABLE IF NOT EXISTS gl_security_scan (
     _deleted Bool DEFAULT false,
     INDEX idx_latest latest TYPE minmax GRANULARITY 1,
     INDEX idx_id id TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -727,7 +727,7 @@ CREATE TABLE IF NOT EXISTS gl_stage (
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_status status TYPE set(16) GRANULARITY 2,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_pipeline_id (SELECT pipeline_id ORDER BY pipeline_id),
     PROJECTION by_pipeline (SELECT * ORDER BY (traversal_path, pipeline_id, id)),
     PROJECTION tp_count (
@@ -801,7 +801,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -828,7 +828,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_identifier (
     INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_name name TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -860,7 +860,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_description description TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_cve cve TYPE bloom_filter(0.01) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -884,7 +884,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     INDEX idx_name_ngram name TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -918,7 +918,7 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     INDEX idx_title_ngram title TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     INDEX idx_description description TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_description_ngram description TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
-    PROJECTION by_id (SELECT id ORDER BY id),
+    PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path

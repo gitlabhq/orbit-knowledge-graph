@@ -90,5 +90,5 @@ storage:
     - {name: idx_external_id, column: external_id, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
     - {name: idx_external_id_ngram, column: external_id, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
-    - {type: lightweight, name: by_id, order_by: [id]}
+    - {type: reorder, name: by_id, order_by: [id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
