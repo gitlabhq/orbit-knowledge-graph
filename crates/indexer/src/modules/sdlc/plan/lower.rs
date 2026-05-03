@@ -123,13 +123,22 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
             source,
             target,
             values,
+            nullable,
         } => {
             let cases: Vec<String> = values
                 .iter()
                 .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
                 .collect();
+            let null_case = if *nullable {
+                format!("WHEN {source} IS NULL THEN NULL ")
+            } else {
+                String::new()
+            };
             SelectExpr::new(
-                Expr::raw(format!("CASE {} ELSE 'unknown' END", cases.join(" "))),
+                Expr::raw(format!(
+                    "CASE {null_case}{} ELSE 'unknown' END",
+                    cases.join(" ")
+                )),
                 target.clone(),
             )
         }
@@ -691,6 +700,7 @@ mod tests {
                 source: "state".to_string(),
                 target: "state".to_string(),
                 values,
+                nullable: false,
             },
         ];
 
@@ -699,6 +709,24 @@ mod tests {
         assert!(sql.contains("WHEN state = 0 THEN 'active'"));
         assert!(sql.contains("WHEN state = 1 THEN 'blocked'"));
         assert!(sql.contains("ELSE 'unknown' END AS state"));
+    }
+
+    #[test]
+    fn node_transform_sql_preserves_nullable_int_enum_nulls() {
+        let mut values = BTreeMap::new();
+        values.insert(1, "script_failure".to_string());
+
+        let columns = vec![NodeColumn::IntEnum {
+            source: "failure_reason".to_string(),
+            target: "failure_reason".to_string(),
+            values,
+            nullable: true,
+        }];
+
+        let sql = emit(&lower_node_transform(&columns));
+        assert!(sql.contains("WHEN failure_reason IS NULL THEN NULL"));
+        assert!(sql.contains("WHEN failure_reason = 1 THEN 'script_failure'"));
+        assert!(sql.contains("ELSE 'unknown' END AS failure_reason"));
     }
 
     #[test]

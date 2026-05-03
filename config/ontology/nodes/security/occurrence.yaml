@@ -94,6 +94,7 @@ properties:
       6: api_fuzzing
       7: cluster_image_scanning
       8: container_scanning_for_registry
+      9: sarif
       99: generic
 
   detection_method:
