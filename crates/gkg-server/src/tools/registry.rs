@@ -4,8 +4,6 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
-use super::schema::condensed_query_schema;
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
@@ -38,31 +36,34 @@ mod params {
             "description": "Node types to expand with properties and relationships."
         })
     }
+
+    pub fn include_response_format() -> Value {
+        json!({
+            "type": "boolean",
+            "description": "When true, include the query response JSON Schema (the formatter output shape) alongside the ontology."
+        })
+    }
 }
 
 pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![Self::query_graph(), Self::get_graph_schema()]
+        vec![
+            Self::query_graph(),
+            Self::get_graph_schema(),
+            Self::get_query_dsl(),
+        ]
     }
 
     fn query_graph() -> ToolDefinition {
-        let base_description = "Execute graph queries to find nodes, traverse relationships, \
-                                explore neighborhoods, find paths, or aggregate data. \
-                                Use get_graph_schema to discover available entity types and relationships.";
-
-        let description = match condensed_query_schema() {
-            Ok(schema) => format!(
-                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
-                base_description, schema
-            ),
-            Err(_) => base_description.to_string(),
-        };
-
         ToolDefinition {
             name: "query_graph".into(),
-            description,
+            description: "Execute graph queries to find nodes, traverse relationships, \
+                          explore neighborhoods, find paths, or aggregate data. \
+                          Call get_query_dsl once per session for the query grammar. \
+                          Call get_graph_schema for available entity types and relationships."
+                .into(),
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -80,12 +81,30 @@ impl ToolRegistry {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types."
+                          property details for specific types. Set include_response_format to \
+                          also return the formatter output JSON Schema."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "expand_nodes": params::expand_nodes(),
+                    "include_response_format": params::include_response_format(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_query_dsl() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_query_dsl".into(),
+            description: "Return the query DSL grammar (JSON Schema) used by query_graph. \
+                          Call this once per session before composing queries."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
                     "format": params::format()
                 },
                 "additionalProperties": false
@@ -113,7 +132,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -136,6 +155,7 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
+        assert!(names.contains(&"get_query_dsl".into()));
     }
 
     #[test]
@@ -179,11 +199,27 @@ mod tests {
     }
 
     #[test]
-    fn query_graph_description_contains_dsl_schema() {
+    fn query_graph_description_points_to_discovery_tools() {
         let tool = find_tool("query_graph");
-        assert!(tool.description.contains("query_type"));
-        assert!(tool.description.contains("traversal"));
+        assert!(tool.description.contains("get_query_dsl"));
         assert!(tool.description.contains("get_graph_schema"));
+    }
+
+    #[test]
+    fn query_graph_description_does_not_embed_dsl() {
+        // Issue #553: the DSL grammar must not be in the description because
+        // some MCP clients silently truncate it. The description must stay
+        // small and stable; the grammar lives behind get_query_dsl instead.
+        let tool = find_tool("query_graph");
+        assert!(
+            !tool.description.contains("<toon>"),
+            "query_graph description must not embed inline TOON"
+        );
+        assert!(
+            tool.description.len() < 1024,
+            "query_graph description should stay well under common MCP truncation limits, got {} bytes",
+            tool.description.len()
+        );
     }
 
     #[test]
@@ -197,5 +233,24 @@ mod tests {
     fn get_graph_schema_has_expand_nodes_param() {
         let tool = find_tool("get_graph_schema");
         assert!(tool.parameters["properties"]["expand_nodes"].is_object());
+    }
+
+    #[test]
+    fn get_graph_schema_has_include_response_format_param() {
+        let tool = find_tool("get_graph_schema");
+        let prop = &tool.parameters["properties"]["include_response_format"];
+        assert!(prop.is_object());
+        assert_eq!(prop["type"], "boolean");
+    }
+
+    #[test]
+    fn get_query_dsl_has_only_format_param() {
+        let tool = find_tool("get_query_dsl");
+        let props = tool.parameters["properties"]
+            .as_object()
+            .expect("properties should be an object");
+        assert_eq!(props.len(), 1);
+        assert!(props.contains_key("format"));
+        assert!(tool.parameters.get("required").is_none());
     }
 }

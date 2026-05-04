@@ -16,6 +16,14 @@ View the [Graph Query Engine](graph_engine.md) design document for more details 
 
 View the [Intermediate Query Language](./intermediary_llm_query_language.md) design document for more details on the intermediate LLM query language.
 
+The DSL grammar is served separately from the `query_graph` tool description so MCP clients that truncate descriptions still see the full text. Three RPCs cover discovery and execution:
+
+- `GetGraphSchema` — ontology (nodes, edges, domains). Set `include_response_format = true` to also return the query response JSON Schema.
+- `GetQueryDsl` — query DSL grammar. `RAW` returns the full JSON Schema; `LLM` returns a condensed TOON form.
+- `ExecuteQuery` — runs the query.
+
+The matching MCP tools are `get_graph_schema`, `get_query_dsl`, and `query_graph`.
+
 ### Unified Response Schema
 
 All four query types (traversal, aggregation, path_finding, neighbors) return a unified JSON response in the shape `{ query_type, nodes, edges, columns?, pagination? }`. Deduplicated entity objects and instance-level edges replace the previous flat tabular rows, giving callers a single contract for rendering graphs, tables, or analytics views. Aggregation queries include a `columns` array describing each computed value. When the query includes a `cursor`, the response includes a `pagination` object with `has_more` and `total_rows`.

@@ -42,6 +42,12 @@ service KnowledgeGraphService {
   // Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
 
+  // Returns the query DSL grammar (JSON Schema for query_graph input).
+  // Decoupled from ListTools so MCP clients that truncate tool descriptions can
+  // still discover the grammar on demand without bloating tool metadata.
+  // Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/query_dsl.
+  rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
+
   // Returns cluster health and component status.
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
@@ -107,8 +113,9 @@ message ExecuteQueryError {
 
 // Request to retrieve the graph schema with optional node expansion.
 message GetGraphSchemaRequest {
-  repeated string expand_nodes = 1;  // node names to include full properties/relationships; pass "*" to expand all
-  ResponseFormat format = 2;         // RAW: StructuredSchema; LLM: TOON text
+  repeated string expand_nodes = 1;       // node names to include full properties/relationships; pass "*" to expand all
+  ResponseFormat format = 2;              // RAW: StructuredSchema; LLM: TOON text
+  bool include_response_format = 3;       // when true, append the query response JSON Schema (the formatter output shape) alongside the ontology
 }
 
 // Schema response — exactly one of structured or text depending on format.
@@ -125,6 +132,13 @@ message StructuredSchema {
   repeated SchemaDomain domains = 2;
   repeated SchemaNode nodes = 3;
   repeated SchemaEdge edges = 4;
+  // Query response JSON Schema (the formatter output shape). Populated only
+  // when GetGraphSchemaRequest.include_response_format is true. Empty otherwise.
+  string response_format = 5;
+  // Semver of the response format (matches config/RAW_OUTPUT_FORMAT_VERSION
+  // and the format_version stamped on every query response). Populated only
+  // when include_response_format is true. Empty otherwise.
+  string response_format_version = 6;
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").
@@ -173,6 +187,23 @@ message SchemaEdgeVariant {
 message SchemaNodeStyle {
   int32 size = 1;    // relative node size in the graph visualization
   string color = 2;  // hex color, e.g. "#6366f1"
+}
+
+// ---------------------------------------------------------------------------
+// GetQueryDsl — unary, returns the JSON Schema for query_graph input
+// ---------------------------------------------------------------------------
+
+// Request for the query DSL grammar.
+message GetQueryDslRequest {
+  ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+}
+
+// Response carrying the DSL grammar in the requested format.
+message GetQueryDslResponse {
+  oneof content {
+    string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
+    string formatted_text = 2;   // format = LLM: condensed TOON
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -228,7 +259,7 @@ message ListToolsResponse {
 // truth for tool metadata — Rails passes these through to MCP and REST consumers.
 message ToolDefinition {
   string name = 1;                    // e.g. "query_graph", "get_graph_schema"
-  string description = 2;            // includes TOON schema context for query_graph
+  string description = 2;            // tool description; intentionally short so MCP clients that truncate descriptions still see the full text
   string parameters_json_schema = 3; // JSON Schema for the tool's input parameters
 }
 

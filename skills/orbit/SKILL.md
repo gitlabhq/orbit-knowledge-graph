@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.3.0
+version: 0.4.0
 license: MIT
 metadata:
   audience: developers
@@ -27,13 +27,15 @@ authoritative ontology and query DSL before writing queries.
 All endpoints live under `/api/v4/orbit/*` and are **user-scoped**, not project-scoped.
 Do **not** pass `-R owner/repo`.
 
-| Endpoint                    | Method | Purpose                                                  |
-|-----------------------------|--------|----------------------------------------------------------|
-| `orbit/status`              | GET    | Cluster health (always returns 200).                     |
-| `orbit/schema`              | GET    | Graph ontology: domains, nodes, edges.                   |
-| `orbit/schema?expand=A,B`   | GET    | Drill into nodes for properties and relationships.       |
-| `orbit/tools`               | GET    | MCP tool manifest with the full query DSL JSON Schema.   |
-| `orbit/query`               | POST   | Execute a query. **Requires `Content-Type` header.**     |
+| Endpoint                                | Method | Purpose                                                                       |
+|-----------------------------------------|--------|-------------------------------------------------------------------------------|
+| `orbit/status`                          | GET    | Cluster health (always returns 200).                                          |
+| `orbit/schema`                          | GET    | Graph ontology: domains, nodes, edges.                                        |
+| `orbit/schema?expand=A,B`               | GET    | Drill into nodes for properties and relationships.                            |
+| `orbit/schema?include_response_format=1`| GET    | Schema plus the query response JSON Schema (the formatter output shape).      |
+| `orbit/query_dsl`                       | GET    | Query DSL grammar. `?format=raw` returns the full JSON Schema; default is condensed TOON. |
+| `orbit/tools`                           | GET    | MCP tool manifest. Tool descriptions are kept short — call `orbit/query_dsl` for the grammar. |
+| `orbit/query`                           | POST   | Execute a query. **Requires `Content-Type` header.**                          |
 
 ## Discovery workflow (always start here)
 
@@ -41,7 +43,8 @@ Do **not** pass `-R owner/repo`.
 glab api orbit/status                                   # is the service up?
 glab api orbit/schema                                   # what entities and edges exist?
 glab api "orbit/schema?expand=MergeRequest,Project"     # properties of specific nodes
-glab api orbit/tools                                    # full DSL JSON Schema
+glab api orbit/query_dsl                                # query DSL grammar (condensed TOON)
+glab api orbit/tools                                    # MCP tool manifest
 ```
 
 These calls are cheap and return the authoritative ontology + query-DSL schema. Prefer them over

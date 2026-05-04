@@ -3,6 +3,11 @@ use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
+const RESPONSE_FORMAT_SCHEMA: &str = include_str!(concat!(
+    env!("GKG_SERVER_SCHEMAS_DIR"),
+    "/query_response.json"
+));
+
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
     "String value",
@@ -18,6 +23,17 @@ pub fn condensed_query_schema() -> Result<String, String> {
 
     let options = EncodeOptions::default();
     encode(&condensed, &options).map_err(|e| e.to_string())
+}
+
+/// Verbatim query DSL JSON Schema (uncondensed). Used by GetQueryDsl with RAW format.
+pub fn raw_query_schema() -> &'static str {
+    BASE_SCHEMA
+}
+
+/// Verbatim query response JSON Schema (formatter output shape).
+/// Surfaced via GetGraphSchema(include_response_format = true).
+pub fn query_response_schema() -> &'static str {
+    RESPONSE_FORMAT_SCHEMA
 }
 
 fn condense_schema(mut schema: Value) -> Value {

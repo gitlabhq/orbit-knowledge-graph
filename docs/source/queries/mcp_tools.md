@@ -28,10 +28,13 @@ title: Orbit MCP tools
 ## `query_graph`
 
 Query the knowledge graph and return matching nodes, relationships, and aggregations.
+The query DSL grammar is exposed separately through [`get_query_dsl`](#get_query_dsl)
+so the `query_graph` description stays small enough to survive MCP client truncation.
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
 | `query`   | object | Yes      | An [Orbit query language object](query_language.md). Valid query types: `traversal`, `aggregation`, `path_finding`, and `neighbors`. |
+| `format`  | string | No       | `llm` (default) returns compact text. `raw` returns structured JSON. |
 
 Example request:
 
@@ -99,9 +102,11 @@ Example response:
 
 Return the Orbit graph schema so agents can understand which entities, relationships, and properties are available.
 
-| Parameter     | Type             | Required | Description |
-|---------------|------------------|----------|-------------|
-| `expand_nodes` | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. |
+| Parameter                | Type             | Required | Description |
+|--------------------------|------------------|----------|-------------|
+| `expand_nodes`           | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. Pass `["*"]` to expand every node. |
+| `include_response_format`| boolean          | No       | When `true`, include the query response JSON Schema (the formatter output shape) and its semver alongside the ontology. The version matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` stamped on every query response. |
+| `format`                 | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
 
 Example request:
 
@@ -217,3 +222,32 @@ Example response:
   }
 }
 ```
+
+## `get_query_dsl`
+
+Return the query DSL grammar (the JSON Schema for `query_graph` input).
+Call this once per session before composing queries. The grammar is exposed
+through a dedicated tool, rather than embedded in `query_graph`'s description,
+so the description stays small enough for MCP clients that truncate tool
+metadata.
+
+| Parameter | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| `format`  | string | No       | `llm` (default) returns the condensed grammar as TOON. `raw` returns the full JSON Schema. |
+
+Example request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": "1",
+  "params": {
+    "name": "get_query_dsl",
+    "arguments": { "format": "llm" }
+  }
+}
+```
+
+The response carries the same grammar that previously lived in the
+`query_graph` description.

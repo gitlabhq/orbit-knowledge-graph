@@ -19,10 +19,11 @@ use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_er
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, ListToolsRequest,
-    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
-    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
+    GetQueryDslResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
+    SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty,
+    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response, get_query_dsl_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
@@ -239,17 +240,54 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         info!(format = ?req.format, "Fetching graph schema for user");
 
         let response = if req.format == ResponseFormat::Llm as i32 {
-            let toon_text = self
+            let mut toon_text = self
                 .tool_service
                 .build_schema_toon(&req.expand_nodes)
                 .map_err(|e| Status::internal(e.to_string()))?;
+            if req.include_response_format {
+                toon_text.push_str("\n\nResponseFormat v");
+                toon_text.push_str(&ToolService::build_response_format_version());
+                toon_text.push_str(" (JSON Schema):\n");
+                toon_text.push_str(ToolService::build_response_format_schema());
+            }
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::FormattedText(toon_text)),
             }
         } else {
-            let structured = self.build_structured_schema(&req.expand_nodes);
+            let structured =
+                self.build_structured_schema(&req.expand_nodes, req.include_response_format);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
+            }
+        };
+
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn get_query_dsl(
+        &self,
+        request: Request<GetQueryDslRequest>,
+    ) -> Result<Response<GetQueryDslResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching query DSL grammar for user");
+
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let toon =
+                ToolService::build_query_dsl_toon().map_err(|e| Status::internal(e.to_string()))?;
+            GetQueryDslResponse {
+                content: Some(get_query_dsl_response::Content::FormattedText(toon)),
+            }
+        } else {
+            GetQueryDslResponse {
+                content: Some(get_query_dsl_response::Content::RawJsonSchema(
+                    ToolService::build_query_dsl_raw().to_string(),
+                )),
             }
         };
 
@@ -300,7 +338,11 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 }
 
 impl KnowledgeGraphServiceImpl {
-    fn build_structured_schema(&self, expand_nodes: &[String]) -> StructuredSchema {
+    fn build_structured_schema(
+        &self,
+        expand_nodes: &[String],
+        include_response_format: bool,
+    ) -> StructuredSchema {
         let domains: Vec<SchemaDomain> = self
             .ontology
             .domains()
@@ -398,11 +440,22 @@ impl KnowledgeGraphServiceImpl {
             })
             .collect();
 
+        let (response_format, response_format_version) = if include_response_format {
+            (
+                ToolService::build_response_format_schema().to_string(),
+                ToolService::build_response_format_version(),
+            )
+        } else {
+            (String::new(), String::new())
+        };
+
         StructuredSchema {
             schema_version: self.ontology.schema_version().to_string(),
             domains,
             nodes,
             edges,
+            response_format,
+            response_format_version,
         }
     }
 
@@ -518,7 +571,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], false);
 
         assert!(!response.schema_version.is_empty());
         assert!(!response.nodes.is_empty());
@@ -547,7 +600,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema(&["User".to_string()], false);
 
         let user_node = response.nodes.iter().find(|n| n.name == "User");
         assert!(user_node.is_some());
@@ -622,7 +675,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&["User".to_string()]);
+        let response = service.build_structured_schema(&["User".to_string()], false);
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
 
         let id_prop = user.properties.iter().find(|p| p.name == "id");
@@ -650,7 +703,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], false);
 
         for domain in &response.domains {
             assert!(!domain.name.is_empty(), "Domain should have a name");
@@ -673,7 +726,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&[]);
+        let response = service.build_structured_schema(&[], false);
 
         for edge in &response.edges {
             assert!(!edge.name.is_empty(), "Edge should have a name");
@@ -701,7 +754,7 @@ mod tests {
         );
 
         let response =
-            service.build_structured_schema(&["User".to_string(), "Project".to_string()]);
+            service.build_structured_schema(&["User".to_string(), "Project".to_string()], false);
 
         let user = response.nodes.iter().find(|n| n.name == "User").unwrap();
         let project = response.nodes.iter().find(|n| n.name == "Project").unwrap();
@@ -805,7 +858,7 @@ mod tests {
             60,
         );
 
-        let response = service.build_structured_schema(&["*".to_string()]);
+        let response = service.build_structured_schema(&["*".to_string()], false);
 
         assert_eq!(
             response.nodes.len(),
@@ -830,5 +883,36 @@ mod tests {
                 node.name
             );
         }
+    }
+
+    #[test]
+    fn test_build_structured_schema_includes_response_format_when_flagged() {
+        let validator = Arc::new(mock_validator());
+        let service = KnowledgeGraphServiceImpl::new(
+            validator,
+            test_ontology(),
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+            60,
+        );
+
+        let with_flag = service.build_structured_schema(&[], true);
+        assert!(
+            with_flag
+                .response_format
+                .contains("GKG unified query response")
+        );
+        assert!(
+            !with_flag.response_format_version.is_empty(),
+            "response_format_version should be populated when flag is set"
+        );
+        assert_eq!(
+            with_flag.response_format_version,
+            ToolService::build_response_format_version()
+        );
+
+        let without_flag = service.build_structured_schema(&[], false);
+        assert!(without_flag.response_format.is_empty());
+        assert!(without_flag.response_format_version.is_empty());
     }
 }
