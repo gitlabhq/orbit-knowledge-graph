@@ -2092,6 +2092,7 @@ dependencies = [
  "arrow 58.1.0",
  "arrow-ipc 58.1.0",
  "bytes",
+ "circuit-breaker",
  "clickhouse",
  "futures",
  "gkg-server-config",
@@ -5156,8 +5157,10 @@ dependencies = [
 name = "gkg-observability"
 version = "0.1.0"
 dependencies = [
+ "circuit-breaker",
  "opentelemetry",
  "serde",
+ "tracing",
 ]
 
 [[package]]
