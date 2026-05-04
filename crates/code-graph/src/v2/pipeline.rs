@@ -118,6 +118,14 @@ fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
 
+/// A file paired with the specific [`Language`] that should parse it.
+/// Used when a language family groups multiple languages into one
+/// pipeline invocation (e.g. C and C++ in `CFamily`).
+pub struct FamilyFileInput {
+    pub language: Language,
+    pub path: FileInput,
+}
+
 /// Immutable context shared across the entire pipeline run.
 /// Bundles config, tracer, root path, and cancellation — everything
 /// that doesn't change per-language or per-file.
@@ -528,17 +536,20 @@ impl Pipeline {
         let root_str = root.to_string_lossy().to_string();
         config.emit_file_inventory_graph = true;
 
-        // 1. Normalize the repository inventory, then group parseable files by language.
+        // 1. Normalize the repository inventory, then group parseable files
+        //    by language family. Files keep their specific Language for
+        //    parser selection; the family determines which files share a
+        //    CodeGraph for cross-language resolution.
         let pb_discover = spinner("Preparing file inventory...");
         let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
-        let (files_by_language, parsed_file_languages) =
+        let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(root, &file_inventory, &config);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
-        let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
-        let lang_summary: Vec<String> = files_by_language
+        let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
+        let lang_summary: Vec<String> = files_by_family
             .iter()
-            .map(|(l, f)| format!("{l}: {}", f.len()))
+            .map(|(fam, f)| format!("{fam}: {}", f.len()))
             .collect();
         pb_discover.finish_with_message(format!(
             "Found {total_files} files, {parsable_files} parseable ({})",
@@ -595,7 +606,7 @@ impl Pipeline {
         }
 
         std::thread::scope(|s| {
-            for (language, files) in &files_by_language {
+            for (family, files) in &files_by_family {
                 // Block until a slot opens
                 sem_rx.recv().unwrap();
 
@@ -652,7 +663,7 @@ impl Pipeline {
                         Err(e) => {
                             all_errors.lock().unwrap().push(
                                 crate::v2::error::CodeGraphError::ThreadPoolCreation {
-                                    language: language.to_string(),
+                                    language: family.to_string(),
                                     source: e,
                                 }
                                 .into(),
@@ -676,15 +687,15 @@ impl Pipeline {
                     };
 
                     tracing::info!(
-                        %language,
+                        family = %family,
                         file_count,
                         threads = pool.current_num_threads(),
-                        "processing language"
+                        "processing language family"
                     );
 
                     let result = pool.install(|| {
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                            crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
                         }))
                     });
 
@@ -699,7 +710,7 @@ impl Pipeline {
                         let err = match payload.downcast::<crate::v2::error::CodeGraphError>() {
                             Ok(typed) => *typed,
                             Err(payload) => crate::v2::error::CodeGraphError::Internal {
-                                context: format!("language_panic:{language}"),
+                                context: format!("language_panic:{family}"),
                                 message: format!(
                                     "language worker panicked: {}",
                                     panic_payload_message(&payload)
@@ -710,15 +721,15 @@ impl Pipeline {
                     }) {
                         Some(Ok(())) => {
                             tracing::info!(
-                                %language,
+                                family = %family,
                                 elapsed_ms = t_lang.elapsed().as_millis() as u64,
-                                "language done"
+                                "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
                             tracing::warn!(
-                                %language,
+                                family = %family,
                                 error_count = errors.len(),
                                 "language processing failed"
                             );
@@ -739,14 +750,14 @@ impl Pipeline {
                         }
                         None => {
                             tracing::debug!(
-                                %language,
+                                family = %family,
                                 file_count,
-                                "language not supported, skipping"
+                                "language family not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
                     }
-                    // Release permit — next language can start
+                    // Release permit — next family can start
                     sem_tx.send(()).ok();
                     // tx dropped here — writer thread exits
                 });
@@ -790,7 +801,14 @@ impl Pipeline {
         inventory: &[FileInventoryEntry],
         config: &PipelineConfig,
     ) -> FxHashMap<Language, Vec<FileInput>> {
-        group_parseable_inventory(root, inventory, config).0
+        let (by_family, _) = group_parseable_inventory(root, inventory, config);
+        let mut by_lang: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+        for (_fam, files) in by_family {
+            for f in files {
+                by_lang.entry(f.language).or_default().push(f.path);
+            }
+        }
+        by_lang
     }
 
     fn build_file_inventory_graph(
@@ -814,10 +832,11 @@ fn group_parseable_inventory(
     inventory: &[FileInventoryEntry],
     config: &PipelineConfig,
 ) -> (
-    FxHashMap<Language, Vec<FileInput>>,
+    FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>>,
     FxHashMap<String, Language>,
 ) {
-    let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+    let mut groups: FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>> =
+        FxHashMap::default();
     let mut parsed_file_languages = FxHashMap::default();
     let mut accepted_files = 0usize;
 
@@ -841,7 +860,13 @@ fn group_parseable_inventory(
 
         accepted_files += 1;
         parsed_file_languages.insert(entry.path.clone(), lang);
-        groups.entry(lang).or_default().push(entry.path.clone());
+        groups
+            .entry(lang.family())
+            .or_default()
+            .push(FamilyFileInput {
+                language: lang,
+                path: entry.path.clone(),
+            });
     }
 
     (groups, parsed_file_languages)

@@ -3,7 +3,7 @@
 //! All pipeline registration lives here. Adding a new language or custom
 //! pipeline: add one line to the `register_v2_pipelines!` invocation below.
 
-use crate::v2::config::Language;
+use crate::v2::config::{Language, LanguageFamily};
 
 use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
@@ -17,7 +17,8 @@ use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
-    BatchTx, FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError,
+    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguagePipeline, PipelineContext,
+    PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -87,6 +88,54 @@ register_v2_pipelines! {
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
     Tag("js") => [JsPipeline],
+}
+
+// ── Family dispatch ─────────────────────────────────────────────
+
+/// Dispatch a language family to the appropriate pipeline(s).
+///
+/// Groups files by their [`Language`], then runs each language's
+/// registered pipeline over its slice. Works identically for
+/// single-language (`Standalone`) and multi-language families --
+/// no per-family special cases.
+pub fn dispatch_family(
+    _family: LanguageFamily,
+    files: &[FamilyFileInput],
+    ctx: &Arc<PipelineContext>,
+    btx: &BatchTx<'_>,
+) -> Option<Result<(), Vec<PipelineError>>> {
+    let mut by_lang: rustc_hash::FxHashMap<Language, Vec<FileInput>> =
+        rustc_hash::FxHashMap::default();
+    for f in files {
+        by_lang.entry(f.language).or_default().push(f.path.clone());
+    }
+
+    let mut all_errors: Vec<PipelineError> = Vec::new();
+    let mut any_matched = false;
+
+    for (lang, paths) in &by_lang {
+        match dispatch_language(*lang, paths, ctx, btx) {
+            Some(Ok(())) => {
+                any_matched = true;
+            }
+            Some(Err(errs)) => {
+                any_matched = true;
+                all_errors.extend(errs);
+            }
+            None => {
+                tracing::warn!(%lang, "no pipeline registered for language");
+            }
+        }
+    }
+
+    if !any_matched {
+        return None;
+    }
+    if all_errors.is_empty() {
+        Some(Ok(()))
+    } else {
+        Some(Err(all_errors))
+    }
 }
 
 #[cfg(test)]
