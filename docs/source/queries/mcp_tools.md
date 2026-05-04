@@ -28,8 +28,10 @@ title: Orbit MCP tools
 ## `query_graph`
 
 Query the knowledge graph and return matching nodes, relationships, and aggregations.
-The query DSL grammar is exposed separately through [`get_query_dsl`](#get_query_dsl)
-so the `query_graph` description stays small enough to survive MCP client truncation.
+The query DSL grammar is also exposed through [`get_query_dsl`](#get_query_dsl) so MCP
+clients that truncate tool descriptions can still discover it. The grammar stays inline
+on `query_graph` for one release cycle to give existing consumers time to migrate; a
+follow-up MR strips it.
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|

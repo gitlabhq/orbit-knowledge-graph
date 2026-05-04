@@ -4,6 +4,8 @@ use ontology::Ontology;
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 
+use super::schema::condensed_query_schema;
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ToolDefinition {
     pub name: String,
@@ -57,13 +59,26 @@ impl ToolRegistry {
     }
 
     fn query_graph() -> ToolDefinition {
+        // Keep the inline TOON for now so existing MCP clients that already
+        // depend on it keep working. The new `get_query_dsl` tool exposes
+        // the same grammar through a dedicated call; a follow-up MR will
+        // strip the inline schema once the new tool has been adopted.
+        let base_description = "Execute graph queries to find nodes, traverse relationships, \
+                                explore neighborhoods, find paths, or aggregate data. \
+                                Use get_query_dsl for the query grammar. \
+                                Use get_graph_schema to discover available entity types and relationships.";
+
+        let description = match condensed_query_schema() {
+            Ok(schema) => format!(
+                "{}\n\nQuery DSL Schema:\n<toon>\n{}\n</toon>",
+                base_description, schema
+            ),
+            Err(_) => base_description.to_string(),
+        };
+
         ToolDefinition {
             name: "query_graph".into(),
-            description: "Execute graph queries to find nodes, traverse relationships, \
-                          explore neighborhoods, find paths, or aggregate data. \
-                          Call get_query_dsl once per session for the query grammar. \
-                          Call get_graph_schema for available entity types and relationships."
-                .into(),
+            description,
             parameters: json!({
                 "type": "object",
                 "required": ["query"],
@@ -206,24 +221,20 @@ mod tests {
     }
 
     #[test]
-    fn query_graph_description_does_not_embed_dsl() {
-        // Issue #553: the DSL grammar must not be in the description because
-        // some MCP clients silently truncate it. The description must stay
-        // small and stable; the grammar lives behind get_query_dsl instead.
+    fn query_graph_description_still_embeds_dsl_for_back_compat() {
+        // Issue #553 added `get_query_dsl` so MCP clients that truncate
+        // descriptions can still find the grammar. We keep the inline TOON
+        // in the description for one release cycle so existing consumers
+        // do not break. A follow-up MR strips it once adoption is verified.
         let tool = find_tool("query_graph");
-        assert!(
-            !tool.description.contains("<toon>"),
-            "query_graph description must not embed inline TOON"
-        );
-        assert!(
-            tool.description.len() < 1024,
-            "query_graph description should stay well under common MCP truncation limits, got {} bytes",
-            tool.description.len()
-        );
+        assert!(tool.description.contains("query_type"));
+        assert!(tool.description.contains("traversal"));
+        assert!(tool.description.contains("<toon>"));
     }
 
     #[test]
     fn query_graph_excludes_ontology_data() {
+        // The embedded DSL describes query shape, not ontology entities.
         let tool = find_tool("query_graph");
         assert!(!tool.description.contains("username"));
         assert!(!tool.description.contains("AUTHORED"));
