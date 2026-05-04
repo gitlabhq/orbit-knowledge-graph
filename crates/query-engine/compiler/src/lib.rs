@@ -557,7 +557,9 @@ mod tests {
         );
         // Traversal-path scope applied to edge scans inside the forward CTE.
         assert!(
-            sql.contains("traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"),
+            sql.contains(
+                "traversal_path IN (SELECT traversal_path FROM _path_scope_traversal_paths)"
+            ),
             "edge scans should use traversal_path scope, got:\n{sql}"
         );
         assert!(

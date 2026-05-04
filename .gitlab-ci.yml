@@ -470,8 +470,6 @@ integration-test:
     - cargo nextest run --profile ci --all-features --test containers
     - sccache --show-stats || true
 
-# Temporary: run server integration tests through v2 skeleton-first compiler.
-# Remove once v2 is the default.
 # Benchmark Stage
 #
 # Runs code indexing benchmarks when indexing crates change.
