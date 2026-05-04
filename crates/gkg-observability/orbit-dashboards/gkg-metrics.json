@@ -118,11 +118,6 @@
         "outcome"
       ],
       "buckets": [
-        0.001,
-        0.005,
-        0.01,
-        0.025,
-        0.05,
         0.1,
         0.25,
         0.5,
@@ -150,23 +145,14 @@
       "description": "Time to write a batch to ClickHouse.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [
-        "table"
-      ],
+      "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -205,19 +191,12 @@
         "handler"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -245,19 +224,12 @@
         "topic"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -285,19 +257,12 @@
         "outcome"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -314,19 +279,12 @@
         "group"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -429,16 +387,12 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.1,
         0.5,
         1.0,
-        2.5,
         5.0,
         10.0,
-        15.0,
         30.0,
         60.0,
-        120.0,
         300.0
       ],
       "stability": "stable",
@@ -452,16 +406,12 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.1,
         0.5,
         1.0,
-        2.5,
         5.0,
         10.0,
-        15.0,
         30.0,
         60.0,
-        120.0,
         300.0
       ],
       "stability": "stable",
@@ -508,16 +458,12 @@
       "unit": "s",
       "labels": [],
       "buckets": [
-        0.1,
         0.5,
         1.0,
-        2.5,
         5.0,
         10.0,
-        15.0,
         30.0,
         60.0,
-        120.0,
         300.0
       ],
       "stability": "stable",
@@ -568,23 +514,14 @@
       "description": "Duration of a single table's soft-delete INSERT-SELECT.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [
-        "table"
-      ],
+      "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -619,23 +556,14 @@
       "description": "Duration of ClickHouse datalake extraction queries.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [
-        "entity"
-      ],
+      "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -651,16 +579,12 @@
         "handler"
       ],
       "buckets": [
-        0.1,
         0.5,
         1.0,
-        2.5,
         5.0,
         10.0,
-        15.0,
         30.0,
         60.0,
-        120.0,
         300.0
       ],
       "stability": "stable",
@@ -676,16 +600,12 @@
         "entity"
       ],
       "buckets": [
-        0.1,
         0.5,
         1.0,
-        2.5,
         5.0,
         10.0,
-        15.0,
         30.0,
         60.0,
-        120.0,
         300.0
       ],
       "stability": "stable",
@@ -720,23 +640,14 @@
       "description": "Duration of DataFusion SQL transform per batch.",
       "kind": "histogram_f64",
       "unit": "s",
-      "labels": [
-        "entity"
-      ],
+      "labels": [],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -748,9 +659,7 @@
       "description": "Seconds between the current watermark and wall-clock time (data freshness).",
       "kind": "gauge",
       "unit": "s",
-      "labels": [
-        "entity"
-      ],
+      "labels": [],
       "stability": "stable",
       "domain": "indexer.sdlc"
     },
@@ -852,19 +761,12 @@
         "query_type"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -945,19 +847,12 @@
         "query_type"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -974,19 +869,12 @@
         "status"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -1057,19 +945,12 @@
         "query_type"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -1085,19 +966,12 @@
         "query_type"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -1165,19 +1039,12 @@
         "task"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",
@@ -1205,19 +1072,12 @@
         "query"
       ],
       "buckets": [
-        0.005,
-        0.01,
-        0.025,
-        0.05,
-        0.075,
         0.1,
         0.25,
         0.5,
-        0.75,
         1.0,
         2.5,
         5.0,
-        7.5,
         10.0
       ],
       "stability": "stable",

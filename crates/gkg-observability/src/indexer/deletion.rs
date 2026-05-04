@@ -13,7 +13,7 @@ pub const TABLE_DELETION_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.namespace_deletion.table.duration",
     "Duration of a single table's soft-delete INSERT-SELECT.",
     Some("s"),
-    &[labels::TABLE],
+    &[],
     LATENCY,
     DOMAIN,
 );
