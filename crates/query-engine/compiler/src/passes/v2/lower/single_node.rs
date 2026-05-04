@@ -7,7 +7,7 @@ use super::super::plan::*;
 use super::EmitOutput;
 use super::helpers::{build_dedup_subquery, node_select_columns};
 
-pub(super) fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
+pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
     let (_, np) = plan
         .nodes
         .iter()

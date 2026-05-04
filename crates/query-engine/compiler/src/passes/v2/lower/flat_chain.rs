@@ -11,15 +11,16 @@ use super::super::plan::*;
 use super::super::shared::filter_to_expr;
 use super::EmitOutput;
 use super::helpers::{
-    build_multi_hop_union, emit_filter_subquery, emit_node_ids_on_edge,
-    emit_node_join_with_narrowing, emit_precomputed_denorm_tags, push_edge_predicates,
+    build_multi_hop_union, emit_denorm_tags, emit_filter_subquery, emit_node_ids_on_edge,
+    emit_node_join_with_narrowing, push_edge_predicates,
 };
 
-pub(super) fn emit_flat_chain(plan: &EdgeChainPlan) -> Result<EmitOutput> {
+pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
+    let mut tagged_nodes: HashSet<String> = HashSet::new();
 
     for (i, hop) in plan.hops.iter().enumerate() {
         let alias = format!("e{i}");
@@ -71,8 +72,16 @@ pub(super) fn emit_flat_chain(plan: &EdgeChainPlan) -> Result<EmitOutput> {
             where_parts.push(filter_to_expr(&alias, prop, filter));
         }
 
-        // Apply pre-computed denorm tags from the plan nodes.
-        emit_precomputed_denorm_tags(&mut where_parts, &plan.nodes, hop, start_col, end_col);
+        // Compute denorm tags from plan.denorm_columns.
+        emit_denorm_tags(
+            &mut where_parts,
+            plan,
+            hop,
+            &alias,
+            start_col,
+            end_col,
+            &mut tagged_nodes,
+        );
         emit_node_ids_on_edge(
             &mut where_parts,
             &alias,

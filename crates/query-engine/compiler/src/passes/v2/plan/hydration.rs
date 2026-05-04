@@ -1,7 +1,11 @@
 //! Hydration plan: fetch node properties for a set of IDs.
 
+use std::collections::HashMap;
+
 use crate::error::{QueryError, Result};
 use crate::input::*;
+
+use super::{Plan, PlanBody, Strategy};
 
 pub struct HydrationNodePlan {
     pub alias: String,
@@ -12,18 +16,13 @@ pub struct HydrationNodePlan {
     pub columns: Vec<String>,
 }
 
-pub struct HydrationPlan {
-    pub nodes: Vec<HydrationNodePlan>,
-    pub limit: u32,
-}
-
-pub fn plan_hydration(input: &Input) -> Result<HydrationPlan> {
+pub fn plan_hydration(input: &Input) -> Result<Plan> {
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
         ));
     }
-    let nodes = input
+    let hydration_nodes = input
         .nodes
         .iter()
         .map(|node| {
@@ -50,8 +49,15 @@ pub fn plan_hydration(input: &Input) -> Result<HydrationPlan> {
         })
         .collect::<Result<Vec<_>>>()?;
 
-    Ok(HydrationPlan {
-        nodes,
+    Ok(Plan {
+        nodes: HashMap::new(),
+        hops: vec![],
+        strategy: Strategy::SingleNode,
         limit: input.limit,
+        order_by: None,
+        cursor: None,
+        node_edge_mappings: HashMap::new(),
+        denorm_columns: HashMap::new(),
+        body: PlanBody::Hydration(hydration_nodes),
     })
 }

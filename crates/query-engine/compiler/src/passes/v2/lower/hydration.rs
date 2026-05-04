@@ -8,20 +8,20 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::super::plan::{HydrationNodePlan, HydrationPlan};
+use super::super::plan::HydrationNodePlan;
 use super::super::shared::{dedup_query, deleted_false};
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_hydration(plan: &HydrationPlan) -> Result<Node> {
-    let mut arms = plan.nodes.iter().map(emit_arm);
+pub fn emit_hydration(nodes: &[HydrationNodePlan], limit: u32) -> Result<Node> {
+    let mut arms = nodes.iter().map(emit_arm);
     let mut first = arms
         .next()
         .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
     for arm in arms {
         first.union_all.push(arm?);
     }
-    first.limit = Some(plan.limit);
+    first.limit = Some(limit);
     Ok(Node::Query(Box::new(first)))
 }
 

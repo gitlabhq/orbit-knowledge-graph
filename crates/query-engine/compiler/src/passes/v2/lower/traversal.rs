@@ -1,23 +1,20 @@
 //! Traversal query lowering.
-//!
-//! Single-node: direct node table scan.
-//! Multi-node: edge chain plan + edge metadata SELECT + ORDER BY.
 
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::{EdgeChainPlan, Strategy};
+use super::super::plan::{Plan, Strategy};
 use super::super::shared::edge_select_columns;
 use super::super::shared::edge_select_columns_with_prefix;
 use crate::constants::*;
 
-pub fn emit_traversal(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
+pub fn emit_traversal(plan: &Plan) -> Result<Node> {
     if matches!(plan.strategy, Strategy::SingleNode) {
-        return emit_single_node(plan, input);
+        return emit_single_node(plan);
     }
 
-    let output = plan.emit(input)?;
+    let output = plan.emit_edge_chain()?;
 
     let mut select = Vec::new();
     let already_has_edge_cols = output.select.iter().any(|s| {
@@ -47,7 +44,7 @@ pub fn emit_traversal(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
         .map(|ob| {
             vec![OrderExpr {
                 expr: Expr::col(&ob.node, &ob.property),
-                desc: ob.desc,
+                desc: matches!(ob.direction, OrderDirection::Desc),
             }]
         })
         .unwrap_or_default();
@@ -56,8 +53,8 @@ pub fn emit_traversal(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
     Ok(Node::Query(Box::new(q)))
 }
 
-fn emit_single_node(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
-    let output = plan.emit(input)?;
+fn emit_single_node(plan: &Plan) -> Result<Node> {
+    let output = plan.emit_edge_chain()?;
 
     let order_by = plan
         .order_by
@@ -65,7 +62,7 @@ fn emit_single_node(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
         .map(|ob| {
             vec![OrderExpr {
                 expr: Expr::col(&ob.node, &ob.property),
-                desc: ob.desc,
+                desc: matches!(ob.direction, OrderDirection::Desc),
             }]
         })
         .unwrap_or_default();

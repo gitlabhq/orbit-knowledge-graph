@@ -12,7 +12,7 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::NeighborsPlan;
+use super::super::plan::{EdgeTableConfig, Plan};
 use super::super::shared::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
@@ -20,17 +20,23 @@ use super::super::shared::{
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
-    let center_id = p.center.id.clone();
-    let center_entity = p.center.entity.clone();
-    let center_table = p.center.table.clone();
-    let center_uses_default_pk = p.center.uses_default_pk();
-    let center_redaction_col = p.center.redaction_id_column.clone();
-    let center_node_ids = p.center.node_ids.clone();
-    let center_filters = p.center.filters.clone();
-    let center_id_range = p.center.id_range.clone();
-    let has_non_denorm = p.has_non_denorm;
-    let edge_table = p.edge.tables.clone();
+pub fn emit_neighbors(
+    plan: &Plan,
+    center_alias: &str,
+    direction: Direction,
+    edge: &EdgeTableConfig,
+    has_non_denorm: bool,
+) -> Result<Node> {
+    let cnp = &plan.nodes[center_alias];
+    let center_id = center_alias.to_string();
+    let center_entity = cnp.entity.clone().unwrap_or_default();
+    let center_table = cnp.table.clone().unwrap_or_default();
+    let center_uses_default_pk = cnp.uses_default_pk();
+    let center_redaction_col = cnp.redaction_id_column.clone();
+    let center_node_ids = cnp.node_ids.clone();
+    let center_filters = cnp.filters.clone();
+    let center_id_range = cnp.id_range.clone();
+    let edge_table = edge.tables.clone();
     let edge_alias = "e";
 
     fn build_center_dedup(
@@ -78,18 +84,18 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
             },
         ]
     };
-    let order_by = match &p.order_by {
+    let order_by = match &plan.order_by {
         Some(ob) => {
             let mut exprs = vec![OrderExpr {
                 expr: Expr::col(&ob.node, &ob.property),
                 desc: ob.direction == OrderDirection::Desc,
             }];
-            if p.cursor.is_some() {
+            if plan.cursor.is_some() {
                 exprs.extend(edge_tiebreakers());
             }
             exprs
         }
-        None if p.cursor.is_some() => edge_tiebreakers(),
+        None if plan.cursor.is_some() => edge_tiebreakers(),
         None => vec![],
     };
 
@@ -137,14 +143,14 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
         };
         for (prop, filter) in &center_filters {
             let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = p.denorm_columns.get(&key)
+            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
                 && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
             {
                 where_parts.push(expr);
             }
         }
 
-        if let Some(ref types) = p.edge.rel_type_filter
+        if let Some(ref types) = edge.rel_type_filter
             && let Some(f) = rel_kind_filter(edge_alias, types)
         {
             where_parts.push(f);
@@ -222,16 +228,16 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
         }
     };
 
-    if p.direction == Direction::Both {
+    if direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
-        outgoing.limit = Some(p.limit);
+        outgoing.limit = Some(plan.limit);
         Ok(Node::Query(Box::new(outgoing)))
     } else {
-        let mut arm = build_arm(p.direction);
+        let mut arm = build_arm(direction);
         arm.order_by = order_by;
-        arm.limit = Some(p.limit);
+        arm.limit = Some(plan.limit);
         Ok(Node::Query(Box::new(arm)))
     }
 }

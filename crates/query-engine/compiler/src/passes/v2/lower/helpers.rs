@@ -1,6 +1,7 @@
 //! Shared emit helpers: dedup, columns, predicates, node hydration, edge predicates.
 
 use std::collections::HashMap;
+use std::collections::HashSet;
 
 use ontology::constants::*;
 
@@ -11,8 +12,8 @@ use crate::input::*;
 
 use super::super::plan::*;
 use super::super::shared::{
-    dedup_query, deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
-    rel_kind_filter, rel_kind_filter_values,
+    dedup_query, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
+    id_range_predicate, rel_kind_filter, rel_kind_filter_values,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -247,38 +248,39 @@ pub(super) fn push_edge_predicates(
     where_parts.push(deleted_false(alias));
 }
 
-/// Emit pre-computed denorm tags from the plan's NodePlans.
-pub(super) fn emit_precomputed_denorm_tags(
+/// Emit denorm tag filters computed from `plan.denorm_columns`.
+///
+/// Each node is tagged at most once (tracked by `tagged_nodes`).
+pub(super) fn emit_denorm_tags(
     where_parts: &mut Vec<Expr>,
-    nodes: &HashMap<String, NodePlan>,
+    plan: &Plan,
     hop: &Hop,
+    edge_alias: &str,
     start_col: &str,
     end_col: &str,
+    tagged_nodes: &mut HashSet<String>,
 ) {
-    for (node_alias, _id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-        let Some(np) = nodes.get(node_alias) else {
+    for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
+        if !tagged_nodes.insert(node_alias.clone()) {
+            continue;
+        }
+        let Some(np) = plan.nodes.get(node_alias) else {
             continue;
         };
-        for tag in &np.denorm_tags {
-            match &tag.op {
-                DenormTagOp::Has => {
-                    where_parts.push(Expr::func(
-                        "has",
-                        vec![
-                            Expr::col(&tag.edge_alias, &tag.tag_column),
-                            Expr::string(&tag.tag_value),
-                        ],
-                    ));
-                }
-                DenormTagOp::HasAny(tags) => {
-                    where_parts.push(Expr::func(
-                        "hasAny",
-                        vec![
-                            Expr::col(&tag.edge_alias, &tag.tag_column),
-                            Expr::func("array", tags.iter().map(Expr::string).collect()),
-                        ],
-                    ));
-                }
+        let Some(ref entity) = np.entity else {
+            continue;
+        };
+        let dir = if id_col == SOURCE_ID_COLUMN {
+            "source"
+        } else {
+            "target"
+        };
+        for (prop, filter) in &np.filters {
+            let key = (entity.clone(), prop.clone(), dir.to_string());
+            if let Some((tag_col, tag_key)) = plan.denorm_columns.get(&key)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+            {
+                where_parts.push(expr);
             }
         }
     }

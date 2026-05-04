@@ -1,10 +1,4 @@
 //! Query lowerer: edge-chain-first, nodes are lazy.
-//!
-//! Emit phase: reads a QueryPlan, produces SQL AST.
-//!
-//! When used via the pipeline, PlannerPass runs phase 1 (`plan::plan()`)
-//! and LowerPass runs phase 2 (`emit()`). When called directly (e.g.
-//! `lower()`), both phases run inline for convenience.
 
 pub mod aggregation;
 mod fk_star;
@@ -20,16 +14,10 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::plan::{self, EdgeChainPlan, QueryPlan, Strategy};
+use super::plan::{self, Plan, PlanBody, Strategy};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// EdgeChainPlan::emit()
-// ─────────────────────────────────────────────────────────────────────────────
-
-impl EdgeChainPlan {
-    /// Emit SQL AST from the plan. Pure AST generation — reads only
-    /// from plan fields, does not consult Input.
-    pub fn emit(&self, _input: &mut Input) -> Result<EmitOutput> {
+impl Plan {
+    pub fn emit_edge_chain(&self) -> Result<EmitOutput> {
         match self.strategy {
             Strategy::SingleNode => single_node::emit_single_node(self),
             Strategy::FkStar { ref center } => fk_star::emit_fk_star(self, center),
@@ -38,7 +26,6 @@ impl EdgeChainPlan {
     }
 }
 
-/// The output of emitting a plan — ready for query-type modules to wrap.
 pub struct EmitOutput {
     pub from: TableRef,
     pub edge_aliases: Vec<String>,
@@ -48,7 +35,6 @@ pub struct EmitOutput {
 }
 
 impl EmitOutput {
-    /// Assemble into a final Query.
     pub fn into_query(
         self,
         mut select: Vec<SelectExpr>,
@@ -70,20 +56,25 @@ impl EmitOutput {
     }
 }
 
-/// Emit SQL AST from a query plan (phase 2).
-pub fn emit(query_plan: &QueryPlan, input: &mut Input) -> Result<Node> {
-    match query_plan {
-        QueryPlan::Traversal(plan) => traversal::emit_traversal(plan, input),
-        QueryPlan::Aggregation(plan) => aggregation::emit_aggregation(plan, input),
-        QueryPlan::Neighbors(p) => neighbors::emit_neighbors(p, input),
-        QueryPlan::PathFinding(p) => pathfinding::emit_pathfinding(p, input),
-        QueryPlan::Hydration(p) => hydration::emit_hydration(p),
+pub fn emit(plan: &Plan) -> Result<Node> {
+    match &plan.body {
+        PlanBody::Traversal => traversal::emit_traversal(plan),
+        PlanBody::Aggregation {
+            aggregations,
+            agg_sort,
+        } => aggregation::emit_aggregation(plan, aggregations, agg_sort.as_ref()),
+        PlanBody::Neighbors {
+            center,
+            direction,
+            edge,
+            has_non_denorm,
+        } => neighbors::emit_neighbors(plan, center, *direction, edge, *has_non_denorm),
+        PlanBody::PathFinding(pf) => pathfinding::emit_pathfinding(plan, pf),
+        PlanBody::Hydration(nodes) => hydration::emit_hydration(nodes, plan.limit),
     }
 }
 
-/// Convenience: plan + emit in one call (used by LowerPass when no
-/// separate PlannerPass is in the pipeline).
 pub fn lower(input: &mut Input) -> Result<Node> {
-    let query_plan = plan::plan(input)?;
-    emit(&query_plan, input)
+    let plan = plan::plan(input)?;
+    emit(&plan)
 }

@@ -8,51 +8,68 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::super::shared::has_non_denorm_filters;
-use super::{EdgeTableConfig, PlanNode, find_node};
+use super::{
+    EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy, find_node,
+};
 
-pub struct NeighborsPlan {
-    pub center: PlanNode,
-    pub has_non_denorm: bool,
-    pub direction: Direction,
-    pub edge: EdgeTableConfig,
-    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
-    pub node_edge_mappings: HashMap<String, (String, String)>,
-    pub order_by: Option<InputOrderBy>,
-    pub cursor: Option<InputCursor>,
-    pub limit: u32,
-}
-
-pub fn plan_neighbors(input: &Input) -> Result<NeighborsPlan> {
+pub fn plan_neighbors(input: &Input) -> Result<Plan> {
     let config = input
         .neighbors
         .as_ref()
         .ok_or_else(|| crate::error::QueryError::Lowering("neighbors config missing".into()))?;
 
     let center_node = find_node(input, &config.node)?;
-    let center = PlanNode::from_input(center_node)?;
+    let center_alias = center_node.id.clone();
+
+    let center_np = NodePlan {
+        alias: center_node.id.clone(),
+        entity: center_node.entity.clone(),
+        table: center_node.table.clone(),
+        selectivity: Selectivity::from_node(center_node),
+        hydration: HydrationStrategy::Skip,
+        filters: center_node.filters.clone().into_iter().collect(),
+        node_ids: center_node.node_ids.clone(),
+        id_range: center_node.id_range.clone(),
+        has_traversal_path: center_node.has_traversal_path,
+        redaction_id_column: center_node.redaction_id_column.clone(),
+        columns: center_node.columns.clone(),
+        dedup_columns: vec![],
+        use_narrowing: false,
+        needs_elevated_filter: false,
+        fk_needs_join: false,
+        emit_select: true,
+    };
 
     let has_non_denorm = has_non_denorm_filters(
-        &center.entity,
-        &center.filters,
+        center_np.entity.as_deref().unwrap_or(""),
+        &center_np.filters,
         &input.compiler.denormalized_columns,
-    ) || center.id_range.is_some();
+    ) || center_np.id_range.is_some();
 
     let edge = EdgeTableConfig::from_input(&input.compiler, &config.rel_types);
 
     let node_edge_mappings = HashMap::from([(
-        center.id.clone(),
+        center_alias.clone(),
         ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
     )]);
 
-    Ok(NeighborsPlan {
-        center,
-        has_non_denorm,
-        direction: config.direction,
-        edge,
-        denorm_columns: input.compiler.denormalized_columns.clone(),
-        node_edge_mappings,
+    let mut nodes = HashMap::new();
+    nodes.insert(center_alias.clone(), center_np);
+
+    Ok(Plan {
+        nodes,
+        hops: vec![],
+        strategy: Strategy::SingleNode,
+        limit: input.limit,
         order_by: input.order_by.clone(),
         cursor: input.cursor,
-        limit: input.limit,
+        node_edge_mappings,
+        denorm_columns: input.compiler.denormalized_columns.clone(),
+        body: PlanBody::Neighbors {
+            center: center_alias,
+            direction: config.direction,
+            edge,
+            has_non_denorm,
+        },
     })
 }

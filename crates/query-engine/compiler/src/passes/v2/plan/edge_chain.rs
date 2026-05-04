@@ -1,6 +1,6 @@
-//! EdgeChainPlan: the edge-chain query plan and its builder.
+//! Edge-chain query plan builder.
 //!
-//! `EdgeChainPlan::plan()` reads Input, populates the IR.
+//! `plan()` reads Input, produces a Plan for traversal and aggregation queries.
 
 use std::collections::HashMap;
 use std::collections::HashSet;
@@ -10,33 +10,11 @@ use ontology::constants::*;
 use crate::input::*;
 
 use super::super::shared::{requested_columns, resolve_edge_table};
+use super::{Plan, PlanBody};
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EdgeChainPlan: the edge-chain query plan
+// Types
 // ─────────────────────────────────────────────────────────────────────────────
-
-pub struct EdgeChainPlan {
-    /// Ordered chain of edge hops.
-    pub hops: Vec<Hop>,
-    /// Per-node planning metadata. Keyed by node alias.
-    pub nodes: HashMap<String, NodePlan>,
-    /// Execution strategy for the edge chain.
-    pub strategy: Strategy,
-    /// FK hops that were elided: (target_node, fk_node, fk_column).
-    /// Used by emit to populate node_edge_col for the enforce pass.
-    pub elided_fks: Vec<(String, String, String)>,
-    /// Pre-resolved node_edge_col mappings for the enforce pass.
-    /// Computed during plan() from hops + elided_fks.
-    pub node_edge_mappings: HashMap<String, (String, String)>,
-    /// Whether to synthesize FK edge metadata (traversal only, non-aggregation).
-    pub synthesize_fk_edge_metadata: bool,
-    /// Pre-computed ORDER BY for the outer query.
-    pub order_by: Option<PlanOrderBy>,
-    /// Query result limit.
-    pub limit: u32,
-    /// Aggregation plan (only present for Aggregation query type).
-    pub agg: Option<AggPlan>,
-}
 
 /// A single edge hop in the plan chain.
 pub struct Hop {
@@ -82,101 +60,30 @@ pub struct HopFk {
     pub target_node: String,
 }
 
-/// Per-node plan: where its ID comes from and what to do with it.
+/// Per-node plan metadata.
 pub struct NodePlan {
     pub alias: String,
     pub entity: Option<String>,
     pub table: Option<String>,
     pub selectivity: Selectivity,
     pub hydration: HydrationStrategy,
-    /// Which edge alias + column carries this node's ID in the plan.
-    pub id_source: Option<IdSource>,
-    /// Node filters from the query input.
     pub filters: Vec<(String, InputFilter)>,
-    /// Pinned IDs (node_ids from query input).
     pub node_ids: Vec<i64>,
-    /// ID range filter.
     pub id_range: Option<InputIdRange>,
-    /// Whether the node table has a traversal_path column (most do; User/Runner don't).
     pub has_traversal_path: bool,
-    /// Auth column (usually "id", but e.g. "project_id" for Definition).
     pub redaction_id_column: String,
-    /// Columns requested by the user.
     pub columns: Option<ColumnSelection>,
-    /// Pre-computed denorm tag predicates for this node.
-    /// Only populated for the first edge where the node appears.
-    pub denorm_tags: Vec<DenormTag>,
-    /// Pre-resolved columns for the dedup subquery.
     pub dedup_columns: Vec<String>,
-    /// Whether this node needs IN-narrowing.
     pub use_narrowing: bool,
-    /// Whether this node needs elevated-access FilterOnly.
     pub needs_elevated_filter: bool,
-    /// Pre-resolved node_edge_col mapping (alias, column).
-    pub edge_col_mapping: Option<(String, String)>,
-    /// Whether an FK target needs inline JOIN hydration.
     pub fk_needs_join: bool,
-    /// Whether this node's columns should appear in SELECT.
-    /// False for non-group-by nodes in aggregation queries.
     pub emit_select: bool,
 }
 
-/// Pre-computed denorm tag predicate for application on an edge.
-pub struct DenormTag {
-    pub edge_alias: String,
-    pub tag_column: String,
-    pub tag_key: String,
-    pub tag_value: String,
-    pub op: DenormTagOp,
-}
-
-/// Operation type for a denorm tag predicate.
-pub enum DenormTagOp {
-    /// has(edge_column, "key:value")
-    Has,
-    /// hasAny(edge_column, array("key:v1", "key:v2", ...))
-    HasAny(Vec<String>),
-}
-
-/// Pre-computed ORDER BY for the outer query (traversal + aggregation).
-pub struct PlanOrderBy {
-    pub node: String,
-    pub property: String,
-    pub desc: bool,
-}
-
-/// Pre-computed aggregation plan (only for Aggregation queries).
-pub struct AggPlan {
-    pub specs: Vec<AggSpec>,
-    pub sort: Option<AggSortPlan>,
-}
-
-/// A single aggregation function specification.
-pub struct AggSpec {
-    pub function: AggFunction,
-    pub target: Option<String>,
-    pub property: Option<String>,
-    pub alias: String,
-    pub group_by: Option<GroupByPlan>,
-}
-
-/// Pre-computed GROUP BY columns for an aggregation.
-pub struct GroupByPlan {
-    pub node_alias: String,
-    pub columns: Vec<String>,
-}
-
-/// Pre-computed aggregation sort.
-pub struct AggSortPlan {
-    pub alias: String,
-    pub desc: bool,
-}
-
-/// Where a node's ID lives in the emitted SQL.
-#[derive(Clone)]
-pub struct IdSource {
-    pub edge_alias: String,
-    pub column: String,
+impl NodePlan {
+    pub fn uses_default_pk(&self) -> bool {
+        self.redaction_id_column == DEFAULT_PRIMARY_KEY
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -235,114 +142,168 @@ pub enum Strategy {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EdgeChainPlan::plan()
+// plan()
 // ─────────────────────────────────────────────────────────────────────────────
 
-impl EdgeChainPlan {
-    /// Build the edge chain plan from query input.
-    pub fn plan(input: &mut Input) -> Self {
-        let hops = build_hops(input);
-        let mut nodes = build_node_plans(input);
+pub fn plan(input: &mut Input) -> Plan {
+    let hops = build_hops(input);
+    let mut nodes = build_node_plans(input);
 
-        // Partial FK elision: when a hop has an FK column and the far-end
-        // node is pinned (concrete node_ids), absorb the FK constraint as a
-        // filter on the FK-holding node and drop the hop entirely. This
-        // eliminates an edge table scan. E.g. IN_PROJECT with project_id FK
-        // becomes `mr.project_id = 278964` on the MR dedup, no edge needed.
-        let (mut hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
+    let (mut hops, elided_fks, input) = elide_fk_hops(hops, &mut nodes, input);
 
-        // Reorder chain so the most selective node drives the scan.
-        // Also reorder input.relationships to stay in sync — the enforce
-        // pass uses relationship index to build EdgeMeta (e0_, e1_, etc.).
-        let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
-        hops = reordered_hops;
-        if reversed {
-            input.relationships.reverse();
+    let (reordered_hops, reversed) = reorder_by_selectivity(hops, &nodes);
+    hops = reordered_hops;
+    if reversed {
+        input.relationships.reverse();
+    }
+
+    for node_plan in nodes.values_mut() {
+        node_plan.hydration = determine_hydration(node_plan, input);
+    }
+
+    let strategy = if hops.is_empty() {
+        Strategy::SingleNode
+    } else if let Some(center) = detect_fk_star(&hops) {
+        Strategy::FkStar { center }
+    } else {
+        Strategy::Flat
+    };
+
+    resolve_join_columns(&mut hops);
+
+    let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
+
+    resolve_node_flags(&hops, &mut nodes, input);
+
+    resolve_dedup_columns(&mut nodes, input);
+
+    // In aggregation queries, only group_by nodes emit columns.
+    if input.query_type == QueryType::Aggregation {
+        let group_by_nodes: HashSet<&str> = input
+            .aggregations
+            .iter()
+            .filter_map(|a| a.group_by.as_deref())
+            .collect();
+        for np in nodes.values_mut() {
+            np.emit_select = group_by_nodes.contains(np.alias.as_str());
         }
+    }
 
-        assign_id_sources(&hops, &mut nodes);
-
-        for node_plan in nodes.values_mut() {
-            node_plan.hydration = determine_hydration(node_plan, input);
+    let body = if input.query_type == QueryType::Aggregation {
+        PlanBody::Aggregation {
+            aggregations: input.aggregations.clone(),
+            agg_sort: input.aggregation_sort.clone(),
         }
+    } else {
+        PlanBody::Traversal
+    };
 
-        let strategy = if hops.is_empty() {
-            Strategy::SingleNode
-        } else if let Some(center) = detect_fk_star(&hops) {
-            Strategy::FkStar { center }
-        } else {
-            Strategy::Flat
-        };
-
-        // Pre-resolve join columns for each hop based on shared-node topology.
-        resolve_join_columns(&mut hops);
-
-        // Pre-compute denorm tags per node (only on the first edge alias
-        // where the node appears).
-        resolve_denorm_tags(&hops, &mut nodes, &input.compiler.denormalized_columns);
-
-        // Pre-compute node_edge_col mappings from hops + elided_fks.
-        let node_edge_mappings = compute_node_edge_mappings(&hops, &elided_fks, &strategy, &nodes);
-
-        // Pre-compute IN-narrowing decisions.
-        resolve_narrowing(&hops, &mut nodes);
-
-        // Pre-resolve elevated-access FilterOnly for Skip nodes.
-        resolve_elevated_access(&mut nodes, input);
-
-        // Pre-compute dedup columns for each node.
-        resolve_dedup_columns(&mut nodes, input);
-
-        // Pre-resolve FK target join needs.
-        resolve_fk_join_needs(&hops, &mut nodes, input);
-
-        // Pre-resolve which nodes emit SELECT columns.
-        // In aggregation queries, only group_by nodes emit columns.
-        if input.query_type == QueryType::Aggregation {
-            let group_by_nodes: HashSet<&str> = input
-                .aggregations
-                .iter()
-                .filter_map(|a| a.group_by.as_deref())
-                .collect();
-            for np in nodes.values_mut() {
-                np.emit_select = group_by_nodes.contains(np.alias.as_str());
-            }
-        }
-
-        let synthesize_fk_edge_metadata = matches!(strategy, Strategy::FkStar { .. })
-            && input.query_type != QueryType::Aggregation;
-
-        let order_by = input.order_by.as_ref().map(|ob| PlanOrderBy {
-            node: ob.node.clone(),
-            property: ob.property.clone(),
-            desc: matches!(ob.direction, OrderDirection::Desc),
-        });
-
-        let limit = input.limit;
-
-        let agg = if input.query_type == QueryType::Aggregation {
-            Some(build_agg_plan(input, &nodes))
-        } else {
-            None
-        };
-
-        Self {
-            hops,
-            nodes,
-            strategy,
-            elided_fks,
-            node_edge_mappings,
-            synthesize_fk_edge_metadata,
-            order_by,
-            limit,
-            agg,
-        }
+    Plan {
+        nodes,
+        hops,
+        strategy,
+        limit: input.limit,
+        order_by: input.order_by.clone(),
+        cursor: input.cursor,
+        node_edge_mappings,
+        denorm_columns: input.compiler.denormalized_columns.clone(),
+        body,
     }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Plan builders
 // ─────────────────────────────────────────────────────────────────────────────
+
+fn build_hops(input: &Input) -> Vec<Hop> {
+    input
+        .relationships
+        .iter()
+        .map(|rel| {
+            let edge_table = resolve_edge_table(input, &rel.types);
+            let fk = rel.fk_column.as_ref().and_then(|col| {
+                let from_table = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.from)
+                    .and_then(|n| n.table.as_deref())
+                    .unwrap_or("");
+                let to_table = input
+                    .nodes
+                    .iter()
+                    .find(|n| n.id == rel.to)
+                    .and_then(|n| n.table.as_deref())
+                    .unwrap_or("");
+
+                let from_has = input
+                    .compiler
+                    .table_columns
+                    .get(from_table)
+                    .is_some_and(|cols| cols.contains(col));
+                let to_has = input
+                    .compiler
+                    .table_columns
+                    .get(to_table)
+                    .is_some_and(|cols| cols.contains(col));
+
+                let (fk_node, target_node) = if from_has {
+                    (rel.from.clone(), rel.to.clone())
+                } else if to_has {
+                    (rel.to.clone(), rel.from.clone())
+                } else {
+                    return None;
+                };
+                Some(HopFk {
+                    fk_node,
+                    fk_column: col.clone(),
+                    target_node,
+                })
+            });
+            Hop {
+                rel_types: rel.types.clone(),
+                edge_table,
+                from_node: rel.from.clone(),
+                to_node: rel.to.clone(),
+                direction: rel.direction,
+                min_hops: rel.min_hops,
+                max_hops: rel.max_hops,
+                fk,
+                filters: rel.filters.clone().into_iter().collect(),
+                join_prev: None,
+            }
+        })
+        .collect()
+}
+
+fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
+    input
+        .nodes
+        .iter()
+        .map(|n| {
+            (
+                n.id.clone(),
+                NodePlan {
+                    alias: n.id.clone(),
+                    entity: n.entity.clone(),
+                    table: n.table.clone(),
+                    selectivity: Selectivity::from_node(n),
+                    hydration: HydrationStrategy::Skip,
+                    has_traversal_path: n.has_traversal_path,
+                    redaction_id_column: n.redaction_id_column.clone(),
+                    filters: n.filters.clone().into_iter().collect(),
+                    node_ids: n.node_ids.clone(),
+                    id_range: n.id_range.clone(),
+                    columns: n.columns.clone(),
+                    dedup_columns: Vec::new(),
+                    use_narrowing: false,
+                    needs_elevated_filter: false,
+                    fk_needs_join: false,
+                    emit_select: true,
+                },
+            )
+        })
+        .collect()
+}
 
 /// Elide hops that have an FK column when the far-end node is pinned.
 /// Converts the FK into a node-level filter and removes the hop + its
@@ -473,116 +434,6 @@ fn reorder_by_selectivity(
     }
 }
 
-fn build_hops(input: &Input) -> Vec<Hop> {
-    input
-        .relationships
-        .iter()
-        .map(|rel| {
-            let edge_table = resolve_edge_table(input, &rel.types);
-            let fk = rel.fk_column.as_ref().and_then(|col| {
-                let from_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.from)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
-                let to_table = input
-                    .nodes
-                    .iter()
-                    .find(|n| n.id == rel.to)
-                    .and_then(|n| n.table.as_deref())
-                    .unwrap_or("");
-
-                let from_has = input
-                    .compiler
-                    .table_columns
-                    .get(from_table)
-                    .is_some_and(|cols| cols.contains(col));
-                let to_has = input
-                    .compiler
-                    .table_columns
-                    .get(to_table)
-                    .is_some_and(|cols| cols.contains(col));
-
-                let (fk_node, target_node) = if from_has {
-                    (rel.from.clone(), rel.to.clone())
-                } else if to_has {
-                    (rel.to.clone(), rel.from.clone())
-                } else {
-                    return None;
-                };
-                Some(HopFk {
-                    fk_node,
-                    fk_column: col.clone(),
-                    target_node,
-                })
-            });
-            Hop {
-                rel_types: rel.types.clone(),
-                edge_table,
-                from_node: rel.from.clone(),
-                to_node: rel.to.clone(),
-                direction: rel.direction,
-                min_hops: rel.min_hops,
-                max_hops: rel.max_hops,
-                fk,
-                filters: rel.filters.clone().into_iter().collect(),
-                join_prev: None,
-            }
-        })
-        .collect()
-}
-
-fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
-    input
-        .nodes
-        .iter()
-        .map(|n| {
-            (
-                n.id.clone(),
-                NodePlan {
-                    alias: n.id.clone(),
-                    entity: n.entity.clone(),
-                    table: n.table.clone(),
-                    selectivity: Selectivity::from_node(n),
-                    hydration: HydrationStrategy::Skip,
-                    id_source: None,
-                    has_traversal_path: n.has_traversal_path,
-                    redaction_id_column: n.redaction_id_column.clone(),
-                    filters: n.filters.clone().into_iter().collect(),
-                    node_ids: n.node_ids.clone(),
-                    id_range: n.id_range.clone(),
-                    columns: n.columns.clone(),
-                    denorm_tags: Vec::new(),
-                    dedup_columns: Vec::new(),
-                    use_narrowing: false,
-                    needs_elevated_filter: false,
-                    edge_col_mapping: None,
-                    fk_needs_join: false,
-                    emit_select: true,
-                },
-            )
-        })
-        .collect()
-}
-
-fn assign_id_sources(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>) {
-    for (i, hop) in hops.iter().enumerate() {
-        let alias = format!("e{i}");
-        let (start_col, end_col) = hop.direction.edge_columns();
-        for (node, col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-            if let Some(np) = nodes.get_mut(node)
-                && np.id_source.is_none()
-            {
-                np.id_source = Some(IdSource {
-                    edge_alias: alias.clone(),
-                    column: col.to_string(),
-                });
-            }
-        }
-    }
-}
-
 fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy {
     let alias = &node_plan.alias;
 
@@ -645,83 +496,6 @@ fn resolve_join_columns(hops: &mut [Hop]) {
     }
 }
 
-/// Pre-compute denorm tags per node. Only applies tags on the first edge
-/// alias where the node appears (later hops already join on filtered IDs).
-fn resolve_denorm_tags(
-    hops: &[Hop],
-    nodes: &mut HashMap<String, NodePlan>,
-    denorm_map: &HashMap<(String, String, String), (String, String)>,
-) {
-    if denorm_map.is_empty() {
-        return;
-    }
-    let mut applied: HashSet<String> = HashSet::new();
-    for (i, hop) in hops.iter().enumerate() {
-        let alias = format!("e{i}");
-        let (start_col, end_col) = hop.direction.edge_columns();
-        for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-            if !applied.insert(node_alias.clone()) {
-                continue;
-            }
-            let Some(np) = nodes.get_mut(node_alias) else {
-                continue;
-            };
-            let Some(ref entity) = np.entity else {
-                continue;
-            };
-            let dir = if id_col == SOURCE_ID_COLUMN {
-                "source"
-            } else {
-                "target"
-            };
-            for (prop, filter) in &np.filters {
-                let key = (entity.clone(), prop.clone(), dir.to_string());
-                let Some((edge_column, tag_key)) = denorm_map.get(&key) else {
-                    continue;
-                };
-                match filter.op {
-                    None | Some(FilterOp::Eq) => {
-                        let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                        np.denorm_tags.push(DenormTag {
-                            edge_alias: alias.clone(),
-                            tag_column: edge_column.clone(),
-                            tag_key: tag_key.clone(),
-                            tag_value: format!("{tag_key}:{val}"),
-                            op: DenormTagOp::Has,
-                        });
-                    }
-                    Some(FilterOp::In) => {
-                        if let Some(values) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                            let tags: Vec<String> = values
-                                .iter()
-                                .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
-                                .collect();
-                            if tags.len() == 1 {
-                                np.denorm_tags.push(DenormTag {
-                                    edge_alias: alias.clone(),
-                                    tag_column: edge_column.clone(),
-                                    tag_key: tag_key.clone(),
-                                    tag_value: tags[0].clone(),
-                                    op: DenormTagOp::Has,
-                                });
-                            } else if !tags.is_empty() {
-                                np.denorm_tags.push(DenormTag {
-                                    edge_alias: alias.clone(),
-                                    tag_column: edge_column.clone(),
-                                    tag_key: tag_key.clone(),
-                                    tag_value: String::new(),
-                                    op: DenormTagOp::HasAny(tags),
-                                });
-                            }
-                        }
-                    }
-                    _ => {}
-                }
-            }
-        }
-    }
-}
-
 /// Pre-compute node_edge_col mappings from hops + elided_fks + strategy.
 fn compute_node_edge_mappings(
     hops: &[Hop],
@@ -777,56 +551,54 @@ fn compute_node_edge_mappings(
     mappings
 }
 
-/// Pre-compute IN-narrowing decisions. A node needs narrowing when:
-/// - it has Join hydration
-/// - it has no user filters, node_ids, or id_range
-/// - another node in ANY hop has FilterOnly hydration (i.e. a _filter_ CTE exists)
-fn resolve_narrowing(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>) {
-    // Check if any node has FilterOnly hydration (will produce a _filter_ CTE).
+/// Resolve narrowing, elevated access, and FK join needs in a single pass.
+fn resolve_node_flags(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
+    // 1. Narrowing: Join nodes without own filters need narrowing when filter CTEs exist
     let has_filter_only = nodes
         .values()
         .any(|np| np.hydration == HydrationStrategy::FilterOnly);
-    if !has_filter_only {
-        return;
-    }
-    // Also check elevated-access nodes that will emit filter CTEs. But we
-    // haven't resolved those yet, so check has_elevated_access_level won't
-    // work here. Instead, the narrowing decision is based solely on whether
-    // _filter_ CTEs exist from FilterOnly nodes. We'll update if
-    // needs_elevated_filter also generates CTEs (it does, checked below).
-    for hop in hops {
-        let (start_col, end_col) = hop.direction.edge_columns();
-        for (node_alias, _edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-            let Some(np) = nodes.get(node_alias) else {
-                continue;
-            };
-            if np.hydration == HydrationStrategy::Join
-                && np.filters.is_empty()
-                && np.node_ids.is_empty()
-                && np.id_range.is_none()
-            {
-                // Mark for narrowing. We can't do get_mut while iterating
-                // immutably so collect the aliases first.
-                let alias = node_alias.clone();
-                if let Some(np_mut) = nodes.get_mut(&alias) {
-                    np_mut.use_narrowing = true;
-                }
-            }
+    if has_filter_only {
+        let needs: Vec<String> = nodes
+            .values()
+            .filter(|np| {
+                np.hydration == HydrationStrategy::Join
+                    && np.filters.is_empty()
+                    && np.node_ids.is_empty()
+                    && np.id_range.is_none()
+            })
+            .map(|np| np.alias.clone())
+            .collect();
+        for alias in needs {
+            nodes.get_mut(&alias).unwrap().use_narrowing = true;
         }
     }
-}
 
-/// Pre-resolve elevated-access FilterOnly for Skip nodes.
-fn resolve_elevated_access(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
-    let aliases: Vec<String> = nodes.keys().cloned().collect();
-    for alias in aliases {
-        let np = &nodes[&alias];
-        if np.hydration == HydrationStrategy::Skip
-            && np.has_traversal_path
-            && np.table.is_some()
-            && has_elevated_access_level(np, input)
-        {
-            nodes.get_mut(&alias).unwrap().needs_elevated_filter = true;
+    // 2. Elevated access: Skip nodes with elevated auth need FilterOnly
+    let elevated: Vec<String> = nodes
+        .values()
+        .filter(|np| {
+            np.hydration == HydrationStrategy::Skip
+                && np.has_traversal_path
+                && np.table.is_some()
+                && has_elevated_access_level(np, input)
+        })
+        .map(|np| np.alias.clone())
+        .collect();
+    for alias in elevated {
+        nodes.get_mut(&alias).unwrap().needs_elevated_filter = true;
+    }
+
+    // 3. FK join needs
+    for hop in hops {
+        let Some(ref fk) = hop.fk else { continue };
+        let Some(np) = nodes.get(&fk.target_node) else {
+            continue;
+        };
+        let needs = np.hydration == HydrationStrategy::Join
+            || (input.query_type != QueryType::Aggregation
+                && matches!(&np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
+        if needs {
+            nodes.get_mut(&fk.target_node).unwrap().fk_needs_join = true;
         }
     }
 }
@@ -894,51 +666,4 @@ fn resolve_dedup_columns(nodes: &mut HashMap<String, NodePlan>, input: &Input) {
 
         nodes.get_mut(&alias).unwrap().dedup_columns = cols;
     }
-}
-
-/// Pre-resolve whether FK target nodes need inline JOIN hydration.
-fn resolve_fk_join_needs(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, input: &Input) {
-    for hop in hops {
-        let Some(ref fk) = hop.fk else { continue };
-        let Some(np) = nodes.get(&fk.target_node) else {
-            continue;
-        };
-        let needs = np.hydration == HydrationStrategy::Join
-            || (input.query_type != QueryType::Aggregation
-                && matches!(&np.columns, Some(ColumnSelection::List(cols)) if !cols.is_empty()));
-        if needs && let Some(np_mut) = nodes.get_mut(&fk.target_node) {
-            np_mut.fk_needs_join = true;
-        }
-    }
-}
-
-fn build_agg_plan(input: &Input, nodes: &HashMap<String, NodePlan>) -> AggPlan {
-    let specs: Vec<AggSpec> = input
-        .aggregations
-        .iter()
-        .map(|a| {
-            let group_by = a.group_by.as_ref().and_then(|gb| {
-                nodes.get(gb.as_str()).map(|np| GroupByPlan {
-                    node_alias: gb.clone(),
-                    columns: requested_columns(&np.columns),
-                })
-            });
-            AggSpec {
-                function: a.function,
-                target: a.target.clone(),
-                property: a.property.clone(),
-                alias: a.alias.clone().unwrap_or_else(|| "agg_result".to_string()),
-                group_by,
-            }
-        })
-        .collect();
-
-    let sort = input.aggregation_sort.as_ref().and_then(|s| {
-        specs.get(s.agg_index).map(|spec| AggSortPlan {
-            alias: spec.alias.clone(),
-            desc: matches!(s.direction, OrderDirection::Desc),
-        })
-    });
-
-    AggPlan { specs, sort }
 }

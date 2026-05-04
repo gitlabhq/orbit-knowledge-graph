@@ -1,8 +1,9 @@
-//! Query planning: reads Input, produces a QueryPlan.
+//! Query planning: reads Input, produces a Plan.
 //!
-//! Separates the "what" (decisions about query structure) from the "how"
-//! (AST generation in `lower/`). Each variant carries all decisions needed
-//! to emit SQL without re-consulting the Input.
+//! One Plan struct with a PlanBody enum. Common fields (nodes, hops,
+//! limit, etc.) live on Plan; query-type-specific data lives in the
+//! body variant. The Rust enum enforces that emit functions only access
+//! their own variant's data.
 
 pub mod edge_chain;
 pub mod hydration;
@@ -11,90 +12,63 @@ pub mod pathfinding;
 
 use std::collections::HashMap;
 
-use ontology::constants::DEFAULT_PRIMARY_KEY;
-
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub use edge_chain::*;
-pub use hydration::{HydrationNodePlan, HydrationPlan};
-pub use neighbors::NeighborsPlan;
-pub use pathfinding::PathFindingPlan;
+pub use edge_chain::{Hop, HopFk, HydrationStrategy, JoinColumns, NodePlan, Selectivity, Strategy};
+pub use hydration::HydrationNodePlan;
 
-/// Top-level plan — one variant per query type.
-pub enum QueryPlan {
-    /// Traversal: edge-chain-first plan for graph traversal queries.
-    Traversal(EdgeChainPlan),
-    /// Aggregation: edge-chain-first plan for aggregation queries.
-    Aggregation(EdgeChainPlan),
-    /// Neighbors: single-hop edge scan for adjacent entities.
-    Neighbors(NeighborsPlan),
-    /// PathFinding: bidirectional frontier expansion.
-    PathFinding(PathFindingPlan),
-    /// Hydration: fetch node properties for a set of IDs.
-    Hydration(HydrationPlan),
+/// Pipeline state compatibility alias (HasQueryPlan, take_query_plan, etc.).
+pub type QueryPlan = Plan;
+
+/// The single query plan. Common fields shared by all query types live
+/// here; query-type-specific data lives in `body`.
+pub struct Plan {
+    pub nodes: HashMap<String, NodePlan>,
+    pub hops: Vec<Hop>,
+    pub strategy: Strategy,
+    pub limit: u32,
+    pub order_by: Option<InputOrderBy>,
+    pub cursor: Option<InputCursor>,
+    pub node_edge_mappings: HashMap<String, (String, String)>,
+    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
+    pub body: PlanBody,
 }
 
-impl QueryPlan {
-    /// Return pre-computed node-to-edge-column mappings for the enforce pass.
+impl Plan {
     pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
-        match self {
-            Self::Traversal(p) | Self::Aggregation(p) => p.node_edge_mappings.clone(),
-            Self::Neighbors(p) => p.node_edge_mappings.clone(),
-            Self::PathFinding(_) | Self::Hydration(_) => HashMap::new(),
-        }
+        self.node_edge_mappings.clone()
     }
 }
 
-/// Look up a node by alias from Input, returning an error if not found.
-pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
-    input
-        .nodes
-        .iter()
-        .find(|n| n.id == alias)
-        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+pub enum PlanBody {
+    Traversal,
+    Aggregation {
+        aggregations: Vec<InputAggregation>,
+        agg_sort: Option<InputAggSort>,
+    },
+    Neighbors {
+        center: String,
+        direction: Direction,
+        edge: EdgeTableConfig,
+        has_non_denorm: bool,
+    },
+    PathFinding(PathFindingBody),
+    Hydration(Vec<HydrationNodePlan>),
 }
 
-/// Resolved node identity and constraints, shared across plan types.
-pub struct PlanNode {
-    pub id: String,
-    pub entity: String,
-    pub table: String,
-    pub node_ids: Vec<i64>,
-    pub filters: Vec<(String, InputFilter)>,
-    pub id_range: Option<InputIdRange>,
-    pub has_traversal_path: bool,
-    pub redaction_id_column: String,
+pub struct PathFindingBody {
+    pub start: String,
+    pub end: String,
+    pub max_depth: u32,
+    pub forward_depth: u32,
+    pub backward_depth: u32,
+    pub edge: EdgeTableConfig,
+    pub forward_first_hop_filter: Option<Vec<String>>,
+    pub backward_first_hop_filter: Option<Vec<String>>,
+    pub scoped_by_tp: bool,
 }
 
-impl PlanNode {
-    pub fn from_input(node: &InputNode) -> Result<Self> {
-        Ok(Self {
-            id: node.id.clone(),
-            entity: node
-                .entity
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no entity", node.id)))?
-                .clone(),
-            table: node
-                .table
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.id)))?
-                .clone(),
-            node_ids: node.node_ids.clone(),
-            filters: node.filters.clone().into_iter().collect(),
-            id_range: node.id_range.clone(),
-            has_traversal_path: node.has_traversal_path,
-            redaction_id_column: node.redaction_id_column.clone(),
-        })
-    }
-
-    pub fn uses_default_pk(&self) -> bool {
-        self.redaction_id_column == DEFAULT_PRIMARY_KEY
-    }
-}
-
-/// Resolved edge table(s) and relationship type filter.
 pub struct EdgeTableConfig {
     pub tables: Vec<String>,
     pub rel_type_filter: Option<Vec<String>>,
@@ -113,28 +87,19 @@ impl EdgeTableConfig {
     }
 }
 
-/// Build a query plan from the input (phase 1).
-pub fn plan(input: &mut Input) -> Result<QueryPlan> {
+pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
+    input
+        .nodes
+        .iter()
+        .find(|n| n.id == alias)
+        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+}
+
+pub fn plan(input: &mut Input) -> Result<Plan> {
     match input.query_type {
-        QueryType::Traversal => {
-            let plan = EdgeChainPlan::plan(input);
-            Ok(QueryPlan::Traversal(plan))
-        }
-        QueryType::Aggregation => {
-            let plan = EdgeChainPlan::plan(input);
-            Ok(QueryPlan::Aggregation(plan))
-        }
-        QueryType::Neighbors => {
-            let p = neighbors::plan_neighbors(input)?;
-            Ok(QueryPlan::Neighbors(p))
-        }
-        QueryType::PathFinding => {
-            let p = pathfinding::plan_pathfinding(input)?;
-            Ok(QueryPlan::PathFinding(p))
-        }
-        QueryType::Hydration => {
-            let p = hydration::plan_hydration(input)?;
-            Ok(QueryPlan::Hydration(p))
-        }
+        QueryType::Traversal | QueryType::Aggregation => Ok(edge_chain::plan(input)),
+        QueryType::Neighbors => neighbors::plan_neighbors(input),
+        QueryType::PathFinding => pathfinding::plan_pathfinding(input),
+        QueryType::Hydration => hydration::plan_hydration(input),
     }
 }

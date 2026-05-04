@@ -2,29 +2,15 @@
 
 use std::collections::HashMap;
 
-use ontology::constants::*;
-
 use crate::error::Result;
 use crate::input::*;
 
-use super::{EdgeTableConfig, PlanNode, find_node};
+use super::{
+    EdgeTableConfig, HydrationStrategy, NodePlan, PathFindingBody, Plan, PlanBody, Selectivity,
+    Strategy, find_node,
+};
 
-pub struct PathFindingPlan {
-    pub start: PlanNode,
-    pub end: PlanNode,
-    pub max_depth: u32,
-    pub forward_depth: u32,
-    pub backward_depth: u32,
-    pub edge: EdgeTableConfig,
-    pub forward_first_hop_filter: Option<Vec<String>>,
-    pub backward_first_hop_filter: Option<Vec<String>>,
-    pub scoped_by_tp: bool,
-    pub denorm_columns: HashMap<(String, String, String), (String, String)>,
-    pub cursor: Option<InputCursor>,
-    pub limit: u32,
-}
-
-pub fn plan_pathfinding(input: &Input) -> Result<PathFindingPlan> {
+pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     let path = input
         .path
         .as_ref()
@@ -32,12 +18,13 @@ pub fn plan_pathfinding(input: &Input) -> Result<PathFindingPlan> {
 
     let start_node = find_node(input, &path.from)?;
     let end_node = find_node(input, &path.to)?;
+    let start_alias = start_node.id.clone();
+    let end_alias = end_node.id.clone();
 
-    let start = PlanNode::from_input(start_node)?;
-    let end = PlanNode::from_input(end_node)?;
+    let start_np = node_plan_from(start_node);
+    let end_np = node_plan_from(end_node);
 
-    let scoped_by_tp = start.has_traversal_path && end.has_traversal_path;
-
+    let scoped_by_tp = start_np.has_traversal_path && end_np.has_traversal_path;
     let edge = EdgeTableConfig::from_input(&input.compiler, &path.rel_types);
 
     let forward_first_hop_filter =
@@ -49,34 +36,50 @@ pub fn plan_pathfinding(input: &Input) -> Result<PathFindingPlan> {
     let forward_depth = max_depth / 2 + max_depth % 2;
     let backward_depth = if max_depth >= 2 { max_depth / 2 } else { 0 };
 
-    Ok(PathFindingPlan {
-        start,
-        end,
-        max_depth,
-        forward_depth,
-        backward_depth,
-        edge,
-        forward_first_hop_filter,
-        backward_first_hop_filter,
-        scoped_by_tp,
-        denorm_columns: input.compiler.denormalized_columns.clone(),
-        cursor: input.cursor,
+    let mut nodes = HashMap::new();
+    nodes.insert(start_alias.clone(), start_np);
+    nodes.insert(end_alias.clone(), end_np);
+
+    Ok(Plan {
+        nodes,
+        hops: vec![],
+        strategy: Strategy::SingleNode,
         limit: input.limit,
+        order_by: None,
+        cursor: input.cursor,
+        node_edge_mappings: HashMap::new(),
+        denorm_columns: input.compiler.denormalized_columns.clone(),
+        body: PlanBody::PathFinding(PathFindingBody {
+            start: start_alias,
+            end: end_alias,
+            max_depth,
+            forward_depth,
+            backward_depth,
+            edge,
+            forward_first_hop_filter,
+            backward_first_hop_filter,
+            scoped_by_tp,
+        }),
     })
 }
 
-fn can_scope_by_tp(
-    start_has_tp: bool,
-    end_has_tp: bool,
-    edge_tables: &[String],
-    table_has_column: impl Fn(&str, &str) -> bool,
-) -> bool {
-    if edge_tables.is_empty()
-        || edge_tables
-            .iter()
-            .any(|t| !table_has_column(t, TRAVERSAL_PATH_COLUMN))
-    {
-        return false;
+fn node_plan_from(node: &InputNode) -> NodePlan {
+    NodePlan {
+        alias: node.id.clone(),
+        entity: node.entity.clone(),
+        table: node.table.clone(),
+        selectivity: Selectivity::from_node(node),
+        hydration: HydrationStrategy::Skip,
+        filters: node.filters.clone().into_iter().collect(),
+        node_ids: node.node_ids.clone(),
+        id_range: node.id_range.clone(),
+        has_traversal_path: node.has_traversal_path,
+        redaction_id_column: node.redaction_id_column.clone(),
+        columns: node.columns.clone(),
+        dedup_columns: vec![],
+        use_narrowing: false,
+        needs_elevated_filter: false,
+        fk_needs_join: false,
+        emit_select: true,
     }
-    start_has_tp && end_has_tp
 }

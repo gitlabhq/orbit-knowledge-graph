@@ -15,7 +15,7 @@ use super::helpers::{
     node_select_columns,
 };
 
-pub(super) fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<EmitOutput> {
+pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
         QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
     })?;
@@ -98,9 +98,9 @@ pub(super) fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<E
     // Synthesize edge metadata columns for the graph formatter.
     // FK paths have no edge table, but traversal queries need e0_type,
     // e0_src, e0_src_type, e0_dst, e0_dst_type for each relationship.
-    // Aggregation queries don't need edge columns — the flag was pre-computed.
+    // Aggregation queries don't need edge columns.
     let mut edge_aliases = Vec::new();
-    if !plan.synthesize_fk_edge_metadata {
+    if !matches!(plan.body, PlanBody::Traversal) {
         return Ok(EmitOutput {
             from,
             edge_aliases,

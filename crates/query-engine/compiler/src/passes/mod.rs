@@ -106,8 +106,7 @@ where
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let plan = state.take_query_plan()?;
-        let input = state.input_mut()?;
-        let node = v2::lower::emit(&plan, input)?;
+        let node = v2::lower::emit(&plan)?;
         state.set_query_plan(plan);
         state.set_node(node);
         Ok(())
