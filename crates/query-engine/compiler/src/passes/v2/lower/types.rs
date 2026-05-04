@@ -22,6 +22,11 @@ pub struct Skeleton {
     /// FK hops that were elided: (target_node, fk_node, fk_column).
     /// Used by emit to populate node_edge_col for the enforce pass.
     pub elided_fks: Vec<(String, String, String)>,
+    /// Pre-resolved node_edge_col mappings for the enforce pass.
+    /// Computed during plan() from hops + elided_fks.
+    pub node_edge_mappings: HashMap<String, (String, String)>,
+    /// Whether to synthesize FK edge metadata (traversal only, non-aggregation).
+    pub synthesize_fk_edge_metadata: bool,
 }
 
 /// A single edge hop in the skeleton chain.
@@ -45,6 +50,16 @@ pub struct Hop {
     pub fk: Option<HopFk>,
     /// Edge-level filters from the query (e.g. relationship property predicates).
     pub filters: Vec<(String, InputFilter)>,
+    /// Pre-resolved join columns for connecting to the previous hop.
+    /// None for the first hop (it's the initial FROM).
+    pub join_prev: Option<JoinColumns>,
+}
+
+/// Pre-resolved join columns for connecting a hop to the previous hop.
+pub struct JoinColumns {
+    pub prev_alias: String,
+    pub prev_col: String,
+    pub curr_col: String,
 }
 
 /// FK info for a hop — which node has the FK column.
@@ -79,6 +94,36 @@ pub struct NodePlan {
     pub redaction_id_column: String,
     /// Columns requested by the user.
     pub columns: Option<ColumnSelection>,
+    /// Pre-computed denorm tag predicates for this node.
+    /// Only populated for the first edge where the node appears.
+    pub denorm_tags: Vec<DenormTag>,
+    /// Pre-resolved columns for the dedup subquery.
+    pub dedup_columns: Vec<String>,
+    /// Whether this node needs IN-narrowing.
+    pub use_narrowing: bool,
+    /// Whether this node needs elevated-access FilterOnly.
+    pub needs_elevated_filter: bool,
+    /// Pre-resolved node_edge_col mapping (alias, column).
+    pub edge_col_mapping: Option<(String, String)>,
+    /// Whether an FK target needs inline JOIN hydration.
+    pub fk_needs_join: bool,
+}
+
+/// Pre-computed denorm tag predicate for application on an edge.
+pub struct DenormTag {
+    pub edge_alias: String,
+    pub tag_column: String,
+    pub tag_key: String,
+    pub tag_value: String,
+    pub op: DenormTagOp,
+}
+
+/// Operation type for a denorm tag predicate.
+pub enum DenormTagOp {
+    /// has(edge_column, "key:value")
+    Has,
+    /// hasAny(edge_column, array("key:v1", "key:v2", ...))
+    HasAny(Vec<String>),
 }
 
 /// Where a node's ID lives in the emitted SQL.
