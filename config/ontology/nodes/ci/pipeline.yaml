@@ -262,6 +262,8 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_user_id, order_by: [user_id]}
+    - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
     - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

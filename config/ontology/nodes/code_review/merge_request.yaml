@@ -582,6 +582,15 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_author_id, order_by: [author_id]}
+    - {type: lightweight, name: by_merge_user_id, order_by: [merge_user_id]}
+    - {type: lightweight, name: by_milestone_id, order_by: [milestone_id]}
+    - {type: lightweight, name: by_source_project_id, order_by: [source_project_id]}
+    - {type: lightweight, name: by_updated_by_id, order_by: [updated_by_id]}
+    - {type: lightweight, name: by_last_edited_by_id, order_by: [last_edited_by_id]}
+    - {type: lightweight, name: by_closed_by_id, order_by: [closed_by_id]}
+    - {type: lightweight, name: by_head_pipeline_id, order_by: [head_pipeline_id]}
+    - {type: lightweight, name: by_latest_merge_request_diff_id, order_by: [latest_merge_request_diff_id]}
     - {type: reorder, name: by_state_id, order_by: [state, id]}
     - {type: reorder, name: by_project_state, order_by: [traversal_path, project_id, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

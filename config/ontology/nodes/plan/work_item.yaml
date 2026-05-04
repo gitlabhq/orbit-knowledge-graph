@@ -211,4 +211,8 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_author_id, order_by: [author_id]}
+    - {type: lightweight, name: by_milestone_id, order_by: [milestone_id]}
+    - {type: lightweight, name: by_namespace_id, order_by: [namespace_id]}
+    - {type: lightweight, name: by_closed_by_id, order_by: [closed_by_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

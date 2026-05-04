@@ -344,6 +344,9 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_user_id, order_by: [user_id]}
+    - {type: lightweight, name: by_upstream_pipeline_id, order_by: [upstream_pipeline_id]}
+    - {type: lightweight, name: by_stage_id, order_by: [stage_id]}
     - {type: lightweight, name: by_pipeline_id, order_by: [pipeline_id]}
     - {type: lightweight, name: by_runner_id, order_by: [runner_id]}
     - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}

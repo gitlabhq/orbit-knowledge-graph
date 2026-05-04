@@ -214,4 +214,7 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_scanner_id, order_by: [scanner_id]}
+    - {type: lightweight, name: by_vulnerability_id, order_by: [vulnerability_id]}
+    - {type: lightweight, name: by_primary_identifier_id, order_by: [primary_identifier_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
