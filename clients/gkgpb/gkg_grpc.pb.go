@@ -25,12 +25,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KnowledgeGraphService_ListTools_FullMethodName        = "/gkg.v1.KnowledgeGraphService/ListTools"
-	KnowledgeGraphService_ExecuteQuery_FullMethodName     = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
-	KnowledgeGraphService_GetGraphSchema_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
-	KnowledgeGraphService_GetQueryDsl_FullMethodName      = "/gkg.v1.KnowledgeGraphService/GetQueryDsl"
-	KnowledgeGraphService_GetClusterHealth_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
-	KnowledgeGraphService_GetGraphStatus_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
+	KnowledgeGraphService_ListTools_FullMethodName         = "/gkg.v1.KnowledgeGraphService/ListTools"
+	KnowledgeGraphService_ExecuteQuery_FullMethodName      = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
+	KnowledgeGraphService_GetGraphSchema_FullMethodName    = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
+	KnowledgeGraphService_GetQueryDsl_FullMethodName       = "/gkg.v1.KnowledgeGraphService/GetQueryDsl"
+	KnowledgeGraphService_GetResponseFormat_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetResponseFormat"
+	KnowledgeGraphService_GetClusterHealth_FullMethodName  = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
+	KnowledgeGraphService_GetGraphStatus_FullMethodName    = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
 )
 
 // KnowledgeGraphServiceClient is the client API for KnowledgeGraphService service.
@@ -57,6 +58,11 @@ type KnowledgeGraphServiceClient interface {
 	// still discover the grammar on demand without bloating tool metadata.
 	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
+	// Returns the JSON Schema describing the query response shape (the formatter
+	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// Used by MCP tools/call("get_response_format") and surfaced by the monolith
+	// through GET /api/v4/orbit/schema?include_response_format=true.
+	GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
@@ -116,6 +122,16 @@ func (c *knowledgeGraphServiceClient) GetQueryDsl(ctx context.Context, in *GetQu
 	return out, nil
 }
 
+func (c *knowledgeGraphServiceClient) GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetResponseFormatResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetResponseFormat_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *knowledgeGraphServiceClient) GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetClusterHealthResponse)
@@ -160,6 +176,11 @@ type KnowledgeGraphServiceServer interface {
 	// still discover the grammar on demand without bloating tool metadata.
 	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
+	// Returns the JSON Schema describing the query response shape (the formatter
+	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// Used by MCP tools/call("get_response_format") and surfaced by the monolith
+	// through GET /api/v4/orbit/schema?include_response_format=true.
+	GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
@@ -187,6 +208,9 @@ func (UnimplementedKnowledgeGraphServiceServer) GetGraphSchema(context.Context, 
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetResponseFormat not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClusterHealth not implemented")
@@ -276,6 +300,24 @@ func _KnowledgeGraphService_GetQueryDsl_Handler(srv interface{}, ctx context.Con
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KnowledgeGraphService_GetResponseFormat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetResponseFormatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).GetResponseFormat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_GetResponseFormat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).GetResponseFormat(ctx, req.(*GetResponseFormatRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KnowledgeGraphService_GetClusterHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetClusterHealthRequest)
 	if err := dec(in); err != nil {
@@ -330,6 +372,10 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetQueryDsl",
 			Handler:    _KnowledgeGraphService_GetQueryDsl_Handler,
+		},
+		{
+			MethodName: "GetResponseFormat",
+			Handler:    _KnowledgeGraphService_GetResponseFormat_Handler,
 		},
 		{
 			MethodName: "GetClusterHealth",

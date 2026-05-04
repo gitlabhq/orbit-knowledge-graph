@@ -88,9 +88,6 @@ pub struct GetGraphSchemaRequest {
     /// RAW: StructuredSchema; LLM: TOON text
     #[prost(enumeration = "ResponseFormat", tag = "2")]
     pub format: i32,
-    /// when true, append the query response JSON Schema (the formatter output shape) alongside the ontology
-    #[prost(bool, tag = "3")]
-    pub include_response_format: bool,
 }
 /// Schema response — exactly one of structured or text depending on format.
 #[derive(Clone, PartialEq, ::prost::Message)]
@@ -121,22 +118,6 @@ pub struct StructuredSchema {
     pub nodes: ::prost::alloc::vec::Vec<SchemaNode>,
     #[prost(message, repeated, tag = "4")]
     pub edges: ::prost::alloc::vec::Vec<SchemaEdge>,
-    /// Formatter output schema and its semver. Populated only when
-    /// GetGraphSchemaRequest.include_response_format is true.
-    #[prost(message, optional, tag = "5")]
-    pub response_format: ::core::option::Option<ResponseFormatSchema>,
-}
-/// JSON Schema describing the query response shape (formatter output) plus
-/// its semver. The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
-/// format_version stamped on every query response.
-#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
-pub struct ResponseFormatSchema {
-    /// verbatim JSON Schema as a JSON string
-    #[prost(string, tag = "1")]
-    pub schema: ::prost::alloc::string::String,
-    /// semver string, e.g. "1.2.0"
-    #[prost(string, tag = "2")]
-    pub version: ::prost::alloc::string::String,
 }
 /// Logical grouping of related node types (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
@@ -242,6 +223,43 @@ pub mod get_query_dsl_response {
         #[prost(string, tag = "2")]
         FormattedText(::prost::alloc::string::String),
     }
+}
+/// Request for the query response shape (formatter output schema).
+#[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetResponseFormatRequest {
+    /// RAW: structured (schema + version); LLM: TOON
+    #[prost(enumeration = "ResponseFormat", tag = "1")]
+    pub format: i32,
+}
+/// Response carrying the formatter output schema and its semver.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct GetResponseFormatResponse {
+    #[prost(oneof = "get_response_format_response::Content", tags = "1, 2")]
+    pub content: ::core::option::Option<get_response_format_response::Content>,
+}
+/// Nested message and enum types in `GetResponseFormatResponse`.
+pub mod get_response_format_response {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Content {
+        /// format = RAW
+        #[prost(message, tag = "1")]
+        Structured(super::ResponseFormatSchema),
+        /// format = LLM (TOON notation)
+        #[prost(string, tag = "2")]
+        FormattedText(::prost::alloc::string::String),
+    }
+}
+/// JSON Schema describing the query response shape plus its semver.
+/// The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+/// format_version stamped on every query response.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResponseFormatSchema {
+    /// verbatim JSON Schema as a JSON string
+    #[prost(string, tag = "1")]
+    pub schema: ::prost::alloc::string::String,
+    /// semver string, e.g. "1.2.0"
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
 }
 /// Wrapper for the redaction handshake within a streaming query.
 /// Server sends `required` with resources to check, client responds with decisions.
@@ -844,6 +862,36 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetQueryDsl"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns the JSON Schema describing the query response shape (the formatter
+        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+        /// Used by MCP tools/call("get_response_format") and surfaced by the monolith
+        /// through GET /api/v4/orbit/schema?include_response_format=true.
+        pub async fn get_response_format(
+            &mut self,
+            request: impl tonic::IntoRequest<super::GetResponseFormatRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetResponseFormatResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/GetResponseFormat",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "GetResponseFormat"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Returns cluster health and component status.
         /// Used by GET /api/v4/orbit/status.
         pub async fn get_cluster_health(
@@ -960,6 +1008,17 @@ pub mod knowledge_graph_service_server {
             request: tonic::Request<super::GetQueryDslRequest>,
         ) -> std::result::Result<
             tonic::Response<super::GetQueryDslResponse>,
+            tonic::Status,
+        >;
+        /// Returns the JSON Schema describing the query response shape (the formatter
+        /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+        /// Used by MCP tools/call("get_response_format") and surfaced by the monolith
+        /// through GET /api/v4/orbit/schema?include_response_format=true.
+        async fn get_response_format(
+            &self,
+            request: tonic::Request<super::GetResponseFormatRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::GetResponseFormatResponse>,
             tonic::Status,
         >;
         /// Returns cluster health and component status.
@@ -1235,6 +1294,55 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = GetQueryDslSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/GetResponseFormat" => {
+                    #[allow(non_camel_case_types)]
+                    struct GetResponseFormatSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::GetResponseFormatRequest>
+                    for GetResponseFormatSvc<T> {
+                        type Response = super::GetResponseFormatResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::GetResponseFormatRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::get_response_format(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = GetResponseFormatSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(

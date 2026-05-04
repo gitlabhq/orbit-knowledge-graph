@@ -104,11 +104,12 @@ Example response:
 
 Return the Orbit graph schema so agents can understand which entities, relationships, and properties are available.
 
-| Parameter                | Type             | Required | Description |
-|--------------------------|------------------|----------|-------------|
-| `expand_nodes`           | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. Pass `["*"]` to expand every node. |
-| `include_response_format`| boolean          | No       | When `true`, include a `response_format` object containing `schema` (the formatter output JSON Schema) and `version` (semver from `config/RAW_OUTPUT_FORMAT_VERSION`, matching the `format_version` stamped on every query response). |
-| `format`                 | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
+| Parameter      | Type             | Required | Description |
+|----------------|------------------|----------|-------------|
+| `expand_nodes` | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. Pass `["*"]` to expand every node. |
+| `format`       | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
+
+For the formatter output shape (the `query_graph` response payload), call [`get_response_format`](#get_response_format).
 
 Example request:
 
@@ -253,3 +254,42 @@ Example request:
 
 The response carries the same grammar that previously lived in the
 `query_graph` description.
+
+## `get_response_format`
+
+Return the JSON Schema describing the query response shape (the formatter
+output) and its semver. Pairs with [`get_query_dsl`](#get_query_dsl): input
+grammar there, output shape here.
+
+| Parameter | Type   | Required | Description |
+|-----------|--------|----------|-------------|
+| `format`  | string | No       | `llm` (default) returns the schema as TOON-prefixed text. `raw` returns `{ schema, version }`. |
+
+Example request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": "1",
+  "params": {
+    "name": "get_response_format",
+    "arguments": { "format": "raw" }
+  }
+}
+```
+
+Raw response payload:
+
+```json
+{
+  "schema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "GKG unified query response",
+    "..." : "..."
+  },
+  "version": "1.2.0"
+}
+```
+
+The `version` matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` field stamped on every query response.

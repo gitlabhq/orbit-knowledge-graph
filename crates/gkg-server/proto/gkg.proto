@@ -48,6 +48,12 @@ service KnowledgeGraphService {
   // Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
+  // Returns the JSON Schema describing the query response shape (the formatter
+  // output). Pairs with GetQueryDsl: input grammar there, output shape here.
+  // Used by MCP tools/call("get_response_format") and surfaced by the monolith
+  // through GET /api/v4/orbit/schema?include_response_format=true.
+  rpc GetResponseFormat(GetResponseFormatRequest) returns (GetResponseFormatResponse);
+
   // Returns cluster health and component status.
   // Used by GET /api/v4/orbit/status.
   rpc GetClusterHealth(GetClusterHealthRequest) returns (GetClusterHealthResponse);
@@ -113,9 +119,8 @@ message ExecuteQueryError {
 
 // Request to retrieve the graph schema with optional node expansion.
 message GetGraphSchemaRequest {
-  repeated string expand_nodes = 1;       // node names to include full properties/relationships; pass "*" to expand all
-  ResponseFormat format = 2;              // RAW: StructuredSchema; LLM: TOON text
-  bool include_response_format = 3;       // when true, append the query response JSON Schema (the formatter output shape) alongside the ontology
+  repeated string expand_nodes = 1;  // node names to include full properties/relationships; pass "*" to expand all
+  ResponseFormat format = 2;         // RAW: StructuredSchema; LLM: TOON text
 }
 
 // Schema response — exactly one of structured or text depending on format.
@@ -132,17 +137,6 @@ message StructuredSchema {
   repeated SchemaDomain domains = 2;
   repeated SchemaNode nodes = 3;
   repeated SchemaEdge edges = 4;
-  // Formatter output schema and its semver. Populated only when
-  // GetGraphSchemaRequest.include_response_format is true.
-  ResponseFormatSchema response_format = 5;
-}
-
-// JSON Schema describing the query response shape (formatter output) plus
-// its semver. The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
-// format_version stamped on every query response.
-message ResponseFormatSchema {
-  string schema = 1;   // verbatim JSON Schema as a JSON string
-  string version = 2;  // semver string, e.g. "1.2.0"
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").
@@ -208,6 +202,31 @@ message GetQueryDslResponse {
     string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
     string formatted_text = 2;   // format = LLM: condensed TOON
   }
+}
+
+// ---------------------------------------------------------------------------
+// GetResponseFormat — unary, returns the JSON Schema for query response
+// ---------------------------------------------------------------------------
+
+// Request for the query response shape (formatter output schema).
+message GetResponseFormatRequest {
+  ResponseFormat format = 1;  // RAW: structured (schema + version); LLM: TOON
+}
+
+// Response carrying the formatter output schema and its semver.
+message GetResponseFormatResponse {
+  oneof content {
+    ResponseFormatSchema structured = 1;  // format = RAW
+    string formatted_text = 2;           // format = LLM (TOON notation)
+  }
+}
+
+// JSON Schema describing the query response shape plus its semver.
+// The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+// format_version stamped on every query response.
+message ResponseFormatSchema {
+  string schema = 1;   // verbatim JSON Schema as a JSON string
+  string version = 2;  // semver string, e.g. "1.2.0"
 }
 
 // ---------------------------------------------------------------------------

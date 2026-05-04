@@ -79,6 +79,7 @@ impl ToolService {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
             "get_query_dsl" => self.execute_get_query_dsl(&arguments),
+            "get_response_format" => self.execute_get_response_format(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -135,39 +136,13 @@ impl ToolService {
 
         let result = match format {
             OutputFormat::Llm => {
-                let mut toon = encode(&response, &EncodeOptions::default()).map_err(|e| {
+                let toon = encode(&response, &EncodeOptions::default()).map_err(|e| {
                     ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
                 })?;
-                if args.include_response_format {
-                    toon.push_str("\n\nResponseFormat v");
-                    toon.push_str(&Self::build_response_format_version());
-                    toon.push_str(" (JSON Schema):\n");
-                    toon.push_str(Self::build_response_format_schema());
-                }
                 json!(toon)
             }
-            OutputFormat::Raw => {
-                let mut value = serde_json::to_value(&response)
-                    .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
-                if args.include_response_format {
-                    let schema: Value = serde_json::from_str(Self::build_response_format_schema())
-                        .map_err(|e| {
-                            ExecutorError::InvalidArguments(format!(
-                                "Failed to parse response format schema: {e}"
-                            ))
-                        })?;
-                    if let Some(obj) = value.as_object_mut() {
-                        obj.insert(
-                            "response_format".to_string(),
-                            json!({
-                                "schema": schema,
-                                "version": Self::build_response_format_version(),
-                            }),
-                        );
-                    }
-                }
-                value
-            }
+            OutputFormat::Raw => serde_json::to_value(&response)
+                .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
         };
 
         Ok(ToolPlan::Immediate { result })
@@ -182,6 +157,28 @@ impl ToolService {
                 serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
                     ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
                 })?
+            }
+        };
+
+        Ok(ToolPlan::Immediate { result })
+    }
+
+    fn execute_get_response_format(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        let format = parse_format(arguments);
+        let version = Self::build_response_format_version();
+        let schema_str = Self::build_response_format_schema();
+
+        let result = match format {
+            OutputFormat::Llm => json!(format!(
+                "ResponseFormat v{version} (JSON Schema):\n{schema_str}"
+            )),
+            OutputFormat::Raw => {
+                let schema: Value = serde_json::from_str(schema_str).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!(
+                        "Failed to parse response format schema: {e}"
+                    ))
+                })?;
+                json!({ "schema": schema, "version": version })
             }
         };
 
@@ -213,8 +210,6 @@ fn parse_format(arguments: &Value) -> OutputFormat {
 struct GetGraphSchemaArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
-    #[serde(default)]
-    include_response_format: bool,
 }
 
 #[cfg(test)]
@@ -592,61 +587,40 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_with_include_response_format_raw() {
-        let result = resolve_immediate(
-            r#"{"format": "raw", "include_response_format": true}"#,
-            "get_graph_schema",
+    fn get_graph_schema_raw_does_not_carry_response_format() {
+        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_graph_schema");
+        assert!(
+            result.get("response_format").is_none(),
+            "get_graph_schema must not surface response_format; clients call get_response_format"
         );
-        let response_format = result
-            .get("response_format")
-            .expect("response_format key should be present when flag is set");
-        assert!(response_format.is_object(), "response_format is an object");
+    }
 
-        let schema = response_format
+    #[test]
+    fn get_response_format_default_returns_toon_string() {
+        let result = resolve_immediate("{}", "get_response_format");
+        let toon = result.as_str().expect("LLM format returns a string");
+        let version = ToolService::build_response_format_version();
+        assert!(toon.contains(&format!("ResponseFormat v{version}")));
+        assert!(toon.contains("GKG unified query response"));
+    }
+
+    #[test]
+    fn get_response_format_raw_returns_schema_and_version() {
+        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_response_format");
+        assert!(result.is_object());
+
+        let schema = result
             .get("schema")
-            .expect("response_format.schema must be present");
+            .expect("schema key must be present in RAW response");
         assert_eq!(
             schema.get("title").and_then(Value::as_str),
             Some("GKG unified query response")
         );
 
-        let version = response_format
+        let version = result
             .get("version")
             .and_then(Value::as_str)
-            .expect("response_format.version should be present");
-        assert!(
-            !version.is_empty() && version.chars().any(|c| c.is_ascii_digit()),
-            "response_format.version should look like a semver, got {version:?}"
-        );
-        assert_eq!(
-            version,
-            ToolService::build_response_format_version(),
-            "version should match RAW_OUTPUT_FORMAT_VERSION"
-        );
-    }
-
-    #[test]
-    fn get_graph_schema_without_include_response_format_omits_it() {
-        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_graph_schema");
-        assert!(
-            result.get("response_format").is_none(),
-            "response_format must be absent unless include_response_format = true"
-        );
-    }
-
-    #[test]
-    fn get_graph_schema_llm_with_include_response_format_appends_section() {
-        let result = resolve_immediate(
-            r#"{"format": "llm", "include_response_format": true}"#,
-            "get_graph_schema",
-        );
-        let toon = result.as_str().expect("LLM format returns a string");
-        let version = ToolService::build_response_format_version();
-        assert!(
-            toon.contains(&format!("ResponseFormat v{version}")),
-            "TOON should embed the response format version, got: ...{}",
-            &toon[toon.len().saturating_sub(200)..]
-        );
-        assert!(toon.contains("GKG unified query response"));
+            .expect("version key must be present in RAW response");
+        assert_eq!(version, ToolService::build_response_format_version());
     }
 }

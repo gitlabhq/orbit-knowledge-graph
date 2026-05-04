@@ -38,13 +38,6 @@ mod params {
             "description": "Node types to expand with properties and relationships."
         })
     }
-
-    pub fn include_response_format() -> Value {
-        json!({
-            "type": "boolean",
-            "description": "When true, include the query response JSON Schema (the formatter output shape) alongside the ontology."
-        })
-    }
 }
 
 pub struct ToolRegistry;
@@ -55,6 +48,7 @@ impl ToolRegistry {
             Self::query_graph(),
             Self::get_graph_schema(),
             Self::get_query_dsl(),
+            Self::get_response_format(),
         ]
     }
 
@@ -96,14 +90,12 @@ impl ToolRegistry {
             name: "get_graph_schema".into(),
             description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
                           and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types. Set include_response_format to \
-                          also return the formatter output JSON Schema."
+                          property details for specific types."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "expand_nodes": params::expand_nodes(),
-                    "include_response_format": params::include_response_format(),
                     "format": params::format()
                 },
                 "additionalProperties": false
@@ -116,6 +108,23 @@ impl ToolRegistry {
             name: "get_query_dsl".into(),
             description: "Return the query DSL grammar (JSON Schema) used by query_graph. \
                           Call this once per session before composing queries."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_response_format() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_response_format".into(),
+            description: "Return the JSON Schema describing the query response shape \
+                          (the formatter output). Pairs with get_query_dsl: input grammar \
+                          there, output shape here."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -147,7 +156,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -171,6 +180,7 @@ mod tests {
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
         assert!(names.contains(&"get_query_dsl".into()));
+        assert!(names.contains(&"get_response_format".into()));
     }
 
     #[test]
@@ -247,16 +257,19 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_has_include_response_format_param() {
-        let tool = find_tool("get_graph_schema");
-        let prop = &tool.parameters["properties"]["include_response_format"];
-        assert!(prop.is_object());
-        assert_eq!(prop["type"], "boolean");
+    fn get_query_dsl_has_only_format_param() {
+        let tool = find_tool("get_query_dsl");
+        let props = tool.parameters["properties"]
+            .as_object()
+            .expect("properties should be an object");
+        assert_eq!(props.len(), 1);
+        assert!(props.contains_key("format"));
+        assert!(tool.parameters.get("required").is_none());
     }
 
     #[test]
-    fn get_query_dsl_has_only_format_param() {
-        let tool = find_tool("get_query_dsl");
+    fn get_response_format_has_only_format_param() {
+        let tool = find_tool("get_response_format");
         let props = tool.parameters["properties"]
             .as_object()
             .expect("properties should be an object");
