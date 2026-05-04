@@ -169,8 +169,15 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                 }
                 HydrationStrategy::Skip => {
-                    // Use pre-resolved elevated-access decision from plan().
-                    if np.needs_elevated_filter {
+                    // Elevated-access nodes need a FilterOnly CTE for the
+                    // security pass, but only if they have non-denorm filters
+                    // to push. Without filters the CTE degenerates to
+                    // `WHERE false` and wastes a scan.
+                    if np.needs_elevated_filter
+                        && (!np.filters.is_empty()
+                            || !np.node_ids.is_empty()
+                            || np.id_range.is_some())
+                    {
                         where_parts
                             .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }
