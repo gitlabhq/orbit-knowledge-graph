@@ -3,10 +3,10 @@ use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
-const RESPONSE_FORMAT_SCHEMA: &str = include_str!(concat!(
-    env!("GKG_SERVER_SCHEMAS_DIR"),
-    "/query_response.json"
-));
+// Path is relative to this source file (crates/gkg-server/src/tools/schema.rs).
+// Avoids depending on the GKG_SERVER_SCHEMAS_DIR env var, which is not always
+// set in every CI compile context.
+const RESPONSE_FORMAT_SCHEMA: &str = include_str!("../../schemas/query_response.json");
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
