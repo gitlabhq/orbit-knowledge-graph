@@ -5,15 +5,16 @@ log "E2E Setup (SHA: $E2E_SHA)"
 
 # Clean cluster-scoped resources orphaned by previous e2e runs whose owning
 # namespace has been torn down. The GitLab chart 9.11.x installs cluster-scoped
-# resources (e.g. GatewayClass "gitlab-gw") that survive `kubectl delete ns`
-# and that helm validates by `meta.helm.sh/release-namespace` annotation;
-# a stale entry from a prior e2e-<oldsha>-gitlab release blocks subsequent
-# installs in any new e2e-<sha>-gitlab namespace with:
-#   "GatewayClass <name> exists and cannot be imported into the current release"
+# resources (GatewayClass "gitlab-gw", ClusterRole/ClusterRoleBinding for the
+# bundled envoy-gateway controller) that survive `kubectl delete ns` and that
+# helm validates by `meta.helm.sh/release-namespace` annotation; a stale entry
+# from a prior e2e-<oldsha>-gitlab release blocks subsequent installs in any
+# new e2e-<sha>-gitlab namespace with:
+#   "<Kind> <name> exists and cannot be imported into the current release"
 log "Cleaning orphaned e2e cluster-scoped resources"
 EXISTING_E2E_NS=$($KC get ns -o jsonpath='{.items[*].metadata.name}' 2>/dev/null \
   | tr ' ' '\n' | grep '^e2e-' || true)
-for kind in gatewayclass; do
+for kind in gatewayclass clusterrole clusterrolebinding; do
   ORPHANS=$(EXISTING="$EXISTING_E2E_NS" $KC get "$kind" -o json 2>/dev/null \
     | python3 -c "
 import json, os, sys
