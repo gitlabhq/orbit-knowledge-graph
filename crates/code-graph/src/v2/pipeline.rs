@@ -381,6 +381,13 @@ pub trait LanguagePipeline {
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>>;
+
+    /// Build a [`LanguageContext`] for this pipeline at runtime.
+    /// Returns `Some` for generic DSL pipelines, `None` for custom
+    /// pipelines that can't participate in a [`FamilyPipeline`].
+    fn lang_ctx(_ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -921,6 +928,14 @@ where
     P: crate::v2::dsl::types::DslLanguage + 'static,
     R: crate::v2::linker::HasRules + Send + Sync,
 {
+    fn lang_ctx(ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
+        Some(Arc::new(LanguageContext {
+            pipeline: ctx.clone(),
+            spec: P::spec(),
+            rules: Arc::new(R::rules()),
+        }))
+    }
+
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,

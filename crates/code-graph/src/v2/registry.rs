@@ -16,8 +16,6 @@ use crate::v2::langs::generic::python::{PythonDsl, PythonRules};
 use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
-use crate::v2::dsl::types::DslLanguage;
-use crate::v2::linker::HasRules;
 use crate::v2::pipeline::{
     BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
     PipelineContext, PipelineError,
@@ -42,7 +40,7 @@ macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*] $v:ident => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)* [$v => $p]] [$($tags)*] $($rest)*);
     };
-    // Emit dispatch_language (called by Pipeline::run).
+    // Emit dispatch_language, lang_ctx_for, dispatch_by_tag.
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_language(
             language: Language,
@@ -55,6 +53,21 @@ macro_rules! register_v2_pipelines {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
+        }
+
+        /// Build a [`LanguageContext`] for the given language at runtime.
+        /// Auto-generated from the pipeline registration table.
+        /// Returns `None` for custom pipelines (JS, Rust) that don't
+        /// implement `lang_ctx`.
+        pub fn lang_ctx_for(
+            language: Language,
+            ctx: &Arc<PipelineContext>,
+        ) -> Option<Arc<LanguageContext>> {
+            #[allow(unreachable_patterns)]
+            match language {
+                $(Language::$variant => <$($pipeline)*>::lang_ctx(ctx),)*
+                _ => None,
+            }
         }
     };
     // Emit dispatch_by_tag (called by YAML test harness).
@@ -93,32 +106,6 @@ register_v2_pipelines! {
 }
 
 // ── Family dispatch ─────────────────────────────────────────────
-
-/// Build a [`LanguageContext`] for a generic-pipeline language at
-/// runtime. Returns `None` for custom-pipeline languages (JS, Rust)
-/// that don't use `DslLanguage + HasRules`.
-fn lang_ctx_for(language: Language, ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
-    macro_rules! ctx_for {
-        ($dsl:ty, $rules:ty) => {
-            Some(Arc::new(LanguageContext {
-                pipeline: ctx.clone(),
-                spec: <$dsl>::spec(),
-                rules: Arc::new(<$rules>::rules()),
-            }))
-        };
-    }
-    match language {
-        Language::C => ctx_for!(CDsl, CRules),
-        Language::Python => ctx_for!(PythonDsl, PythonRules),
-        Language::Java => ctx_for!(JavaDsl, JavaRules),
-        Language::Kotlin => ctx_for!(KotlinDsl, KotlinRules),
-        Language::CSharp => ctx_for!(CSharpDsl, CSharpRules),
-        Language::Go => ctx_for!(GoDsl, GoRules),
-        Language::Ruby => ctx_for!(RubyDsl, RubyRules),
-        // Custom-pipeline languages don't have DslLanguage + HasRules.
-        Language::JavaScript | Language::TypeScript | Language::Rust => None,
-    }
-}
 
 /// Dispatch a language family to the appropriate pipeline(s).
 ///
