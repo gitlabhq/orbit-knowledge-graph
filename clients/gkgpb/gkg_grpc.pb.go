@@ -28,6 +28,7 @@ const (
 	KnowledgeGraphService_ListTools_FullMethodName        = "/gkg.v1.KnowledgeGraphService/ListTools"
 	KnowledgeGraphService_ExecuteQuery_FullMethodName     = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
 	KnowledgeGraphService_GetGraphSchema_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
+	KnowledgeGraphService_GetQueryDsl_FullMethodName      = "/gkg.v1.KnowledgeGraphService/GetQueryDsl"
 	KnowledgeGraphService_GetClusterHealth_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
 	KnowledgeGraphService_GetGraphStatus_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
 )
@@ -51,6 +52,11 @@ type KnowledgeGraphServiceClient interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
+	// Returns the query DSL grammar (JSON Schema for query_graph input).
+	// Decoupled from ListTools so MCP clients that truncate tool descriptions can
+	// still discover the grammar on demand without bloating tool metadata.
+	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
@@ -100,6 +106,16 @@ func (c *knowledgeGraphServiceClient) GetGraphSchema(ctx context.Context, in *Ge
 	return out, nil
 }
 
+func (c *knowledgeGraphServiceClient) GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetQueryDslResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetQueryDsl_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *knowledgeGraphServiceClient) GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetClusterHealthResponse)
@@ -139,6 +155,11 @@ type KnowledgeGraphServiceServer interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
+	// Returns the query DSL grammar (JSON Schema for query_graph input).
+	// Decoupled from ListTools so MCP clients that truncate tool descriptions can
+	// still discover the grammar on demand without bloating tool metadata.
+	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
@@ -163,6 +184,9 @@ func (UnimplementedKnowledgeGraphServiceServer) ExecuteQuery(grpc.BidiStreamingS
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGraphSchema not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClusterHealth not implemented")
@@ -234,6 +258,24 @@ func _KnowledgeGraphService_GetGraphSchema_Handler(srv interface{}, ctx context.
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KnowledgeGraphService_GetQueryDsl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetQueryDslRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).GetQueryDsl(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_GetQueryDsl_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).GetQueryDsl(ctx, req.(*GetQueryDslRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KnowledgeGraphService_GetClusterHealth_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
 	in := new(GetClusterHealthRequest)
 	if err := dec(in); err != nil {
@@ -284,6 +326,10 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "GetGraphSchema",
 			Handler:    _KnowledgeGraphService_GetGraphSchema_Handler,
+		},
+		{
+			MethodName: "GetQueryDsl",
+			Handler:    _KnowledgeGraphService_GetQueryDsl_Handler,
 		},
 		{
 			MethodName: "GetClusterHealth",
