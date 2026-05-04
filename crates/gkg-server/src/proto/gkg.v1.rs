@@ -819,7 +819,7 @@ pub mod knowledge_graph_service_client {
         /// Returns the query DSL grammar (JSON Schema for query_graph input).
         /// Decoupled from ListTools so MCP clients that truncate tool descriptions can
         /// still discover the grammar on demand without bloating tool metadata.
-        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/query_dsl.
+        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
         pub async fn get_query_dsl(
             &mut self,
             request: impl tonic::IntoRequest<super::GetQueryDslRequest>,
@@ -954,7 +954,7 @@ pub mod knowledge_graph_service_server {
         /// Returns the query DSL grammar (JSON Schema for query_graph input).
         /// Decoupled from ListTools so MCP clients that truncate tool descriptions can
         /// still discover the grammar on demand without bloating tool metadata.
-        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/query_dsl.
+        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
         async fn get_query_dsl(
             &self,
             request: tonic::Request<super::GetQueryDslRequest>,

@@ -45,7 +45,7 @@ service KnowledgeGraphService {
   // Returns the query DSL grammar (JSON Schema for query_graph input).
   // Decoupled from ListTools so MCP clients that truncate tool descriptions can
   // still discover the grammar on demand without bloating tool metadata.
-  // Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/query_dsl.
+  // Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
   // Returns cluster health and component status.
