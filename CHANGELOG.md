@@ -1,3 +1,29 @@
+## [0.45.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.44.0...v0.45.0) (2026-05-04)
+
+### Features
+
+* **analytics:** emit gkg_query_executed Snowplow events ([b939daf](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b939dafc5eb0d9c73a59ade155f366441b7dd1a1)) by Bohdan Parkhomchuk
+* **indexer:** parallelize entity plan execution within namespace indexing ([a25e486](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a25e486383067d87c1f94769a89414bf8b99e63b)) by Michael Usachenko
+* **ontology:** add lightweight projections for FK column lookups ([53fab0d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/53fab0d65ed7ba1bfc722acfc021d3654886ce14)) by Michael Usachenko
+* **resilience:** add circuit breaker decorator for ClickHouse clients ([63c10e8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/63c10e860d60071f3d780daccb46c5a9198653da)) by Jean-Gabriel Doyon
+* **resilience:** add circuit breaker decorator for NATS client ([c72aec4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c72aec4cad86fe3f333310e4b80ad22da341caff)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **indexer:** keep graph counts scoped to live rows ([325a388](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/325a388ff6254a687cc4f58183beb35a618a28a4)) by michaelangeloio
+
+### Performance
+
+* **indexer:** pre-sort and dictionary-encode SDLC edge batches ([9309437](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/93094379388d26b5f3b6e3c13455fb79e63fdfb9)) by Michael Usachenko
+
+### Other
+
+* **code-graph:** stabilize benchmark repo cache ([3129215](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3129215ecdb5c047ad3e666c38e22e10ab3e43e4)) by Michael Angelo Rivera
+* **deps:** update ra_ap_* crates to 0.0.330 ([6ec6272](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6ec6272912f5062fa719d11b4c4b3f4224bca79b)) by Jean-Gabriel Doyon
+* **e2e:** stabilize code backfill indexing wait ([df33029](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/df330294fa30de0dd7159c2afd901f13e46b8441)) by michaelangeloio
+* **indexer:** derive dictionary encoding from ontology, move prepare_batches to utils ([9e8a3e4](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9e8a3e4ad38bb3c0e08615cd334b00984050b23e)) by Michael Usachenko
+* move query_response.json to config/schemas ([2125f1e](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/2125f1e2506d081fe212fdaaa1036532240c325f)) by Michael Angelo Rivera
+
 ## [0.44.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.43.0...v0.44.0) (2026-05-03)
 
 ### Features
