@@ -43,7 +43,7 @@ use futures::StreamExt;
 use opentelemetry::KeyValue;
 use thiserror::Error;
 use tokio_util::sync::CancellationToken;
-use tracing::{debug, error, info, warn};
+use tracing::{Instrument, debug, error, info, warn};
 
 use crate::indexing_status::IndexingStatusStore;
 use crate::locking::{LockService, NatsLockService};
@@ -224,6 +224,12 @@ impl Engine {
                 Some(message) = messages.next() => {
                     let message = message?;
                     let progress = message.progress_notifier();
+                    let span = tracing::info_span!(
+                        "process_message",
+                        correlation_id = %message.envelope.id.0,
+                        topic = %topic_name,
+                        attempt = message.envelope.attempt,
+                    );
                     inflight.spawn(process_message(
                         message,
                         self.registry.handlers_for(&subscription),
@@ -232,7 +238,7 @@ impl Engine {
                         runtime.clone(),
                         subscription.clone(),
                         topic_name.clone(),
-                    ));
+                    ).instrument(span));
                 }
             }
         }
@@ -297,14 +303,13 @@ async fn process_message(
     subscription: Subscription,
     topic_name: String,
 ) {
-    let message_id = message.envelope.id.0.clone();
     let attempt = message.envelope.attempt;
     let topic_label = KeyValue::new("topic", topic_name.clone());
 
-    debug!(topic = %topic_name, %message_id, attempt, "message received");
+    debug!("message received");
 
     if attempt > 1 {
-        info!(topic = %topic_name, %message_id, attempt, "message retry received");
+        info!("message retry received");
     }
 
     let message_start = Instant::now();
@@ -321,13 +326,7 @@ async fn process_message(
         Ok(outcome) => outcome,
         Err(panic_payload) => {
             let panic_message = extract_panic_message(&panic_payload);
-            error!(
-                topic = %topic_name,
-                %message_id,
-                attempt,
-                panic = %panic_message,
-                "handler panicked"
-            );
+            error!(panic = %panic_message, "handler panicked");
             HandlersOutcome::Exhausted {
                 error: format!("handler panicked: {panic_message}"),
             }
@@ -337,25 +336,25 @@ async fn process_message(
     let outcome_label = match outcome {
         HandlersOutcome::Success => {
             if let Err(error) = message.ack().await {
-                warn!(%error, %message_id, "failed to ack message");
+                warn!(%error, "failed to ack message");
             }
             "ack"
         }
         HandlersOutcome::Failed { retry_delay } => {
-            info!(topic = %topic_name, %message_id, "message nacked, handler failure");
+            info!("message nacked, handler failure");
             let nack_result = match retry_delay {
                 Some(delay) => message.nack_with_delay(delay).await,
                 None => message.nack().await,
             };
             if let Err(error) = nack_result {
-                warn!(%error, %message_id, "failed to nack message");
+                warn!(%error, "failed to nack message");
             }
             "nack"
         }
         HandlersOutcome::Dropped { error } => {
-            warn!(%message_id, %error, "permanent failure, message dropped");
+            warn!(%error, "permanent failure, message dropped");
             if let Err(term_error) = message.term_ack().await {
-                warn!(%term_error, %message_id, "failed to term-ack dropped message");
+                warn!(%term_error, "failed to term-ack dropped message");
             }
             "term"
         }
@@ -367,7 +366,7 @@ async fn process_message(
                 }
             } else {
                 if let Err(term_error) = message.term_ack().await {
-                    warn!(%term_error, %message_id, "failed to term-ack exhausted message");
+                    warn!(%term_error, "failed to term-ack exhausted message");
                 }
                 "term"
             }
@@ -425,8 +424,6 @@ async fn run_handlers(
                 warn!(
                     handler = handler.name(),
                     subject = %envelope.subject,
-                    message_id = %envelope.id.0,
-                    attempt = envelope.attempt,
                     %error,
                     "permanent failure, skipping retries"
                 );
@@ -443,8 +440,6 @@ async fn run_handlers(
                 if envelope.attempt >= max_attempts {
                     warn!(
                         handler = handler.name(),
-                        message_id = %envelope.id.0,
-                        attempt = envelope.attempt,
                         %max_attempts,
                         %error,
                         "retry attempts exhausted"
@@ -460,7 +455,6 @@ async fn run_handlers(
 
             warn!(
                 handler = handler.name(),
-                message_id = %envelope.id.0,
                 %error,
                 "handler failed with no retry config, acking message"
             );
