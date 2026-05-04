@@ -32,9 +32,9 @@ Do **not** pass `-R owner/repo`.
 | `orbit/status`                          | GET    | Cluster health (always returns 200).                                          |
 | `orbit/schema`                          | GET    | Graph ontology: domains, nodes, edges.                                        |
 | `orbit/schema?expand=A,B`               | GET    | Drill into nodes for properties and relationships.                            |
-| `orbit/schema?include_response_format=1`| GET    | Schema plus the query response JSON Schema (formatter output shape). The monolith fans out to two gRPC calls and merges. |
+| `orbit/schema?include=dsl,response_format`| GET  | Schema plus the query DSL grammar and the formatter output JSON Schema. Comma-separated; monolith fans out to extra gRPCs and merges under `dsl` and `response_format`. |
 | `orbit/dsl`                       | GET    | Query DSL grammar. `?format=raw` returns the full JSON Schema; default is condensed TOON. |
-| `orbit/tools`                           | GET    | MCP tool manifest. Tool descriptions are kept short — call `orbit/dsl` for the grammar. |
+| `orbit/tools`                           | GET    | MCP tool manifest. Two tools: `query_graph` and `get_graph_schema` (use `include=["dsl","response_format"]` for grammar / output shape). |
 | `orbit/query`                           | POST   | Execute a query. **Requires `Content-Type` header.**                          |
 
 ## Discovery workflow (always start here)

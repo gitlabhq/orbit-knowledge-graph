@@ -28,10 +28,10 @@ title: Orbit MCP tools
 ## `query_graph`
 
 Query the knowledge graph and return matching nodes, relationships, and aggregations.
-The query DSL grammar is also exposed through [`get_query_dsl`](#get_query_dsl) so MCP
-clients that truncate tool descriptions can still discover it. The grammar stays inline
-on `query_graph` for one release cycle to give existing consumers time to migrate; a
-follow-up MR strips it.
+The query DSL grammar is also exposed through `get_graph_schema` with
+`include=["dsl"]` so MCP clients that truncate tool descriptions can still
+discover it. The grammar stays inline on `query_graph` for one release cycle to
+give existing consumers time to migrate; a follow-up MR strips it.
 
 | Parameter | Type   | Required | Description |
 |-----------|--------|----------|-------------|
@@ -102,14 +102,13 @@ Example response:
 
 ## `get_graph_schema`
 
-Return the Orbit graph schema so agents can understand which entities, relationships, and properties are available.
+Return the Orbit graph schema so agents can understand which entities, relationships, and properties are available. Pass `include=["dsl"]` to also fetch the query DSL grammar, or `include=["response_format"]` for the formatter output JSON Schema, in the same call. This keeps the MCP tool surface small while still letting agents fetch ontology, query input, and query output shape together.
 
 | Parameter      | Type             | Required | Description |
 |----------------|------------------|----------|-------------|
 | `expand_nodes` | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. Pass `["*"]` to expand every node. |
+| `include`      | array of strings | No       | Extra blocks to merge into the response. Allowed values: `dsl` (the query input grammar) and `response_format` (the formatter output JSON Schema and its semver). |
 | `format`       | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
-
-For the formatter output shape (the `query_graph` response payload), call [`get_response_format`](#get_response_format).
 
 Example request:
 
@@ -226,17 +225,12 @@ Example response:
 }
 ```
 
-## `get_query_dsl`
+### Fetching the DSL grammar and response format
 
-Return the query DSL grammar (the JSON Schema for `query_graph` input).
-Call this once per session before composing queries. The grammar is exposed
-through a dedicated tool, rather than embedded in `query_graph`'s description,
-so the description stays small enough for MCP clients that truncate tool
-metadata.
-
-| Parameter | Type   | Required | Description |
-|-----------|--------|----------|-------------|
-| `format`  | string | No       | `llm` (default) returns the condensed grammar as TOON. `raw` returns the full JSON Schema. |
+The query input grammar and the formatter output JSON Schema both ride on
+`get_graph_schema` via the `include` array, instead of as standalone tools.
+This keeps the MCP tool surface to two entries while still letting agents
+fetch ontology, input shape, and output shape in a single call.
 
 Example request:
 
@@ -246,50 +240,38 @@ Example request:
   "method": "tools/call",
   "id": "1",
   "params": {
-    "name": "get_query_dsl",
-    "arguments": { "format": "llm" }
+    "name": "get_graph_schema",
+    "arguments": {
+      "include": ["dsl", "response_format"],
+      "format": "raw"
+    }
   }
 }
 ```
 
-The response carries the same grammar that previously lived in the
-`query_graph` description.
-
-## `get_response_format`
-
-Return the JSON Schema describing the query response shape (the formatter
-output) and its semver. Pairs with [`get_query_dsl`](#get_query_dsl): input
-grammar there, output shape here.
-
-| Parameter | Type   | Required | Description |
-|-----------|--------|----------|-------------|
-| `format`  | string | No       | `llm` (default) returns the schema as TOON-prefixed text. `raw` returns `{ schema, version }`. |
-
-Example request:
+Raw response payload (truncated):
 
 ```json
 {
-  "jsonrpc": "2.0",
-  "method": "tools/call",
-  "id": "1",
-  "params": {
-    "name": "get_response_format",
-    "arguments": { "format": "raw" }
-  }
-}
-```
-
-Raw response payload:
-
-```json
-{
-  "schema": {
+  "schema_version": "0.1",
+  "domains": [...],
+  "nodes": [...],
+  "edges": [...],
+  "dsl": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
-    "title": "GKG unified query response",
+    "title": "GraphQueryAsJSON",
     "..." : "..."
   },
-  "version": "1.2.0"
+  "response_format": {
+    "schema": {
+      "$schema": "https://json-schema.org/draft/2020-12/schema",
+      "title": "GKG unified query response",
+      "..." : "..."
+    },
+    "version": "1.2.0"
+  }
 }
 ```
 
-The `version` matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` field stamped on every query response.
+The `response_format.version` matches `config/RAW_OUTPUT_FORMAT_VERSION` and
+the `format_version` field stamped on every query response.

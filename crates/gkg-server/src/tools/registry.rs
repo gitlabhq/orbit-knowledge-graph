@@ -38,18 +38,24 @@ mod params {
             "description": "Node types to expand with properties and relationships."
         })
     }
+
+    pub fn schema_include() -> Value {
+        json!({
+            "type": "array",
+            "items": { "type": "string", "enum": ["dsl", "response_format"] },
+            "description": "Extra blocks to merge into the schema response. \
+                            'dsl' adds the query DSL grammar (input shape for query_graph). \
+                            'response_format' adds the formatter output JSON Schema and its semver. \
+                            Composes any subset in a single call to keep tool counts down."
+        })
+    }
 }
 
 pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![
-            Self::query_graph(),
-            Self::get_graph_schema(),
-            Self::get_query_dsl(),
-            Self::get_response_format(),
-        ]
+        vec![Self::query_graph(), Self::get_graph_schema()]
     }
 
     fn query_graph() -> ToolDefinition {
@@ -88,47 +94,17 @@ impl ToolRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
-                          and edges with their source/target types. Use expand_nodes to get \
-                          property details for specific types."
+            description: "Return the GitLab Knowledge Graph schema (nodes, edges, and their \
+                          source/target types). Pass expand_nodes to drill into property \
+                          details. Pass include=[\"dsl\", \"response_format\"] to fetch the \
+                          query DSL grammar and the formatter output JSON Schema in the \
+                          same call."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "properties": {
                     "expand_nodes": params::expand_nodes(),
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn get_query_dsl() -> ToolDefinition {
-        ToolDefinition {
-            name: "get_query_dsl".into(),
-            description: "Return the query DSL grammar (JSON Schema) used by query_graph. \
-                          Call this once per session before composing queries."
-                .into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
-                    "format": params::format()
-                },
-                "additionalProperties": false
-            }),
-        }
-    }
-
-    fn get_response_format() -> ToolDefinition {
-        ToolDefinition {
-            name: "get_response_format".into(),
-            description: "Return the JSON Schema describing the query response shape \
-                          (the formatter output). Pairs with get_query_dsl: input grammar \
-                          there, output shape here."
-                .into(),
-            parameters: json!({
-                "type": "object",
-                "properties": {
+                    "include": params::schema_include(),
                     "format": params::format()
                 },
                 "additionalProperties": false
@@ -156,7 +132,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 2);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -179,8 +155,6 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_query_dsl".into()));
-        assert!(names.contains(&"get_response_format".into()));
     }
 
     #[test]
@@ -257,24 +231,17 @@ mod tests {
     }
 
     #[test]
-    fn get_query_dsl_has_only_format_param() {
-        let tool = find_tool("get_query_dsl");
-        let props = tool.parameters["properties"]
-            .as_object()
-            .expect("properties should be an object");
-        assert_eq!(props.len(), 1);
-        assert!(props.contains_key("format"));
-        assert!(tool.parameters.get("required").is_none());
-    }
+    fn get_graph_schema_include_param_lists_known_blocks() {
+        let tool = find_tool("get_graph_schema");
+        let include = &tool.parameters["properties"]["include"];
+        assert_eq!(include["type"], "array");
 
-    #[test]
-    fn get_response_format_has_only_format_param() {
-        let tool = find_tool("get_response_format");
-        let props = tool.parameters["properties"]
-            .as_object()
-            .expect("properties should be an object");
-        assert_eq!(props.len(), 1);
-        assert!(props.contains_key("format"));
-        assert!(tool.parameters.get("required").is_none());
+        let values: Vec<&str> = include["items"]["enum"]
+            .as_array()
+            .expect("include.items.enum must be an array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert_eq!(values, vec!["dsl", "response_format"]);
     }
 }
