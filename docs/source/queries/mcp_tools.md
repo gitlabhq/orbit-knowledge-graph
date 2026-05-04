@@ -105,7 +105,7 @@ Return the Orbit graph schema so agents can understand which entities, relations
 | Parameter                | Type             | Required | Description |
 |--------------------------|------------------|----------|-------------|
 | `expand_nodes`           | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. Pass `["*"]` to expand every node. |
-| `include_response_format`| boolean          | No       | When `true`, include the query response JSON Schema (the formatter output shape) and its semver alongside the ontology. The version matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` stamped on every query response. |
+| `include_response_format`| boolean          | No       | When `true`, include a `response_format` object containing `schema` (the formatter output JSON Schema) and `version` (semver from `config/RAW_OUTPUT_FORMAT_VERSION`, matching the `format_version` stamped on every query response). |
 | `format`                 | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
 
 Example request:

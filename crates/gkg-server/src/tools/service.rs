@@ -150,19 +150,19 @@ impl ToolService {
                 let mut value = serde_json::to_value(&response)
                     .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
                 if args.include_response_format {
-                    let response_format: Value = serde_json::from_str(
-                        Self::build_response_format_schema(),
-                    )
-                    .map_err(|e| {
-                        ExecutorError::InvalidArguments(format!(
-                            "Failed to parse response format schema: {e}"
-                        ))
-                    })?;
+                    let schema: Value = serde_json::from_str(Self::build_response_format_schema())
+                        .map_err(|e| {
+                            ExecutorError::InvalidArguments(format!(
+                                "Failed to parse response format schema: {e}"
+                            ))
+                        })?;
                     if let Some(obj) = value.as_object_mut() {
-                        obj.insert("response_format".to_string(), response_format);
                         obj.insert(
-                            "response_format_version".to_string(),
-                            Value::String(Self::build_response_format_version()),
+                            "response_format".to_string(),
+                            json!({
+                                "schema": schema,
+                                "version": Self::build_response_format_version(),
+                            }),
                         );
                     }
                 }
@@ -600,19 +600,23 @@ mod tests {
         let response_format = result
             .get("response_format")
             .expect("response_format key should be present when flag is set");
-        assert!(response_format.is_object());
+        assert!(response_format.is_object(), "response_format is an object");
+
+        let schema = response_format
+            .get("schema")
+            .expect("response_format.schema must be present");
         assert_eq!(
-            response_format.get("title").and_then(Value::as_str),
+            schema.get("title").and_then(Value::as_str),
             Some("GKG unified query response")
         );
 
-        let version = result
-            .get("response_format_version")
+        let version = response_format
+            .get("version")
             .and_then(Value::as_str)
-            .expect("response_format_version should be present when flag is set");
+            .expect("response_format.version should be present");
         assert!(
             !version.is_empty() && version.chars().any(|c| c.is_ascii_digit()),
-            "response_format_version should look like a semver, got {version:?}"
+            "response_format.version should look like a semver, got {version:?}"
         );
         assert_eq!(
             version,
@@ -627,10 +631,6 @@ mod tests {
         assert!(
             result.get("response_format").is_none(),
             "response_format must be absent unless include_response_format = true"
-        );
-        assert!(
-            result.get("response_format_version").is_none(),
-            "response_format_version must be absent unless include_response_format = true"
         );
     }
 

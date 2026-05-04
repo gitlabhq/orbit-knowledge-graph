@@ -21,8 +21,8 @@ use crate::proto::{
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
     GetQueryDslResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
-    SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty,
-    StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
     get_graph_schema_response, get_query_dsl_response,
 };
 use crate::tools::{ToolRegistry, ToolService};
@@ -440,14 +440,10 @@ impl KnowledgeGraphServiceImpl {
             })
             .collect();
 
-        let (response_format, response_format_version) = if include_response_format {
-            (
-                ToolService::build_response_format_schema().to_string(),
-                ToolService::build_response_format_version(),
-            )
-        } else {
-            (String::new(), String::new())
-        };
+        let response_format = include_response_format.then(|| ResponseFormatSchema {
+            schema: ToolService::build_response_format_schema().to_string(),
+            version: ToolService::build_response_format_version(),
+        });
 
         StructuredSchema {
             schema_version: self.ontology.schema_version().to_string(),
@@ -455,7 +451,6 @@ impl KnowledgeGraphServiceImpl {
             nodes,
             edges,
             response_format,
-            response_format_version,
         }
     }
 
@@ -897,22 +892,25 @@ mod tests {
         );
 
         let with_flag = service.build_structured_schema(&[], true);
+        let response_format = with_flag
+            .response_format
+            .as_ref()
+            .expect("response_format should be populated when flag is set");
         assert!(
-            with_flag
-                .response_format
+            response_format
+                .schema
                 .contains("GKG unified query response")
         );
         assert!(
-            !with_flag.response_format_version.is_empty(),
-            "response_format_version should be populated when flag is set"
+            !response_format.version.is_empty(),
+            "response_format.version should be populated when flag is set"
         );
         assert_eq!(
-            with_flag.response_format_version,
+            response_format.version,
             ToolService::build_response_format_version()
         );
 
         let without_flag = service.build_structured_schema(&[], false);
-        assert!(without_flag.response_format.is_empty());
-        assert!(without_flag.response_format_version.is_empty());
+        assert!(without_flag.response_format.is_none());
     }
 }

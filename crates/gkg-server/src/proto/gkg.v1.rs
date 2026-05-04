@@ -121,15 +121,22 @@ pub struct StructuredSchema {
     pub nodes: ::prost::alloc::vec::Vec<SchemaNode>,
     #[prost(message, repeated, tag = "4")]
     pub edges: ::prost::alloc::vec::Vec<SchemaEdge>,
-    /// Query response JSON Schema (the formatter output shape). Populated only
-    /// when GetGraphSchemaRequest.include_response_format is true. Empty otherwise.
-    #[prost(string, tag = "5")]
-    pub response_format: ::prost::alloc::string::String,
-    /// Semver of the response format (matches config/RAW_OUTPUT_FORMAT_VERSION
-    /// and the format_version stamped on every query response). Populated only
-    /// when include_response_format is true. Empty otherwise.
-    #[prost(string, tag = "6")]
-    pub response_format_version: ::prost::alloc::string::String,
+    /// Formatter output schema and its semver. Populated only when
+    /// GetGraphSchemaRequest.include_response_format is true.
+    #[prost(message, optional, tag = "5")]
+    pub response_format: ::core::option::Option<ResponseFormatSchema>,
+}
+/// JSON Schema describing the query response shape (formatter output) plus
+/// its semver. The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+/// format_version stamped on every query response.
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ResponseFormatSchema {
+    /// verbatim JSON Schema as a JSON string
+    #[prost(string, tag = "1")]
+    pub schema: ::prost::alloc::string::String,
+    /// semver string, e.g. "1.2.0"
+    #[prost(string, tag = "2")]
+    pub version: ::prost::alloc::string::String,
 }
 /// Logical grouping of related node types (e.g. "ci", "core", "plan").
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]

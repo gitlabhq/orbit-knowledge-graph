@@ -132,13 +132,17 @@ message StructuredSchema {
   repeated SchemaDomain domains = 2;
   repeated SchemaNode nodes = 3;
   repeated SchemaEdge edges = 4;
-  // Query response JSON Schema (the formatter output shape). Populated only
-  // when GetGraphSchemaRequest.include_response_format is true. Empty otherwise.
-  string response_format = 5;
-  // Semver of the response format (matches config/RAW_OUTPUT_FORMAT_VERSION
-  // and the format_version stamped on every query response). Populated only
-  // when include_response_format is true. Empty otherwise.
-  string response_format_version = 6;
+  // Formatter output schema and its semver. Populated only when
+  // GetGraphSchemaRequest.include_response_format is true.
+  ResponseFormatSchema response_format = 5;
+}
+
+// JSON Schema describing the query response shape (formatter output) plus
+// its semver. The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+// format_version stamped on every query response.
+message ResponseFormatSchema {
+  string schema = 1;   // verbatim JSON Schema as a JSON string
+  string version = 2;  // semver string, e.g. "1.2.0"
 }
 
 // Logical grouping of related node types (e.g. "ci", "core", "plan").
