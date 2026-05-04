@@ -40,6 +40,6 @@ pub use grpc::GrpcConfig;
 pub use health_check::{HealthCheckConfig, NamespaceTarget};
 pub use metrics::{MetricsConfig, OtelConfig, PrometheusConfig};
 pub use nats::NatsConfiguration;
-pub use query::{QueryConfig, QuerySettings};
+pub use query::{CompilerDerivedSettings, QueryConfig, QuerySettings};
 pub use schema::{SchemaConfig, SchemaConfigError};
 pub use tls::TlsConfig;

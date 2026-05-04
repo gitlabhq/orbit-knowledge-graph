@@ -1,3 +1,3 @@
 mod common;
-mod gitaly_resolver;
+mod gitaly;
 mod virtual_columns;

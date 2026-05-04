@@ -67,6 +67,13 @@ pub enum StorageProjection {
         name: String,
         order_by: Vec<String>,
     },
+    /// Lightweight projection: stores only the key columns + `_part_offset`,
+    /// acting as a secondary index without duplicating full rows.
+    /// Requires ClickHouse 26.1+.
+    Lightweight {
+        name: String,
+        order_by: Vec<String>,
+    },
     Aggregate {
         name: String,
         select: Vec<String>,
@@ -82,6 +89,8 @@ pub struct EdgeTableStorage {
     pub columns: Vec<StorageColumn>,
     pub indexes: Vec<StorageIndex>,
     pub projections: Vec<StorageProjection>,
+    pub denormalized_columns: Vec<StorageColumn>,
+    pub denormalized_indexes: Vec<StorageIndex>,
     pub settings: BTreeMap<String, String>,
 }
 
@@ -279,6 +288,10 @@ pub struct EdgeEntity {
     pub target_kind: String,
     /// ClickHouse table that stores this edge (defaults to the global edge table).
     pub destination_table: String,
+    /// Foreign key column on one of the two node tables that encodes this
+    /// relationship (e.g. "project_id", "author_id"). When present, the
+    /// compiler can join node tables directly instead of scanning the edge table.
+    pub fk_column: Option<String>,
 }
 
 /// ETL configuration for edges sourced from join tables.
@@ -307,6 +320,10 @@ pub struct EdgeEndpoint {
     pub id_column: String,
     /// How the node type is determined.
     pub node_type: EdgeEndpointType,
+    /// Columns to enrich from this endpoint's node datalake table via LEFT
+    /// JOIN at extract time. Makes node properties available in the MemTable
+    /// for the denormalization system to project onto edge rows.
+    pub enrich: Vec<String>,
 }
 
 /// How an edge endpoint's node type is determined.
@@ -319,6 +336,33 @@ pub enum EdgeEndpointType {
         column: String,
         type_mapping: std::collections::BTreeMap<String, String>,
     },
+}
+
+/// Which side of an edge a denormalized property belongs to.
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub enum DenormDirection {
+    Source,
+    Target,
+}
+
+/// A node property denormalized onto an edge table for query optimization.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DenormalizedProperty {
+    /// The relationship kind this was declared on (e.g. "IN_PROJECT").
+    pub relationship_kind: String,
+    /// Entity kind (e.g. "Pipeline").
+    pub node_kind: String,
+    /// Property name on the node (e.g. "status").
+    pub property_name: String,
+    /// Which side of the edge this entity sits on.
+    pub direction: DenormDirection,
+    /// Array column on the edge table: `"source_tags"` or `"target_tags"`.
+    pub edge_column: String,
+    /// Tag key inside the array (e.g. `"status"`, `"state"`).
+    /// Values are stored as `"key:value"` tokens in the array.
+    pub tag_key: String,
+    /// Enum value mapping if the property is an int-based enum.
+    pub enum_values: Option<BTreeMap<i64, String>>,
 }
 
 impl fmt::Display for EdgeEntity {

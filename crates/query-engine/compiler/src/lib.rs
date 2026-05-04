@@ -381,20 +381,20 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Filter is captured via SIP CTE (`_nf_mr` filtered by state='opened',
-        // edge `source_id IN _nf_mr`). The COUNT must reference the edge column
-        // so that filtered edges are what's counted; emitting bare `count()`
-        // here would not be wrong (the IN-filter still bounds rows) but would
-        // suppress the projection-routing decision based on filter presence.
+        // The MR state filter is denormalized onto the edge as source_state.
+        // The denorm pass rewrites the _nf_mr CTE into a direct edge-column
+        // filter (e0.source_state = 'opened'), and the COUNT becomes bare
+        // count() since the WHERE clause already bounds rows correctly.
         assert!(
             sql.contains("COUNT(e0.source_id)")
                 || sql.contains("countIf")
-                || sql.contains("COUNTIF"),
-            "filtered count must reference edge column or use countIf, got:\n{sql}"
+                || sql.contains("COUNTIF")
+                || sql.contains("count()"),
+            "count must reference edge column, use countIf, or be bare count(), got:\n{sql}"
         );
         assert!(
-            sql.contains("state = 'opened'"),
-            "state filter must reach the SQL (in _nf_* or WHERE), got:\n{sql}"
+            sql.contains("has(e0.source_tags, 'state:opened')"),
+            "state filter must reach the SQL as has on source_tags, got:\n{sql}"
         );
     }
 
@@ -1027,21 +1027,22 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "u", "entity": "User", "node_ids": [116]},
                 {"id": "mr", "entity": "MergeRequest"},
-                {"id": "n", "entity": "Note"}
+                {"id": "p", "entity": "Project"}
             ],
             "relationships": [
                 {"type": "AUTHORED", "from": "u", "to": "mr"},
-                {"type": "HAS_NOTE", "from": "mr", "to": "n"}
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
             ],
             "aggregations": [{
                 "function": "count",
-                "target": "n",
-                "group_by": "u",
-                "alias": "note_count"
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
             }],
-            "limit": 5
+            "limit": 5,
+            "options": {"materialize_ctes": true}
         }"#;
 
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
@@ -1098,6 +1099,371 @@ mod tests {
         assert!(
             !sql.contains("e2.target_id IN") && !sql.contains("e3.target_id IN"),
             "arm-internal target_id IN subquery should be suppressed, got:\n{sql}"
+        );
+    }
+
+    // ── Denormalization pass tests ──────────────────────────────────────
+
+    #[test]
+    fn denorm_single_hop_keeps_nf_cte_and_injects_supplementary_tag() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // CTE is kept for dedup correctness (_deleted + LIMIT 1 BY).
+        assert!(
+            sql.contains("_nf_pipe"),
+            "denorm pass must keep _nf_pipe CTE for dedup correctness, got:\n{sql}"
+        );
+        // Supplementary tag is NOT injected when opposite side has node_ids
+        // (PK is more selective than text index).
+        assert!(
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "tag should be skipped when opposite side has node_ids, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_in_list_filter_keeps_cte_for_dedup() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed", "canceled"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // CTE kept for dedup correctness.
+        assert!(
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_in_list_single_value_keeps_cte_for_dedup() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "in", "value": ["failed"]}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // CTE kept for dedup correctness.
+        assert!(
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    /// Partial denorm: when some filters are denormalized and some are not,
+    /// the CTE is kept (with only non-denormalized filters) and tag
+    /// predicates are injected onto the edge WHERE for the denormalized ones.
+    fn denorm_partial_filters_keeps_nf_cte() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"},
+                    "source": {"op": "eq", "value": "push"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // _nf_pipe kept with all original filters (partial denorm keeps CTE intact).
+        assert!(
+            sql.contains("_nf_pipe"),
+            "partial denorm must keep _nf_pipe CTE for non-denormalized filters, got:\n{sql}"
+        );
+        // Supplementary has() is NOT injected when the opposite side (proj)
+        // already has node_ids — the PK prunes better than the text index.
+        assert!(
+            !sql.contains("has(e0.source_tags, 'status:failed')"),
+            "partial denorm must skip has() when opposite side has node_ids, got:\n{sql}"
+        );
+        // CTE retains all filters including the denormalized one.
+        assert!(
+            sql.contains("push"),
+            "partial denorm CTE must retain non-denormalized source filter, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_skips_rewrite_when_node_ids_present() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "node_ids": [1, 2, 3],
+                 "filters": {"status": {"op": "eq", "value": "failed"}}},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("has"),
+            "denorm pass must skip rewrite when node_ids are present, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_aggregation_count_with_filter_uses_edge_column() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "pipe",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // CTE kept for dedup correctness. Supplementary tag skipped because
+        // opposite side (proj) has node_ids.
+        assert!(
+            sql.contains("_nf_pipe"),
+            "denorm must keep _nf_pipe CTE for dedup, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn denorm_preserves_role_gated_node_table_for_security() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "v", "entity": "Vulnerability", "filters": {
+                    "state": {"op": "eq", "value": "detected"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "proj"}],
+            "aggregations": [{
+                "function": "count",
+                "target": "v",
+                "group_by": "proj",
+                "alias": "n"
+            }],
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            sql.contains("gl_vulnerability"),
+            "role-gated entity gl_vulnerability must NOT be pruned from FROM, got:\n{sql}"
+        );
+    }
+
+    #[test]
+    fn skip_dedup_removes_limit_by_but_keeps_deleted_filter() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+        let query = r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "pipe", "entity": "Pipeline", "filters": {
+                    "status": {"op": "eq", "value": "failed"}
+                }},
+                {"id": "proj", "entity": "Project", "node_ids": [1]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "limit": 10,
+            "options": {"skip_dedup": true}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("LIMIT 1 BY"),
+            "skip_dedup should eliminate LIMIT 1 BY, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("_deleted"),
+            "skip_dedup should still filter by _deleted, got:\n{sql}"
+        );
+    }
+
+    /// Multi-relationship aggregation produces cascade CTEs that are
+    /// referenced from both edge filters and node filters. CTEs with 2+
+    /// references must be emitted as `AS MATERIALIZED (...)` so ClickHouse
+    /// evaluates them once instead of re-executing at every reference site.
+    /// The `enable_materialized_cte = 1` setting must also be present.
+    #[test]
+    fn multi_ref_cte_emits_materialized_keyword_and_setting() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest"},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5,
+            "options": {"materialize_ctes": true}
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // _cascade_mr is referenced from both an edge scan filter and a
+        // node table filter — it must be materialized.
+        assert!(
+            sql.contains("_cascade_mr AS MATERIALIZED"),
+            "multi-referenced _cascade_mr CTE must use MATERIALIZED, got:\n{sql}"
+        );
+        assert!(
+            sql.contains("enable_materialized_cte = 1"),
+            "SETTINGS must include enable_materialized_cte = 1, got:\n{sql}"
+        );
+    }
+
+    /// Single-reference CTEs must NOT be materialized — inlining lets
+    /// ClickHouse push predicates through and is the default behavior.
+    #[test]
+    fn single_ref_cte_is_not_materialized() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User", "node_ids": [1]},
+            "limit": 10
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        assert!(
+            !sql.contains("MATERIALIZED"),
+            "single-ref CTE must not use MATERIALIZED, got:\n{sql}"
+        );
+        assert!(
+            !sql.contains("enable_materialized_cte"),
+            "SETTINGS must not include enable_materialized_cte for non-materialized queries, got:\n{sql}"
+        );
+    }
+
+    /// Aggregation query where the target node has a denormalized filter
+    /// (state=merged) and a cascade CTE exists. The _target_mr_ids CTE
+    /// should NOT be created because the cascade already covers the filter
+    /// via has() on edge tags. The _nf_mr CTE should also be removed.
+    #[test]
+    fn agg_denorm_eliminates_redundant_target_and_nf_ctes() {
+        let ontology = Ontology::load_embedded().expect("ontology must load");
+
+        let query = r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "node_ids": [116]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }},
+                {"id": "p", "entity": "Project"}
+            ],
+            "relationships": [
+                {"type": "AUTHORED", "from": "u", "to": "mr"},
+                {"type": "IN_PROJECT", "from": "mr", "to": "p"}
+            ],
+            "aggregations": [{
+                "function": "count",
+                "target": "mr",
+                "group_by": "p",
+                "alias": "user_mrs"
+            }],
+            "limit": 5
+        }"#;
+
+        let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
+        let sql = compiled.base.render();
+
+        // Cascade should exist with edge tag predicate.
+        assert!(
+            sql.contains("_cascade_mr"),
+            "cascade CTE must exist, got:\n{sql}"
+        );
+
+        // _target_mr_ids should NOT exist — cascade covers the filter.
+        assert!(
+            !sql.contains("_target_mr_ids"),
+            "_target_mr_ids must be eliminated when cascade + denorm covers the filter, got:\n{sql}"
+        );
+
+        // _nf_mr should NOT exist — state is fully denormalized.
+        assert!(
+            !sql.contains("_nf_mr"),
+            "_nf_mr must be eliminated when all filters are denormalized, got:\n{sql}"
+        );
+
+        // Edge tag predicate should be present.
+        assert!(
+            sql.contains("state:merged"),
+            "edge tag predicate must be present, got:\n{sql}"
         );
     }
 }

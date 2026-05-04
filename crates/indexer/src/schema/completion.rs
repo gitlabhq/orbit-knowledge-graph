@@ -20,9 +20,9 @@ use gkg_utils::arrow::ArrowUtils;
 use query_engine::compiler::generate_graph_tables;
 use tracing::{info, warn};
 
+use super::metrics::CompletionMetrics;
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::LockService;
-use crate::metrics::CompletionMetrics;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
 use crate::schema::version::{
     SCHEMA_VERSION, VersionEntry, mark_version_active, mark_version_dropped, mark_version_retired,

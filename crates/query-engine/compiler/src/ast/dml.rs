@@ -125,6 +125,8 @@ pub enum TableRef {
 /// - Right: all rows from right, matching from left
 /// - Full: all rows from both sides
 /// - Cross: cartesian product, no ON condition
+/// - LeftSemi: rows from left that have at least one match in right
+/// - LeftAnti: rows from left that have no match in right
 #[derive(Debug, Clone, Copy, PartialEq, Eq, strum::Display)]
 #[strum(serialize_all = "UPPERCASE")]
 pub enum JoinType {
@@ -133,6 +135,10 @@ pub enum JoinType {
     Right,
     Full,
     Cross,
+    #[strum(serialize = "LEFT SEMI")]
+    LeftSemi,
+    #[strum(serialize = "LEFT ANTI")]
+    LeftAnti,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -175,6 +181,11 @@ pub struct Cte {
     pub name: String,
     pub query: Box<Query>,
     pub recursive: bool,
+    /// When true, emit `name AS MATERIALIZED (...)` so ClickHouse evaluates
+    /// the CTE body once and caches the result. Without this, ClickHouse
+    /// inlines non-recursive CTEs at every reference site, re-executing the
+    /// scan for each `IN (SELECT ... FROM cte)`.
+    pub materialized: bool,
 }
 
 impl Cte {
@@ -183,6 +194,7 @@ impl Cte {
             name: name.into(),
             query: Box::new(query),
             recursive: false,
+            materialized: false,
         }
     }
 }
@@ -197,6 +209,8 @@ impl Cte {
 #[derive(Debug, Clone, PartialEq)]
 pub struct Query {
     pub ctes: Vec<Cte>,
+    /// When true, emit `SELECT DISTINCT` instead of `SELECT`.
+    pub distinct: bool,
     pub select: Vec<SelectExpr>,
     pub from: TableRef,
     pub where_clause: Option<Expr>,
@@ -214,6 +228,7 @@ impl Default for Query {
     fn default() -> Self {
         Self {
             ctes: vec![],
+            distinct: false,
             select: vec![],
             from: TableRef::Scan {
                 table: String::new(),

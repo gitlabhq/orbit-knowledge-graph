@@ -60,8 +60,8 @@ pub fn default_test_watermark() -> DateTime<Utc> {
 pub fn namespace_envelope(org_id: i64, namespace_id: i64) -> Envelope {
     TestEnvelopeFactory::simple(
         &serde_json::json!({
-            "organization": org_id,
             "namespace": namespace_id,
+            "traversal_path": format!("{org_id}/{namespace_id}/"),
             "watermark": default_test_watermark().to_rfc3339()
         })
         .to_string(),

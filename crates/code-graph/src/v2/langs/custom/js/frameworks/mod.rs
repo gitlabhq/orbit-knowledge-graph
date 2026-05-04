@@ -5,11 +5,14 @@
 //! calls `has_embedded_scripts` / `extract_scripts` / `combine_scripts`
 //! and the per-framework analyzer hooks re-exported below.
 
+pub(in crate::v2::langs::custom::js) mod react;
 mod vue;
 
 use oxc_linter::loader::{JavaScriptSource, PartialLoader};
 
-pub(in crate::v2::langs::custom::js) use vue::extract_vue_options_api;
+pub(in crate::v2::langs::custom::js) use vue::{
+    extract_vue_options_api, is_vue_like_path, vue_default_component_def,
+};
 
 use crate::v2::error::{AnalyzerError, FileFault, FileSkip};
 

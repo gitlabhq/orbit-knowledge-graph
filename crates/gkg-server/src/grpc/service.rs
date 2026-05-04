@@ -2,7 +2,7 @@ use std::pin::Pin;
 use std::sync::Arc;
 
 use clickhouse_client::ClickHouseConfigurationExt;
-use gkg_server_config::ClickHouseConfiguration;
+use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration};
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tokio::sync::mpsc;
@@ -11,6 +11,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tracing::{Instrument, info, instrument};
 
 use super::auth::extract_claims;
+use crate::analytics::AnalyticsTracker;
 use crate::auth::{Claims, JwtValidator, build_security_context};
 use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
@@ -57,6 +58,7 @@ impl KnowledgeGraphServiceImpl {
         clickhouse_config: &ClickHouseConfiguration,
         cluster_health: Arc<ClusterHealthChecker>,
         stream_timeout_secs: u64,
+        analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let client = Arc::new(clickhouse_config.build_client());
         let tool_service = ToolService::new(Arc::clone(&ontology));
@@ -64,6 +66,7 @@ impl KnowledgeGraphServiceImpl {
             Arc::clone(&ontology),
             Arc::clone(&client),
             clickhouse_config.profiling.clone(),
+            analytics_config,
         );
         let graph_status = GraphStatusService::new(client, Arc::clone(&ontology));
         Self {
@@ -89,6 +92,11 @@ impl KnowledgeGraphServiceImpl {
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.pipeline = self.pipeline.with_billing(tracker);
+        self
+    }
+
+    pub fn with_analytics(mut self, tracker: Arc<dyn AnalyticsTracker>) -> Self {
+        self.pipeline = self.pipeline.with_analytics(tracker);
         self
     }
 
@@ -441,19 +449,15 @@ impl KnowledgeGraphServiceImpl {
 }
 
 fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(), Status> {
-    let org_id = claims
-        .organization_id
-        .ok_or_else(|| Status::unauthenticated("missing organization_id in claims"))?;
+    if claims.admin {
+        return Ok(());
+    }
 
-    let authorized_paths: Vec<String> = if claims.admin {
-        vec![format!("{org_id}/")]
-    } else {
-        claims
-            .group_traversal_ids
-            .iter()
-            .map(|tp| tp.path.clone())
-            .collect()
-    };
+    let authorized_paths: Vec<&str> = claims
+        .group_traversal_ids
+        .iter()
+        .map(|tp| tp.path.as_str())
+        .collect();
 
     let is_authorized = authorized_paths
         .iter()
@@ -493,6 +497,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let plan = service
@@ -520,6 +525,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -549,6 +555,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -584,6 +591,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("User");
@@ -607,6 +615,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let (outgoing, incoming) = service.get_node_edge_names("NonexistentNode");
@@ -624,6 +633,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["User".to_string()]);
@@ -652,6 +662,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -675,6 +686,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&[]);
@@ -702,6 +714,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response =
@@ -772,6 +785,7 @@ mod tests {
         for (claims, path) in [
             (admin(42), "42/"),
             (admin(42), "42/100/200/"),
+            (admin(42), "99/100/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/22/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/22/44/"),
             (user(1, vec!["1/22/", "1/33/"]), "1/33/55/"),
@@ -783,7 +797,6 @@ mod tests {
         }
 
         for (claims, path) in [
-            (admin(42), "99/100/"),
             (user(1, vec!["1/22/"]), "1/99/"),
             (user(1, vec!["1/22/33/"]), "1/22/"),
             (user(1, vec![]), "1/22/"),
@@ -797,20 +810,6 @@ mod tests {
     }
 
     #[test]
-    fn authorize_traversal_path_missing_org_id_returns_unauthenticated() {
-        let claims = Claims {
-            organization_id: None,
-            ..test_claims()
-        };
-        assert_eq!(
-            authorize_traversal_path(&claims, "1/22/")
-                .unwrap_err()
-                .code(),
-            tonic::Code::Unauthenticated
-        );
-    }
-
-    #[test]
     fn test_expand_all_wildcard() {
         let ontology = test_ontology();
         let expected_count = ontology.nodes().count();
@@ -821,6 +820,7 @@ mod tests {
             &test_config(),
             ClusterHealthChecker::default().into_arc(),
             60,
+            Arc::new(AnalyticsConfig::default()),
         );
 
         let response = service.build_structured_schema(&["*".to_string()]);

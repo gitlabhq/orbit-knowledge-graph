@@ -1,0 +1,581 @@
+name: "C hardcore — negative tests, exact counts, static visibility, include chains, duplicates"
+
+fixtures:
+  - path: common/types.h
+    content: |
+      #ifndef TYPES_H
+      #define TYPES_H
+      typedef unsigned int uint32;
+      typedef unsigned char byte;
+      #endif
+
+  - path: common/error.h
+    content: |
+      #ifndef ERROR_H
+      #define ERROR_H
+      #include "types.h"
+      enum ErrorCode { ERR_NONE, ERR_IO, ERR_MEM };
+      void panic(enum ErrorCode code);
+      #endif
+
+  - path: common/error.c
+    content: |
+      #include "error.h"
+      void panic(enum ErrorCode code) {}
+
+  - path: io/reader.h
+    content: |
+      #ifndef READER_H
+      #define READER_H
+      #include "../common/error.h"
+      struct Reader { int fd; int pos; };
+      int reader_open(struct Reader *r, const char *path);
+      int reader_read(struct Reader *r, char *buf, int len);
+      void reader_close(struct Reader *r);
+      #endif
+
+  - path: io/reader.c
+    content: |
+      #include "reader.h"
+      int reader_open(struct Reader *r, const char *path) { return 0; }
+      int reader_read(struct Reader *r, char *buf, int len) { return 0; }
+      void reader_close(struct Reader *r) {}
+      static void internal_flush(struct Reader *r) {}
+      static int internal_seek(struct Reader *r, int offset) {
+          internal_flush(r);
+          return 0;
+      }
+
+  - path: io/writer.h
+    content: |
+      #ifndef WRITER_H
+      #define WRITER_H
+      #include "../common/error.h"
+      struct Writer { int fd; };
+      int writer_open(struct Writer *w, const char *path);
+      int writer_write(struct Writer *w, const char *data, int len);
+      void writer_close(struct Writer *w);
+      #endif
+
+  - path: io/writer.c
+    content: |
+      #include "writer.h"
+      int writer_open(struct Writer *w, const char *path) { return 0; }
+      int writer_write(struct Writer *w, const char *data, int len) { return 0; }
+      void writer_close(struct Writer *w) {}
+
+  - path: app.c
+    content: |
+      #include "io/reader.h"
+      #include "io/writer.h"
+
+      int copy_file(const char *src, const char *dst) {
+          struct Reader r;
+          struct Writer w;
+          char buf[1024];
+          reader_open(&r, src);
+          writer_open(&w, dst);
+          int n = reader_read(&r, buf, 1024);
+          writer_write(&w, buf, n);
+          reader_close(&r);
+          writer_close(&w);
+          return 0;
+      }
+
+      int main() {
+          copy_file("in.txt", "out.txt");
+          panic(ERR_IO);
+          return 0;
+      }
+
+  - path: unrelated.c
+    content: |
+      static void helper() {}
+      void unrelated_func() { helper(); }
+
+  - path: nested.c
+    content: |
+      struct Outer {
+          int x;
+          struct Inner { int y; int z; } inner;
+      };
+      typedef void (*Callback)(int);
+      typedef struct { int id; Callback on_done; } Task;
+      void run_task(Task *t) {}
+
+  - path: generic/list.h
+    content: |
+      #ifndef LIST_H
+      #define LIST_H
+      struct ListNode { int data; struct ListNode *next; };
+      struct List { struct ListNode *head; int count; };
+      void list_init(struct List *l);
+      void list_push(struct List *l, int item);
+      int list_pop(struct List *l);
+      int list_count(struct List *l);
+      int list_empty(struct List *l);
+      #endif
+
+  - path: generic/list.c
+    content: |
+      #include "list.h"
+      void list_init(struct List *l) { l->head = 0; l->count = 0; }
+      void list_push(struct List *l, int item) { l->count++; }
+      int list_pop(struct List *l) { l->count--; return 0; }
+      int list_count(struct List *l) { return l->count; }
+      int list_empty(struct List *l) { return l->count == 0; }
+
+  - path: generic/user.c
+    content: |
+      #include "list.h"
+      #include "../common/error.h"
+
+      void process_users() {
+          struct List users;
+          list_init(&users);
+          list_push(&users, 1);
+          int count = list_count(&users);
+          int val = list_pop(&users);
+          if (list_empty(&users)) panic(ERR_MEM);
+      }
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # EXACT TOTAL COUNTS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Exact function count"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 20 }
+      - { unique: fqn }
+      - { no_nulls: fqn }
+
+  - name: "Exact struct count with scoped FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Struct'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { unique: fqn }
+      - { row: { fqn: "reader::Reader" } }
+      - { row: { fqn: "writer::Writer" } }
+      - { row: { fqn: "nested::Outer" } }
+      - { row: { fqn: "nested::Outer::Inner" } }
+      - { row: { fqn: "list::ListNode" } }
+      - { row: { fqn: "list::List" } }
+
+  - name: "Exact typedef count"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Typedef'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 4 }
+      - { unique: fqn }
+      - { row: { fqn: "types::uint32" } }
+      - { row: { fqn: "types::byte" } }
+      - { row: { fqn: "nested::(*Callback)(int)" } }
+      - { row: { fqn: "nested::Task" } }
+
+  - name: "Exact file count"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 13 }
+      - { unique: path }
+
+  # ══════════════════════════════════════════════════════════════
+  # STATIC FUNCTION VISIBILITY
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Static functions exist as definitions"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN ['reader::internal_flush', 'reader::internal_seek']
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "reader::internal_flush" } }
+      - { row: { fqn: "reader::internal_seek" } }
+
+  - name: "Static internal_seek calls internal_flush (same file)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'reader::internal_seek'
+        AND callee.fqn = 'reader::internal_flush'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # NEGATIVE ASSERTIONS — must NOT exist
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "NO edge from app to static internal_flush (file-local)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND callee.fqn = 'reader::internal_flush'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  - name: "NO edge from app to unrelated_func (not included)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn IN ['app::copy_file', 'app::main']
+        AND callee.fqn = 'unrelated::unrelated_func'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  - name: "NO edge from app to static helper (not included + static)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn IN ['app::copy_file', 'app::main']
+        AND callee.fqn = 'unrelated::helper'
+      RETURN caller.fqn AS caller
+    assert:
+      - { row_count: 0 }
+
+  # ══════════════════════════════════════════════════════════════
+  # INCLUDE CHAIN RESOLUTION
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "copy_file calls reader_open (via io/reader.h → reader.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND callee.fqn = 'reader::reader_open'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::copy_file", callee: "reader::reader_open", kind: Calls } }
+
+  - name: "copy_file calls writer_write (via io/writer.h → writer.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND callee.fqn = 'writer::writer_write'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::copy_file", callee: "writer::writer_write", kind: Calls } }
+
+  - name: "main calls copy_file (same file)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'app::copy_file'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+
+  - name: "Transitive include: main calls panic (app.c → reader.h → error.h → error.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'error::panic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "error::panic", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # DUPLICATE EDGE CHECK
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "copy_file CALLS edges have no duplicates"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { unique: callee }
+
+  # ══════════════════════════════════════════════════════════════
+  # NESTED STRUCT
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Nested struct with scoped FQN"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'nested::Outer::Inner'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "nested::Outer::Inner", type: Struct } }
+
+  - name: "Outer defines Inner"
+    query: |
+      MATCH (parent:Definition)-[e:DefinitionToDefinition]->(child:Definition)
+      WHERE parent.fqn = 'nested::Outer'
+        AND child.fqn = 'nested::Outer::Inner'
+      RETURN parent.fqn AS parent, child.fqn AS child, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { parent: "nested::Outer", child: "nested::Outer::Inner", kind: Defines } }
+
+  # ══════════════════════════════════════════════════════════════
+  # TYPEDEF FUNCTION POINTER
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Function pointer typedef"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'nested::(*Callback)(int)'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "nested::(*Callback)(int)", type: Typedef } }
+
+  - name: "Task typedef struct"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'nested::Task'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "nested::Task", type: Typedef } }
+
+  # ══════════════════════════════════════════════════════════════
+  # ENUM SCOPING
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "ErrorCode enum constants with full scope"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumConstant'
+        AND d.fqn STARTS WITH 'error::ErrorCode::'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "error::ErrorCode::ERR_NONE" } }
+      - { row: { fqn: "error::ErrorCode::ERR_IO" } }
+      - { row: { fqn: "error::ErrorCode::ERR_MEM" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # FILE CONTAINMENT — exact per-file function counts
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "reader.c defines exactly 5 functions (3 public + 2 static)"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'io/reader.c'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+      - { row: { fqn: "reader::reader_open" } }
+      - { row: { fqn: "reader::reader_read" } }
+      - { row: { fqn: "reader::reader_close" } }
+      - { row: { fqn: "reader::internal_flush" } }
+      - { row: { fqn: "reader::internal_seek" } }
+
+  - name: "unrelated.c defines exactly 2 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'unrelated.c'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: "unrelated::helper" } }
+      - { row: { fqn: "unrelated::unrelated_func" } }
+
+  - name: "app.c defines exactly 2 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'app.c'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { unique: fqn }
+      - { row: { fqn: "app::copy_file" } }
+      - { row: { fqn: "app::main" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # INTRA-FILE CALLS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Intra-file: internal_seek calls internal_flush (both in reader.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'reader::internal_seek'
+        AND callee.fqn = 'reader::internal_flush'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "reader::internal_seek", callee: "reader::internal_flush", kind: Calls } }
+
+  - name: "Intra-file: main calls copy_file (both in app.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'app::copy_file'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "app::copy_file", kind: Calls } }
+
+  - name: "Intra-file: unrelated_func calls helper (both in unrelated.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'unrelated::unrelated_func'
+        AND callee.fqn = 'unrelated::helper'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "unrelated::unrelated_func", callee: "unrelated::helper", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-FILE CALLS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Cross-file: copy_file calls all 6 IO functions via include"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::copy_file'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 6 }
+      - { unique: callee }
+      - { row: { callee: "reader::reader_open" } }
+      - { row: { callee: "reader::reader_read" } }
+      - { row: { callee: "reader::reader_close" } }
+      - { row: { callee: "writer::writer_open" } }
+      - { row: { callee: "writer::writer_write" } }
+      - { row: { callee: "writer::writer_close" } }
+
+  - name: "Cross-file: main calls panic via transitive include chain"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::main'
+        AND callee.fqn = 'error::panic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "app::main", callee: "error::panic", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # GENERIC (void*) DATA STRUCTURES
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Generic list API functions exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+        AND d.fqn STARTS WITH 'list::list_'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+      - { row: { fqn: "list::list_init" } }
+      - { row: { fqn: "list::list_push" } }
+      - { row: { fqn: "list::list_pop" } }
+      - { row: { fqn: "list::list_count" } }
+      - { row: { fqn: "list::list_empty" } }
+
+  - name: "Generic list structs exist"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Struct'
+        AND d.fqn STARTS WITH 'list::'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 2 }
+      - { row: { fqn: "list::ListNode" } }
+      - { row: { fqn: "list::List" } }
+
+  - name: "list.c defines exactly 5 functions"
+    query: |
+      MATCH (f:File)-[e:FileToDefinition]->(d:Definition)
+      WHERE f.path = 'generic/list.c'
+        AND d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 5 }
+      - { unique: fqn }
+
+  - name: "Cross-file: process_users calls list_init (user.c -> list.h -> list.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_init'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_init", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_push"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_push'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_push", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_count'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_count", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_pop"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_pop'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_pop", kind: Calls } }
+
+  - name: "Cross-file: process_users calls list_empty"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'list::list_empty'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "list::list_empty", kind: Calls } }
+
+  - name: "Cross-file: process_users calls panic via transitive include"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND callee.fqn = 'error::panic'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "user::process_users", callee: "error::panic", kind: Calls } }
+
+  - name: "process_users total call count"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'user::process_users'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 6 }
+      - { unique: callee }

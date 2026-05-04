@@ -287,7 +287,7 @@ The user can always switch.
 
 ### Implementation
 
-`GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `crates/gkg-server/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
+`GraphFormatter` in Rust replaces `RawRowFormatter` as the default. `GoonFormatter` handles LLM output (GOON/TOON format). `ResultContext` was extended with `EdgeMeta` to carry edge column metadata through the pipeline. A JSON Schema at `config/schemas/query_response.json` is the shared contract between server and frontend. On the frontend side, `graph_transform.js` goes away entirely, replaced by ~30 lines of `buildGraphData()` that passes nodes and edges straight to Three.js.
 
 ### Format versioning
 
@@ -325,4 +325,4 @@ GOON format versioning (`config/GOON_OUTPUT_FORMAT_VERSION`) will be added in a 
 - Snippets: [5965027](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965027) (Michael U.), [5965036](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965036) (Angelo), [5965394](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/snippets/5965394) (Combined research)
 - [ADR 003](003_api_design.md)
 - MR !411 note on proto sync decisions
-- JSON Schema: `crates/gkg-server/schemas/query_response.json`
+- JSON Schema: `config/schemas/query_response.json`

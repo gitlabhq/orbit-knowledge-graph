@@ -33,6 +33,21 @@ async fn global_indexing() {
 }
 
 #[tokio::test]
+async fn merge_request_indexing() {
+    let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
+    run_subtests!(
+        &ctx,
+        merge_requests::processes_merge_requests_with_edges,
+        merge_requests::metric_columns_read_from_siphon_not_stale_denorm,
+        merge_requests::processes_merge_requests_closing_issues,
+        merge_requests::processes_standalone_reviewer_edges,
+        merge_requests::processes_standalone_approved_edges,
+        merge_requests::processes_standalone_assigned_edges,
+        merge_requests::processes_standalone_has_label_edges,
+    );
+}
+
+#[tokio::test]
 async fn namespace_indexing() {
     let ctx = TestContext::new(&[SIPHON_SCHEMA_SQL, *GRAPH_SCHEMA_SQL]).await;
     run_subtests!(
@@ -52,6 +67,7 @@ async fn namespace_indexing() {
         labels::processes_labels_with_edges,
         milestones::processes_milestones_with_edges,
         merge_requests::processes_merge_requests_with_edges,
+        merge_requests::metric_columns_read_from_siphon_not_stale_denorm,
         merge_requests::processes_merge_requests_closing_issues,
         merge_requests::processes_standalone_reviewer_edges,
         merge_requests::processes_standalone_approved_edges,

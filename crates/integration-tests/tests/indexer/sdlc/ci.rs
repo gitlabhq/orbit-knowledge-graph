@@ -1,11 +1,12 @@
-use arrow::array::StringArray;
+use arrow::array::{Array, StringArray};
 use gkg_utils::arrow::ArrowUtils;
 use integration_testkit::t;
 
 use crate::indexer::common::{
-    TestContext, assert_edges_have_traversal_path, assert_node_count, create_namespace,
-    create_project, create_runner, create_runner_namespace, create_runner_project, create_user,
-    global_envelope, global_handler, handler_context, namespace_envelope, namespace_handler,
+    TestContext, assert_edge_tags_by_source, assert_edge_tags_by_target,
+    assert_edges_have_traversal_path, assert_node_count, create_namespace, create_project,
+    create_runner, create_runner_namespace, create_runner_project, create_user, global_envelope,
+    global_handler, handler_context, namespace_envelope, namespace_handler,
 };
 
 pub async fn processes_pipelines(ctx: &TestContext) {
@@ -14,10 +15,10 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     create_user(ctx, 1).await;
 
     ctx.execute(
-        "INSERT INTO siphon_p_ci_pipelines (id, partition_id, project_id, user_id, iid, sha, ref, status, source, tag, duration, created_at, started_at, finished_at, traversal_path, _siphon_replicated_at)
+        "INSERT INTO siphon_p_ci_pipelines (id, partition_id, project_id, user_id, iid, sha, ref, status, source, tag, duration, failure_reason, created_at, started_at, finished_at, traversal_path, _siphon_replicated_at)
         VALUES
-        (5001, 1, 1000, 1, 1, 'abc123def456', 'main', 'success', 1, false, 120, '2024-01-15 10:00:00', '2024-01-15 10:01:00', '2024-01-15 10:03:00', '1/100/1000/', '2024-01-20 12:00:00'),
-        (5002, 1, 1000, 1, 2, 'def456abc789', 'feature-branch', 'failed', 1, false, 60, '2024-01-16 10:00:00', '2024-01-16 10:01:00', '2024-01-16 10:02:00', '1/100/1000/', '2024-01-20 12:00:00')",
+        (5001, 1, 1000, 1, 1, 'abc123def456', 'main', 'success', 19, false, 120, NULL, '2024-01-15 10:00:00', '2024-01-15 10:01:00', '2024-01-15 10:03:00', '1/100/1000/', '2024-01-20 12:00:00'),
+        (5002, 1, 1000, 1, 2, 'def456abc789', 'feature-branch', 'failed', 1, false, 60, 30, '2024-01-16 10:00:00', '2024-01-16 10:01:00', '2024-01-16 10:02:00', '1/100/1000/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -40,9 +41,58 @@ pub async fn processes_pipelines(ctx: &TestContext) {
     assert_eq!(status.value(0), "success");
     assert_eq!(status.value(1), "failed");
 
+    let result = ctx
+        .query(&format!(
+            "SELECT source, failure_reason FROM {} FINAL ORDER BY id",
+            t("gl_pipeline")
+        ))
+        .await;
+    let source =
+        ArrowUtils::get_column_by_name::<StringArray>(&result[0], "source").expect("source column");
+    assert_eq!(source.value(0), "dependency_management_security_update");
+    assert_eq!(source.value(1), "push");
+
+    let failure_reason =
+        ArrowUtils::get_column_by_name::<StringArray>(&result[0], "failure_reason")
+            .expect("failure_reason column");
+    assert!(failure_reason.is_null(0));
+    assert_eq!(failure_reason.value(1), "filtered_by_no_pipeline");
+
     assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Pipeline", "Project", "1/100/1000/", 2)
         .await;
     assert_edges_have_traversal_path(ctx, "TRIGGERED", "User", "Pipeline", "1/100/1000/", 2).await;
+
+    // FK edge: Pipeline source_tags carry status from the MemTable (no JOIN needed).
+    assert_edge_tags_by_source(
+        ctx,
+        "IN_PROJECT",
+        "Pipeline",
+        "Project",
+        "source_tags",
+        &[
+            (
+                5001,
+                &[
+                    "failure_reason:null",
+                    "protected:null",
+                    "source:dependency_management_security_update",
+                    "status:success",
+                    "tag:false",
+                ],
+            ),
+            (
+                5002,
+                &[
+                    "failure_reason:filtered_by_no_pipeline",
+                    "protected:null",
+                    "source:push",
+                    "status:failed",
+                    "tag:false",
+                ],
+            ),
+        ],
+    )
+    .await;
 }
 
 pub async fn processes_stages(ctx: &TestContext) {
@@ -100,10 +150,11 @@ pub async fn processes_jobs(ctx: &TestContext) {
     .await;
 
     ctx.execute(
-        "INSERT INTO siphon_p_ci_builds (id, partition_id, stage_id, project_id, user_id, name, status, ref, tag, allow_failure, environment, `when`, retried, created_at, started_at, finished_at, queued_at, traversal_path, _siphon_replicated_at)
+        "INSERT INTO siphon_p_ci_builds (id, partition_id, stage_id, project_id, user_id, name, status, ref, tag, allow_failure, environment, `when`, retried, created_at, started_at, finished_at, queued_at, failure_reason, traversal_path, _siphon_replicated_at)
         VALUES
-        (7001, 1, 6001, 1000, 1, 'compile', 'success', 'main', false, false, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', '1/100/1000/', '2024-01-20 12:00:00'),
-        (7002, 1, 6001, 1000, 1, 'lint', 'success', 'main', false, true, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', '1/100/1000/', '2024-01-20 12:00:00')",
+        (7001, 1, 6001, 1000, 1, 'compile', 'success', 'main', false, false, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', NULL, '1/100/1000/', '2024-01-20 12:00:00'),
+        (7002, 1, 6001, 1000, 1, 'lint', 'success', 'main', false, true, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', 1, '1/100/1000/', '2024-01-20 12:00:00'),
+        (7003, 1, 6001, 1000, 1, 'deploy', 'failed', 'main', false, false, NULL, 'on_success', false, '2024-01-15 10:00:00', '2024-01-15 10:00:30', '2024-01-15 10:01:00', '2024-01-15 10:00:00', 1000, '1/100/1000/', '2024-01-20 12:00:00')",
     )
     .await;
 
@@ -113,7 +164,7 @@ pub async fn processes_jobs(ctx: &TestContext) {
         .await
         .unwrap();
 
-    assert_node_count(ctx, "gl_job", 2).await;
+    assert_node_count(ctx, "gl_job", 3).await;
 
     let result = ctx
         .query(&format!(
@@ -125,10 +176,24 @@ pub async fn processes_jobs(ctx: &TestContext) {
         ArrowUtils::get_column_by_name::<StringArray>(&result[0], "name").expect("name column");
     assert_eq!(name.value(0), "compile");
     assert_eq!(name.value(1), "lint");
+    assert_eq!(name.value(2), "deploy");
 
-    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Job", "Project", "1/100/1000/", 2).await;
-    assert_edges_have_traversal_path(ctx, "HAS_JOB", "Stage", "Job", "1/100/1000/", 2).await;
-    assert_edges_have_traversal_path(ctx, "TRIGGERED", "User", "Job", "1/100/1000/", 2).await;
+    let result = ctx
+        .query(&format!(
+            "SELECT failure_reason FROM {} FINAL ORDER BY id",
+            t("gl_job")
+        ))
+        .await;
+    let failure_reason =
+        ArrowUtils::get_column_by_name::<StringArray>(&result[0], "failure_reason")
+            .expect("failure_reason column");
+    assert!(failure_reason.is_null(0));
+    assert_eq!(failure_reason.value(1), "script_failure");
+    assert_eq!(failure_reason.value(2), "protected_environment_failure");
+
+    assert_edges_have_traversal_path(ctx, "IN_PROJECT", "Job", "Project", "1/100/1000/", 3).await;
+    assert_edges_have_traversal_path(ctx, "HAS_JOB", "Stage", "Job", "1/100/1000/", 3).await;
+    assert_edges_have_traversal_path(ctx, "TRIGGERED", "User", "Job", "1/100/1000/", 3).await;
 }
 
 pub async fn processes_ci_hierarchy(ctx: &TestContext) {
@@ -314,6 +379,45 @@ pub async fn processes_ci_sources_pipelines(ctx: &TestContext) {
         "Pipeline",
         "1/100/1000/",
         1,
+    )
+    .await;
+
+    // Standalone edge with both sides enriched: CHILD_OF Pipeline → Pipeline.
+    // Source (child pipeline 5002, status=success) and target (parent pipeline 5001, status=success).
+    assert_edge_tags_by_source(
+        ctx,
+        "CHILD_OF",
+        "Pipeline",
+        "Pipeline",
+        "source_tags",
+        &[(
+            5002,
+            &[
+                "failure_reason:null",
+                "protected:null",
+                "source:parent_pipeline",
+                "status:success",
+                "tag:false",
+            ],
+        )],
+    )
+    .await;
+    assert_edge_tags_by_target(
+        ctx,
+        "CHILD_OF",
+        "Pipeline",
+        "Pipeline",
+        "target_tags",
+        &[(
+            5001,
+            &[
+                "failure_reason:null",
+                "protected:null",
+                "source:push",
+                "status:success",
+                "tag:false",
+            ],
+        )],
     )
     .await;
 }

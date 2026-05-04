@@ -53,6 +53,8 @@ pub enum ColumnType {
     Nullable(Box<ColumnType>),
     /// Dictionary-encoded / low-cardinality wrapper.
     LowCardinality(Box<ColumnType>),
+    /// ClickHouse `Array(T)`.
+    Array(Box<ColumnType>),
 }
 
 /// Compression codec applied to a column's on-disk representation.
@@ -82,6 +84,12 @@ pub enum IndexType {
     /// ClickHouse 26.2+ full-text index with inverted posting lists.
     /// Stores the raw parameter string (e.g. `tokenizer = splitByNonAlpha`).
     Text(String),
+    /// N-gram bloom filter for substring matching (`LIKE '%pattern%'`).
+    /// Stores the raw parameter string (e.g. `3, 256, 2, 0`).
+    NgramBF(String),
+    /// Token bloom filter for token matching.
+    /// Stores the raw parameter string (e.g. `256, 2, 0`).
+    TokenBF(String),
 }
 
 /// A materialized projection over table data.
@@ -90,6 +98,11 @@ pub enum ProjectionDef {
     /// Re-sorted copy of the data for alternative access patterns.
     /// Emits: `SELECT * ORDER BY (cols...)`.
     Reorder { name: String, order_by: Vec<String> },
+    /// Lightweight projection: stores only key columns + `_part_offset`,
+    /// acting as a secondary index without duplicating full rows.
+    /// Emits: `SELECT col1, col2 ORDER BY (col1, col2)`.
+    /// Requires ClickHouse 26.1+.
+    Lightweight { name: String, order_by: Vec<String> },
     /// Pre-aggregated rollup.
     /// `select` contains raw column refs and aggregate expressions (e.g. `count()`, `uniq(col)`).
     /// `group_by` contains the grouping columns.

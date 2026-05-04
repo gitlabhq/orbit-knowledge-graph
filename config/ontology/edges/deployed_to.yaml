@@ -1,6 +1,7 @@
 # config/ontology/edges/deployed_to.yaml
 
 description: Merge request was deployed as part of a deployment
+table: gl_ci_edge
 
 variants:
   - from_node: { type: MergeRequest, id: id }
@@ -14,6 +15,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]
     to:
       id: deployment_id
       type: Deployment
+      enrich: [status, tag, archived]

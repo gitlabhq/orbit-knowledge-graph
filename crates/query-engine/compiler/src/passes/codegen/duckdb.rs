@@ -126,7 +126,12 @@ impl Context {
                 }
             })
             .collect();
-        parts.push(format!("SELECT {}", select_items.join(", ")));
+        let keyword = if q.distinct {
+            "SELECT DISTINCT"
+        } else {
+            "SELECT"
+        };
+        parts.push(format!("{keyword} {}", select_items.join(", ")));
 
         let from = self.emit_table_ref(&q.from)?;
         parts.push(format!("FROM {from}"));
@@ -505,6 +510,7 @@ mod tests {
                     ..Default::default()
                 }),
                 recursive: true,
+                materialized: false,
             }],
             select: vec![SelectExpr::new(Expr::col("r", "node_id"), "id")],
             from: TableRef::scan("path_cte", "r"),

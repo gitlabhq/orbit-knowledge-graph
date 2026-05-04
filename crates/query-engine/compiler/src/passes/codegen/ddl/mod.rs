@@ -129,6 +129,9 @@ fn parse_column_type(s: &str) -> ColumnType {
     if let Some(inner) = strip_wrapper(s, "LowCardinality") {
         return ColumnType::LowCardinality(Box::new(parse_column_type(inner)));
     }
+    if let Some(inner) = strip_wrapper(s, "Array") {
+        return ColumnType::Array(Box::new(parse_column_type(inner)));
+    }
     if s.starts_with("DateTime64") {
         // DateTime64(6, 'UTC') or DateTime64(6)
         let inner = &s[11..s.len() - 1]; // strip "DateTime64(" and ")"
@@ -176,6 +179,14 @@ fn parse_index_type(s: &str) -> IndexType {
             // Preserve original casing for tokenizer/preprocessor params.
             let inner = &s[5..s.len() - 1];
             IndexType::Text(inner.to_string())
+        }
+        _ if lower.starts_with("ngrambf_v1(") => {
+            let inner = &s[11..s.len() - 1];
+            IndexType::NgramBF(inner.to_string())
+        }
+        _ if lower.starts_with("tokenbf_v1(") => {
+            let inner = &s[11..s.len() - 1];
+            IndexType::TokenBF(inner.to_string())
         }
         _ => IndexType::MinMax,
     }
@@ -255,6 +266,10 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
             name: name.clone(),
             order_by: order_by.clone(),
         },
+        StorageProjection::Lightweight { name, order_by } => ProjectionDef::Lightweight {
+            name: name.clone(),
+            order_by: order_by.clone(),
+        },
         StorageProjection::Aggregate {
             name,
             select,
@@ -317,9 +332,24 @@ fn build_edge_table(name: &str, config: &ontology::EdgeTableConfig) -> CreateTab
         .iter()
         .map(storage_col_to_def)
         .collect();
+    // Denormalized node properties follow structural columns, before system columns.
+    columns.extend(
+        config
+            .storage
+            .denormalized_columns
+            .iter()
+            .map(storage_col_to_def),
+    );
     columns.extend(system_columns(None));
 
-    let indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
+    let mut indexes: Vec<IndexDef> = config.storage.indexes.iter().map(convert_index).collect();
+    indexes.extend(
+        config
+            .storage
+            .denormalized_indexes
+            .iter()
+            .map(convert_index),
+    );
     let projections: Vec<ProjectionDef> = config
         .storage
         .projections

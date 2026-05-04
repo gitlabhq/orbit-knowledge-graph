@@ -55,6 +55,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
         ColumnType::LowCardinality(inner) => {
             format!("LowCardinality({})", emit_column_type(inner))
         }
+        ColumnType::Array(inner) => format!("Array({})", emit_column_type(inner)),
     }
 }
 
@@ -72,6 +73,8 @@ fn emit_index_type(it: &IndexType) -> String {
         IndexType::Set(n) => format!("set({n})"),
         IndexType::BloomFilter(rate) => format!("bloom_filter({rate:.2})"),
         IndexType::Text(params) => format!("text({params})"),
+        IndexType::NgramBF(params) => format!("ngrambf_v1({params})"),
+        IndexType::TokenBF(params) => format!("tokenbf_v1({params})"),
     }
 }
 
@@ -175,6 +178,18 @@ fn emit_projection(proj: &ProjectionDef) -> String {
                 format!("({})", order_by.join(", "))
             };
             format!("    PROJECTION {name} (SELECT * ORDER BY {order})")
+        }
+        ProjectionDef::Lightweight { name, order_by } => {
+            assert!(
+                !order_by.is_empty(),
+                "Lightweight projection '{name}' has empty order_by"
+            );
+            let order = if order_by.len() == 1 {
+                order_by[0].clone()
+            } else {
+                format!("({})", order_by.join(", "))
+            };
+            format!("    PROJECTION {name} (SELECT _part_offset ORDER BY {order})")
         }
         ProjectionDef::Aggregate {
             name,

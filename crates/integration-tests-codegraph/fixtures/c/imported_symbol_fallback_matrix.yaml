@@ -1,0 +1,49 @@
+name: "C: imported-symbol fallback matrix"
+fixtures:
+  - path: app.c
+    content: |
+      #include <stdio.h>
+      #include <stdlib.h>
+
+      int log_status(void) {
+          printf("ready\n");
+          return 0;
+      }
+
+      int local_helper(void) {
+          return 1;
+      }
+
+      int local_call(void) {
+          return local_helper();
+      }
+
+  - path: worker.c
+    content: |
+      #include "external_api.h"
+
+      void send_metric(void) {
+          external_emit();
+      }
+
+tests:
+  - name: "includes are captured as imported symbols"
+    query: |
+      MATCH (sym:ImportedSymbol)
+      RETURN sym.file_path AS file, sym.path AS path, sym.name AS name
+      ORDER BY file, path
+    assert:
+      - { row_count: 3 }
+      - { row: { file: "app.c", path: "<stdio.h>", name: null } }
+      - { row: { file: "app.c", path: "<stdlib.h>", name: null } }
+      - { row: { file: "worker.c", path: "\"external_api.h\"", name: null } }
+
+  - name: "resolved same-file calls still target definitions"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'app::local_call'
+        AND callee.fqn = 'app::local_helper'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }

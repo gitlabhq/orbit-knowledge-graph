@@ -65,9 +65,16 @@ macro_rules! define_languages {
 }
 
 define_languages! {
+    C => {
+        support_lang: C,
+        extensions: ["c", "h"],
+        exclude: [],
+        separator: "::",
+        names: ["c"],
+    },
     Cpp => {
         support_lang: Cpp,
-        extensions: ["cpp", "cc", "cxx", "hpp", "hh", "hxx", "h"],
+        extensions: ["cpp", "cc", "cxx", "hpp", "hh", "hxx"],
         exclude: [],
         separator: "::",
         names: ["cpp", "c++"],

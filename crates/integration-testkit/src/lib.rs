@@ -6,7 +6,8 @@ mod seed;
 pub mod visitor;
 
 pub use assertions::{
-    assert_edge_count, assert_edge_count_for_traversal_path, assert_edges_have_traversal_path,
+    assert_edge_count, assert_edge_count_for_traversal_path, assert_edge_tags,
+    assert_edge_tags_by_source, assert_edge_tags_by_target, assert_edges_have_traversal_path,
     assert_node_count,
 };
 pub use context::TestContext;

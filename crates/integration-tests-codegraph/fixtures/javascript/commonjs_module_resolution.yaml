@@ -120,6 +120,72 @@ fixtures:
         return util.default(value);
       }
 
+  - path: external/namespace.js
+    content: |
+      const tracker = require('external-tracker');
+
+      function report() {
+        return tracker.emit();
+      }
+
+  - path: external/destructured.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function report() {
+        return track();
+      }
+
+  - path: external/duplicate_aliases.js
+    content: |
+      const { track: firstTrack, track: secondTrack } = require('external-tracker');
+
+      function reportAliases() {
+        firstTrack();
+        secondTrack();
+      }
+  - path: external/module_level.js
+    content: |
+      const { init } = require('external-sdk');
+
+      init();
+  - path: external/module_level_globals.js
+    content: |
+      const { init } = require('external-sdk');
+
+      console.log("ready");
+      JSON.parse("{}");
+  - path: external/imported_reference_only.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportReference() {
+        return track;
+      }
+  - path: external/shadowed.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportShadowed() {
+        const track = () => "local";
+        return track();
+      }
+  - path: external/globals.js
+    content: |
+      const { track } = require('external-tracker');
+
+      function reportGlobals() {
+        console.log("ready");
+        return JSON.parse("{}");
+      }
+  - path: side_effect/main.js
+    content: |
+      require('external-polyfill');
+
+      function boot() {
+        return installPolyfill();
+      }
+
 tests:
   - name: Destructured require targets named export proxy
     query: |
@@ -265,3 +331,78 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "run", callee: "defaultHelper" } }
+
+  - name: External CommonJS calls target imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN ['external/namespace.js', 'external/destructured.js']
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.name AS name, sym.alias AS alias
+      ORDER BY file, name
+    assert:
+      - { row_count: 2 }
+      - { row: { file: "external/destructured.js", caller: "report", name: "track", alias: null } }
+      - { row: { file: "external/namespace.js", caller: "report", name: "default", alias: "tracker" } }
+
+  - name: External CommonJS duplicate aliases preserve exact imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'external/duplicate_aliases.js'
+        AND e.edge_kind = 'Calls'
+      RETURN DISTINCT caller.fqn AS caller, sym.name AS name, sym.alias AS alias
+      ORDER BY alias
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "reportAliases", name: "track", alias: "firstTrack" } }
+      - { row: { caller: "reportAliases", name: "track", alias: "secondTrack" } }
+
+  - name: Module-level external CommonJS calls target imported symbols from the file
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { row_count: 1 }
+      - { row: { file: "external/module_level.js", path: "external-sdk", name: "init" } }
+
+  - name: Module-level global CommonJS calls do not target unrelated imports
+    query: |
+      MATCH (file:File)-[e:FileToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE file.path = 'external/module_level_globals.js'
+        AND e.edge_kind = 'Calls'
+      RETURN file.path AS file, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Resolved CommonJS calls do not emit imported-symbol fallback
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'named/main.js',
+        'namespace/main.js',
+        'alias/main.js',
+        'default/main.js',
+        'object/main.js',
+        'alias_chain/main.js',
+        'no_false_call/main.js',
+        'interop/main.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: Side-effect shadowed reference-only and global CommonJS calls avoid imported-symbol fallbacks
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path IN [
+        'side_effect/main.js',
+        'external/shadowed.js',
+        'external/imported_reference_only.js',
+        'external/globals.js'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.file_path AS file, caller.fqn AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }

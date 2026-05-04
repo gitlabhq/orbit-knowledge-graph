@@ -1,6 +1,7 @@
 # config/ontology/edges/in_pipeline.yaml
 
 description: Entity belongs to a pipeline
+table: gl_ci_edge
 
 variants:
   - from_node: { type: SecurityScan, id: id }
@@ -9,4 +10,5 @@ variants:
 
   - from_node: { type: Job, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: pipeline_id
     description: "Job belongs to pipeline (skips the Stage hop)."

@@ -671,7 +671,7 @@
     },
     "QueryOptions": {
       "type": "object",
-      "description": "Consumer-level preferences that affect result presentation, not query semantics.",
+      "description": "Consumer-level preferences that affect result presentation, not query semantics. Compiler performance options (skip_dedup, materialize_ctes, use_semi_join) are injected by the ontology-derived schema at runtime to keep the base schema token-efficient for LLM consumers.",
       "properties": {
         "dynamic_columns": {
           "$ref": "#/$defs/DynamicColumnMode",
@@ -683,8 +683,7 @@
           "description": "When true, includes compiled ClickHouse SQL in the response metadata for debugging. Only honored for authorized users (instance admins and direct GitLab org members with Reporter+ access). Defaults to false.",
           "default": false
         }
-      },
-      "additionalProperties": false
+      }
     },
     "DynamicColumnMode": {
       "type": "string",

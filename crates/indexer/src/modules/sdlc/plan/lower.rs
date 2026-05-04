@@ -1,9 +1,12 @@
-use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
+use std::collections::HashSet;
 
-use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
+use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
+
+use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
+use super::codegen;
 use super::input::{
-    EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan, ExtractSource, FkEdgeTransform,
-    NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
+    DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
+    ExtractSource, FkEdgeTransform, NodeColumn, NodePlan, PlanInput, StandaloneEdgePlan,
 };
 use super::{ExtractQuery, PipelinePlan, Plans, SOURCE_DATA_TABLE, Transformation};
 const VERSION_ALIAS: &str = "_version";
@@ -11,6 +14,7 @@ const DELETED_ALIAS: &str = "_deleted";
 
 pub(in crate::modules::sdlc) fn lower(
     inputs: PlanInput,
+    ontology: &Ontology,
     global_batch_size: u64,
     namespaced_batch_size: u64,
     batch_size_overrides: &std::collections::HashMap<String, u64>,
@@ -28,7 +32,7 @@ pub(in crate::modules::sdlc) fn lower(
             .copied()
             .unwrap_or(scope_default);
         let scope = node.scope;
-        let plan = lower_node_plan(node, batch_size);
+        let plan = lower_node_plan(node, batch_size, ontology);
         match scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
@@ -45,7 +49,7 @@ pub(in crate::modules::sdlc) fn lower(
             .copied()
             .unwrap_or(scope_default);
         let scope = edge.scope;
-        let plan = lower_standalone_edge_plan(edge, batch_size);
+        let plan = lower_standalone_edge_plan(edge, batch_size, ontology);
         match scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
@@ -55,17 +59,30 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
-fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
+fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> PipelinePlan {
     let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
+
+    let dict_columns = ontology
+        .get_node(&input.name)
+        .map(|node| {
+            node.storage
+                .columns
+                .iter()
+                .filter(|col| col.ch_type.starts_with("LowCardinality"))
+                .map(|col| col.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut transforms = vec![Transformation {
         query: lower_node_transform(&input.columns),
         destination_table: node_destination,
+        dict_encode_columns: dict_columns,
     }];
 
     for fk_edge in &input.edges {
-        transforms.push(lower_fk_edge_transform(fk_edge));
+        transforms.push(lower_fk_edge_transform(fk_edge, ontology));
     }
 
     PipelinePlan {
@@ -75,7 +92,50 @@ fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
     }
 }
 
-fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
+/// Resolve the ORDER BY and dictionary-encode columns for an edge table
+/// from the ontology's storage metadata. `relationship_kind` is used to
+/// look up the unprefixed table name via the ontology.
+fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTableMetadata {
+    let table = ontology.edge_table_for_relationship(relationship_kind);
+
+    let sort_key = ontology
+        .sort_key_for_table(table)
+        .map(|keys| {
+            keys.iter()
+                .map(|col| OrderExpr {
+                    expr: Expr::col("", col),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let dict_columns = ontology
+        .edge_table_config(table)
+        .map(|config| {
+            config
+                .storage
+                .columns
+                .iter()
+                .filter(|col| col.ch_type.starts_with("LowCardinality"))
+                .map(|col| col.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    EdgeTableMetadata {
+        sort_key,
+        dict_columns,
+    }
+}
+
+struct EdgeTableMetadata {
+    sort_key: Vec<OrderExpr>,
+    dict_columns: HashSet<String>,
+}
+
+fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
+    let meta = edge_table_metadata(&fk_edge.relationship_kind, ontology);
+
     let transform_query = Query {
         select: lower_edge_select(
             lower_edge_id(&fk_edge.source_id),
@@ -84,16 +144,18 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
             lower_edge_id(&fk_edge.target_id),
             lower_edge_kind(&fk_edge.target_kind),
             fk_edge.namespaced,
+            &fk_edge.denormalized_columns,
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&fk_edge.filters),
-        order_by: vec![],
+        order_by: meta.sort_key,
         limit: None,
     };
 
     Transformation {
         query: transform_query,
         destination_table: fk_edge.destination_table.clone(),
+        dict_encode_columns: meta.dict_columns,
     }
 }
 
@@ -121,23 +183,37 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
             source,
             target,
             values,
+            nullable,
         } => {
             let cases: Vec<String> = values
                 .iter()
                 .map(|(key, value)| format!("WHEN {source} = {key} THEN '{value}'"))
                 .collect();
+            let null_case = if *nullable {
+                format!("WHEN {source} IS NULL THEN NULL ")
+            } else {
+                String::new()
+            };
             SelectExpr::new(
-                Expr::raw(format!("CASE {} ELSE 'unknown' END", cases.join(" "))),
+                Expr::raw(format!(
+                    "CASE {null_case}{} ELSE 'unknown' END",
+                    cases.join(" ")
+                )),
                 target.clone(),
             )
         }
     }
 }
 
-fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> PipelinePlan {
+fn lower_standalone_edge_plan(
+    input: StandaloneEdgePlan,
+    batch_size: u64,
+    ontology: &Ontology,
+) -> PipelinePlan {
     let destination_table = input.extract.destination_table.clone();
     let name = plan_name(&input.relationship_kind, &input.extract.source);
     let extract_query = lower_extract_plan(input.extract, batch_size);
+    let meta = edge_table_metadata(&input.relationship_kind, ontology);
 
     let transform_query = Query {
         select: lower_edge_select(
@@ -147,10 +223,11 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
             lower_edge_id(&input.target_id),
             lower_edge_kind(&input.target_kind),
             input.namespaced,
+            &input.denormalized_columns,
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&input.filters),
-        order_by: vec![],
+        order_by: meta.sort_key,
         limit: None,
     };
 
@@ -160,6 +237,7 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
         transforms: vec![Transformation {
             query: transform_query,
             destination_table,
+            dict_encode_columns: meta.dict_columns,
         }],
     }
 }
@@ -244,6 +322,7 @@ fn lower_edge_select(
     target_id: Expr,
     target_kind: Expr,
     namespaced: bool,
+    denormalized: &[DenormalizedColumnProjection],
 ) -> Vec<SelectExpr> {
     let traversal_path = if namespaced {
         SelectExpr::bare(Expr::col("", "traversal_path"))
@@ -251,7 +330,7 @@ fn lower_edge_select(
         SelectExpr::new(Expr::raw("'0/'"), "traversal_path")
     };
 
-    vec![
+    let mut cols = vec![
         traversal_path,
         SelectExpr::new(source_id, "source_id"),
         SelectExpr::new(source_kind, "source_kind"),
@@ -263,7 +342,57 @@ fn lower_edge_select(
         SelectExpr::new(target_kind, "target_kind"),
         SelectExpr::bare(Expr::col("", VERSION_ALIAS)),
         SelectExpr::bare(Expr::col("", DELETED_ALIAS)),
-    ]
+    ];
+
+    // Group denormalized columns by edge_column (source_tags / target_tags)
+    // and build a single array expression per direction.
+    let mut tag_groups: std::collections::BTreeMap<String, Vec<String>> =
+        std::collections::BTreeMap::new();
+    for d in denormalized {
+        let tag_expr = match &d.enum_mapping {
+            Some(mapping) => {
+                let cases: Vec<String> = mapping
+                    .iter()
+                    .map(|(key, value)| {
+                        format!(
+                            "WHEN {} = {} THEN '{}'",
+                            d.source_column,
+                            key,
+                            value.replace('\'', "\\'")
+                        )
+                    })
+                    .collect();
+                format!(
+                    "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
+                    key = d.tag_key,
+                    cases = cases.join(" "),
+                    col = d.source_column
+                )
+            }
+            None => format!(
+                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
+                key = d.tag_key,
+                col = d.source_column
+            ),
+        };
+        tag_groups
+            .entry(d.edge_column.clone())
+            .or_default()
+            .push(tag_expr);
+    }
+
+    // Always emit both source_tags and target_tags. If no denormalized
+    // entries exist for a direction, emit an empty array so the Arrow
+    // batch schema matches the ClickHouse edge table.
+    for col_name in &["source_tags", "target_tags"] {
+        let expr = match tag_groups.remove(*col_name) {
+            Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
+            None => "make_array()".to_string(),
+        };
+        cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
+    }
+
+    cols
 }
 
 fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
@@ -292,15 +421,65 @@ fn lower_extract_plan(input: ExtractPlan, batch_size: u64) -> ExtractQuery {
         input.additional_where.map(Expr::raw),
     ]);
 
-    let base_query = Query {
-        select,
-        from,
-        where_clause,
-        order_by: vec![],
-        limit: None,
-    };
+    if let Some(enrichment) = input.enrichment {
+        // CTE-based enrichment: build the entire SQL as a raw template.
+        // The _batch CTE contains the base extract query with pagination.
+        // Enrichment CTEs do point lookups by FK from _batch.
+        // The outer SELECT LEFT JOINs _batch against enrichment CTEs.
 
-    ExtractQuery::new(base_query, input.order_by, batch_size)
+        // _batch CTE inner SELECT (base columns only, no enriched).
+        let base_select: Vec<String> = select.iter().map(codegen::emit_select_expr).collect();
+
+        let base_where = where_clause
+            .as_ref()
+            .map(codegen::emit_expr_to_string)
+            .unwrap_or_default();
+
+        let from_sql = match &from {
+            TableRef::Scan { table, .. } => table.clone(),
+            TableRef::Raw(r) => r.clone(),
+        };
+
+        let order_by_sql = input.order_by.join(", ");
+
+        // Outer SELECT: _batch.col AS col for base, enriched as-is.
+        let outer_cols: Vec<String> = select
+            .iter()
+            .map(|s| {
+                let name = s.alias.as_deref().unwrap_or(match &s.expr {
+                    Expr::Column { column, .. } => column.as_str(),
+                    Expr::Raw(r) => r.as_str(),
+                    _ => "?",
+                });
+                format!("_batch.{name} AS {name}")
+            })
+            .chain(enrichment.select_exprs.iter().cloned())
+            .collect();
+
+        let template = format!(
+            "WITH _batch AS (\
+             SELECT {base_select} FROM {from_sql} \
+             WHERE {base_where}{{CURSOR}} \
+             ORDER BY {order_by_sql} LIMIT {batch_size}\
+             ), {cte_defs} \
+             SELECT {outer_select} FROM _batch {joins}",
+            base_select = base_select.join(", "),
+            cte_defs = enrichment.cte_defs.join(", "),
+            outer_select = outer_cols.join(", "),
+            joins = enrichment.join_clauses.join(" "),
+        );
+
+        ExtractQuery::raw(template, input.order_by, batch_size)
+    } else {
+        let base_query = Query {
+            select,
+            from,
+            where_clause,
+            order_by: vec![],
+            limit: None,
+        };
+        ExtractQuery::new(base_query, input.order_by, batch_size)
+    }
 }
 
 /// If namespaced and no custom filter, use the default `startsWith`.
@@ -368,9 +547,14 @@ mod tests {
         super::super::codegen::emit_sql(query)
     }
 
+    fn test_ontology() -> ontology::Ontology {
+        ontology::Ontology::load_embedded().expect("should load ontology")
+    }
+
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {
         lower(
             input::from_ontology(ontology),
+            ontology,
             batch_size,
             batch_size,
             &std::collections::HashMap::new(),
@@ -402,6 +586,7 @@ mod tests {
         let overrides = std::collections::HashMap::from([("WorkItem".to_string(), 50_000u64)]);
         let plans = lower(
             input::from_ontology(&ontology),
+            &ontology,
             1_000_000,
             1_000_000,
             &overrides,
@@ -497,6 +682,71 @@ mod tests {
     }
 
     #[test]
+    fn enriched_standalone_edge_extract_sql() {
+        let ontology = ontology::Ontology::load_embedded().expect("should load ontology");
+        let plans = build_plans(&ontology, 1_000_000);
+
+        // Find a standalone edge plan whose extract SQL references siphon_issue_assignees.
+        let plan = plans
+            .namespaced
+            .iter()
+            .find(|p| p.extract_query.to_sql().contains("siphon_issue_assignees"))
+            .unwrap_or_else(|| {
+                let names: Vec<_> = plans.namespaced.iter().map(|p| &p.name).collect();
+                panic!("no plan with siphon_issue_assignees found; plans: {names:?}")
+            });
+
+        let sql = plan.extract_query.to_sql();
+        eprintln!("ASSIGNED WorkItem extract SQL:\n{sql}");
+
+        // CTE-based: _batch CTE wraps the base query, enrichment CTE does point lookups.
+        assert!(
+            sql.contains("WITH _batch AS ("),
+            "should have _batch CTE: {sql}"
+        );
+        assert!(
+            sql.contains("_e0 AS ("),
+            "should have enrichment CTE: {sql}"
+        );
+        assert!(
+            sql.contains("FROM _batch"),
+            "outer query should read from _batch: {sql}"
+        );
+        assert!(
+            sql.contains("LEFT JOIN _e0"),
+            "should LEFT JOIN enrichment CTE: {sql}"
+        );
+
+        // Enrichment CTE uses argMax + GROUP BY for dedup.
+        assert!(sql.contains("argMax("), "should use argMax dedup: {sql}");
+        assert!(sql.contains("GROUP BY id"), "should GROUP BY id: {sql}");
+
+        // Enrichment CTE uses IN (SELECT DISTINCT fk FROM _batch) instead of namespace scan.
+        assert!(
+            sql.contains("id IN (SELECT DISTINCT issue_id FROM _batch)"),
+            "enrichment should use point lookup via IN: {sql}"
+        );
+        // No traversal_path filter on the enrichment CTE (only the _batch CTE has it).
+        let e0_body = sql
+            .split("_e0 AS (")
+            .nth(1)
+            .and_then(|s| s.split(')').next())
+            .unwrap_or("");
+        assert!(
+            !e0_body.contains("traversal_path"),
+            "enrichment CTE body should NOT filter by traversal_path: {e0_body}"
+        );
+
+        // Transform SQL should produce tag arrays.
+        let transform_sql = emit(&plan.transforms[0].query);
+        eprintln!("ASSIGNED WorkItem transform SQL:\n{transform_sql}");
+        assert!(
+            transform_sql.contains("target_tags"),
+            "transform should produce target_tags: {transform_sql}"
+        );
+    }
+
+    #[test]
     fn node_transform_sql_handles_column_renaming() {
         let columns = vec![
             NodeColumn::Identity("id".to_string()),
@@ -523,6 +773,7 @@ mod tests {
                 source: "state".to_string(),
                 target: "state".to_string(),
                 values,
+                nullable: false,
             },
         ];
 
@@ -531,6 +782,24 @@ mod tests {
         assert!(sql.contains("WHEN state = 0 THEN 'active'"));
         assert!(sql.contains("WHEN state = 1 THEN 'blocked'"));
         assert!(sql.contains("ELSE 'unknown' END AS state"));
+    }
+
+    #[test]
+    fn node_transform_sql_preserves_nullable_int_enum_nulls() {
+        let mut values = BTreeMap::new();
+        values.insert(1, "script_failure".to_string());
+
+        let columns = vec![NodeColumn::IntEnum {
+            source: "failure_reason".to_string(),
+            target: "failure_reason".to_string(),
+            values,
+            nullable: true,
+        }];
+
+        let sql = emit(&lower_node_transform(&columns));
+        assert!(sql.contains("WHEN failure_reason IS NULL THEN NULL"));
+        assert!(sql.contains("WHEN failure_reason = 1 THEN 'script_failure'"));
+        assert!(sql.contains("ELSE 'unknown' END AS failure_reason"));
     }
 
     #[test]
@@ -544,9 +813,11 @@ mod tests {
             filters: vec![EdgeFilter::IsNotNull("owner_id".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("id AS source_id"));
@@ -566,9 +837,11 @@ mod tests {
             filters: vec![EdgeFilter::IsNotNull("author_id".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("author_id AS source_id"));
@@ -607,9 +880,11 @@ mod tests {
             ],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         // Mapped values collapse to ontology names via CASE.
@@ -644,9 +919,11 @@ mod tests {
             ],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(
@@ -672,9 +949,11 @@ mod tests {
             filters: vec![EdgeFilter::ArrayNotEmpty("assignees".to_string())],
             namespaced: true,
             destination_table: "gl_edge".to_string(),
+            denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");
@@ -699,6 +978,7 @@ mod tests {
             namespaced: false,
             traversal_path_filter: None,
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 1000).to_sql();
@@ -726,6 +1006,7 @@ mod tests {
             namespaced: false,
             traversal_path_filter: None,
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 1000).to_sql();
@@ -758,6 +1039,7 @@ mod tests {
                 "startsWith(traversal_path, {traversal_path:String})".to_string(),
             ),
             additional_where: None,
+            enrichment: None,
         };
 
         let sql = lower_extract_plan(extract, 500).to_sql();

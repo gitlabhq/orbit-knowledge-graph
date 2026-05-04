@@ -26,7 +26,7 @@ use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefi
 use thiserror::Error;
 use tracing::{info, warn};
 
-use crate::metrics::MigrationMetrics;
+use super::metrics::MigrationMetrics;
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::locking::{LockError, LockService};

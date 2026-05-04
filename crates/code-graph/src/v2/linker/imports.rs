@@ -97,12 +97,21 @@ impl<'a> ImportResolver<'a> {
             .or(import.name)
             .map(|id| self.graph.str(id))
             .unwrap_or("");
-        if symbol_name.is_empty() {
-            return vec![];
-        }
 
         let sep = self.sep();
         let imp_path = self.graph.str(import.path);
+        if symbol_name.is_empty() {
+            if imp_path.is_empty() {
+                return vec![];
+            }
+            let by_path = self
+                .graph
+                .indexes
+                .by_fqn
+                .lookup(imp_path, |idx| self.graph.def_fqn(idx) == imp_path);
+            return by_path.to_vec();
+        }
+
         let key = if imp_path.is_empty() {
             self.scratch.clear();
             self.scratch.push_str(symbol_name);
@@ -277,6 +286,7 @@ impl<'a> ImportResolver<'a> {
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
     /// reachable header, also search the paired source file (.h -> .c/.cpp).
+    /// Used for C/C++/Objective-C.
     fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
         const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
 
@@ -290,6 +300,7 @@ impl<'a> ImportResolver<'a> {
                 }
                 let raw = self.graph.str(imp.path);
                 let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
+
                 let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
                 paths.push(normalized.to_string());
             }

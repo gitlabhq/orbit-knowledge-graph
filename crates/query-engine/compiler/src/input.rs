@@ -36,6 +36,39 @@ pub struct QueryOptions {
     /// org members with Reporter+ access).
     #[serde(default)]
     pub include_debug_sql: bool,
+    /// When true, skips the ReplacingMergeTree deduplication pass for node
+    /// tables. Rows are still filtered by `_deleted = false` but stale
+    /// duplicates from un-merged parts may appear in results.
+    ///
+    /// Not allowed for aggregation queries (would produce incorrect counts).
+    /// Useful for traversal/neighbors/path_finding where the caller tolerates
+    /// eventual consistency in exchange for lower latency.
+    #[serde(default)]
+    pub skip_dedup: bool,
+    /// When true, marks multi-referenced CTEs as `MATERIALIZED` so
+    /// ClickHouse evaluates them once instead of inlining at every
+    /// reference site. Reduces redundant scans for cascade and hop
+    /// frontier CTEs in multi-relationship queries.
+    #[serde(default)]
+    pub materialize_ctes: bool,
+    /// When true, rewrites `IN (SELECT id FROM cte)` SIP patterns into
+    /// explicit `LEFT SEMI JOIN` for early termination and reduced hash-set
+    /// materialization in ClickHouse.
+    #[serde(default)]
+    pub use_semi_join: bool,
+    /// When true, forces auth-scoped cascade seeding on every query,
+    /// regardless of whether any node has `node_ids`. When false (default),
+    /// auth-scoped cascades are only used when no node has `node_ids` —
+    /// pinned-node cascades provide better narrowing and avoid redundant
+    /// full-table _nf_* scans.
+    #[serde(default)]
+    pub auth_scope_cascade: bool,
+    /// When true, emits `SELECT DISTINCT` on cascade and hop frontier CTEs.
+    /// When false (default), CTEs emit plain `SELECT` — ClickHouse's `IN`
+    /// operator already deduplicates internally, and `DISTINCT` adds a
+    /// blocking hash aggregation barrier that prevents pipelining.
+    #[serde(default)]
+    pub cascade_distinct: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -131,6 +164,10 @@ pub struct CompilerMetadata {
     /// `EdgeEntity.destination_table`. Used by lower/optimize to route each
     /// relationship's scan to the correct physical table.
     pub edge_table_for_rel: HashMap<String, String>,
+    /// Maps (node_kind, property_name, direction_prefix) → (edge_column, tag_key).
+    /// Populated by normalize from ontology denormalized properties.
+    /// Example: ("Pipeline", "status", "source") → ("source_tags", "status")
+    pub denormalized_columns: HashMap<(String, String, String), (String, String)>,
     /// `_nf_*` CTEs created by the lowerer from user-supplied filters or
     /// node_ids. Distinguished from `_nf_*` CTEs synthesized by
     /// `narrow_joined_nodes_via_pinned_neighbors` (reverse cascades).
@@ -155,6 +192,7 @@ impl Default for CompilerMetadata {
             edge_tables: HashSet::from([ontology::constants::EDGE_TABLE.to_string()]),
             default_edge_table: ontology::constants::EDGE_TABLE.to_string(),
             edge_table_for_rel: HashMap::new(),
+            denormalized_columns: HashMap::new(),
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
             table_columns: HashMap::new(),
@@ -969,6 +1007,33 @@ mod tests {
         .unwrap();
 
         assert!(!input.options.include_debug_sql);
+    }
+
+    #[test]
+    fn options_skip_dedup_true() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"},
+            "options": {"skip_dedup": true}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(input.options.skip_dedup);
+    }
+
+    #[test]
+    fn options_skip_dedup_defaults_false() {
+        let input = parse_input(
+            r#"{
+            "query_type": "traversal",
+            "node": {"id": "u", "entity": "User"}
+        }"#,
+        )
+        .unwrap();
+
+        assert!(!input.options.skip_dedup);
     }
 
     #[test]

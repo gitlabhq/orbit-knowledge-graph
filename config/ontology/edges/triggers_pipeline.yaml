@@ -1,6 +1,7 @@
 # config/ontology/edges/triggers_pipeline.yaml
 
 description: Bridge job triggered a downstream pipeline
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Job, id: id }
@@ -14,6 +15,8 @@ etl:
     from:
       id: source_job_id
       type: Job
+      enrich: [status, tag, allow_failure, when, retried, failure_reason, type, timeout_source, scheduling_type]
     to:
       id: pipeline_id
       type: Pipeline
+      enrich: [status, source, tag, failure_reason, protected]

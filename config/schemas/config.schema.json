@@ -6,10 +6,12 @@
     "analytics": {
       "$ref": "#/$defs/AnalyticsConfig",
       "default": {
+        "collector_url": "",
         "deployment": {
           "environment": "development",
           "type": "self_managed"
-        }
+        },
+        "enabled": false
       }
     },
     "billing": {
@@ -61,7 +63,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
-              "respect_gitignore": true,
               "worker_threads": 0
             },
             "retry_interval_secs": null
@@ -83,6 +84,7 @@
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
+            "max_concurrent_entities": 3,
             "retry_interval_secs": null
           }
         },
@@ -190,7 +192,7 @@
         "max_deliver": 5,
         "password": null,
         "request_timeout_secs": 5,
-        "stream_max_age_secs": null,
+        "stream_max_age_secs": 14400,
         "stream_max_bytes": null,
         "stream_max_messages": null,
         "stream_replicas": 1,
@@ -263,12 +265,20 @@
     "AnalyticsConfig": {
       "type": "object",
       "properties": {
+        "collector_url": {
+          "type": "string",
+          "default": ""
+        },
         "deployment": {
           "$ref": "#/$defs/DeploymentConfig",
           "default": {
             "environment": "development",
             "type": "self_managed"
           }
+        },
+        "enabled": {
+          "type": "boolean",
+          "default": false
         }
       },
       "additionalProperties": false
@@ -359,10 +369,6 @@
           "default": 5000,
           "minimum": 0
         },
-        "respect_gitignore": {
-          "type": "boolean",
-          "default": true
-        },
         "worker_threads": {
           "type": "integer",
           "format": "uint",
@@ -401,7 +407,6 @@
             "max_file_size_bytes": 5000000,
             "max_files": 1000000,
             "per_file_timeout_ms": 5000,
-            "respect_gitignore": true,
             "worker_threads": 0
           }
         },
@@ -502,7 +507,6 @@
                 "max_file_size_bytes": 5000000,
                 "max_files": 1000000,
                 "per_file_timeout_ms": 5000,
-                "respect_gitignore": true,
                 "worker_threads": 0
               },
               "retry_interval_secs": null
@@ -524,6 +528,7 @@
               "concurrency_group": null,
               "datalake_batch_size": 1000000,
               "max_attempts": null,
+              "max_concurrent_entities": 3,
               "retry_interval_secs": null
             }
           }
@@ -714,7 +719,6 @@
               "max_file_size_bytes": 5000000,
               "max_files": 1000000,
               "per_file_timeout_ms": 5000,
-              "respect_gitignore": true,
               "worker_threads": 0
             },
             "retry_interval_secs": null
@@ -745,6 +749,7 @@
             "concurrency_group": null,
             "datalake_batch_size": 1000000,
             "max_attempts": null,
+            "max_concurrent_entities": 3,
             "retry_interval_secs": null
           }
         }
@@ -972,6 +977,13 @@
           "default": null,
           "minimum": 0
         },
+        "max_concurrent_entities": {
+          "description": "Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)\nto run concurrently within a single namespace indexing pass.",
+          "type": "integer",
+          "format": "uint",
+          "default": 3,
+          "minimum": 0
+        },
         "retry_interval_secs": {
           "description": "Delay in seconds between retry attempts. Used as the NATS nack delay.\nWhen absent, nacks use immediate redelivery.",
           "type": [
@@ -1082,13 +1094,13 @@
           "minimum": 0
         },
         "stream_max_age_secs": {
-          "description": "Maximum age of messages in seconds before deletion. Defaults to None (unlimited).",
+          "description": "Maximum age of messages in seconds before deletion. Defaults to 14400 (4 hours).",
           "type": [
             "integer",
             "null"
           ],
           "format": "uint64",
-          "default": null,
+          "default": 14400,
           "minimum": 0
         },
         "stream_max_bytes": {

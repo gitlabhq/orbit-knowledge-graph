@@ -1,6 +1,7 @@
 # config/ontology/edges/runs_for_project.yaml
 
 description: Runner is registered against a project
+table: gl_ci_edge
 
 variants:
   - from_node: { type: Runner, id: id }
@@ -14,6 +15,8 @@ etl:
     from:
       id: runner_id
       type: Runner
+      enrich: [runner_type, active, locked, run_untagged, access_level]
     to:
       id: project_id
       type: Project
+      enrich: [visibility_level, archived]

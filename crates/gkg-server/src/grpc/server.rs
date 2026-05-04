@@ -2,13 +2,14 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gkg_server_config::{ClickHouseConfiguration, GrpcConfig};
+use gkg_server_config::{AnalyticsConfig, ClickHouseConfiguration, GrpcConfig};
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
 use tonic::transport::Server as TonicServer;
 use tonic::transport::server::ServerTlsConfig;
 use tracing::info;
 
+use crate::analytics::AnalyticsTracker;
 use crate::auth::JwtValidator;
 use crate::billing::BillingTracker;
 use crate::cluster_health::ClusterHealthChecker;
@@ -24,6 +25,7 @@ pub struct GrpcServer {
 }
 
 impl GrpcServer {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         addr: SocketAddr,
         validator: Arc<JwtValidator>,
@@ -32,6 +34,7 @@ impl GrpcServer {
         cluster_health: Arc<ClusterHealthChecker>,
         tls_config: Option<ServerTlsConfig>,
         grpc_config: GrpcConfig,
+        analytics_config: Arc<AnalyticsConfig>,
     ) -> Self {
         let service = KnowledgeGraphServiceImpl::new(
             validator,
@@ -39,6 +42,7 @@ impl GrpcServer {
             clickhouse_config,
             cluster_health,
             grpc_config.stream_timeout_secs,
+            analytics_config,
         );
         Self {
             addr,
@@ -60,6 +64,11 @@ impl GrpcServer {
 
     pub fn with_billing(mut self, tracker: Arc<dyn BillingTracker>) -> Self {
         self.service = self.service.with_billing(tracker);
+        self
+    }
+
+    pub fn with_analytics(mut self, tracker: Arc<dyn AnalyticsTracker>) -> Self {
+        self.service = self.service.with_analytics(tracker);
         self
     }
 
@@ -124,6 +133,7 @@ mod tests {
             cluster_health,
             None,
             GrpcConfig::default(),
+            Arc::new(AnalyticsConfig::default()),
         );
         assert_eq!(server.addr(), addr);
     }

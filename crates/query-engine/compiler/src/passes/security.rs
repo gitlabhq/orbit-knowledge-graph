@@ -345,14 +345,14 @@ mod tests {
 
     #[test]
     fn traversal_path_validation() {
-        // Valid paths (org_id must match first segment)
+        // Valid paths
         assert!(SecurityContext::new(1, vec!["1/".into()]).is_ok());
         assert!(SecurityContext::new(1, vec!["1/2/3/".into()]).is_ok());
         assert!(SecurityContext::new(42, vec!["42/100/".into()]).is_ok());
 
-        // Invalid: org_id mismatch
-        assert!(SecurityContext::new(1, vec!["42/".into()]).is_err());
-        assert!(SecurityContext::new(99, vec!["1/2/3/".into()]).is_err());
+        // Cross-org paths are allowed (user's home org != path org)
+        assert!(SecurityContext::new(1, vec!["42/".into()]).is_ok());
+        assert!(SecurityContext::new(99, vec!["1/2/3/".into()]).is_ok());
 
         // Invalid: format errors
         assert!(SecurityContext::new(1, vec!["1/2/3".into()]).is_err()); // missing trailing slash

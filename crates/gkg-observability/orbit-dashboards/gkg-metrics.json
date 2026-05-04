@@ -2,6 +2,42 @@
   "$generated_by": "cargo xtask metrics-catalog - do not edit",
   "metrics": [
     {
+      "otel_name": "gkg.circuit_breaker.calls",
+      "prom_name": "gkg_circuit_breaker_calls_total",
+      "description": "Classified call outcomes through the circuit breaker.",
+      "kind": "counter",
+      "labels": [
+        "service",
+        "outcome"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.calls.rejected",
+      "prom_name": "gkg_circuit_breaker_calls_rejected_total",
+      "description": "Calls rejected by an open circuit breaker.",
+      "kind": "counter",
+      "labels": [
+        "service"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
+      "otel_name": "gkg.circuit_breaker.state.transitions",
+      "prom_name": "gkg_circuit_breaker_state_transitions_total",
+      "description": "Circuit-breaker state transitions, labelled by service and direction.",
+      "kind": "counter",
+      "labels": [
+        "service",
+        "from",
+        "to"
+      ],
+      "stability": "stable",
+      "domain": "resilience.circuit_breaker"
+    },
+    {
       "otel_name": "gkg.content.blob.size",
       "prom_name": "gkg_content_blob_size_bytes",
       "description": "Size of resolved blob content in bytes.",
@@ -28,6 +64,17 @@
       "description": "Total list_blobs RPCs issued to Gitaly.",
       "kind": "counter",
       "labels": [],
+      "stability": "stable",
+      "domain": "server.content"
+    },
+    {
+      "otel_name": "gkg.content.mr_diff.calls",
+      "prom_name": "gkg_content_mr_diff_calls_total",
+      "description": "Total HTTP calls issued to the merge_request_diffs internal API.",
+      "kind": "counter",
+      "labels": [
+        "endpoint"
+      ],
       "stability": "stable",
       "domain": "server.content"
     },
@@ -501,7 +548,7 @@
     {
       "otel_name": "gkg.indexer.code.repository.source.size",
       "prom_name": "gkg_indexer_code_repository_source_size_bytes",
-      "description": "Total bytes of language-supported source files discovered during one code indexing run.",
+      "description": "Total bytes of repository files discovered during one code indexing run.",
       "kind": "histogram_u64",
       "unit": "By",
       "labels": [],

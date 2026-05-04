@@ -131,15 +131,11 @@ impl IndexingStatusStore {
 
 /// `"42/9970/12345/"` → `"status.42.9970.12345"`.
 fn normalize_key(traversal_path: &str) -> Result<String, Error> {
-    let joined = traversal_path
-        .split('/')
-        .filter(|segment| !segment.is_empty())
-        .collect::<Vec<_>>()
-        .join(".");
-    if joined.is_empty() {
+    let dotted = gkg_utils::traversal_path::to_dotted(traversal_path);
+    if dotted.is_empty() {
         return Err(Error::EmptyTraversalPath);
     }
-    Ok(format!("{KEY_PREFIX}.{joined}"))
+    Ok(format!("{KEY_PREFIX}.{dotted}"))
 }
 
 #[cfg(test)]

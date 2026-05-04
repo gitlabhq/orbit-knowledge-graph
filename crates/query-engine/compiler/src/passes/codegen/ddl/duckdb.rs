@@ -29,6 +29,7 @@ fn emit_column_type(ct: &ColumnType) -> String {
         ColumnType::Enum8(_) => "VARCHAR".into(),
         ColumnType::Nullable(inner) => emit_column_type(inner),
         ColumnType::LowCardinality(inner) => emit_column_type(inner),
+        ColumnType::Array(inner) => format!("{}[]", emit_column_type(inner)),
     }
 }
 

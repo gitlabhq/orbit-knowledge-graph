@@ -6,7 +6,11 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 use crate::clickhouse::TIMESTAMP_FORMAT;
@@ -55,14 +59,24 @@ impl Pipeline {
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
+        max_concurrent_entities: usize,
     ) -> Result<(), HandlerError> {
-        let mut errors = Vec::new();
+        let semaphore = Semaphore::new(max_concurrent_entities.max(1));
+        let mut futures = FuturesUnordered::new();
 
         for plan in plans {
-            if let Err(err) = self.run_plan(plan, context, destination, progress).await {
-                self.metrics
-                    .record_pipeline_error(&plan.name, err.error_kind());
-                errors.push(format!("{}: {err}", plan.name));
+            futures.push(async {
+                let _permit = semaphore.acquire().await.expect("semaphore is not closed");
+                let result = self.run_plan(plan, context, destination, progress).await;
+                (&plan.name, result)
+            });
+        }
+
+        let mut errors = Vec::new();
+        while let Some((name, result)) = futures.next().await {
+            if let Err(err) = result {
+                self.metrics.record_pipeline_error(name, err.error_kind());
+                errors.push(format!("{name}: {err}"));
             }
         }
 
@@ -278,7 +292,7 @@ impl Pipeline {
 
         for transform in transforms {
             let transform_start = Instant::now();
-            let result_batches = self
+            let mut result_batches = self
                 .execute_transform(session, &transform.to_sql())
                 .await
                 .map_err(|err| {
@@ -288,6 +302,8 @@ impl Pipeline {
                     ))
                 })?;
             transform_duration += transform_start.elapsed();
+
+            prepare_batches(&mut result_batches, &transform.dict_encode_columns);
 
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
@@ -376,11 +392,12 @@ mod tests {
     use crate::modules::sdlc::datalake::DatalakeError;
     use crate::modules::sdlc::plan::ExtractQuery;
     use crate::modules::sdlc::plan::ast::{Expr, Op, Query, SelectExpr, TableRef};
-    use crate::modules::sdlc::test_fixtures::test_metrics;
+    use crate::modules::sdlc::test_helpers::test_metrics;
     use crate::testkit::MockDestination;
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use std::collections::HashSet;
     use std::sync::Mutex;
 
     fn simple_extract_query(batch_size: u64) -> ExtractQuery {
@@ -432,6 +449,7 @@ mod tests {
             transforms: vec![Transformation {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
+                dict_encode_columns: HashSet::new(),
             }],
         }
     }
@@ -469,8 +487,8 @@ mod tests {
         .unwrap()
     }
 
-    use crate::modules::sdlc::test_fixtures::EmptyDatalake;
-    use crate::modules::sdlc::test_fixtures::FailingDatalake;
+    use crate::modules::sdlc::test_helpers::EmptyDatalake;
+    use crate::modules::sdlc::test_helpers::FailingDatalake;
     use crate::nats::ProgressNotifier;
 
     struct MultiBatchDatalake {
@@ -568,6 +586,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
         assert!(result.is_ok());
@@ -596,6 +615,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -622,6 +642,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -700,6 +721,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -739,6 +761,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -777,6 +800,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -811,6 +835,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 

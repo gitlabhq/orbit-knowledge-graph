@@ -32,13 +32,13 @@ properties:
   sha:
     type: string
     source: sha
-    nullable: true
+    nullable: false
     description: "Git commit SHA that the pipeline runs against."
 
   ref:
     type: string
     source: ref
-    nullable: true
+    nullable: false
     description: "Branch or tag name the pipeline runs for."
 
   status:
@@ -87,6 +87,7 @@ properties:
       16: container_registry_push
       17: duo_workflow
       18: pipeline_execution_policy_schedule
+      19: dependency_management_security_update
 
   tag:
     type: boolean
@@ -118,6 +119,7 @@ properties:
       27: filtered_by_workflow_rules
       28: composite_identity_forbidden
       29: pipeline_ref_creation_failure
+      30: filtered_by_no_pipeline
 
   created_at:
     type: timestamp
@@ -152,13 +154,13 @@ properties:
   before_sha:
     type: string
     source: before_sha
-    nullable: true
+    nullable: false
     description: "Previous commit SHA before the push that produced this pipeline."
 
   yaml_errors:
     type: string
     source: yaml_errors
-    nullable: true
+    nullable: false
     description: "Errors encountered parsing the pipeline configuration, if any."
 
   protected:
@@ -206,26 +208,28 @@ etl:
 storage:
   primary_key: [traversal_path, id]
   settings:
+    allow_part_offset_column_in_projections: "1"
     add_minmax_index_for_temporal_columns: "1"
+    auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: ref, type: "Nullable(String)", codec: ["ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: ref, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: status, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: tag, type: "Bool", default: "false"}
-    - {name: duration, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: duration, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: failure_reason, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: committed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: before_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
-    - {name: yaml_errors, type: "Nullable(String)", codec: ["ZSTD(3)"]}
+    - {name: before_sha, type: "String", default: "''", codec: ["ZSTD(1)"]}
+    - {name: yaml_errors, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: protected, type: "Nullable(Bool)"}
-    - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_status, column: status, type: "set(16)", granularity: 2}
@@ -233,7 +237,9 @@ storage:
     - {name: idx_id, column: id, type: "bloom_filter(0.01)", granularity: 1}
     - {name: idx_source, column: source, type: "set(20)", granularity: 2}
     - {name: idx_ref, column: ref, type: "text(tokenizer = splitByNonAlpha)", granularity: 1}
+    - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

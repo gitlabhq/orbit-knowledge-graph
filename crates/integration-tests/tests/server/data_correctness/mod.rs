@@ -68,6 +68,9 @@ async fn data_correctness() {
         traversal::traversal_order_by_node_property,
         traversal::traversal_order_by_source_node_property,
         traversal::traversal_order_by_with_node_ids_filter,
+        // traversal: code graph cascades
+        traversal::traversal_code_graph_calls_without_node_ids,
+        traversal::traversal_code_graph_calls_with_node_ids,
         // aggregation
         aggregation::aggregation_count_returns_correct_values,
         aggregation::aggregation_wildcard_user_to_mr_counts_inferred_edges,

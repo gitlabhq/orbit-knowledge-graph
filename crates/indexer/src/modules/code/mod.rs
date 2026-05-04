@@ -4,17 +4,14 @@
 //! fetches repository code from Gitaly, runs the code-graph, and
 //! writes the resulting graph data to ClickHouse.
 
-pub(crate) mod archive;
 mod arrow_converter;
-mod checkpoint_store;
-mod code_indexing_task_handler;
+mod checkpoint;
 pub mod config;
-pub mod indexing_pipeline;
-pub mod locking;
+mod dispatch;
+mod handler;
 pub mod metrics;
-mod namespace_backfill_dispatcher;
+mod pipeline;
 pub mod repository;
-mod siphon_code_indexing_task_dispatcher;
 mod siphon_decoder;
 mod stale_data_cleaner;
 #[cfg(test)]
@@ -25,16 +22,15 @@ use std::sync::Arc;
 use crate::IndexerConfig;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
-pub use code_indexing_task_handler::CodeIndexingTaskHandler;
 use config::CodeTableNames;
 use gitlab_client::GitlabClient;
 use metrics::CodeMetrics;
-pub use namespace_backfill_dispatcher::NamespaceCodeBackfillDispatcher;
 use repository::RepositoryResolver;
-pub use siphon_code_indexing_task_dispatcher::SiphonCodeIndexingTaskDispatcher;
 
-pub use checkpoint_store::ClickHouseCodeCheckpointStore;
-pub use indexing_pipeline::{CodeIndexingPipeline, IndexingRequest};
+pub use checkpoint::ClickHouseCodeCheckpointStore;
+pub use dispatch::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispatcher};
+pub use handler::CodeIndexingTaskHandler;
+pub use pipeline::{CodeIndexingPipeline, IndexingRequest};
 pub use repository::{
     CachingRepositoryService, LocalRepositoryCache, RailsRepositoryService, RepositoryCache,
     RepositoryService, RepositoryServiceError,
@@ -62,7 +58,7 @@ pub fn register_handlers(
 
     let repository_service: Arc<dyn RepositoryService> =
         CachingRepositoryService::create(RailsRepositoryService::create(gitlab_client));
-    let checkpoint_store: Arc<dyn checkpoint_store::CodeCheckpointStore> =
+    let checkpoint_store: Arc<dyn checkpoint::CodeCheckpointStore> =
         Arc::new(ClickHouseCodeCheckpointStore::new(Arc::clone(&client)));
     let stale_data_cleaner: Arc<dyn stale_data_cleaner::StaleDataCleaner> = Arc::new(
         stale_data_cleaner::ClickHouseStaleDataCleaner::new(client, &table_names),
@@ -77,7 +73,7 @@ pub fn register_handlers(
 
     let resolver = RepositoryResolver::new(Arc::clone(&repository_service), cache, metrics.clone());
 
-    let pipeline = Arc::new(indexing_pipeline::CodeIndexingPipeline::new(
+    let pipeline = Arc::new(pipeline::CodeIndexingPipeline::new(
         resolver,
         Arc::clone(&checkpoint_store),
         stale_data_cleaner,

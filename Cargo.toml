@@ -4,6 +4,7 @@ version = "0.1.0"
 [workspace]
 resolver = "2"
 members = [
+  "crates/circuit-breaker",
   "crates/code-graph",
   "crates/code-graph/treesitter-visit",
   "crates/clickhouse-client",
@@ -18,6 +19,7 @@ members = [
   "crates/query-engine/compiler-pipeline-macros",
   "crates/cli",
 
+  "crates/gkg-analytics",
   "crates/gkg-observability",
   "crates/gkg-server-config",
   "crates/gkg-server",
@@ -39,8 +41,8 @@ members = [
 
 [workspace.dependencies]
 gkg-observability = { path = "crates/gkg-observability" }
-labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "7697ce4d" }
-labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "7697ce4d" }
+labkit = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "9c4bfbf5" }
+labkit-events = { git = "https://gitlab.com/gitlab-org/rust/labkit-rs.git", rev = "9c4bfbf5" }
 arrow = "58.0.0"
 bumpalo = { version = "3.20.2", features = ["collections"] }
 cargo-platform = "0.3.3"
@@ -89,6 +91,7 @@ walkdir = "2.5.0"
 criterion = { version = "0.8.1", features = ["html_reports"] }
 tracing-test = "0.2.5"
 
+circuit-breaker = { path = "crates/circuit-breaker" }
 clickhouse-client = { path = "crates/clickhouse-client" }
 nats-client = { path = "crates/nats-client" }
 duckdb = { version = "1.10501.0", features = ["vtab-arrow", "appender-arrow"] }
@@ -131,16 +134,16 @@ lance-graph = { version = "0.5.4", default-features = false }
 
 rcgen = { version = "0.14.7", default-features = false, features = ["aws_lc_rs", "pem"] }
 regex = "1.12.2"
-ra_ap_hir = "0.0.329"
-ra_ap_cfg = "0.0.329"
-ra_ap_ide = "0.0.329"
-ra_ap_ide_db = "0.0.329"
-ra_ap_intern = "0.0.329"
-ra_ap_load-cargo = "0.0.329"
-ra_ap_paths = "0.0.329"
-ra_ap_project_model = "0.0.329"
-ra_ap_syntax = "0.0.329"
-ra_ap_vfs = "0.0.329"
+ra_ap_hir = "0.0.330"
+ra_ap_cfg = "0.0.330"
+ra_ap_ide = "0.0.330"
+ra_ap_ide_db = "0.0.330"
+ra_ap_intern = "0.0.330"
+ra_ap_load-cargo = "0.0.330"
+ra_ap_paths = "0.0.330"
+ra_ap_project_model = "0.0.330"
+ra_ap_syntax = "0.0.330"
+ra_ap_vfs = "0.0.330"
 sqlparser = { version = "0.61.0", features = ["visitor"] }
 prost = "0.14.3"
 prost-build = "0.14.3"

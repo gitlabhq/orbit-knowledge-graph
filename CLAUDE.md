@@ -28,7 +28,8 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 - Ontology YAML validated against JSON schema (`ontology-schema-validate`)
 - `cargo fmt` (`fmt-check`)
 - `cargo audit`, `cargo deny`, `cargo geiger` (security stage)
-- Unit tests via nextest, includes compiler tests (`unit-test`)
+- Unit tests via nextest (`unit-test`)
+- Compiler integration tests: query compilation, ontology validation, pipeline infra (`compiler-integration-test`)
 - CLI integration tests: concurrency, worktrees, content resolution (`cli-integration-test`)
 - Integration tests with Docker testcontainers (`integration-test`)
 - MR titles must follow conventional commit format: `type(scope): description` (`mr-title-check`)
@@ -53,7 +54,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
-| Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
+| Query response JSON schema | `config/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
@@ -82,6 +83,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 |---|---|
 | `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`) |
 | `gkg-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
+| `gkg-analytics` | Cross-crate Snowplow analytics primitives: `AnalyticsTracker` trait, `SnowplowAnalyticsTracker` (wraps `labkit_events::Tracker`), `InMemoryAnalyticsTracker` (testkit), shared `OrbitCommonContext` builder. Domain-specific contexts (Claims → `OrbitQueryContext`, indexer state → `OrbitSdlcIndexingContext`) are built in the consuming crate. |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |
 | `query-engine/compiler` | JSON DSL -> parameterized ClickHouse SQL, composable pipeline passes, security context enforcement |
 | `query-engine/compiler-pipeline-macros` | Proc-macro derives (`PipelineEnv`, `PipelineState`) for compiler pipeline |

@@ -6,7 +6,9 @@ use treesitter_visit::extract::Extract;
 use treesitter_visit::extract::{child_of_kind, field, field_chain, text};
 use treesitter_visit::predicate::*;
 
-use crate::v2::linker::rules::{ImportStrategy, ReceiverMode, ResolveStage};
+use crate::v2::linker::rules::{
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolveStage, ResolverHooks,
+};
 use crate::v2::linker::{HasRules, ResolutionRules};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
@@ -295,5 +297,13 @@ impl HasRules for GoRules {
             &[],
             None,
         )
+        .with_hooks(ResolverHooks {
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &[
+                "append", "cap", "clear", "close", "complex", "copy", "delete", "imag", "len",
+                "make", "max", "min", "new", "panic", "print", "println", "real", "recover",
+            ],
+            ..Default::default()
+        })
     }
 }

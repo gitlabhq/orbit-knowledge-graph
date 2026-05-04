@@ -1,0 +1,224 @@
+name: "C resolution — functions, structs, enums, calls (file-scoped FQNs)"
+
+fixtures:
+  - path: math.h
+    content: |
+      #ifndef MATH_H
+      #define MATH_H
+      struct Vector { int x; int y; };
+      double vec_length(struct Vector v);
+      struct Vector vec_add(struct Vector a, struct Vector b);
+      struct Vector vec_normalize(struct Vector v);
+      #endif
+
+  - path: math.c
+    content: |
+      #include "math.h"
+
+      double vec_length(struct Vector v) { return 0.0; }
+
+      struct Vector vec_add(struct Vector a, struct Vector b) {
+          struct Vector result;
+          result.x = a.x + b.x;
+          result.y = a.y + b.y;
+          return result;
+      }
+
+      struct Vector vec_normalize(struct Vector v) {
+          double len = vec_length(v);
+          struct Vector result;
+          result.x = v.x / len;
+          result.y = v.y / len;
+          return result;
+      }
+
+  - path: shapes.h
+    content: |
+      #ifndef SHAPES_H
+      #define SHAPES_H
+      enum ShapeType { CIRCLE, RECTANGLE, TRIANGLE };
+      typedef struct { enum ShapeType type; double area; } Shape;
+      Shape create_circle(double radius);
+      double get_area(Shape s);
+      #endif
+
+  - path: shapes.c
+    content: |
+      #include "shapes.h"
+      #include "math.h"
+
+      Shape create_circle(double radius) {
+          Shape s;
+          s.type = CIRCLE;
+          s.area = 3.14159 * radius * radius;
+          return s;
+      }
+
+      double get_area(Shape s) { return s.area; }
+
+  - path: main.c
+    content: |
+      #include "math.h"
+      #include "shapes.h"
+
+      int main() {
+          struct Vector a;
+          a.x = 1.0; a.y = 2.0;
+          struct Vector b;
+          b.x = 3.0; b.y = 4.0;
+
+          struct Vector sum = vec_add(a, b);
+          struct Vector norm = vec_normalize(sum);
+          double len = vec_length(norm);
+
+          Shape circle = create_circle(5.0);
+          double area = get_area(circle);
+          return 0;
+      }
+
+tests:
+  - name: "Function definitions with file-scoped FQNs"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'Function'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 6 }
+      - { no_nulls: fqn }
+      - { row: { fqn: "math::vec_length" } }
+      - { row: { fqn: "math::vec_add" } }
+      - { row: { fqn: "math::vec_normalize" } }
+      - { row: { fqn: "shapes::create_circle" } }
+      - { row: { fqn: "shapes::get_area" } }
+      - { row: { fqn: "main::main" } }
+
+  - name: "Struct definition scoped to header"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'math::Vector'
+        AND d.definition_type = 'Struct'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "math::Vector", type: Struct } }
+
+  - name: "Enum with scoped constants"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.definition_type = 'EnumConstant'
+      RETURN d.fqn AS fqn
+    assert:
+      - { row_count: 3 }
+      - { row: { fqn: "shapes::ShapeType::CIRCLE" } }
+      - { row: { fqn: "shapes::ShapeType::RECTANGLE" } }
+      - { row: { fqn: "shapes::ShapeType::TRIANGLE" } }
+
+  - name: "Typedef scoped to header"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'shapes::Shape'
+        AND d.definition_type = 'Typedef'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "shapes::Shape", type: Typedef } }
+
+  # ══════════════════════════════════════════════════════════════
+  # INTRA-FILE CALLS (same .c file)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Intra-file: vec_normalize calls vec_length (both in math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'math::vec_normalize'
+        AND callee.fqn = 'math::vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "math::vec_normalize", callee: "math::vec_length", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-FILE CALLS (via #include)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Cross-file: main calls vec_add (main.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'math::vec_add'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "math::vec_add", kind: Calls } }
+
+  - name: "Cross-file: main calls vec_normalize (main.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'math::vec_normalize'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "math::vec_normalize", kind: Calls } }
+
+  - name: "Cross-file: main calls vec_length (main.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'math::vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "math::vec_length", kind: Calls } }
+
+  - name: "Cross-file: main calls create_circle (main.c -> shapes.h -> shapes.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'shapes::create_circle'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "shapes::create_circle", kind: Calls } }
+
+  - name: "Cross-file: main calls get_area (main.c -> shapes.h -> shapes.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND callee.fqn = 'shapes::get_area'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "main::main", callee: "shapes::get_area", kind: Calls } }
+
+  - name: "Cross-file: shapes.c calls vec_length (shapes.c -> math.h -> math.c)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn STARTS WITH 'shapes::'
+        AND callee.fqn = 'math::vec_length'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { no_nulls: caller }
+
+  - name: "Exact cross-file call count from main"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::main'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 5 }
+      - { unique: callee }
+
+  - name: "All files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }
+      - { row: { path: main.c } }
+      - { row: { path: math.c } }
+      - { row: { path: math.h } }
+      - { row: { path: shapes.c } }
+      - { row: { path: shapes.h } }

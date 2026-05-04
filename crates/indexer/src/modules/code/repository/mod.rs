@@ -1,3 +1,4 @@
+pub(crate) mod archive;
 // pub: consumed by gkg-server's content resolver for Workhorse wire format parsing.
 pub mod blob_stream;
 pub mod cache;

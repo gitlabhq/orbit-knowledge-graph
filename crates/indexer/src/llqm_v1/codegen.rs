@@ -78,6 +78,22 @@ fn emit_table_ref(sql: &mut String, table_ref: &TableRef) {
     }
 }
 
+pub fn emit_select_expr(se: &SelectExpr) -> String {
+    let mut sql = String::new();
+    emit_expr(&mut sql, &se.expr);
+    if let Some(alias) = &se.alias {
+        sql.push_str(" AS ");
+        sql.push_str(alias);
+    }
+    sql
+}
+
+pub fn emit_expr_to_string(expr: &Expr) -> String {
+    let mut sql = String::new();
+    emit_expr(&mut sql, expr);
+    sql
+}
+
 fn emit_expr(sql: &mut String, expr: &Expr) {
     match expr {
         Expr::Raw(raw) => sql.push_str(raw),

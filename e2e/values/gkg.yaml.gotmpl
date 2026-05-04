@@ -79,7 +79,7 @@ healthCheck:
     enabled: true
   targets:
     - deployments:
-        - gkg-indexer
+        - gkg-indexer-default
         - gkg-webserver
         - gkg-dispatcher
     - namespace: e2e-{{ $sha }}-siphon
@@ -131,6 +131,13 @@ metrics:
     enabled: false
   otel:
     enabled: false
+
+analytics:
+  enabled: true
+  collector_url: "https://snowplowprd.trx.gitlab.net"
+  deployment:
+    type: self_managed
+    environment: development
 
 schedule:
   tasks:

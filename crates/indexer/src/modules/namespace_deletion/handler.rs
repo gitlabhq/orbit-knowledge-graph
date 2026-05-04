@@ -12,18 +12,6 @@ use gkg_server_config::{HandlerConfiguration, NamespaceDeletionHandlerConfig};
 use super::metrics::DeletionMetrics;
 use super::store::NamespaceDeletionStore;
 
-/// An empty or malformed path would cause `startsWith(traversal_path, '')` to match
-/// every row in the table, so we reject anything that isn't `<org_id>/<namespace_id>/`.
-fn is_valid_traversal_path(path: &str) -> bool {
-    let Some(inner) = path.strip_suffix('/') else {
-        return false;
-    };
-    let Some((org, namespace)) = inner.split_once('/') else {
-        return false;
-    };
-    org.parse::<u64>().is_ok() && namespace.parse::<u64>().is_ok()
-}
-
 pub struct NamespaceDeletionHandler {
     store: Arc<dyn NamespaceDeletionStore>,
     config: NamespaceDeletionHandlerConfig,
@@ -67,7 +55,7 @@ impl Handler for NamespaceDeletionHandler {
                 SerializationError::Json(err) => HandlerError::Deserialization(err),
             })?;
 
-        if !is_valid_traversal_path(&payload.traversal_path) {
+        if !gkg_utils::traversal_path::is_valid(&payload.traversal_path) {
             error!(
                 namespace_id = payload.namespace_id,
                 traversal_path = %payload.traversal_path,

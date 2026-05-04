@@ -1,11 +1,11 @@
+pub mod dispatch;
 mod handler;
 mod lower;
 mod metrics;
-pub mod scheduler;
 pub(crate) mod store;
 
+pub use dispatch::NamespaceDeletionScheduler;
 pub use handler::NamespaceDeletionHandler;
-pub use scheduler::NamespaceDeletionScheduler;
 pub use store::{ClickHouseNamespaceDeletionStore, NamespaceDeletionStore};
 
 use std::sync::Arc;

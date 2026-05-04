@@ -167,7 +167,6 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
-        respect_gitignore: true
         worker_threads: 0
         max_concurrent_languages: 0
     namespace-deletion:
@@ -195,7 +194,6 @@ engine:
 |-------------|---------|-------------|
 | `engine.handlers.code-indexing-task.pipeline.max_file_size_bytes` | `5,000,000` | Largest source file the v2 pipeline will parse |
 | `engine.handlers.code-indexing-task.pipeline.max_files` | `1,000,000` | Maximum language-supported source files accepted for one pipeline run |
-| `engine.handlers.code-indexing-task.pipeline.respect_gitignore` | `true` | Whether repository `.gitignore` rules apply during discovery |
 | `engine.handlers.code-indexing-task.pipeline.worker_threads` | `0` | Rayon workers per language; `0` uses Rayon default |
 | `engine.handlers.code-indexing-task.pipeline.max_concurrent_languages` | `0` | Concurrent language pipelines; `0` uses the pipeline default |
 
@@ -545,7 +543,6 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
-        respect_gitignore: true
         worker_threads: 0
         max_concurrent_languages: 0
     namespace-deletion:

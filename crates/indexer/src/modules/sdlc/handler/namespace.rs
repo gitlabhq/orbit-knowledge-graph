@@ -60,12 +60,12 @@ impl Handler for NamespaceHandler {
         let started_at = Utc::now();
         info!(
             namespace_id = payload.namespace,
-            organization_id = payload.organization,
+            traversal_path = %payload.traversal_path,
             pipeline_count = self.plans.len(),
             "starting namespace indexing"
         );
 
-        let traversal_path = format!("{}/{}/", payload.organization, payload.namespace);
+        let traversal_path = payload.traversal_path.clone();
         context
             .indexing_status
             .record_start(&traversal_path, started_at)
@@ -87,6 +87,7 @@ impl Handler for NamespaceHandler {
                 &pipeline_context,
                 context.destination.as_ref(),
                 &context.progress,
+                self.config.max_concurrent_entities,
             )
             .await;
 
@@ -124,7 +125,7 @@ impl Handler for NamespaceHandler {
 mod tests {
     use super::*;
     use crate::modules::sdlc::plan::build_plans;
-    use crate::modules::sdlc::test_fixtures::{EmptyDatalake, MockCheckpointStore, test_metrics};
+    use crate::modules::sdlc::test_helpers::{EmptyDatalake, MockCheckpointStore, test_metrics};
     use crate::nats::ProgressNotifier;
     use crate::testkit::{MockDestination, MockLockService, MockNatsServices, TestEnvelopeFactory};
     use ontology::Ontology;
@@ -149,8 +150,8 @@ mod tests {
         );
 
         let payload = serde_json::json!({
-            "organization": 1,
             "namespace": 2,
+            "traversal_path": "1/2/",
             "watermark": "2024-01-21T00:00:00Z"
         })
         .to_string();

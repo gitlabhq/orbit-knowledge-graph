@@ -8,14 +8,18 @@ use crate::v2::pipeline::LanguageContext;
 use crate::v2::sentinel::{FileGuard, Killed};
 use crate::v2::trace::Tracer;
 use crate::v2::types::ssa::ParseValue;
-use crate::v2::types::{DefKind, EdgeKind, ExpressionStep, NodeKind, Relationship};
+use crate::v2::types::{
+    DefKind, EdgeKind, ExpressionStep, ImportBindingKind, NodeKind, Relationship,
+};
 use petgraph::graph::NodeIndex;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::sync::Arc;
 
 use super::graph::{CodeGraph, GraphEdge};
 use super::imports::{ImportResolver, ResolveSettings};
-use super::rules::{ResolutionRules, ResolveStage};
+use super::rules::{
+    AmbientImportFallback, ImportedSymbolFallbackContext, ResolutionRules, ResolveStage,
+};
 use super::state::ScratchBuf;
 
 /// Borrowed reference data for resolution. No allocations.
@@ -35,6 +39,7 @@ pub struct FileResolver<'a> {
     /// Edges from definitions to external imported symbols. Stored
     /// separately so they don't interfere with the failed_chains check.
     import_edges: Vec<(NodeIndex, NodeIndex, GraphEdge)>,
+    import_edge_keys: FxHashSet<(NodeIndex, NodeIndex, EdgeKind)>,
 }
 
 impl<'a> FileResolver<'a> {
@@ -62,6 +67,7 @@ impl<'a> FileResolver<'a> {
             ctx,
             _guard: guard,
             import_edges: Vec::new(),
+            import_edge_keys: FxHashSet::default(),
         }
     }
 
@@ -97,11 +103,13 @@ impl<'a> FileResolver<'a> {
             ctx,
             _guard: None,
             import_edges: Vec::new(),
+            import_edge_keys: FxHashSet::default(),
         }
     }
 
     /// Drain accumulated Definition → ImportedSymbol edges.
     pub fn drain_import_edges(&mut self) -> Vec<(NodeIndex, NodeIndex, GraphEdge)> {
+        self.import_edge_keys.clear();
         std::mem::take(&mut self.import_edges)
     }
 
@@ -141,9 +149,7 @@ impl<'a> FileResolver<'a> {
         };
         let targets = self.ctx.resolve_single(&ref_data)?;
         if targets.is_empty() {
-            let mut imp_edges = Vec::new();
-            self.emit_imported_symbol_edges(reaching, enclosing_def, &mut imp_edges);
-            self.import_edges.extend(imp_edges);
+            self.emit_imported_symbol_edges(&ref_data);
             return Ok(());
         }
 
@@ -179,45 +185,113 @@ impl<'a> FileResolver<'a> {
         Ok(())
     }
 
-    /// Emit Definition → ImportedSymbol edges for external (unresolved) refs.
-    fn emit_imported_symbol_edges(
-        &self,
-        reaching: &[ParseValue],
-        enclosing_def: Option<u32>,
-        edges: &mut Vec<(NodeIndex, NodeIndex, GraphEdge)>,
-    ) {
-        let Some(enc) = enclosing_def else { return };
-        let Some(&src) = self.ctx.def_nodes.get(enc as usize) else {
-            return;
-        };
-        let src_def_kind = self.ctx.graph.graph[src]
-            .def_id()
-            .map(|did| self.ctx.graph.defs[did.0 as usize].kind);
+    /// Emit source → ImportedSymbol edges for external (unresolved) refs.
+    fn emit_imported_symbol_edges(&mut self, r: &RefData<'_>) {
+        let graph = self.ctx.graph;
+        let src = r
+            .enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize).copied())
+            .unwrap_or(self.ctx.file_node);
+        let (source_node_kind, source_def_kind) = r
+            .enclosing_def
+            .and_then(|i| self.ctx.def_nodes.get(i as usize))
+            .and_then(|&n| graph.graph[n].def_id())
+            .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
+            .unwrap_or((NodeKind::File, None));
         let rel = Relationship {
             edge_kind: EdgeKind::Calls,
-            source_node: NodeKind::Definition,
+            source_node: source_node_kind,
             target_node: NodeKind::ImportedSymbol,
-            source_def_kind: src_def_kind,
+            source_def_kind,
             target_def_kind: None,
         };
-        // (a) Explicit imports from reaching defs
-        let before = edges.len();
-        for pv in reaching {
-            if let ParseValue::ImportRef(i) = pv
-                && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
-            {
-                edges.push((src, import_node, GraphEdge { relationship: rel }));
-            }
-        }
-        // (b) Wildcard imports: when no explicit import matched, any wildcard
-        // import from this file could cover the ref name.
-        if edges.len() == before {
-            for &import_node in self.ctx.import_nodes {
-                let imp = self.ctx.graph.import(import_node);
-                if imp.wildcard {
-                    edges.push((src, import_node, GraphEdge { relationship: rel }));
+
+        let policy = self.ctx.rules.hooks.imported_symbol_fallback;
+        let excluded_ambient_name = self
+            .ctx
+            .rules
+            .hooks
+            .excluded_ambient_imported_symbol_names
+            .contains(&r.name);
+
+        if let Some(candidate_hook) = self.ctx.rules.hooks.imported_symbol_candidates {
+            let candidates = candidate_hook(
+                self.ctx.graph,
+                self.ctx.import_nodes,
+                ImportedSymbolFallbackContext {
+                    name: r.name,
+                    chain: r.chain,
+                },
+            );
+            let mut emitted = false;
+            for import_node in candidates {
+                if !self.ctx.import_resolves_locally(import_node) {
+                    self.push_imported_symbol_edge(src, import_node, rel);
+                    emitted = true;
                 }
             }
+            if emitted {
+                return;
+            }
+        }
+
+        let mut saw_explicit_import = false;
+        if policy.explicit_reaching_imports {
+            for pv in r.reaching {
+                if let ParseValue::ImportRef(i) = pv
+                    && let Some(&import_node) = self.ctx.import_nodes.get(*i as usize)
+                {
+                    saw_explicit_import = true;
+                    let import = self.ctx.graph.import(import_node);
+                    if excluded_ambient_name && import.wildcard {
+                        continue;
+                    }
+                    if !self.ctx.import_resolves_locally(import_node) {
+                        self.push_imported_symbol_edge(src, import_node, rel);
+                    }
+                }
+            }
+        }
+
+        if saw_explicit_import || excluded_ambient_name {
+            return;
+        }
+
+        match policy.ambient {
+            AmbientImportFallback::None => {}
+            AmbientImportFallback::Wildcard => {
+                let candidates: Vec<NodeIndex> = self
+                    .ctx
+                    .import_nodes
+                    .iter()
+                    .copied()
+                    .filter(|&import_node| self.ctx.graph.import(import_node).wildcard)
+                    .collect();
+                if candidates.is_empty()
+                    || candidates.len() > policy.max_ambient_candidates
+                    || policy.max_ambient_candidates == 0
+                {
+                    return;
+                }
+                for import_node in candidates {
+                    self.push_imported_symbol_edge(src, import_node, rel);
+                }
+            }
+        }
+    }
+
+    fn push_imported_symbol_edge(
+        &mut self,
+        src: NodeIndex,
+        import_node: NodeIndex,
+        relationship: Relationship,
+    ) {
+        if self
+            .import_edge_keys
+            .insert((src, import_node, relationship.edge_kind))
+        {
+            self.import_edges
+                .push((src, import_node, GraphEdge { relationship }));
         }
     }
 }
@@ -332,6 +406,39 @@ impl<'a> ResolveCtx<'a> {
         result
     }
 
+    fn import_resolves_locally(&mut self, import_node: NodeIndex) -> bool {
+        !self.resolve_import_cached(import_node).is_empty()
+    }
+
+    fn has_imported_symbol_candidates(&self, r: &RefData<'_>) -> bool {
+        self.rules
+            .hooks
+            .imported_symbol_candidates
+            .is_some_and(|hook| {
+                !hook(
+                    self.graph,
+                    self.import_nodes,
+                    ImportedSymbolFallbackContext {
+                        name: r.name,
+                        chain: r.chain,
+                    },
+                )
+                .is_empty()
+            })
+    }
+
+    fn has_unresolved_import_ref(&mut self, reaching: &[ParseValue]) -> bool {
+        for value in reaching {
+            if let ParseValue::ImportRef(i) = value
+                && let Some(&import_node) = self.import_nodes.get(*i as usize)
+                && !self.import_resolves_locally(import_node)
+            {
+                return true;
+            }
+        }
+        false
+    }
+
     fn lookup_nested_cached(
         &mut self,
         scope_fqn: &str,
@@ -349,6 +456,16 @@ impl<'a> ResolveCtx<'a> {
         let mut result = Vec::new();
         self.graph
             .lookup_nested_with_hierarchy(scope_fqn, member_name, &mut result);
+
+        if result.is_empty() {
+            let direct_fqn = format!("{}{member_name}", self.scope_member_prefix(scope_fqn));
+            let direct = self.graph.indexes.by_fqn.lookup(&direct_fqn, |idx| {
+                self.graph.graph[idx].def_id().is_some_and(|d| {
+                    self.graph.str(self.graph.defs[d.0 as usize].fqn) == direct_fqn
+                })
+            });
+            result.extend_from_slice(&direct);
+        }
 
         // Fallback: try implicit sub-scopes (e.g. Kotlin Companion objects).
         // Foo.bar() → Foo.Companion.bar()
@@ -713,6 +830,7 @@ impl<'a> ResolveCtx<'a> {
         }
 
         let mut current_types: Vec<String> = self.resolve_base_type_fqns(&chain[0], r.reaching)?;
+        let base_has_unresolved_import_ref = self.has_unresolved_import_ref(r.reaching);
 
         trace!(
             self.tracer,
@@ -723,6 +841,9 @@ impl<'a> ResolveCtx<'a> {
         );
 
         if current_types.is_empty() {
+            if base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
+                return Ok(vec![]);
+            }
             return self.chain_fallback(r, chain);
         }
 
@@ -831,6 +952,10 @@ impl<'a> ResolveCtx<'a> {
                 next_types.retain(|t| seen.insert(t.clone()));
             }
             current_types = next_types;
+        }
+
+        if base_has_unresolved_import_ref || self.has_imported_symbol_candidates(r) {
+            return Ok(vec![]);
         }
 
         self.chain_fallback(r, chain)
@@ -947,6 +1072,7 @@ impl<'a> ResolveCtx<'a> {
                         }
                         ParseValue::ImportRef(i) => {
                             if let Some(&import_node) = self.import_nodes.get(*i as usize) {
+                                let before = types.len();
                                 let resolved = self.resolve_import_cached(import_node);
                                 for def_idx in resolved {
                                     if let Some(did) = self.graph.graph[def_idx].def_id() {
@@ -998,6 +1124,21 @@ impl<'a> ResolveCtx<'a> {
                                             types.push(rt.clone());
                                         }
                                     }
+                                }
+                                if types.len() == before
+                                    && let Some(import_type) =
+                                        self.imported_symbol_type_fqn(import_node)
+                                {
+                                    trace!(
+                                        self.tracer,
+                                        ReachingDefResolved {
+                                            value: format!("ImportRef({i})"),
+                                            result: format!(
+                                                "base type (imported symbol) -> {import_type}"
+                                            ),
+                                        }
+                                    );
+                                    types.push(import_type);
                                 }
                             }
                         }
@@ -1077,6 +1218,30 @@ impl<'a> ResolveCtx<'a> {
             }
             _ => Ok(vec![]),
         }
+    }
+
+    fn imported_symbol_type_fqn(&self, import_node: NodeIndex) -> Option<String> {
+        if let Some(hook) = self.rules.hooks.external_import_type {
+            return hook(self.graph, import_node);
+        }
+
+        let imp = self.graph.import(import_node);
+        if imp.wildcard || matches!(imp.binding_kind, ImportBindingKind::SideEffect) {
+            return None;
+        }
+
+        let path = self.graph.str(imp.path);
+        let name = imp.name.map(|id| self.graph.str(id));
+        match (path.is_empty(), name) {
+            (true, Some(name)) => Some(name.to_string()),
+            (true, None) => imp.alias.map(|id| self.graph.str(id).to_string()),
+            (false, Some(name)) => Some(format!("{}{name}", self.scope_member_prefix(path))),
+            (false, None) => Some(path.to_string()),
+        }
+    }
+
+    fn scope_member_prefix(&self, scope_fqn: &str) -> String {
+        format!("{}{}", scope_fqn, self.rules.fqn_separator)
     }
 
     fn resolve_implicit_member(&self, enclosing_node: NodeIndex, name: &str) -> Vec<NodeIndex> {

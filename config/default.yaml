@@ -18,7 +18,7 @@ nats:
   # batch_size: 10
   # auto_create_streams: true
   # stream_replicas: 1
-  # stream_max_age_secs: null
+  stream_max_age_secs: 14400
   # stream_max_bytes: null
   # stream_max_messages: null
 
@@ -27,6 +27,8 @@ datalake:
   database: default
   username: default
   # password: ""
+  query_settings:
+    max_execution_time: "900"
 
 graph:
   url: "http://127.0.0.1:8123"
@@ -67,7 +69,6 @@ engine:
       pipeline:
         max_file_size_bytes: 5000000
         max_files: 1000000
-        respect_gitignore: true
         worker_threads: 0
         max_concurrent_languages: 0
         per_file_timeout_ms: 5000
@@ -128,6 +129,8 @@ schema:
   version_poll_interval_secs: 5
 
 analytics:
+  enabled: false                         # opt-in. Helm flips on for .com / Dedicated.
+  collector_url: ""                      # e.g. "https://snowplowprd.trx.gitlab.net" (no path; tracker appends /com.snowplowanalytics.snowplow/tp2)
   deployment:
     type: self_managed        # com | dedicated | self_managed
     environment: development  # development | staging | production

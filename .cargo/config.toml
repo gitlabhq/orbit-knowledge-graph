@@ -11,4 +11,3 @@ E2E_DIR = { value = "e2e", relative = true }
 HELM_DIR = { value = "helm", relative = true }
 SCRIPTS_DIR = { value = "scripts", relative = true }
 XTASK_DIR = { value = "crates/xtask", relative = true }
-GKG_SERVER_SCHEMAS_DIR = { value = "crates/gkg-server/schemas", relative = true }

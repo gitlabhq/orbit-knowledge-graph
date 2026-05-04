@@ -1,0 +1,18 @@
+[package]
+name = "gkg-analytics"
+version.workspace = true
+edition = "2024"
+license = "MIT"
+
+[features]
+default = []
+testkit = []
+
+[dependencies]
+gkg-server-config = { path = "../gkg-server-config" }
+labkit-events = { workspace = true }
+parking_lot = { workspace = true }
+tracing = { workspace = true }
+
+[lints]
+workspace = true

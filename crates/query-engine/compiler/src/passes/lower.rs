@@ -1641,12 +1641,10 @@ fn build_hydration_arm(node: &InputNode) -> Result<Query> {
         _ => vec![],
     };
 
-    let prop_columns: Vec<&str> = columns.iter().filter(|&&c| c != pk).copied().collect();
-
-    let json_expr = if prop_columns.is_empty() {
+    let json_expr = if columns.is_empty() {
         Expr::string("{}")
     } else {
-        let map_args: Vec<Expr> = prop_columns
+        let map_args: Vec<Expr> = columns
             .iter()
             .flat_map(|&col| {
                 [
@@ -2138,7 +2136,7 @@ fn id_filter(table: &str, col: &str, ids: &[i64]) -> Option<Expr> {
     )
 }
 
-fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
+pub(crate) fn filter_expr(table: &str, column: &str, filter: &InputFilter) -> Expr {
     let col = Expr::col(table, column);
     let val = || {
         let v = filter.value.clone().unwrap_or(Value::Null);
