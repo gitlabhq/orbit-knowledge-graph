@@ -159,7 +159,7 @@ fn can_scope_by_tp(
 // Phase 2: Emit
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub fn emit_pathfinding(plan: PathFindingPlan, _input: &mut Input) -> Result<Node> {
+pub fn emit_pathfinding(plan: &PathFindingPlan, _input: &mut Input) -> Result<Node> {
     let mut anchor_ctes: Vec<Cte> = Vec::new();
     let start_anchor = build_anchor(
         &plan.start,

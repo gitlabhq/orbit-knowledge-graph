@@ -81,7 +81,7 @@ pub fn plan_neighbors(input: &Input) -> Result<NeighborsPlan> {
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_neighbors(p: NeighborsPlan, input: &mut Input) -> Result<Node> {
+pub fn emit_neighbors(p: &NeighborsPlan, input: &mut Input) -> Result<Node> {
     let center_id = p.center_id.clone();
     let center_entity = p.center_entity.clone();
     let center_table = p.center_table.clone();

@@ -22,6 +22,17 @@ pub enum QueryPlan {
     Hydration(HydrationPlan),
 }
 
+impl QueryPlan {
+    /// Return pre-computed node-to-edge-column mappings for the enforce pass.
+    pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
+        match self {
+            Self::Skeleton(s) => s.node_edge_mappings.clone(),
+            // Neighbors populates node_edge_col directly in emit (per-arm center col).
+            Self::Neighbors(_) | Self::PathFinding(_) | Self::Hydration(_) => HashMap::new(),
+        }
+    }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Neighbors plan
 // ─────────────────────────────────────────────────────────────────────────────

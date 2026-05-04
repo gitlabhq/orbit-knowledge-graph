@@ -76,6 +76,19 @@ impl Skeleton {
         // Pre-resolve FK target join needs.
         resolve_fk_join_needs(&hops, &mut nodes, input);
 
+        // Pre-resolve which nodes emit SELECT columns.
+        // In aggregation queries, only group_by nodes emit columns.
+        if input.query_type == QueryType::Aggregation {
+            let group_by_nodes: HashSet<&str> = input
+                .aggregations
+                .iter()
+                .filter_map(|a| a.group_by.as_deref())
+                .collect();
+            for np in nodes.values_mut() {
+                np.emit_select = group_by_nodes.contains(np.alias.as_str());
+            }
+        }
+
         let synthesize_fk_edge_metadata = matches!(strategy, Strategy::FkStar { .. })
             && input.query_type != QueryType::Aggregation;
 
@@ -89,22 +102,13 @@ impl Skeleton {
         }
     }
 
-    /// Emit SQL AST from the plan.
-    pub fn emit(&self, input: &mut Input) -> Result<SkeletonOutput> {
-        // Copy pre-computed node_edge_col mappings to input.compiler for
-        // downstream passes (enforce, optimize).
-        for (node, mapping) in &self.node_edge_mappings {
-            input
-                .compiler
-                .node_edge_col
-                .entry(node.clone())
-                .or_insert_with(|| mapping.clone());
-        }
-
+    /// Emit SQL AST from the plan. Pure AST generation — reads only
+    /// from Skeleton fields, does not consult Input.
+    pub fn emit(&self, _input: &mut Input) -> Result<SkeletonOutput> {
         match self.strategy {
-            Strategy::SingleNode => emit_single_node(self, input),
-            Strategy::FkStar { ref center } => emit_fk_star(self, center, input),
-            Strategy::Flat | Strategy::Bidirectional { .. } => emit_flat_chain(self, input),
+            Strategy::SingleNode => emit_single_node(self),
+            Strategy::FkStar { ref center } => emit_fk_star(self, center),
+            Strategy::Flat | Strategy::Bidirectional { .. } => emit_flat_chain(self),
         }
     }
 }
@@ -217,12 +221,8 @@ pub fn id_list_predicate(alias: &str, col: &str, ids: &[i64]) -> Expr {
 /// Node columns for the outer SELECT, aliased as `{alias}_{col}` for the
 /// graph formatter. Only for non-aggregation queries (aggregation builds
 /// its own SELECT).
-fn node_select_columns(alias: &str, np: &NodePlan, input: &Input) -> Vec<SelectExpr> {
-    let is_group_by = input
-        .aggregations
-        .iter()
-        .any(|a| a.group_by.as_deref() == Some(alias));
-    if !is_group_by && input.query_type == QueryType::Aggregation {
+fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
+    if !np.emit_select {
         return vec![];
     }
     requested_columns(&np.columns)
@@ -450,6 +450,7 @@ fn build_node_plans(input: &Input) -> HashMap<String, NodePlan> {
                     needs_elevated_filter: false,
                     edge_col_mapping: None,
                     fk_needs_join: false,
+                    emit_select: true,
                 },
             )
         })
@@ -795,7 +796,7 @@ fn resolve_fk_join_needs(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, in
 // Emit: single node (no edges)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOutput> {
+fn emit_single_node(skeleton: &Skeleton) -> Result<SkeletonOutput> {
     let (_, np) = skeleton
         .nodes
         .iter()
@@ -813,7 +814,7 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
     };
 
     let where_parts = node_where_predicates(alias, np);
-    let select = node_select_columns(alias, np, input);
+    let select = node_select_columns(alias, np);
 
     Ok(SkeletonOutput {
         from,
@@ -828,7 +829,7 @@ fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOu
 // Emit: flat edge chain
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOutput> {
+fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
@@ -951,7 +952,6 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
                         np,
                         edge_alias,
                         edge_col,
-                        input,
                         false,
                         narrow_cte.as_deref(),
                     )?;
@@ -987,11 +987,7 @@ fn emit_flat_chain(skeleton: &Skeleton, input: &mut Input) -> Result<SkeletonOut
 // Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_fk_star(
-    skeleton: &Skeleton,
-    center_alias: &str,
-    input: &mut Input,
-) -> Result<SkeletonOutput> {
+fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutput> {
     let center_np = skeleton.nodes.get(center_alias).ok_or_else(|| {
         QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
     })?;
@@ -1022,7 +1018,7 @@ fn emit_fk_star(
     };
 
     let mut where_parts = node_where_predicates(center_alias, center_np);
-    let mut selects = node_select_columns(center_alias, center_np, input);
+    let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
 
     // Each hop: target node connected via FK column.
@@ -1053,7 +1049,7 @@ fn emit_fk_star(
         // Target hydration — use pre-resolved fk_needs_join.
         if target_np.fk_needs_join {
             let (new_from, ns, nw) =
-                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, input, true)?;
+                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, true)?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);
@@ -1150,7 +1146,6 @@ fn emit_node_join_with_narrowing(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
-    input: &Input,
     use_traversal_path_join: bool,
     narrow_cte: Option<&str>,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
@@ -1159,7 +1154,6 @@ fn emit_node_join_with_narrowing(
         np,
         edge_alias,
         edge_col,
-        input,
         use_traversal_path_join,
         narrow_cte,
     )
@@ -1174,7 +1168,6 @@ fn emit_node_join(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
-    input: &Input,
     use_traversal_path_join: bool,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     emit_node_join_inner(
@@ -1182,7 +1175,6 @@ fn emit_node_join(
         np,
         edge_alias,
         edge_col,
-        input,
         use_traversal_path_join,
         None,
     )
@@ -1193,7 +1185,6 @@ fn emit_node_join_inner(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
-    input: &Input,
     use_traversal_path_join: bool,
     narrow_cte: Option<&str>,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
@@ -1261,7 +1252,7 @@ fn emit_node_join_inner(
         on,
     );
 
-    let selects = node_select_columns(alias, np, input);
+    let selects = node_select_columns(alias, np);
     // Only _deleted=false in the outer WHERE; user filters are already
     // inside the dedup scan.
     let wheres = vec![Expr::eq(

@@ -10,7 +10,7 @@ use crate::input::*;
 use super::shared::requested_columns;
 use super::types::*;
 
-pub fn emit_aggregation(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
+pub fn emit_aggregation(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
     let output = skeleton.emit(input)?;
     let (agg_select, group_by, order_by) = build_aggregation(input)?;
 

@@ -107,6 +107,9 @@ pub struct NodePlan {
     pub edge_col_mapping: Option<(String, String)>,
     /// Whether an FK target needs inline JOIN hydration.
     pub fk_needs_join: bool,
+    /// Whether this node's columns should appear in SELECT.
+    /// False for non-group-by nodes in aggregation queries.
+    pub emit_select: bool,
 }
 
 /// Pre-computed denorm tag predicate for application on an edge.

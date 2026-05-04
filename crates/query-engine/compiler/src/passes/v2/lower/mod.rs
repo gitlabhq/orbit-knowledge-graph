@@ -48,7 +48,7 @@ pub fn plan(input: &mut Input) -> Result<QueryPlan> {
 }
 
 /// Emit SQL AST from a query plan (phase 2).
-pub fn emit(query_plan: QueryPlan, input: &mut Input) -> Result<Node> {
+pub fn emit(query_plan: &QueryPlan, input: &mut Input) -> Result<Node> {
     match query_plan {
         QueryPlan::Skeleton(skeleton) => match input.query_type {
             QueryType::Traversal => traversal::emit_traversal(skeleton, input),
@@ -65,5 +65,5 @@ pub fn emit(query_plan: QueryPlan, input: &mut Input) -> Result<Node> {
 /// separate PlannerPass is in the pipeline).
 pub fn lower(input: &mut Input) -> Result<Node> {
     let query_plan = plan(input)?;
-    emit(query_plan, input)
+    emit(&query_plan, input)
 }

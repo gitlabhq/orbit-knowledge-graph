@@ -12,7 +12,7 @@ use super::shared::edge_select_columns_with_prefix;
 use super::types::Skeleton;
 use crate::constants::*;
 
-pub fn emit_traversal(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
+pub fn emit_traversal(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {
         return emit_single_node(skeleton, input);
     }
@@ -56,7 +56,7 @@ pub fn emit_traversal(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
     Ok(Node::Query(Box::new(q)))
 }
 
-fn emit_single_node(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
+fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
     let output = skeleton.emit(input)?;
 
     let order_by = input

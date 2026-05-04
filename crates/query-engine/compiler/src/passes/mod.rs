@@ -107,7 +107,8 @@ where
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let plan = state.take_query_plan()?;
         let input = state.input_mut()?;
-        let node = v2::lower::emit(plan, input)?;
+        let node = v2::lower::emit(&plan, input)?;
+        state.set_query_plan(plan);
         state.set_node(node);
         Ok(())
     }
@@ -137,14 +138,17 @@ pub struct EnforcePass;
 impl<E, S> CompilerPass<E, S> for EnforcePass
 where
     E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx,
+    S: PipelineState + HasNode + HasInput + HasQueryPlan + HasResultCtx,
 {
     const NAME: &'static str = "enforce";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let plan = state.take_query_plan()?;
+        let node_edge_col = plan.node_edge_mappings();
+        state.set_query_plan(plan);
         let mut node = state.take_node()?;
         let input = state.input()?;
-        let result_context = enforce::enforce_return(&mut node, input)?;
+        let result_context = enforce::enforce_return(&mut node, input, &node_edge_col)?;
         state.set_node(node);
         state.set_result_ctx(result_context);
         Ok(())

@@ -54,7 +54,7 @@ pub fn plan_hydration(input: &Input) -> Result<HydrationPlan> {
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_hydration(plan: HydrationPlan) -> Result<Node> {
+pub fn emit_hydration(plan: &HydrationPlan) -> Result<Node> {
     let mut arms = plan.nodes.iter().map(emit_arm);
     let mut first = arms
         .next()
