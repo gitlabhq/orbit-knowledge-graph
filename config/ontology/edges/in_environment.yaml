@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Deployment, id: id }
     to_node: { type: Environment, id: id }
+    fk_column: environment_id
     description: "Deployment targets environment."

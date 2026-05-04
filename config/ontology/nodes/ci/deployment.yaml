@@ -109,6 +109,12 @@ properties:
     nullable: true
     description: "Timestamp when the deployment was last updated."
 
+  environment_id:
+    type: int64
+    source: environment_id
+    nullable: false
+    description: "Environment this deployment targets."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -155,6 +161,7 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: environment_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_status, column: status, type: "set(8)", granularity: 2}
@@ -165,5 +172,6 @@ storage:
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
     - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_environment_id, order_by: [environment_id]}
     - {type: reorder, name: by_status_id, order_by: [status, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}
