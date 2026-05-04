@@ -250,7 +250,15 @@ fn enforce_return_columns(
                     node.id
                 ))
             })?;
-            let edge_id_expr = Expr::col(edge_alias, edge_col.as_str());
+            // For FK-elided nodes, the edge_alias (e.g. "mr") may not exist
+            // in FROM because the node was absorbed into a filter. If the
+            // node is pinned with a single ID, emit the literal value.
+            let edge_id_expr =
+                if !alias_exists_in_from(&q.from, edge_alias) && node.node_ids.len() == 1 {
+                    Expr::lit(node.node_ids[0])
+                } else {
+                    Expr::col(edge_alias, edge_col.as_str())
+                };
 
             if needs_separate_pk {
                 // JOIN node table for the auth column (e.g. merge_request_id).
