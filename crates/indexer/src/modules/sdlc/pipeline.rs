@@ -2,14 +2,13 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::compute;
-use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
 use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
@@ -293,7 +292,7 @@ impl Pipeline {
 
         for transform in transforms {
             let transform_start = Instant::now();
-            let result_batches = self
+            let mut result_batches = self
                 .execute_transform(session, &transform.to_sql())
                 .await
                 .map_err(|err| {
@@ -304,7 +303,7 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
-            let result_batches = prepare_batches(result_batches, &transform.dict_encode_columns);
+            prepare_batches(&mut result_batches, &transform.dict_encode_columns);
 
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
@@ -386,97 +385,6 @@ impl Pipeline {
     }
 }
 
-/// Single-pass column fixup before Arrow IPC serialization:
-/// - Casts StringView / List<StringView> to Utf8 / List<Utf8> (ClickHouse
-///   26.x rejects utf8_view in Arrow IPC).
-/// - Dictionary-encodes Utf8 columns listed in `dict_columns` (ontology
-///   LowCardinality columns) for smaller IPC payloads.
-fn prepare_batches(batches: Vec<RecordBatch>, dict_columns: &[String]) -> Vec<RecordBatch> {
-    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
-
-    batches
-        .into_iter()
-        .map(|batch| {
-            let schema = batch.schema();
-            let num_columns = schema.fields().len();
-            let mut new_fields = Vec::with_capacity(num_columns);
-            let mut new_columns = Vec::with_capacity(num_columns);
-            let mut changed = false;
-
-            for (i, field) in schema.fields().iter().enumerate() {
-                let col = batch.column(i);
-
-                // StringView -> Utf8
-                if *field.data_type() == DataType::Utf8View {
-                    new_fields.push(Field::new(
-                        field.name(),
-                        DataType::Utf8,
-                        field.is_nullable(),
-                    ));
-                    new_columns.push(
-                        compute::cast(col, &DataType::Utf8)
-                            .expect("StringView -> Utf8 cast should not fail"),
-                    );
-                    changed = true;
-                    continue;
-                }
-
-                // List<StringView> -> List<Utf8>
-                if let DataType::List(inner) = field.data_type()
-                    && *inner.data_type() == DataType::Utf8View
-                {
-                    let target = DataType::List(Arc::new(Field::new(
-                        inner.name(),
-                        DataType::Utf8,
-                        inner.is_nullable(),
-                    )));
-                    new_fields.push(Field::new(
-                        field.name(),
-                        target.clone(),
-                        field.is_nullable(),
-                    ));
-                    new_columns.push(
-                        compute::cast(col, &target)
-                            .expect("List<StringView> -> List<Utf8> cast should not fail"),
-                    );
-                    changed = true;
-                    continue;
-                }
-
-                // Utf8 -> Dictionary<Int32, Utf8> for low-cardinality columns
-                if *field.data_type() == DataType::Utf8
-                    && dict_columns.iter().any(|c| c == field.name())
-                {
-                    new_fields.push(Field::new(
-                        field.name(),
-                        dict_type.clone(),
-                        field.is_nullable(),
-                    ));
-                    new_columns.push(
-                        compute::cast(col, &dict_type)
-                            .expect("Utf8 -> Dictionary cast should not fail"),
-                    );
-                    changed = true;
-                    continue;
-                }
-
-                new_fields.push(field.as_ref().clone());
-                new_columns.push(Arc::clone(col));
-            }
-
-            if changed {
-                RecordBatch::try_new(
-                    Arc::new(arrow::datatypes::Schema::new(new_fields)),
-                    new_columns,
-                )
-                .expect("schema/column mismatch in prepare_batches")
-            } else {
-                batch
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -489,6 +397,7 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use std::collections::HashSet;
     use std::sync::Mutex;
 
     fn simple_extract_query(batch_size: u64) -> ExtractQuery {
@@ -540,7 +449,7 @@ mod tests {
             transforms: vec![Transformation {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
-                dict_encode_columns: vec![],
+                dict_encode_columns: HashSet::new(),
             }],
         }
     }

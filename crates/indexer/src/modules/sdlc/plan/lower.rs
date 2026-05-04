@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
 use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
@@ -61,10 +63,22 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
     let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
 
+    let dict_columns = ontology
+        .get_node(&input.name)
+        .map(|node| {
+            node.storage
+                .columns
+                .iter()
+                .filter(|col| col.ch_type.starts_with("LowCardinality"))
+                .map(|col| col.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
     let mut transforms = vec![Transformation {
         query: lower_node_transform(&input.columns),
         destination_table: node_destination,
-        dict_encode_columns: vec![],
+        dict_encode_columns: dict_columns,
     }];
 
     for fk_edge in &input.edges {
@@ -116,7 +130,7 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
 
 struct EdgeTableMetadata {
     sort_key: Vec<OrderExpr>,
-    dict_columns: Vec<String>,
+    dict_columns: HashSet<String>,
 }
 
 fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
