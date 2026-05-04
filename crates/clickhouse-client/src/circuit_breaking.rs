@@ -45,12 +45,8 @@ impl CircuitBreakingClickHouseClient {
         batches: &[RecordBatch],
     ) -> Result<(), ClickHouseError> {
         self.breaker
-            .call_with_filter(
-                || self.client.insert_arrow(table, batches),
-                ClickHouseError::is_transient,
-            )
+            .call_transient(|| self.client.insert_arrow(table, batches))
             .await
-            .map_err(ClickHouseError::from_circuit_breaker)
     }
 
     pub fn client(&self) -> &ArrowClickHouseClient {
@@ -83,10 +79,7 @@ impl CircuitBreakingQuery {
     }
 
     pub async fn execute(self) -> Result<(), ClickHouseError> {
-        self.breaker
-            .call_with_filter(|| self.inner.execute(), ClickHouseError::is_transient)
-            .await
-            .map_err(ClickHouseError::from_circuit_breaker)
+        self.breaker.call_transient(|| self.inner.execute()).await
     }
 
     pub async fn fetch_arrow(self) -> Result<Vec<RecordBatch>, ClickHouseError> {
@@ -98,24 +91,16 @@ impl CircuitBreakingQuery {
         self,
     ) -> Result<(Vec<RecordBatch>, Option<QuerySummary>), ClickHouseError> {
         self.breaker
-            .call_with_filter(
-                || self.inner.fetch_arrow_with_summary(),
-                ClickHouseError::is_transient,
-            )
+            .call_transient(|| self.inner.fetch_arrow_with_summary())
             .await
-            .map_err(ClickHouseError::from_circuit_breaker)
     }
 
     pub async fn fetch_arrow_stream(
         self,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
         self.breaker
-            .call_with_filter(
-                || self.inner.fetch_arrow_stream(),
-                ClickHouseError::is_transient,
-            )
+            .call_transient(|| self.inner.fetch_arrow_stream())
             .await
-            .map_err(ClickHouseError::from_circuit_breaker)
     }
 
     pub async fn fetch_arrow_streamed(
@@ -123,11 +108,7 @@ impl CircuitBreakingQuery {
         max_block_size: u64,
     ) -> Result<BoxStream<'static, Result<RecordBatch, ClickHouseError>>, ClickHouseError> {
         self.breaker
-            .call_with_filter(
-                || self.inner.fetch_arrow_streamed(max_block_size),
-                ClickHouseError::is_transient,
-            )
+            .call_transient(|| self.inner.fetch_arrow_streamed(max_block_size))
             .await
-            .map_err(ClickHouseError::from_circuit_breaker)
     }
 }
