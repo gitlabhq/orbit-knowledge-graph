@@ -11,7 +11,8 @@ use crate::input::*;
 
 use super::super::plan::*;
 use super::super::shared::{
-    filter_to_expr, id_list_predicate, id_range_predicate, rel_kind_filter_values,
+    dedup_query, deleted_false, filter_to_expr, id_list_predicate, id_range_predicate,
+    rel_kind_filter, rel_kind_filter_values,
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -40,17 +41,7 @@ pub(super) fn build_dedup_subquery(
     if let Some(ref range) = np.id_range {
         scan_where.push(id_range_predicate(alias, range));
     }
-    Query {
-        select,
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    }
+    dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY)
 }
 
 /// Build SelectExpr list from the pre-computed dedup_columns on NodePlan.
@@ -175,10 +166,7 @@ fn emit_node_join_inner(
     let selects = node_select_columns(alias, np);
     // Only _deleted=false in the outer WHERE; user filters are already
     // inside the dedup scan.
-    let wheres = vec![Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    )];
+    let wheres = vec![deleted_false(alias)];
 
     Ok((joined, selects, wheres))
 }
@@ -215,10 +203,7 @@ pub(super) fn emit_filter_subquery(
             query: Box::new(dedup),
             alias: alias.to_string(),
         },
-        where_clause: Some(Expr::eq(
-            Expr::col(alias, DELETED_COLUMN),
-            Expr::param(ChType::Bool, false),
-        )),
+        where_clause: Some(deleted_false(alias)),
         ..Default::default()
     };
 
@@ -259,10 +244,7 @@ pub(super) fn push_edge_predicates(
             where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
         }
     }
-    where_parts.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    where_parts.push(deleted_false(alias));
 }
 
 /// Emit pre-computed denorm tags from the plan's NodePlans.
@@ -326,28 +308,6 @@ pub(super) fn emit_node_ids_on_edge(
     }
 }
 
-pub(super) fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
-    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
-        return None;
-    }
-    if types.len() == 1 {
-        Some(Expr::eq(
-            Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
-            Expr::string(&types[0]),
-        ))
-    } else {
-        Expr::col_in(
-            alias,
-            RELATIONSHIP_KIND_COLUMN,
-            ChType::String,
-            types
-                .iter()
-                .map(|t| serde_json::Value::String(t.clone()))
-                .collect(),
-        )
-    }
-}
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Variable-length: UNION ALL of edge chains
 // ─────────────────────────────────────────────────────────────────────────────
@@ -398,10 +358,7 @@ pub(super) fn build_multi_hop_union(
             where_parts.push(Expr::eq(Expr::col(alias, kind_col), Expr::string(entity)));
         }
     }
-    where_parts.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    where_parts.push(deleted_false(alias));
 
     (union, where_parts)
 }
@@ -431,10 +388,7 @@ pub(super) fn build_depth_arm(
     {
         where_parts.push(f);
     }
-    where_parts.push(Expr::eq(
-        Expr::col("e1", DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    where_parts.push(deleted_false("e1"));
     let where_clause = Expr::conjoin(where_parts);
 
     for i in 2..=depth {
@@ -443,13 +397,7 @@ pub(super) fn build_depth_arm(
         let right = TableRef::scan(edge_table, &curr);
         let mut join_on = Expr::eq(Expr::col(&prev, end_col), Expr::col(&curr, start_col));
         // _deleted = false on every chained edge.
-        join_on = Expr::and(
-            join_on,
-            Expr::eq(
-                Expr::col(&curr, DELETED_COLUMN),
-                Expr::param(ChType::Bool, false),
-            ),
-        );
+        join_on = Expr::and(join_on, deleted_false(&curr));
         if let Some(types) = type_filter
             && let Some(tc) = Expr::col_in(
                 &curr,

@@ -8,7 +8,7 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 
 use super::super::plan::*;
-use super::super::shared::id_list_predicate;
+use super::super::shared::{deleted_false, id_list_predicate};
 use super::EmitOutput;
 use super::helpers::{
     build_dedup_subquery, collect_dedup_columns, emit_filter_subquery, emit_node_join,
@@ -47,10 +47,7 @@ pub(super) fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<E
     };
 
     // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
-    let mut where_parts = vec![Expr::eq(
-        Expr::col(center_alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    )];
+    let mut where_parts = vec![deleted_false(center_alias)];
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
 

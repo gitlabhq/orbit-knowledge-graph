@@ -166,3 +166,121 @@ pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
         Some(types.to_vec())
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared helpers used across lower/ modules
+// ─────────────────────────────────────────────────────────────────────────────
+
+/// `alias._deleted = false` predicate.
+pub fn deleted_false(alias: &str) -> Expr {
+    Expr::eq(
+        Expr::col(alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    )
+}
+
+pub fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
+    if types.is_empty() || (types.len() == 1 && types[0] == "*") {
+        return None;
+    }
+    if types.len() == 1 {
+        Some(Expr::eq(
+            Expr::col(alias, RELATIONSHIP_KIND_COLUMN),
+            Expr::string(&types[0]),
+        ))
+    } else {
+        Expr::col_in(
+            alias,
+            RELATIONSHIP_KIND_COLUMN,
+            ChType::String,
+            types
+                .iter()
+                .map(|t| serde_json::Value::String(t.clone()))
+                .collect(),
+        )
+    }
+}
+
+/// Convert a denormalized tag filter into a ClickHouse expression.
+/// Returns `None` for unsupported filter ops.
+pub fn denorm_tag_expr(
+    edge_alias: &str,
+    tag_col: &str,
+    tag_key: &str,
+    filter: &InputFilter,
+) -> Option<Expr> {
+    match filter.op {
+        None | Some(FilterOp::Eq) => {
+            let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
+            Some(Expr::func(
+                "has",
+                vec![
+                    Expr::col(edge_alias, tag_col),
+                    Expr::string(format!("{tag_key}:{val}")),
+                ],
+            ))
+        }
+        Some(FilterOp::In) => {
+            let values = filter.value.as_ref().and_then(|v| v.as_array())?;
+            let tags: Vec<String> = values
+                .iter()
+                .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
+                .collect();
+            if tags.len() == 1 {
+                Some(Expr::func(
+                    "has",
+                    vec![Expr::col(edge_alias, tag_col), Expr::string(&tags[0])],
+                ))
+            } else if !tags.is_empty() {
+                Some(Expr::func(
+                    "hasAny",
+                    vec![
+                        Expr::col(edge_alias, tag_col),
+                        Expr::func("array", tags.iter().map(Expr::string).collect()),
+                    ],
+                ))
+            } else {
+                None
+            }
+        }
+        _ => None,
+    }
+}
+
+/// Build a TableRef for an edge scan: single table or UNION ALL across tables.
+pub fn edge_table_scan(tables: &[String], alias: &str) -> TableRef {
+    if tables.len() == 1 {
+        TableRef::scan(&tables[0], alias)
+    } else {
+        let arms: Vec<Query> = tables
+            .iter()
+            .map(|table| Query {
+                select: vec![SelectExpr::star()],
+                from: TableRef::scan(table, format!("_{alias}")),
+                ..Default::default()
+            })
+            .collect();
+        TableRef::union_all(arms, alias)
+    }
+}
+
+/// Build a dedup scan: SELECT columns FROM table WHERE filters ORDER BY version DESC LIMIT 1 BY pk.
+pub fn dedup_query(
+    alias: &str,
+    table: &str,
+    select: Vec<SelectExpr>,
+    scan_where: Vec<Expr>,
+    pk: &str,
+) -> Query {
+    Query {
+        select,
+        from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(scan_where),
+        order_by: vec![OrderExpr {
+            expr: Expr::col(alias, VERSION_COLUMN),
+            desc: true,
+        }],
+        limit_by: Some((1, vec![Expr::col(alias, pk)])),
+        ..Default::default()
+    }
+}

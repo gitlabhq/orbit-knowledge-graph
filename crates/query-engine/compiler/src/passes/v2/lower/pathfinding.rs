@@ -17,6 +17,10 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::super::plan::{PathEndpoint, PathFindingPlan};
+use super::super::shared::{
+    dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
+    id_list_predicate, id_range_predicate, rel_kind_filter,
+};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Emit
@@ -321,17 +325,17 @@ fn build_anchor(
     let alias = &endpoint.id;
     let mut scan_where = Vec::new();
     for (prop, filter) in &endpoint.filters {
-        scan_where.push(super::super::shared::filter_to_expr(alias, prop, filter));
+        scan_where.push(filter_to_expr(alias, prop, filter));
     }
     if !endpoint.node_ids.is_empty() {
-        scan_where.push(super::super::shared::id_list_predicate(
+        scan_where.push(id_list_predicate(
             alias,
             DEFAULT_PRIMARY_KEY,
             &endpoint.node_ids,
         ));
     }
     if let Some(ref range) = endpoint.id_range {
-        scan_where.push(super::super::shared::id_range_predicate(alias, range));
+        scan_where.push(id_range_predicate(alias, range));
     }
 
     let mut select = vec![SelectExpr::new(
@@ -349,17 +353,7 @@ fn build_anchor(
         DELETED_COLUMN,
     ));
 
-    let dedup_scan = Query {
-        select,
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
+    let dedup_scan = dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY);
 
     let mut outer_select = vec![SelectExpr::new(
         Expr::col(alias, DEFAULT_PRIMARY_KEY),
@@ -378,10 +372,7 @@ fn build_anchor(
             query: Box::new(dedup_scan),
             alias: alias.to_string(),
         },
-        where_clause: Some(Expr::eq(
-            Expr::col(alias, DELETED_COLUMN),
-            Expr::param(ChType::Bool, false),
-        )),
+        where_clause: Some(deleted_false(alias)),
         limit: Some(crate::passes::validate::MAX_PATH_ANCHOR_LIMIT as u32),
         ..Default::default()
     };
@@ -517,12 +508,12 @@ fn build_frontier_arm(
 
     let last = format!("e{depth}");
 
-    let mut from = edge_scan(opts.edge_tables, "e1", opts.first_hop_filter);
+    let mut from = edge_table_scan(opts.edge_tables, "e1");
     let mut first_type_cond = type_cond_for("e1", opts.first_hop_filter);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
-        let edge_tbl = edge_scan(opts.edge_tables, &curr, opts.rel_type_filter);
+        let edge_tbl = edge_table_scan(opts.edge_tables, &curr);
         let mut join_cond = Expr::eq(Expr::col(&prev, next_col), Expr::col(&curr, anchor_col));
         if opts.include_tp {
             join_cond = Expr::and(
@@ -539,13 +530,7 @@ fn build_frontier_arm(
         if let Some(sc) = opts.scope_cte {
             join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
         }
-        join_cond = Expr::and(
-            join_cond,
-            Expr::eq(
-                Expr::col(&curr, DELETED_COLUMN),
-                Expr::param(ChType::Bool, false),
-            ),
-        );
+        join_cond = Expr::and(join_cond, deleted_false(&curr));
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
 
@@ -608,10 +593,7 @@ fn build_frontier_arm(
         ));
     }
 
-    let deleted_cond = Some(Expr::eq(
-        Expr::col("e1", DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
+    let deleted_cond = Some(deleted_false("e1"));
 
     let mut all_conds = vec![
         anchor_cond,
@@ -630,30 +612,8 @@ fn build_frontier_arm(
     }
 }
 
-fn edge_scan(tables: &[String], alias: &str, _type_filter: &Option<Vec<String>>) -> TableRef {
-    if tables.len() == 1 {
-        TableRef::scan(&tables[0], alias)
-    } else {
-        let arms: Vec<Query> = tables
-            .iter()
-            .map(|table| Query {
-                select: vec![SelectExpr::star()],
-                from: TableRef::scan(table, format!("_{alias}")),
-                ..Default::default()
-            })
-            .collect();
-        TableRef::union_all(arms, alias)
-    }
-}
-
 fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {
-    let types = type_filter.as_ref()?;
-    Expr::col_in(
-        alias,
-        RELATIONSHIP_KIND_COLUMN,
-        ChType::String,
-        types.iter().map(|t| Value::String(t.clone())).collect(),
-    )
+    rel_kind_filter(alias, type_filter.as_deref().unwrap_or(&[]))
 }
 
 fn build_denorm_tags(
@@ -666,46 +626,10 @@ fn build_denorm_tags(
     let mut exprs = Vec::new();
     for (prop, filter) in filters {
         let key = (entity.to_string(), prop.clone(), dir_prefix.to_string());
-        let Some((tag_col, tag_key)) = denorm_map.get(&key) else {
-            continue;
-        };
-        match filter.op {
-            None | Some(FilterOp::Eq) => {
-                let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-                exprs.push(Expr::func(
-                    "has",
-                    vec![
-                        Expr::col(edge_alias, tag_col.as_str()),
-                        Expr::string(format!("{tag_key}:{val}")),
-                    ],
-                ));
-            }
-            Some(FilterOp::In) => {
-                if let Some(values) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                    let tags: Vec<String> = values
-                        .iter()
-                        .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
-                        .collect();
-                    if tags.len() == 1 {
-                        exprs.push(Expr::func(
-                            "has",
-                            vec![
-                                Expr::col(edge_alias, tag_col.as_str()),
-                                Expr::string(&tags[0]),
-                            ],
-                        ));
-                    } else if !tags.is_empty() {
-                        exprs.push(Expr::func(
-                            "hasAny",
-                            vec![
-                                Expr::col(edge_alias, tag_col.as_str()),
-                                Expr::func("array", tags.iter().map(Expr::string).collect()),
-                            ],
-                        ));
-                    }
-                }
-            }
-            _ => {}
+        if let Some((tag_col, tag_key)) = denorm_map.get(&key)
+            && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+        {
+            exprs.push(expr);
         }
     }
     exprs

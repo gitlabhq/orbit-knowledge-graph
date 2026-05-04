@@ -30,10 +30,7 @@ pub(super) fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
     };
 
     // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
-    let where_parts = vec![Expr::eq(
-        Expr::col(alias, ontology::constants::DELETED_COLUMN),
-        Expr::param(crate::ast::ChType::Bool, false),
-    )];
+    let where_parts = vec![super::super::shared::deleted_false(alias)];
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {

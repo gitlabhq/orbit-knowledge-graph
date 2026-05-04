@@ -13,6 +13,10 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::super::plan::NeighborsPlan;
+use super::super::shared::{
+    dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
+    id_list_predicate, id_range_predicate, rel_kind_filter,
+};
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
@@ -29,8 +33,6 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
     let edge_table = p.edge_tables.clone();
     let edge_alias = "e";
 
-    /// Build an inline dedup subquery for the center node (no CTE).
-    /// Returns a TableRef::Subquery that can be JOINed to the edge.
     fn build_center_dedup(
         alias: &str,
         table: &str,
@@ -40,41 +42,24 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
     ) -> (TableRef, Expr) {
         let mut scan_where = Vec::new();
         for (prop, filter) in filters {
-            scan_where.push(super::super::shared::filter_to_expr(alias, prop, filter));
+            scan_where.push(filter_to_expr(alias, prop, filter));
         }
         if !node_ids.is_empty() {
-            scan_where.push(super::super::shared::id_list_predicate(
-                alias,
-                DEFAULT_PRIMARY_KEY,
-                node_ids,
-            ));
+            scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, node_ids));
         }
         if let Some(range) = id_range {
-            scan_where.push(super::super::shared::id_range_predicate(alias, range));
+            scan_where.push(id_range_predicate(alias, range));
         }
-        let dedup_scan = Query {
-            select: vec![
-                SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
-                SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
-            ],
-            from: TableRef::scan(table, alias),
-            where_clause: Expr::conjoin(scan_where),
-            order_by: vec![OrderExpr {
-                expr: Expr::col(alias, VERSION_COLUMN),
-                desc: true,
-            }],
-            limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-            ..Default::default()
-        };
+        let select = vec![
+            SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
+            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+        ];
+        let query = dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY);
         let from = TableRef::Subquery {
-            query: Box::new(dedup_scan),
+            query: Box::new(query),
             alias: alias.to_string(),
         };
-        let deleted_filter = Expr::eq(
-            Expr::col(alias, DELETED_COLUMN),
-            Expr::param(ChType::Bool, false),
-        );
-        (from, deleted_filter)
+        (from, deleted_false(alias))
     }
 
     let edge_tiebreakers = || -> Vec<OrderExpr> {
@@ -138,14 +123,13 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
 
         // Push node_ids directly on edge column.
         if !center_node_ids.is_empty() {
-            where_parts.push(super::super::shared::id_list_predicate(
+            where_parts.push(id_list_predicate(
                 edge_alias,
                 center_edge_col,
                 &center_node_ids,
             ));
         }
 
-        // Push denorm filters as tags directly on edge.
         let denorm_dir = if dir == Direction::Outgoing {
             "source"
         } else {
@@ -153,31 +137,20 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
         };
         for (prop, filter) in &center_filters {
             let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = p.denorm_columns.get(&key) {
-                push_denorm_tag(&mut where_parts, edge_alias, tag_col, tag_key, filter);
+            if let Some((tag_col, tag_key)) = p.denorm_columns.get(&key)
+                && let Some(expr) = denorm_tag_expr(edge_alias, tag_col, tag_key, filter)
+            {
+                where_parts.push(expr);
             }
         }
 
-        // Relationship type filter.
         if let Some(ref types) = p.rel_type_filter
-            && let Some(f) = Expr::col_in(
-                edge_alias,
-                RELATIONSHIP_KIND_COLUMN,
-                ChType::String,
-                types
-                    .iter()
-                    .map(|t| serde_json::Value::String(t.clone()))
-                    .collect(),
-            )
+            && let Some(f) = rel_kind_filter(edge_alias, types)
         {
             where_parts.push(f);
         }
 
-        // _deleted on edge.
-        where_parts.push(Expr::eq(
-            Expr::col(edge_alias, DELETED_COLUMN),
-            Expr::param(ChType::Bool, false),
-        ));
+        where_parts.push(deleted_false(edge_alias));
 
         let mut select = vec![
             SelectExpr::new(Expr::col(edge_alias, neighbor_id), neighbor_id_column()),
@@ -189,19 +162,7 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
             SelectExpr::new(Expr::int(is_outgoing), neighbor_is_outgoing_column()),
         ];
 
-        let mut from: TableRef = if edge_table.len() == 1 {
-            TableRef::scan(&edge_table[0], edge_alias)
-        } else {
-            let arms: Vec<Query> = edge_table
-                .iter()
-                .map(|table| Query {
-                    select: vec![SelectExpr::star()],
-                    from: TableRef::scan(table, format!("_{edge_alias}")),
-                    ..Default::default()
-                })
-                .collect();
-            TableRef::union_all(arms, edge_alias)
-        };
+        let mut from: TableRef = edge_table_scan(&edge_table, edge_alias);
 
         // Non-denorm filters: inline dedup JOIN instead of CTE.
         if has_non_denorm {
@@ -272,50 +233,5 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
         arm.order_by = order_by;
         arm.limit = Some(p.limit);
         Ok(Node::Query(Box::new(arm)))
-    }
-}
-
-/// Push a denormalized tag predicate onto the edge WHERE.
-fn push_denorm_tag(
-    where_parts: &mut Vec<Expr>,
-    edge_alias: &str,
-    tag_col: &str,
-    tag_key: &str,
-    filter: &InputFilter,
-) {
-    match filter.op {
-        None | Some(FilterOp::Eq) => {
-            let val = filter.value.as_ref().and_then(|v| v.as_str()).unwrap_or("");
-            where_parts.push(Expr::func(
-                "has",
-                vec![
-                    Expr::col(edge_alias, tag_col),
-                    Expr::string(format!("{tag_key}:{val}")),
-                ],
-            ));
-        }
-        Some(FilterOp::In) => {
-            if let Some(values) = filter.value.as_ref().and_then(|v| v.as_array()) {
-                let tags: Vec<String> = values
-                    .iter()
-                    .filter_map(|v| v.as_str().map(|s| format!("{tag_key}:{s}")))
-                    .collect();
-                if tags.len() == 1 {
-                    where_parts.push(Expr::func(
-                        "has",
-                        vec![Expr::col(edge_alias, tag_col), Expr::string(&tags[0])],
-                    ));
-                } else if !tags.is_empty() {
-                    where_parts.push(Expr::func(
-                        "hasAny",
-                        vec![
-                            Expr::col(edge_alias, tag_col),
-                            Expr::func("array", tags.iter().map(Expr::string).collect()),
-                        ],
-                    ));
-                }
-            }
-        }
-        _ => {}
     }
 }

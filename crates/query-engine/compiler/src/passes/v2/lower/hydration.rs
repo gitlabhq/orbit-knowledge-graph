@@ -9,6 +9,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::super::plan::{HydrationNodePlan, HydrationPlan};
+use super::super::shared::{dedup_query, deleted_false};
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
@@ -57,21 +58,17 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
         scan_where.push(id_filter);
     }
 
-    let dedup_scan = Query {
-        select: vec![
+    let dedup_scan = dedup_query(
+        alias,
+        &node.table,
+        vec![
             SelectExpr::new(Expr::col(alias, pk), pk),
             SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
             SelectExpr::star(),
         ],
-        from: TableRef::scan(&node.table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, pk)])),
-        ..Default::default()
-    };
+        scan_where,
+        pk,
+    );
 
     Ok(Query {
         select: vec![
@@ -83,10 +80,7 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
             query: Box::new(dedup_scan),
             alias: alias.to_string(),
         },
-        where_clause: Some(Expr::eq(
-            Expr::col(alias, DELETED_COLUMN),
-            Expr::param(ChType::Bool, false),
-        )),
+        where_clause: Some(deleted_false(alias)),
         ..Default::default()
     })
 }
