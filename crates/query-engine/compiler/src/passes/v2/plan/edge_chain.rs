@@ -30,6 +30,12 @@ pub struct EdgeChainPlan {
     pub node_edge_mappings: HashMap<String, (String, String)>,
     /// Whether to synthesize FK edge metadata (traversal only, non-aggregation).
     pub synthesize_fk_edge_metadata: bool,
+    /// Pre-computed ORDER BY for the outer query.
+    pub order_by: Option<PlanOrderBy>,
+    /// Query result limit.
+    pub limit: u32,
+    /// Aggregation plan (only present for Aggregation query type).
+    pub agg: Option<AggPlan>,
 }
 
 /// A single edge hop in the plan chain.
@@ -130,6 +136,40 @@ pub enum DenormTagOp {
     Has,
     /// hasAny(edge_column, array("key:v1", "key:v2", ...))
     HasAny(Vec<String>),
+}
+
+/// Pre-computed ORDER BY for the outer query (traversal + aggregation).
+pub struct PlanOrderBy {
+    pub node: String,
+    pub property: String,
+    pub desc: bool,
+}
+
+/// Pre-computed aggregation plan (only for Aggregation queries).
+pub struct AggPlan {
+    pub specs: Vec<AggSpec>,
+    pub sort: Option<AggSortPlan>,
+}
+
+/// A single aggregation function specification.
+pub struct AggSpec {
+    pub function: AggFunction,
+    pub target: Option<String>,
+    pub property: Option<String>,
+    pub alias: String,
+    pub group_by: Option<GroupByPlan>,
+}
+
+/// Pre-computed GROUP BY columns for an aggregation.
+pub struct GroupByPlan {
+    pub node_alias: String,
+    pub columns: Vec<String>,
+}
+
+/// Pre-computed aggregation sort.
+pub struct AggSortPlan {
+    pub alias: String,
+    pub desc: bool,
 }
 
 /// Where a node's ID lives in the emitted SQL.
@@ -272,6 +312,20 @@ impl EdgeChainPlan {
         let synthesize_fk_edge_metadata = matches!(strategy, Strategy::FkStar { .. })
             && input.query_type != QueryType::Aggregation;
 
+        let order_by = input.order_by.as_ref().map(|ob| PlanOrderBy {
+            node: ob.node.clone(),
+            property: ob.property.clone(),
+            desc: matches!(ob.direction, OrderDirection::Desc),
+        });
+
+        let limit = input.limit;
+
+        let agg = if input.query_type == QueryType::Aggregation {
+            Some(build_agg_plan(input, &nodes))
+        } else {
+            None
+        };
+
         Self {
             hops,
             nodes,
@@ -279,6 +333,9 @@ impl EdgeChainPlan {
             elided_fks,
             node_edge_mappings,
             synthesize_fk_edge_metadata,
+            order_by,
+            limit,
+            agg,
         }
     }
 }
@@ -855,4 +912,35 @@ fn resolve_fk_join_needs(hops: &[Hop], nodes: &mut HashMap<String, NodePlan>, in
             np_mut.fk_needs_join = true;
         }
     }
+}
+
+fn build_agg_plan(input: &Input, nodes: &HashMap<String, NodePlan>) -> AggPlan {
+    let specs: Vec<AggSpec> = input
+        .aggregations
+        .iter()
+        .map(|a| {
+            let group_by = a.group_by.as_ref().and_then(|gb| {
+                nodes.get(gb.as_str()).map(|np| GroupByPlan {
+                    node_alias: gb.clone(),
+                    columns: requested_columns(&np.columns),
+                })
+            });
+            AggSpec {
+                function: a.function,
+                target: a.target.clone(),
+                property: a.property.clone(),
+                alias: a.alias.clone().unwrap_or_else(|| "agg_result".to_string()),
+                group_by,
+            }
+        })
+        .collect();
+
+    let sort = input.aggregation_sort.as_ref().and_then(|s| {
+        specs.get(s.agg_index).map(|spec| AggSortPlan {
+            alias: spec.alias.clone(),
+            desc: matches!(s.direction, OrderDirection::Desc),
+        })
+    });
+
+    AggPlan { specs, sort }
 }

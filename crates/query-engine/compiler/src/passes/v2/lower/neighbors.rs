@@ -16,7 +16,7 @@ use super::super::plan::NeighborsPlan;
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
-pub fn emit_neighbors(p: &NeighborsPlan, input: &mut Input) -> Result<Node> {
+pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
     let center_id = p.center_id.clone();
     let center_entity = p.center_entity.clone();
     let center_table = p.center_table.clone();
@@ -260,15 +260,6 @@ pub fn emit_neighbors(p: &NeighborsPlan, input: &mut Input) -> Result<Node> {
             ..Default::default()
         }
     };
-
-    // Populate node_edge_col so the enforce pass can find the center node.
-    // Neighbors emits _gkg_* columns itself (center edge col differs per arm),
-    // so the enforce pass skips redaction injection for Neighbors but still
-    // needs the mapping for security context.
-    input.compiler.node_edge_col.insert(
-        center_id.clone(),
-        (edge_alias.to_string(), SOURCE_ID_COLUMN.to_string()),
-    );
 
     if p.direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);

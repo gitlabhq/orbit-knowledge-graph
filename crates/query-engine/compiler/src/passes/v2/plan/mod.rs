@@ -38,8 +38,8 @@ impl QueryPlan {
     pub fn node_edge_mappings(&self) -> HashMap<String, (String, String)> {
         match self {
             Self::Traversal(p) | Self::Aggregation(p) => p.node_edge_mappings.clone(),
-            // Neighbors populates node_edge_col directly in emit (per-arm center col).
-            Self::Neighbors(_) | Self::PathFinding(_) | Self::Hydration(_) => HashMap::new(),
+            Self::Neighbors(p) => p.node_edge_mappings.clone(),
+            Self::PathFinding(_) | Self::Hydration(_) => HashMap::new(),
         }
     }
 }

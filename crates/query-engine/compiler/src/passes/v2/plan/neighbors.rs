@@ -22,6 +22,7 @@ pub struct NeighborsPlan {
     pub rel_type_filter: Option<Vec<String>>,
     /// Denorm column map snapshot from CompilerMetadata.
     pub denorm_columns: HashMap<(String, String, String), (String, String)>,
+    pub node_edge_mappings: HashMap<String, (String, String)>,
     pub order_by: Option<InputOrderBy>,
     pub cursor: Option<InputCursor>,
     pub limit: u32,
@@ -66,6 +67,11 @@ pub fn plan_neighbors(input: &Input) -> Result<NeighborsPlan> {
         !src && !tgt
     }) || center_node.id_range.is_some();
 
+    let node_edge_mappings = HashMap::from([(
+        center_node.id.clone(),
+        ("e".to_string(), SOURCE_ID_COLUMN.to_string()),
+    )]);
+
     Ok(NeighborsPlan {
         center_id: center_node.id.clone(),
         center_entity,
@@ -84,6 +90,7 @@ pub fn plan_neighbors(input: &Input) -> Result<NeighborsPlan> {
             Some(config.rel_types.clone())
         },
         denorm_columns: input.compiler.denormalized_columns.clone(),
+        node_edge_mappings,
         order_by: input.order_by.clone(),
         cursor: input.cursor,
         limit: input.limit,

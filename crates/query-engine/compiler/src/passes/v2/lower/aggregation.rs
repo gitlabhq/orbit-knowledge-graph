@@ -8,57 +8,41 @@ use crate::error::Result;
 use crate::input::*;
 
 use super::super::plan::*;
-use super::super::shared::requested_columns;
 
 pub fn emit_aggregation(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
     let output = plan.emit(input)?;
-    let (agg_select, group_by, order_by) = build_aggregation(input)?;
+    let agg = plan.agg.as_ref().expect("aggregation plan required");
+    let (agg_select, group_by, order_by) = build_aggregation(agg);
 
-    let q = output.into_query(agg_select, group_by, order_by, input.limit);
+    let q = output.into_query(agg_select, group_by, order_by, plan.limit);
     Ok(Node::Query(Box::new(q)))
 }
 
-fn build_aggregation(input: &Input) -> Result<(Vec<SelectExpr>, Vec<Expr>, Vec<OrderExpr>)> {
+fn build_aggregation(agg: &AggPlan) -> (Vec<SelectExpr>, Vec<Expr>, Vec<OrderExpr>) {
     let mut select = Vec::new();
     let mut group_by = Vec::new();
 
-    for agg in &input.aggregations {
-        let agg_expr = match agg.function {
+    for spec in &agg.specs {
+        let agg_expr = match spec.function {
             AggFunction::Count => {
-                if let (Some(target), Some(prop)) = (agg.target.as_deref(), agg.property.as_deref())
-                {
+                if let (Some(target), Some(prop)) = (&spec.target, &spec.property) {
                     Expr::func("COUNT", vec![Expr::col(target, prop)])
                 } else {
                     Expr::func("COUNT", vec![])
                 }
             }
-            AggFunction::Sum | AggFunction::Avg | AggFunction::Min | AggFunction::Max => {
-                let target = agg.target.as_deref().unwrap_or("*");
-                let prop = agg.property.as_deref().unwrap_or("id");
-                let fname = match agg.function {
-                    AggFunction::Sum => "SUM",
-                    AggFunction::Avg => "AVG",
-                    AggFunction::Min => "MIN",
-                    AggFunction::Max => "MAX",
-                    _ => unreachable!(),
-                };
-                Expr::func(fname, vec![Expr::col(target, prop)])
-            }
-            AggFunction::Collect => {
-                let target = agg.target.as_deref().unwrap_or("*");
-                let prop = agg.property.as_deref().unwrap_or("id");
-                Expr::func("groupArray", vec![Expr::col(target, prop)])
+            _ => {
+                let target = spec.target.as_deref().unwrap_or("*");
+                let prop = spec.property.as_deref().unwrap_or("id");
+                Expr::func(spec.function.as_sql(), vec![Expr::col(target, prop)])
             }
         };
 
-        let alias = agg.alias.as_deref().unwrap_or("agg_result");
-        select.push(SelectExpr::new(agg_expr, alias));
+        select.push(SelectExpr::new(agg_expr, &spec.alias));
 
-        if let Some(ref gb) = agg.group_by
-            && let Some(gb_node) = input.nodes.iter().find(|n| n.id == *gb)
-        {
-            for col in requested_columns(&gb_node.columns) {
-                let expr = Expr::col(gb, &col);
+        if let Some(ref gb) = spec.group_by {
+            for col in &gb.columns {
+                let expr = Expr::col(&gb.node_alias, col);
                 if !group_by.contains(&expr) {
                     group_by.push(expr);
                 }
@@ -67,15 +51,12 @@ fn build_aggregation(input: &Input) -> Result<(Vec<SelectExpr>, Vec<Expr>, Vec<O
     }
 
     let mut order_by = Vec::new();
-    if let Some(ref agg_sort) = input.aggregation_sort
-        && let Some(agg) = input.aggregations.get(agg_sort.agg_index)
-    {
-        let alias = agg.alias.as_deref().unwrap_or("agg_result");
+    if let Some(ref sort) = agg.sort {
         order_by.push(OrderExpr {
-            expr: Expr::ident(alias),
-            desc: matches!(agg_sort.direction, OrderDirection::Desc),
+            expr: Expr::ident(&sort.alias),
+            desc: sort.desc,
         });
     }
 
-    Ok((select, group_by, order_by))
+    (select, group_by, order_by)
 }
