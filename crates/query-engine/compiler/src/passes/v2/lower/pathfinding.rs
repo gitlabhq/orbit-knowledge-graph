@@ -1,8 +1,14 @@
 //! PathFinding: bidirectional frontier expansion.
 //!
+//! Two-phase design:
+//!   1. `plan_pathfinding` — reads Input, produces PathFindingPlan (no AST types).
+//!   2. `emit_pathfinding` — reads PathFindingPlan, produces SQL AST.
+//!
 //! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
 //! then combines via direct (depth-1) + intersection (forward meets backward).
 //! Dedup is baked into anchor CTEs (unlike v1 where DeduplicatePass adds it).
+
+use std::collections::HashMap;
 
 use ontology::constants::*;
 use serde_json::Value;
@@ -12,33 +18,50 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
+use super::plan::{PathEndpoint, PathFindingPlan};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 1: Plan
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn plan_pathfinding(input: &Input) -> Result<PathFindingPlan> {
     let path = input
         .path
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("path config missing".into()))?
         .clone();
 
-    let start = input
+    let start_node = input
         .nodes
         .iter()
         .find(|n| n.id == path.from)
         .ok_or_else(|| QueryError::Lowering(format!("start node '{}' not found", path.from)))?;
-    let end = input
+    let end_node = input
         .nodes
         .iter()
         .find(|n| n.id == path.to)
         .ok_or_else(|| QueryError::Lowering(format!("end node '{}' not found", path.to)))?;
 
-    let start_entity = start
+    let start_entity = start_node
         .entity
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("start node has no entity".into()))?
         .to_string();
-    let end_entity = end
+    let end_entity = end_node
         .entity
         .as_deref()
         .ok_or_else(|| QueryError::Lowering("end node has no entity".into()))?
+        .to_string();
+
+    let start_table = start_node
+        .table
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", start_node.id)))?
+        .to_string();
+    let end_table = end_node
+        .table
+        .as_deref()
+        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", end_node.id)))?
         .to_string();
 
     let wildcard_path = path.rel_types.is_empty();
@@ -60,44 +83,120 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
     let forward_depth = max_depth.div_ceil(2);
     let backward_depth = max_depth / 2;
 
-    let et = input.compiler.resolve_edge_tables(&path.rel_types);
-    let scoped_by_tp = can_scope_by_tp(input, start, end, &et);
+    let edge_tables = input.compiler.resolve_edge_tables(&path.rel_types);
 
-    // Build anchor CTEs with dedup baked in.
+    let start_has_tp = input
+        .compiler
+        .table_has_column(&start_table, TRAVERSAL_PATH_COLUMN);
+    let end_has_tp = input
+        .compiler
+        .table_has_column(&end_table, TRAVERSAL_PATH_COLUMN);
+
+    let scoped_by_tp = can_scope_by_tp(start_has_tp, end_has_tp, &edge_tables, |t, c| {
+        input.compiler.table_has_column(t, c)
+    });
+
+    let denorm_columns = input.compiler.denormalized_columns.clone();
+
+    Ok(PathFindingPlan {
+        start: PathEndpoint {
+            id: start_node.id.clone(),
+            entity: start_entity,
+            table: start_table,
+            node_ids: start_node.node_ids.clone(),
+            filters: start_node.filters.clone(),
+            id_range: start_node.id_range.clone(),
+            has_tp: start_has_tp,
+        },
+        end: PathEndpoint {
+            id: end_node.id.clone(),
+            entity: end_entity,
+            table: end_table,
+            node_ids: end_node.node_ids.clone(),
+            filters: end_node.filters.clone(),
+            id_range: end_node.id_range.clone(),
+            has_tp: end_has_tp,
+        },
+        max_depth,
+        forward_depth,
+        backward_depth,
+        rel_type_filter,
+        forward_first_hop_filter,
+        backward_first_hop_filter,
+        edge_tables,
+        scoped_by_tp,
+        denorm_columns,
+        cursor: input.cursor,
+        limit: input.limit,
+    })
+}
+
+fn make_type_filter(types: &[String]) -> Option<Vec<String>> {
+    if types.is_empty() {
+        None
+    } else {
+        Some(types.to_vec())
+    }
+}
+
+fn can_scope_by_tp(
+    start_has_tp: bool,
+    end_has_tp: bool,
+    edge_tables: &[String],
+    table_has_column: impl Fn(&str, &str) -> bool,
+) -> bool {
+    if edge_tables.is_empty()
+        || edge_tables
+            .iter()
+            .any(|t| !table_has_column(t, TRAVERSAL_PATH_COLUMN))
+    {
+        return false;
+    }
+    start_has_tp && end_has_tp
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Phase 2: Emit
+// ─────────────────────────────────────────────────────────────────────────────
+
+pub fn emit_pathfinding(plan: PathFindingPlan, _input: &mut Input) -> Result<Node> {
     let mut anchor_ctes: Vec<Cte> = Vec::new();
     let start_anchor = build_anchor(
-        input,
-        start,
+        &plan.start,
         SOURCE_ID_COLUMN,
         &mut anchor_ctes,
-        scoped_by_tp,
-    )?;
-    let end_anchor = build_anchor(input, end, TARGET_ID_COLUMN, &mut anchor_ctes, scoped_by_tp)?;
+        plan.scoped_by_tp,
+    );
+    let end_anchor = build_anchor(
+        &plan.end,
+        TARGET_ID_COLUMN,
+        &mut anchor_ctes,
+        plan.scoped_by_tp,
+    );
     let path_scope_cte = build_scope_cte(&start_anchor, &end_anchor);
 
-    // Build denorm tags for start/end entities to push onto anchor edges.
     let start_denorm = build_denorm_tags(
-        &start_entity,
+        &plan.start.entity,
         "source",
         "e1",
-        &start.filters,
-        &input.compiler.denormalized_columns,
+        &plan.start.filters,
+        &plan.denorm_columns,
     );
     let end_denorm = build_denorm_tags(
-        &end_entity,
+        &plan.end.entity,
         "target",
         "e1",
-        &end.filters,
-        &input.compiler.denormalized_columns,
+        &plan.end.filters,
+        &plan.denorm_columns,
     );
 
     let frontier_opts = FrontierOpts {
-        rel_type_filter: &rel_type_filter,
-        first_hop_filter: &forward_first_hop_filter,
-        anchor_entity: Some(&start_entity),
-        edge_tables: &et,
+        rel_type_filter: &plan.rel_type_filter,
+        first_hop_filter: &plan.forward_first_hop_filter,
+        anchor_entity: Some(&plan.start.entity),
+        edge_tables: &plan.edge_tables,
         scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
-        include_tp: scoped_by_tp,
+        include_tp: plan.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
     };
 
@@ -105,21 +204,21 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
         FORWARD_CTE,
         build_frontier(
             start_anchor.edge_filter,
-            forward_depth,
+            plan.forward_depth,
             FDir::Forward,
             &frontier_opts,
         ),
     );
-    let backward_cte = if backward_depth > 0 {
+    let backward_cte = if plan.backward_depth > 0 {
         Some(Cte::new(
             BACKWARD_CTE,
             build_frontier(
                 end_anchor.edge_filter.clone(),
-                backward_depth,
+                plan.backward_depth,
                 FDir::Backward,
                 &FrontierOpts {
-                    first_hop_filter: &backward_first_hop_filter,
-                    anchor_entity: Some(&end_entity),
+                    first_hop_filter: &plan.backward_first_hop_filter,
+                    anchor_entity: Some(&plan.end.entity),
                     anchor_denorm_tags: end_denorm,
                     ..frontier_opts.clone()
                 },
@@ -129,16 +228,19 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
         None
     };
 
+    let start_entity = &plan.start.entity;
+    let end_entity = &plan.end.entity;
+
     let start_tuple = |t: &str| {
         Expr::func(
             "tuple",
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(&start_entity)],
+            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(start_entity)],
         )
     };
     let end_tuple = |t: &str| {
         Expr::func(
             "tuple",
-            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(&end_entity)],
+            vec![Expr::col(t, ANCHOR_ID_COLUMN), Expr::string(end_entity)],
         )
     };
 
@@ -170,9 +272,9 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
             )),
             Some(Expr::eq(
                 Expr::col(FORWARD_ALIAS, END_KIND_COLUMN),
-                Expr::string(&end_entity),
+                Expr::string(end_entity),
             )),
-            endpoint_filter(end, FORWARD_ALIAS, END_ID_COLUMN),
+            endpoint_filter(&plan.end, FORWARD_ALIAS, END_ID_COLUMN),
         ]),
         ..Default::default()
     };
@@ -222,7 +324,7 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
                 Expr::col(FORWARD_ALIAS, END_ID_COLUMN),
                 Expr::col(BACKWARD_ALIAS, END_ID_COLUMN),
             );
-            if scoped_by_tp {
+            if plan.scoped_by_tp {
                 join_cond = Expr::and(
                     join_cond,
                     Expr::eq(
@@ -245,12 +347,12 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
                 Expr::col(FORWARD_ALIAS, DEPTH_COLUMN),
                 Expr::col(BACKWARD_ALIAS, DEPTH_COLUMN),
             ),
-            Expr::int(max_depth as i64),
+            Expr::int(plan.max_depth as i64),
         )),
         ..Default::default()
     };
 
-    let paths_union = if backward_depth == 0 {
+    let paths_union = if plan.backward_depth == 0 {
         TableRef::subquery(direct_query, PATHS_ALIAS)
     } else {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
@@ -260,7 +362,7 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
         expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
         desc: false,
     }];
-    if input.cursor.is_some() {
+    if plan.cursor.is_some() {
         order_by.extend([
             OrderExpr {
                 expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
@@ -298,42 +400,14 @@ pub fn lower_pathfinding(input: &mut Input) -> Result<Node> {
         ],
         from: paths_union,
         order_by,
-        limit: Some(input.limit),
+        limit: Some(plan.limit),
         ..Default::default()
     })))
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helpers
+// Emit helpers
 // ─────────────────────────────────────────────────────────────────────────────
-
-fn make_type_filter(types: &[String]) -> Option<Vec<String>> {
-    if types.is_empty() {
-        None
-    } else {
-        Some(types.to_vec())
-    }
-}
-
-fn can_scope_by_tp(
-    input: &Input,
-    start: &InputNode,
-    end: &InputNode,
-    edge_tables: &[String],
-) -> bool {
-    if edge_tables.is_empty()
-        || edge_tables
-            .iter()
-            .any(|t| !input.compiler.table_has_column(t, TRAVERSAL_PATH_COLUMN))
-    {
-        return false;
-    }
-    [start, end].iter().all(|node| {
-        node.table
-            .as_ref()
-            .is_some_and(|t| input.compiler.table_has_column(t, TRAVERSAL_PATH_COLUMN))
-    })
-}
 
 #[derive(Clone)]
 struct Anchor {
@@ -343,60 +417,57 @@ struct Anchor {
 }
 
 fn build_anchor(
-    input: &Input,
-    node: &InputNode,
+    endpoint: &PathEndpoint,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
     force_cte: bool,
-) -> Result<Anchor> {
+) -> Anchor {
     // Literal IN for concrete node_ids (no CTE needed).
-    if !force_cte && !node.node_ids.is_empty() {
-        return Ok(Anchor {
+    if !force_cte && !endpoint.node_ids.is_empty() {
+        return Anchor {
             edge_filter: Expr::col_in(
                 "e1",
                 edge_col,
                 ChType::Int64,
-                node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+                endpoint
+                    .node_ids
+                    .iter()
+                    .map(|id| Value::from(*id))
+                    .collect(),
             ),
             cte_name: None,
             has_tp: false,
-        });
+        };
     }
 
-    // Check if the node has conditions worth resolving.
-    let has_conds =
-        !node.node_ids.is_empty() || !node.filters.is_empty() || node.id_range.is_some();
+    let has_conds = !endpoint.node_ids.is_empty()
+        || !endpoint.filters.is_empty()
+        || endpoint.id_range.is_some();
     if !has_conds {
-        return Ok(Anchor {
+        return Anchor {
             edge_filter: None,
             cte_name: None,
             has_tp: false,
-        });
+        };
     }
 
-    let table = node
-        .table
-        .as_ref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.id)))?;
-    let cte_name = node_filter_cte(&node.id);
-    let has_tp = input
-        .compiler
-        .table_has_column(table, TRAVERSAL_PATH_COLUMN);
+    let table = &endpoint.table;
+    let cte_name = node_filter_cte(&endpoint.id);
+    let has_tp = endpoint.has_tp;
 
-    // Build dedup scan with filters baked in (no DeduplicatePass needed).
-    let alias = &node.id;
+    let alias = &endpoint.id;
     let mut scan_where = Vec::new();
-    for (prop, filter) in &node.filters {
+    for (prop, filter) in &endpoint.filters {
         scan_where.push(super::shared::filter_to_expr(alias, prop, filter));
     }
-    if !node.node_ids.is_empty() {
+    if !endpoint.node_ids.is_empty() {
         scan_where.push(super::shared::id_list_predicate(
             alias,
             DEFAULT_PRIMARY_KEY,
-            &node.node_ids,
+            &endpoint.node_ids,
         ));
     }
-    if let Some(ref range) = node.id_range {
+    if let Some(ref range) = endpoint.id_range {
         scan_where.push(super::shared::id_range_predicate(alias, range));
     }
 
@@ -410,7 +481,6 @@ fn build_anchor(
             TRAVERSAL_PATH_COLUMN,
         ));
     }
-    // _deleted for outer filter.
     select.push(SelectExpr::new(
         Expr::col(alias, DELETED_COLUMN),
         DELETED_COLUMN,
@@ -428,7 +498,6 @@ fn build_anchor(
         ..Default::default()
     };
 
-    // Wrap with _deleted=false + LIMIT cap.
     let mut outer_select = vec![SelectExpr::new(
         Expr::col(alias, DEFAULT_PRIMARY_KEY),
         DEFAULT_PRIMARY_KEY,
@@ -455,7 +524,7 @@ fn build_anchor(
     };
     ctes.push(Cte::new(&cte_name, cte_query));
 
-    Ok(Anchor {
+    Anchor {
         edge_filter: Some(Expr::InSubquery {
             expr: Box::new(Expr::col("e1", edge_col)),
             cte_name: cte_name.clone(),
@@ -463,7 +532,7 @@ fn build_anchor(
         }),
         cte_name: Some(cte_name),
         has_tp,
-    })
+    }
 }
 
 fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
@@ -498,17 +567,21 @@ const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
 const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
 const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
-fn endpoint_filter(node: &InputNode, alias: &str, col: &str) -> Option<Expr> {
-    if !node.node_ids.is_empty() {
+fn endpoint_filter(endpoint: &PathEndpoint, alias: &str, col: &str) -> Option<Expr> {
+    if !endpoint.node_ids.is_empty() {
         return Expr::col_in(
             alias,
             col,
             ChType::Int64,
-            node.node_ids.iter().map(|id| Value::from(*id)).collect(),
+            endpoint
+                .node_ids
+                .iter()
+                .map(|id| Value::from(*id))
+                .collect(),
         );
     }
-    if !node.filters.is_empty() || node.id_range.is_some() || !node.node_ids.is_empty() {
-        let cte_name = node_filter_cte(&node.id);
+    if !endpoint.filters.is_empty() || endpoint.id_range.is_some() {
+        let cte_name = node_filter_cte(&endpoint.id);
         return Some(Expr::InSubquery {
             expr: Box::new(Expr::col(alias, col)),
             cte_name,
@@ -544,7 +617,6 @@ struct FrontierOpts<'a> {
     edge_tables: &'a [String],
     scope_cte: Option<&'a str>,
     include_tp: bool,
-    /// Denorm tag predicates to push onto the anchor edge (e1).
     anchor_denorm_tags: Vec<Expr>,
 }
 
@@ -582,7 +654,6 @@ fn build_frontier_arm(
 
     let last = format!("e{depth}");
 
-    // Build edge join chain: e1 JOIN e2 ON e1.next = e2.anchor ...
     let mut from = edge_scan(opts.edge_tables, "e1", opts.first_hop_filter);
     let mut first_type_cond = type_cond_for("e1", opts.first_hop_filter);
     for i in 2..=depth {
@@ -605,7 +676,6 @@ fn build_frontier_arm(
         if let Some(sc) = opts.scope_cte {
             join_cond = Expr::and(join_cond, scope_filter(&curr, sc));
         }
-        // _deleted=false on chained edges.
         join_cond = Expr::and(
             join_cond,
             Expr::eq(
@@ -616,7 +686,6 @@ fn build_frontier_arm(
         from = TableRef::join(JoinType::Inner, from, edge_tbl, join_cond);
     }
 
-    // path_nodes: array of (id, kind) tuples.
     let path_range = match direction {
         FDir::Forward => 1..=depth,
         FDir::Backward => 1..=depth.saturating_sub(1),
@@ -676,7 +745,6 @@ fn build_frontier_arm(
         ));
     }
 
-    // _deleted=false on the anchor edge (e1).
     let deleted_cond = Some(Expr::eq(
         Expr::col("e1", DELETED_COLUMN),
         Expr::param(ChType::Bool, false),
@@ -689,7 +757,6 @@ fn build_frontier_arm(
         scope_cond,
         deleted_cond,
     ];
-    // Denorm tags on the anchor edge for prewhere granule skipping.
     all_conds.extend(opts.anchor_denorm_tags.iter().cloned().map(Some));
 
     Query {
@@ -700,7 +767,6 @@ fn build_frontier_arm(
     }
 }
 
-/// Build a FROM for a single or multi-edge-table scan.
 fn edge_scan(tables: &[String], alias: &str, _type_filter: &Option<Vec<String>>) -> TableRef {
     if tables.len() == 1 {
         TableRef::scan(&tables[0], alias)
@@ -717,7 +783,6 @@ fn edge_scan(tables: &[String], alias: &str, _type_filter: &Option<Vec<String>>)
     }
 }
 
-/// Build a type condition for an edge alias (separate from the FROM).
 fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr> {
     let types = type_filter.as_ref()?;
     Expr::col_in(
@@ -728,13 +793,12 @@ fn type_cond_for(alias: &str, type_filter: &Option<Vec<String>>) -> Option<Expr>
     )
 }
 
-/// Build denorm tag predicates for an anchor entity's filters.
 fn build_denorm_tags(
     entity: &str,
     dir_prefix: &str,
     edge_alias: &str,
-    filters: &std::collections::HashMap<String, InputFilter>,
-    denorm_map: &std::collections::HashMap<(String, String, String), (String, String)>,
+    filters: &HashMap<String, InputFilter>,
+    denorm_map: &HashMap<(String, String, String), (String, String)>,
 ) -> Vec<Expr> {
     let mut exprs = Vec::new();
     for (prop, filter) in filters {

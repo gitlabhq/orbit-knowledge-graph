@@ -1,8 +1,7 @@
 //! Hydration: fetch node properties for a set of IDs.
 //!
 //! Produces a UNION ALL of per-entity dedup scans with inline
-//! `LIMIT 1 BY id` dedup and `_deleted=false` filtering. No
-//! OptimizePass or DeduplicatePass needed.
+//! `LIMIT 1 BY id` dedup and `_deleted=false` filtering.
 
 use ontology::constants::*;
 
@@ -10,45 +9,74 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub fn lower_hydration(input: &mut Input) -> Result<Node> {
+use super::plan::{HydrationNodePlan, HydrationPlan};
+
+// ─── Plan ────────────────────────────────────────────────────────────────────
+
+pub fn plan_hydration(input: &Input) -> Result<HydrationPlan> {
     if input.nodes.is_empty() {
         return Err(QueryError::Lowering(
             "hydration requires at least one node".into(),
         ));
     }
+    let nodes = input
+        .nodes
+        .iter()
+        .map(|node| {
+            let table = node
+                .table
+                .as_ref()
+                .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
+            let entity = node
+                .entity
+                .as_ref()
+                .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
+            let columns = match &node.columns {
+                Some(ColumnSelection::List(cols)) => cols.clone(),
+                _ => vec![],
+            };
+            Ok(HydrationNodePlan {
+                alias: node.id.clone(),
+                table: table.clone(),
+                entity: entity.clone(),
+                id_property: node.id_property.clone(),
+                node_ids: node.node_ids.clone(),
+                columns,
+            })
+        })
+        .collect::<Result<Vec<_>>>()?;
 
-    let mut first_query = build_arm(&input.nodes[0])?;
-    for node in &input.nodes[1..] {
-        first_query.union_all.push(build_arm(node)?);
-    }
-    first_query.limit = Some(input.limit);
-
-    Ok(Node::Query(Box::new(first_query)))
+    Ok(HydrationPlan {
+        nodes,
+        limit: input.limit,
+    })
 }
 
-fn build_arm(node: &InputNode) -> Result<Query> {
-    let table = node
-        .table
-        .as_ref()
-        .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
-    let entity = node
-        .entity
-        .as_ref()
-        .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
-    let alias = &node.id;
+// ─── Emit ────────────────────────────────────────────────────────────────────
+
+pub fn emit_hydration(plan: HydrationPlan) -> Result<Node> {
+    let mut arms = plan.nodes.iter().map(emit_arm);
+    let mut first = arms
+        .next()
+        .ok_or_else(|| QueryError::Lowering("hydration requires at least one node".into()))??;
+    for arm in arms {
+        first.union_all.push(arm?);
+    }
+    first.limit = Some(plan.limit);
+    Ok(Node::Query(Box::new(first)))
+}
+
+fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
+    let alias = &node.alias;
     let pk = &node.id_property;
 
-    let columns: Vec<&str> = match &node.columns {
-        Some(ColumnSelection::List(cols)) => cols.iter().map(|s| s.as_str()).collect(),
-        _ => vec![],
-    };
-
-    let json_expr = if columns.is_empty() {
+    let json_expr = if node.columns.is_empty() {
         Expr::string("{}")
     } else {
-        let map_args: Vec<Expr> = columns
+        let map_args: Vec<Expr> = node
+            .columns
             .iter()
-            .flat_map(|&col| {
+            .flat_map(|col| {
                 [
                     Expr::string(col),
                     Expr::func("toString", vec![Expr::col(alias, col)]),
@@ -58,7 +86,6 @@ fn build_arm(node: &InputNode) -> Result<Query> {
         Expr::func("toJSONString", vec![Expr::func("map", map_args)])
     };
 
-    // Inner dedup scan: ID filter + LIMIT 1 BY for ReplacingMergeTree dedup.
     let mut scan_where = Vec::new();
     if let Some(id_filter) = Expr::col_in(
         alias,
@@ -72,15 +99,13 @@ fn build_arm(node: &InputNode) -> Result<Query> {
         scan_where.push(id_filter);
     }
 
-    let dedup_select = vec![
-        SelectExpr::new(Expr::col(alias, pk), pk),
-        SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
-        SelectExpr::star(),
-    ];
-
     let dedup_scan = Query {
-        select: dedup_select,
-        from: TableRef::scan(table, alias),
+        select: vec![
+            SelectExpr::new(Expr::col(alias, pk), pk),
+            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+            SelectExpr::star(),
+        ],
+        from: TableRef::scan(&node.table, alias),
         where_clause: Expr::conjoin(scan_where),
         order_by: vec![OrderExpr {
             expr: Expr::col(alias, VERSION_COLUMN),
@@ -90,15 +115,12 @@ fn build_arm(node: &InputNode) -> Result<Query> {
         ..Default::default()
     };
 
-    // Outer: project columns + _deleted=false after dedup.
-    let select = vec![
-        SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
-        SelectExpr::new(Expr::string(entity), format!("{alias}_entity_type")),
-        SelectExpr::new(json_expr, format!("{alias}_props")),
-    ];
-
     Ok(Query {
-        select,
+        select: vec![
+            SelectExpr::new(Expr::col(alias, pk), format!("{alias}_{pk}")),
+            SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
+            SelectExpr::new(json_expr, format!("{alias}_props")),
+        ],
         from: TableRef::Subquery {
             query: Box::new(dedup_scan),
             alias: alias.to_string(),

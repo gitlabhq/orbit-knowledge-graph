@@ -12,6 +12,7 @@ use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
+use crate::passes::v2::lower::QueryPlan;
 use crate::passes::*;
 use crate::pipeline::{Pipeline, PipelineEnv, PipelineState};
 use crate::types::SecurityContext;
@@ -32,6 +33,7 @@ crate::define_env_capabilities! {
 crate::define_state_capabilities! {
     pub json: String,
     pub input: Input,
+    pub query_plan: QueryPlan,
     pub node: Node,
     pub result_ctx: ResultContext,
     pub query_config: QueryConfig,
@@ -77,6 +79,7 @@ impl LocalEnv {
 pub struct QueryState {
     pub json: Option<String>,
     pub input: Option<Input>,
+    pub query_plan: Option<QueryPlan>,
     pub node: Option<Node>,
     pub result_ctx: Option<ResultContext>,
     pub query_config: Option<QueryConfig>,
@@ -96,6 +99,7 @@ impl QueryState {
 pub struct DuckDbState {
     pub json: Option<String>,
     pub input: Option<Input>,
+    pub query_plan: Option<QueryPlan>,
     pub node: Option<Node>,
     pub result_ctx: Option<ResultContext>,
     pub hydration_plan: Option<HydrationPlan>,
@@ -118,7 +122,7 @@ impl DuckDbState {
 /// common case.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// JSON → Validate → Normalize → Restrict → Plan → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
@@ -126,6 +130,7 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
         .seal(SealJson)
         .pass(NormalizePass)
         .pass(RestrictPass)
+        .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
         .pass(SecurityPass)
@@ -139,11 +144,12 @@ pub fn clickhouse() -> Pipeline<SecureEnv, QueryState> {
 /// Pipeline from pre-built Input (for tests and profiler).
 ///
 /// ```text
-/// Input → Restrict → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
+/// Input → Restrict → Plan → Lower → Enforce → Security → Check → HydratePlan → Settings → Codegen
 /// ```
 pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
+        .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
         .pass(SecurityPass)
@@ -159,11 +165,12 @@ pub fn from_input() -> Pipeline<SecureEnv, QueryState> {
 /// Dedup is baked into the lowerer (LIMIT 1 BY + _deleted=false).
 ///
 /// ```text
-/// Input → Restrict → Lower → Enforce → Settings → Codegen
+/// Input → Restrict → Plan → Lower → Enforce → Settings → Codegen
 /// ```
 pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
     Pipeline::builder()
         .pass(RestrictPass)
+        .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
         .pass(SettingsPass)
@@ -174,10 +181,11 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
 /// Local DuckDB hydration compilation pipeline.
 ///
 /// ```text
-/// Input → Lower → Enforce → DuckDbCodegen
+/// Input → Plan → Lower → Enforce → DuckDbCodegen
 /// ```
 pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
+        .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
         .pass(DuckDbCodegenPass)
@@ -187,13 +195,14 @@ pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
 /// Local DuckDB compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Lower → Enforce → HydratePlan → DuckDbCodegen
+/// JSON → Validate → Normalize → Plan → Lower → Enforce → HydratePlan → DuckDbCodegen
 /// ```
 pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
         .pass(ValidatePass)
         .seal(SealJson)
         .pass(NormalizePass)
+        .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
         .pass(HydratePlanPass)

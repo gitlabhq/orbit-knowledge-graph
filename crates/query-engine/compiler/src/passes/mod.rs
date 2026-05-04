@@ -18,6 +18,7 @@ use crate::ast::Node;
 use crate::error::Result;
 use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::pipelines::HasQueryPlan;
 use crate::pipelines::{
     HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasQueryConfig,
     HasResultCtx, HasSecurityCtx,
@@ -77,18 +78,36 @@ where
     }
 }
 
+pub struct PlannerPass;
+
+impl<E, S> CompilerPass<E, S> for PlannerPass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasInput + HasQueryPlan,
+{
+    const NAME: &'static str = "plan";
+
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let input = state.input_mut()?;
+        let plan = v2::lower::plan(input)?;
+        state.set_query_plan(plan);
+        Ok(())
+    }
+}
+
 pub struct LowerPass;
 
 impl<E, S> CompilerPass<E, S> for LowerPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode,
+    S: PipelineState + HasInput + HasQueryPlan + HasNode,
 {
     const NAME: &'static str = "lower";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let plan = state.take_query_plan()?;
         let input = state.input_mut()?;
-        let node = v2::lower::lower(input)?;
+        let node = v2::lower::emit(plan, input)?;
         state.set_node(node);
         Ok(())
     }

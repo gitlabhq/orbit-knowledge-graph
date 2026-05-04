@@ -7,21 +7,18 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::shared::{edge_select_columns, edge_select_columns_with_prefix};
+use super::shared::edge_select_columns;
+use super::shared::edge_select_columns_with_prefix;
 use super::types::Skeleton;
 use crate::constants::*;
 
-pub fn lower_traversal(input: &mut Input) -> Result<Node> {
+pub fn emit_traversal(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {
-        return lower_single_node(input);
+        return emit_single_node(skeleton, input);
     }
 
-    let skeleton = Skeleton::plan(input);
     let output = skeleton.emit(input)?;
 
-    // Edge metadata SELECT columns. FK paths already synthesize these
-    // as literal values in the skeleton SELECT — only add them for
-    // edge-table-based paths where the alias is a real table scan.
     let mut select = Vec::new();
     let already_has_edge_cols = output.select.iter().any(|s| {
         s.alias
@@ -59,8 +56,7 @@ pub fn lower_traversal(input: &mut Input) -> Result<Node> {
     Ok(Node::Query(Box::new(q)))
 }
 
-fn lower_single_node(input: &mut Input) -> Result<Node> {
-    let skeleton = Skeleton::plan(input);
+fn emit_single_node(skeleton: Skeleton, input: &mut Input) -> Result<Node> {
     let output = skeleton.emit(input)?;
 
     let order_by = input

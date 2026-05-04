@@ -12,12 +12,15 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
+use super::plan::NeighborsPlan;
+
+// ─── Plan ────────────────────────────────────────────────────────────────────
+
+pub fn plan_neighbors(input: &Input) -> Result<NeighborsPlan> {
     let config = input
         .neighbors
         .as_ref()
-        .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?
-        .clone();
+        .ok_or_else(|| QueryError::Lowering("neighbors config missing".into()))?;
 
     let center_node = input
         .nodes
@@ -34,24 +37,9 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
         .as_ref()
         .ok_or_else(|| QueryError::Lowering("center node table missing".into()))?
         .clone();
-    let center_id = center_node.id.clone();
-    let center_uses_default_pk = center_node.redaction_id_column == DEFAULT_PRIMARY_KEY;
-    let center_redaction_col = center_node.redaction_id_column.clone();
 
-    let edge_table = input.compiler.resolve_edge_tables(&config.rel_types);
-    let edge_alias = "e";
-
-    // Resolve center node constraints directly on the edge where possible.
-    // Non-denorm filters get an inline dedup JOIN per arm instead of a
-    // shared CTE (avoids CTE inlining duplication).
-    //
-    // 1. node_ids → push directly on edge column
-    // 2. denorm filters → push as tags on edge
-    // 3. non-denorm filters / id_range → inline dedup JOIN in each arm
-    let center_node_ids = center_node.node_ids.clone();
     let center_filters: Vec<(String, InputFilter)> =
         center_node.filters.clone().into_iter().collect();
-    let center_id_range = center_node.id_range.clone();
 
     let has_non_denorm = center_filters.iter().any(|(prop, _)| {
         let src = input.compiler.denormalized_columns.contains_key(&(
@@ -65,7 +53,46 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
             "target".to_string(),
         ));
         !src && !tgt
-    }) || center_id_range.is_some();
+    }) || center_node.id_range.is_some();
+
+    Ok(NeighborsPlan {
+        center_id: center_node.id.clone(),
+        center_entity,
+        center_table,
+        center_uses_default_pk: center_node.redaction_id_column == DEFAULT_PRIMARY_KEY,
+        center_redaction_col: center_node.redaction_id_column.clone(),
+        center_node_ids: center_node.node_ids.clone(),
+        center_filters,
+        center_id_range: center_node.id_range.clone(),
+        has_non_denorm,
+        direction: config.direction,
+        edge_tables: input.compiler.resolve_edge_tables(&config.rel_types),
+        rel_type_filter: if config.rel_types.is_empty() {
+            None
+        } else {
+            Some(config.rel_types.clone())
+        },
+        denorm_columns: input.compiler.denormalized_columns.clone(),
+        order_by: input.order_by.clone(),
+        cursor: input.cursor,
+        limit: input.limit,
+    })
+}
+
+// ─── Emit ────────────────────────────────────────────────────────────────────
+
+pub fn emit_neighbors(p: NeighborsPlan, input: &mut Input) -> Result<Node> {
+    let center_id = p.center_id.clone();
+    let center_entity = p.center_entity.clone();
+    let center_table = p.center_table.clone();
+    let center_uses_default_pk = p.center_uses_default_pk;
+    let center_redaction_col = p.center_redaction_col.clone();
+    let center_node_ids = p.center_node_ids.clone();
+    let center_filters = p.center_filters.clone();
+    let center_id_range = p.center_id_range.clone();
+    let has_non_denorm = p.has_non_denorm;
+    let edge_table = p.edge_tables.clone();
+    let edge_alias = "e";
 
     /// Build an inline dedup subquery for the center node (no CTE).
     /// Returns a TableRef::Subquery that can be JOINed to the edge.
@@ -115,7 +142,6 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
         (from, deleted_filter)
     }
 
-    // Deterministic tiebreakers for cursor pagination.
     let edge_tiebreakers = || -> Vec<OrderExpr> {
         vec![
             OrderExpr {
@@ -132,25 +158,19 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
             },
         ]
     };
-    let order_by = match &input.order_by {
+    let order_by = match &p.order_by {
         Some(ob) => {
             let mut exprs = vec![OrderExpr {
                 expr: Expr::col(&ob.node, &ob.property),
                 desc: ob.direction == OrderDirection::Desc,
             }];
-            if input.cursor.is_some() {
+            if p.cursor.is_some() {
                 exprs.extend(edge_tiebreakers());
             }
             exprs
         }
-        None if input.cursor.is_some() => edge_tiebreakers(),
+        None if p.cursor.is_some() => edge_tiebreakers(),
         None => vec![],
-    };
-
-    let rel_type_filter: Option<Vec<String>> = if config.rel_types.is_empty() {
-        None
-    } else {
-        Some(config.rel_types.clone())
     };
 
     let build_arm = |dir: Direction| -> Query {
@@ -198,26 +218,13 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
         };
         for (prop, filter) in &center_filters {
             let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = input.compiler.denormalized_columns.get(&key) {
-                push_denorm_tag(&mut where_parts, edge_alias, tag_col, tag_key, filter);
-            }
-        }
-
-        // Push denorm filters as tags directly on edge.
-        let denorm_dir = if dir == Direction::Outgoing {
-            "source"
-        } else {
-            "target"
-        };
-        for (prop, filter) in &center_filters {
-            let key = (center_entity.clone(), prop.clone(), denorm_dir.to_string());
-            if let Some((tag_col, tag_key)) = input.compiler.denormalized_columns.get(&key) {
+            if let Some((tag_col, tag_key)) = p.denorm_columns.get(&key) {
                 push_denorm_tag(&mut where_parts, edge_alias, tag_col, tag_key, filter);
             }
         }
 
         // Relationship type filter.
-        if let Some(ref types) = rel_type_filter
+        if let Some(ref types) = p.rel_type_filter
             && let Some(f) = Expr::col_in(
                 edge_alias,
                 RELATIONSHIP_KIND_COLUMN,
@@ -328,16 +335,16 @@ pub fn lower_neighbors(input: &mut Input) -> Result<Node> {
         (edge_alias.to_string(), SOURCE_ID_COLUMN.to_string()),
     );
 
-    if config.direction == Direction::Both {
+    if p.direction == Direction::Both {
         let mut outgoing = build_arm(Direction::Outgoing);
         outgoing.union_all = vec![build_arm(Direction::Incoming)];
         outgoing.order_by = order_by;
-        outgoing.limit = Some(input.limit);
+        outgoing.limit = Some(p.limit);
         Ok(Node::Query(Box::new(outgoing)))
     } else {
-        let mut arm = build_arm(config.direction);
+        let mut arm = build_arm(p.direction);
         arm.order_by = order_by;
-        arm.limit = Some(input.limit);
+        arm.limit = Some(p.limit);
         Ok(Node::Query(Box::new(arm)))
     }
 }
