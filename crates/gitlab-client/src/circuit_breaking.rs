@@ -20,12 +20,8 @@ impl CircuitBreakingGitlabClient {
 
     pub async fn project_info(&self, project_id: i64) -> Result<ProjectInfo, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || self.client.project_info(project_id),
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| self.client.project_info(project_id))
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn download_archive(
@@ -34,12 +30,8 @@ impl CircuitBreakingGitlabClient {
         ref_name: &str,
     ) -> Result<ByteStream, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || self.client.download_archive(project_id, ref_name),
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| self.client.download_archive(project_id, ref_name))
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn changed_paths(
@@ -49,12 +41,8 @@ impl CircuitBreakingGitlabClient {
         to_sha: &str,
     ) -> Result<ByteStream, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || self.client.changed_paths(project_id, from_sha, to_sha),
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| self.client.changed_paths(project_id, from_sha, to_sha))
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn list_blobs(
@@ -63,12 +51,8 @@ impl CircuitBreakingGitlabClient {
         oids: &[String],
     ) -> Result<ByteStream, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || self.client.list_blobs(project_id, oids),
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| self.client.list_blobs(project_id, oids))
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn list_merge_request_diff_files(
@@ -78,15 +62,11 @@ impl CircuitBreakingGitlabClient {
         paths: &[String],
     ) -> Result<MergeRequestDiffBatch, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || {
-                    self.client
-                        .list_merge_request_diff_files(project_id, diff_id, paths)
-                },
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| {
+                self.client
+                    .list_merge_request_diff_files(project_id, diff_id, paths)
+            })
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn get_merge_request_raw_diff(
@@ -95,12 +75,8 @@ impl CircuitBreakingGitlabClient {
         diff_id: i64,
     ) -> Result<ByteStream, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || self.client.get_merge_request_raw_diff(project_id, diff_id),
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| self.client.get_merge_request_raw_diff(project_id, diff_id))
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 
     pub async fn get_merge_request_raw_diff_by_iid(
@@ -109,14 +85,10 @@ impl CircuitBreakingGitlabClient {
         merge_request_iid: i64,
     ) -> Result<ByteStream, GitlabClientError> {
         self.breaker
-            .call_with_filter(
-                || {
-                    self.client
-                        .get_merge_request_raw_diff_by_iid(project_id, merge_request_iid)
-                },
-                GitlabClientError::is_transient,
-            )
+            .call_transient(|| {
+                self.client
+                    .get_merge_request_raw_diff_by_iid(project_id, merge_request_iid)
+            })
             .await
-            .map_err(GitlabClientError::from_circuit_breaker)
     }
 }

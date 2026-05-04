@@ -1,4 +1,4 @@
-use circuit_breaker::CircuitBreakerError;
+use circuit_breaker::CircuitBreakableError;
 
 #[derive(Debug, thiserror::Error)]
 pub enum GitlabClientError {
@@ -30,8 +30,8 @@ pub enum GitlabClientError {
     CircuitOpen { service: &'static str },
 }
 
-impl GitlabClientError {
-    pub fn is_transient(&self) -> bool {
+impl CircuitBreakableError for GitlabClientError {
+    fn is_transient(&self) -> bool {
         match self {
             Self::Request(_) | Self::ServerError { .. } => true,
             Self::Unauthorized
@@ -44,10 +44,7 @@ impl GitlabClientError {
         }
     }
 
-    pub(crate) fn from_circuit_breaker(error: CircuitBreakerError<Self>) -> Self {
-        match error {
-            CircuitBreakerError::Open { service } => Self::CircuitOpen { service },
-            CircuitBreakerError::Inner(inner) => inner,
-        }
+    fn circuit_open(service: &'static str) -> Self {
+        Self::CircuitOpen { service }
     }
 }
