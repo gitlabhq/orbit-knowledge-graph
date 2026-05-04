@@ -115,6 +115,12 @@ properties:
     nullable: false
     description: "Environment this deployment targets."
 
+  user_id:
+    type: int64
+    source: user_id
+    nullable: true
+    description: "User who created the deployment."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -162,6 +168,7 @@ storage:
     - {name: finished_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: environment_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_status, column: status, type: "set(8)", granularity: 2}

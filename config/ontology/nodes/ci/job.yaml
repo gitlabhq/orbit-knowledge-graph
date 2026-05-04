@@ -226,6 +226,18 @@ properties:
     nullable: false
     description: "Project this job belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
 
+  user_id:
+    type: int64
+    source: user_id
+    nullable: true
+    description: "User who triggered the job."
+
+  upstream_pipeline_id:
+    type: int64
+    source: upstream_pipeline_id
+    nullable: true
+    description: "Upstream pipeline that triggered this bridge job."
+
   stage_id:
     type: int64
     source: stage_id
@@ -314,6 +326,8 @@ storage:
     - {name: exit_code, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: scheduling_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: upstream_pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: stage_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}

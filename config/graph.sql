@@ -109,6 +109,7 @@ CREATE TABLE IF NOT EXISTS gl_deployment (
     finished_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     environment_id Int64 CODEC(Delta(8), LZ4),
+    user_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -173,6 +174,7 @@ CREATE TABLE IF NOT EXISTS gl_environment (
     description String DEFAULT '' CODEC(ZSTD(3)),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    merge_request_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -338,6 +340,8 @@ CREATE TABLE IF NOT EXISTS gl_job (
     exit_code Nullable(Int64) CODEC(Delta(8), LZ4),
     scheduling_type LowCardinality(String) DEFAULT '' CODEC(LZ4),
     project_id Int64 CODEC(Delta(8), LZ4),
+    user_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    upstream_pipeline_id Nullable(Int64) CODEC(Delta(8), LZ4),
     stage_id Nullable(Int64) CODEC(Delta(8), LZ4),
     pipeline_id Nullable(Int64) CODEC(Delta(8), LZ4),
     auto_canceled_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
@@ -378,12 +382,14 @@ CREATE TABLE IF NOT EXISTS gl_job_metadata (
     expanded_environment_name String DEFAULT '' CODEC(ZSTD(1)),
     environment_auto_stop_in String DEFAULT '' CODEC(ZSTD(1)),
     debug_trace_enabled Bool DEFAULT false,
+    project_id Int64 CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
     INDEX idx_build_id build_id TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
     PROJECTION by_build_id (SELECT _part_offset ORDER BY build_id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
@@ -400,6 +406,7 @@ CREATE TABLE IF NOT EXISTS gl_label (
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    group_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -454,6 +461,15 @@ CREATE TABLE IF NOT EXISTS gl_merge_request (
     removed_lines Nullable(Int64) CODEC(Delta(8), LZ4),
     first_contribution Bool DEFAULT false,
     reviewer_first_assigned_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    author_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    merge_user_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    updated_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    last_edited_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    closed_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    milestone_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    source_project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    head_pipeline_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    latest_merge_request_diff_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -565,6 +581,7 @@ CREATE TABLE IF NOT EXISTS gl_milestone (
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    group_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -599,6 +616,7 @@ CREATE TABLE IF NOT EXISTS gl_note (
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    author_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -639,6 +657,8 @@ CREATE TABLE IF NOT EXISTS gl_pipeline (
     yaml_errors String DEFAULT '' CODEC(ZSTD(3)),
     protected Nullable(Bool),
     project_id Int64 CODEC(Delta(8), LZ4),
+    user_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    merge_request_id Nullable(Int64) CODEC(Delta(8), LZ4),
     auto_canceled_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
@@ -821,6 +841,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability (
     dismissed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Int64 CODEC(Delta(8), LZ4),
     finding_id Int64 CODEC(Delta(8), LZ4),
+    author_id Int64 CODEC(Delta(8), LZ4),
+    confirmed_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    resolved_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    dismissed_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -888,6 +912,10 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     created_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
     updated_at DateTime64(6, 'UTC') DEFAULT now() CODEC(Delta(8), ZSTD(1)),
     detected_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
+    scanner_id Int64 CODEC(Delta(8), LZ4),
+    vulnerability_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    primary_identifier_id Int64 CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -897,13 +925,14 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_occurrence (
     INDEX idx_description description TYPE bloom_filter(0.01) GRANULARITY 1,
     INDEX idx_cve cve TYPE bloom_filter(0.01) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     id Int64 CODEC(Delta(8), LZ4),
@@ -912,6 +941,7 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     vendor LowCardinality(String) DEFAULT 'GitLab' CODEC(LZ4),
     created_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
+    project_id Int64 CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,
@@ -921,13 +951,14 @@ CREATE TABLE IF NOT EXISTS gl_vulnerability_scanner (
     INDEX idx_external_id external_id TYPE text(tokenizer = splitByNonAlpha) GRANULARITY 1,
     INDEX idx_external_id_ngram external_id TYPE ngrambf_v1(3, 512, 2, 0) GRANULARITY 1,
     PROJECTION by_id (SELECT * ORDER BY id),
+    PROJECTION by_project_id (SELECT _part_offset ORDER BY project_id),
     PROJECTION tp_count (
       SELECT traversal_path, uniq(id)
       GROUP BY traversal_path
     )
 ) ENGINE = ReplacingMergeTree(_version, _deleted)
 ORDER BY (traversal_path, id) PRIMARY KEY (traversal_path, id)
-SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, auto_statistics_types = 'minmax, uniq, countmin';
+SETTINGS index_granularity = 2048, deduplicate_merge_projection_mode = 'rebuild', allow_experimental_replacing_merge_with_cleanup = 1, allow_part_offset_column_in_projections = 1, auto_statistics_types = 'minmax, uniq, countmin';
 
 CREATE TABLE IF NOT EXISTS gl_work_item (
     id Int64 CODEC(Delta(8), LZ4),
@@ -944,6 +975,10 @@ CREATE TABLE IF NOT EXISTS gl_work_item (
     updated_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     closed_at Nullable(DateTime64(6, 'UTC')) CODEC(Delta(8), ZSTD(1)),
     project_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    author_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    milestone_id Nullable(Int64) CODEC(Delta(8), LZ4),
+    namespace_id Int64 CODEC(Delta(8), LZ4),
+    closed_by_id Nullable(Int64) CODEC(Delta(8), LZ4),
     traversal_path String DEFAULT '0/' CODEC(ZSTD(1)),
     _version DateTime64(6, 'UTC') DEFAULT now64(6) CODEC(ZSTD(1)),
     _deleted Bool DEFAULT false,

@@ -116,6 +116,30 @@ properties:
     nullable: true
     description: "Project this work item belongs to, if project-scoped. Null for group-level work items. Stored on the node row so the compiler can filter by project without scanning the edge table."
 
+  author_id:
+    type: int64
+    source: author_id
+    nullable: true
+    description: "User who created the work item."
+
+  milestone_id:
+    type: int64
+    source: milestone_id
+    nullable: true
+    description: "Milestone this work item is associated with."
+
+  namespace_id:
+    type: int64
+    source: namespace_id
+    nullable: false
+    description: "Namespace (group) this work item belongs to."
+
+  closed_by_id:
+    type: int64
+    source: closed_by_id
+    nullable: true
+    description: "User who closed the work item."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -170,6 +194,10 @@ storage:
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: namespace_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: closed_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}
