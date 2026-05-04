@@ -51,6 +51,7 @@ properties:
 
 storage:
   settings:
+    allow_part_offset_column_in_projections: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
