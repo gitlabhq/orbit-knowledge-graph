@@ -278,4 +278,3 @@ Example response:
   }
 }
 ```
-
