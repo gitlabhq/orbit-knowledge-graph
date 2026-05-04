@@ -21,6 +21,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
     let mut tagged_nodes: HashSet<String> = HashSet::new();
+    let mut narrowed_nodes: HashSet<String> = HashSet::new();
 
     for (i, hop) in plan.hops.iter().enumerate() {
         let alias = format!("e{i}");
@@ -97,6 +98,8 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             &alias,
             start_col,
             end_col,
+            &mut ctes,
+            &mut narrowed_nodes,
         );
 
         edge_aliases.push(alias);

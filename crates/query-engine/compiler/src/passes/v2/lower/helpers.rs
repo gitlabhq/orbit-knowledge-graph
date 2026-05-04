@@ -317,11 +317,10 @@ pub(super) fn emit_node_ids_on_edge(
     }
 }
 
-/// Narrow edge scan via FilterOnly node CTEs.
-/// When a node on this hop has FilterOnly hydration, its `_filter_{alias}` CTE
-/// contains the surviving IDs after dedup + property filters. Feeding that back
-/// into the edge WHERE as `edge_col IN (SELECT id FROM _filter_*)` lets
-/// ClickHouse skip non-matching edge rows early.
+/// Narrow edge scan via node filter CTEs.
+/// For FilterOnly nodes, the `_filter_*` CTE is created later in the node
+/// processing phase — we just reference it here. For Join nodes with property
+/// filters, we create a lightweight narrowing CTE on the spot.
 pub(super) fn emit_filter_narrowing(
     where_parts: &mut Vec<Expr>,
     hop: &Hop,
@@ -329,18 +328,50 @@ pub(super) fn emit_filter_narrowing(
     edge_alias: &str,
     start_col: &str,
     end_col: &str,
+    ctes: &mut Vec<Cte>,
+    narrowed: &mut HashSet<String>,
 ) {
     for (node_alias, id_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
         let Some(np) = nodes.get(node_alias) else {
             continue;
         };
-        if np.hydration == HydrationStrategy::FilterOnly {
-            where_parts.push(Expr::InSubquery {
-                expr: Box::new(Expr::col(edge_alias, id_col)),
-                cte_name: format!("_filter_{node_alias}"),
-                column: "id".to_string(),
-            });
+        let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
+        let should_narrow = match np.hydration {
+            HydrationStrategy::FilterOnly => true,
+            HydrationStrategy::Join => selective,
+            HydrationStrategy::Skip => false,
+        };
+        if !should_narrow {
+            continue;
         }
+        let cte_name = format!("_filter_{node_alias}");
+        // Join nodes need their CTE created here; FilterOnly gets theirs later.
+        if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
+            let table = np.table.as_deref().unwrap_or("");
+            let dedup = build_dedup_subquery(
+                node_alias,
+                table,
+                vec![
+                    SelectExpr::col(node_alias, DEFAULT_PRIMARY_KEY),
+                    SelectExpr::col(node_alias, DELETED_COLUMN),
+                ],
+                np,
+            );
+            ctes.push(Cte::new(
+                &cte_name,
+                Query {
+                    select: vec![SelectExpr::col(node_alias, DEFAULT_PRIMARY_KEY)],
+                    from: TableRef::subquery(dedup, node_alias),
+                    where_clause: Some(deleted_false(node_alias)),
+                    ..Default::default()
+                },
+            ));
+        }
+        where_parts.push(Expr::InSubquery {
+            expr: Box::new(Expr::col(edge_alias, id_col)),
+            cte_name,
+            column: "id".to_string(),
+        });
     }
 }
 
