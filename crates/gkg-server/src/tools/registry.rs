@@ -149,10 +149,11 @@ impl ToolRegistry {
     fn get_graph_info() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_info".into(),
-            description: "Discovery tool for the GitLab Knowledge Graph. Call this BEFORE \
+            description: "Discovery tool for Orbit - the GitLab Knowledge Graph. Call this BEFORE \
                           composing a query to learn the graph's shape, query language, response \
                           format, or indexing status. Returns any subset of four sections in one \
-                          call.\n\n\
+                          call. At minimum call with `sections=[\"dsl\",\"schema\"]` before \
+                          writing a query.\n\n\
                           Sections (pass via `sections`, pick only what you need):\n\
                           - `schema`: ontology of node/edge types and domains. Add \
                           `schema_options.expand_nodes=[\"Node1\",...]` or `[\"*\"]` to include \
