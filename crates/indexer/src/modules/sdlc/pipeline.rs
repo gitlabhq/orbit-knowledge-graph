@@ -2,7 +2,6 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::array::ArrayRef;
 use arrow::compute;
 use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
@@ -292,10 +291,7 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
-            // DataFusion may produce StringView (utf8_view) arrays which
-            // ClickHouse 26.x doesn't support in Arrow IPC ingestion.
-            // Cast them to Utf8 before writing.
-            let result_batches = downcast_string_views(&result_batches);
+            let result_batches = prepare_batches(result_batches, &transform.dict_encode_columns);
 
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
@@ -377,57 +373,92 @@ impl Pipeline {
     }
 }
 
-/// Cast StringView / List<StringView> columns to Utf8 / List<Utf8>.
-/// DataFusion 53+ produces StringView for `make_array(concat(...))` results,
-/// but ClickHouse 26.x rejects the `utf8_view` Arrow type during IPC ingestion.
-fn downcast_string_views(batches: &[RecordBatch]) -> Vec<RecordBatch> {
+/// Single-pass column fixup before Arrow IPC serialization:
+/// - Casts StringView / List<StringView> to Utf8 / List<Utf8> (ClickHouse
+///   26.x rejects utf8_view in Arrow IPC).
+/// - Dictionary-encodes Utf8 columns listed in `dict_columns` (ontology
+///   LowCardinality columns) for smaller IPC payloads.
+fn prepare_batches(batches: Vec<RecordBatch>, dict_columns: &[String]) -> Vec<RecordBatch> {
+    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
     batches
-        .iter()
+        .into_iter()
         .map(|batch| {
             let schema = batch.schema();
-            let mut new_fields: Vec<Field> = Vec::new();
-            let mut new_columns: Vec<ArrayRef> = Vec::new();
+            let num_columns = schema.fields().len();
+            let mut new_fields = Vec::with_capacity(num_columns);
+            let mut new_columns = Vec::with_capacity(num_columns);
             let mut changed = false;
 
             for (i, field) in schema.fields().iter().enumerate() {
                 let col = batch.column(i);
-                match field.data_type() {
-                    DataType::Utf8View => {
-                        let casted = compute::cast(col, &DataType::Utf8)
-                            .expect("StringView -> Utf8 cast should not fail");
-                        new_fields.push(Field::new(
-                            field.name(),
-                            DataType::Utf8,
-                            field.is_nullable(),
-                        ));
-                        new_columns.push(casted);
-                        changed = true;
-                    }
-                    DataType::List(inner) if *inner.data_type() == DataType::Utf8View => {
-                        let target = DataType::List(Arc::new(Field::new(
-                            inner.name(),
-                            DataType::Utf8,
-                            inner.is_nullable(),
-                        )));
-                        let casted = compute::cast(col, &target)
-                            .expect("List<StringView> -> List<Utf8> cast should not fail");
-                        new_fields.push(Field::new(field.name(), target, field.is_nullable()));
-                        new_columns.push(casted);
-                        changed = true;
-                    }
-                    _ => {
-                        new_fields.push(field.as_ref().clone());
-                        new_columns.push(Arc::clone(col));
-                    }
+
+                // StringView -> Utf8
+                if *field.data_type() == DataType::Utf8View {
+                    new_fields.push(Field::new(
+                        field.name(),
+                        DataType::Utf8,
+                        field.is_nullable(),
+                    ));
+                    new_columns.push(
+                        compute::cast(col, &DataType::Utf8)
+                            .expect("StringView -> Utf8 cast should not fail"),
+                    );
+                    changed = true;
+                    continue;
                 }
+
+                // List<StringView> -> List<Utf8>
+                if let DataType::List(inner) = field.data_type()
+                    && *inner.data_type() == DataType::Utf8View
+                {
+                    let target = DataType::List(Arc::new(Field::new(
+                        inner.name(),
+                        DataType::Utf8,
+                        inner.is_nullable(),
+                    )));
+                    new_fields.push(Field::new(
+                        field.name(),
+                        target.clone(),
+                        field.is_nullable(),
+                    ));
+                    new_columns.push(
+                        compute::cast(col, &target)
+                            .expect("List<StringView> -> List<Utf8> cast should not fail"),
+                    );
+                    changed = true;
+                    continue;
+                }
+
+                // Utf8 -> Dictionary<Int32, Utf8> for low-cardinality columns
+                if *field.data_type() == DataType::Utf8
+                    && dict_columns.iter().any(|c| c == field.name())
+                {
+                    new_fields.push(Field::new(
+                        field.name(),
+                        dict_type.clone(),
+                        field.is_nullable(),
+                    ));
+                    new_columns.push(
+                        compute::cast(col, &dict_type)
+                            .expect("Utf8 -> Dictionary cast should not fail"),
+                    );
+                    changed = true;
+                    continue;
+                }
+
+                new_fields.push(field.as_ref().clone());
+                new_columns.push(Arc::clone(col));
             }
 
             if changed {
-                let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
-                RecordBatch::try_new(new_schema, new_columns)
-                    .expect("schema/column mismatch in downcast_string_views")
+                RecordBatch::try_new(
+                    Arc::new(arrow::datatypes::Schema::new(new_fields)),
+                    new_columns,
+                )
+                .expect("schema/column mismatch in prepare_batches")
             } else {
-                batch.clone()
+                batch
             }
         })
         .collect()
@@ -496,6 +527,7 @@ mod tests {
             transforms: vec![Transformation {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
+                dict_encode_columns: vec![],
             }],
         }
     }
