@@ -3,10 +3,13 @@ use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
-// Path is relative to this source file (crates/gkg-server/src/tools/schema.rs).
-// Avoids depending on the GKG_SERVER_SCHEMAS_DIR env var, which is not always
-// set in every CI compile context.
-const RESPONSE_FORMAT_SCHEMA: &str = include_str!("../../schemas/query_response.json");
+// Anchored at the crate manifest dir so sccache (which copies sources to its
+// cache before compiling) still resolves the path. A pure source-relative
+// include_str! breaks under sccache.
+const RESPONSE_FORMAT_SCHEMA: &str = include_str!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/schemas/query_response.json"
+));
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
