@@ -972,12 +972,12 @@ fn is_edge_relevant_node(node: &SyntaxNode) -> bool {
         || ast::MacroCall::can_cast(kind)
 }
 
-fn collect_resolved_edge_candidates(
+fn collect_resolved_edge_candidates<'a>(
     source_file: &ast::SourceFile,
-    sema: &Semantics<'_, RootDatabase>,
-    db: &RootDatabase,
-    paths_by_file_id: &HashMap<FileId, String>,
-    relative_path: &str,
+    sema: &'a Semantics<'a, RootDatabase>,
+    db: &'a RootDatabase,
+    paths_by_file_id: &'a HashMap<FileId, String>,
+    relative_path: &'a str,
 ) -> EdgeCollectionResult {
     let local_flow = build_local_flow_index(source_file, sema, db, paths_by_file_id);
     let edge_collector = ResolvedEdgeCollector {
