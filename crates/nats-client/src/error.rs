@@ -1,4 +1,4 @@
-use circuit_breaker::CircuitBreakerError;
+use circuit_breaker::CircuitBreakableError;
 use thiserror::Error;
 
 #[derive(Debug, Error)]
@@ -66,8 +66,8 @@ pub enum NatsError {
     CircuitOpen { service: &'static str },
 }
 
-impl NatsError {
-    pub fn is_transient(&self) -> bool {
+impl CircuitBreakableError for NatsError {
+    fn is_transient(&self) -> bool {
         use async_nats::jetstream::context::{CreateStreamErrorKind, GetStreamErrorKind};
 
         match self {
@@ -98,11 +98,8 @@ impl NatsError {
         }
     }
 
-    pub(crate) fn from_circuit_breaker(error: CircuitBreakerError<Self>) -> Self {
-        match error {
-            CircuitBreakerError::Open { service } => Self::CircuitOpen { service },
-            CircuitBreakerError::Inner(inner) => inner,
-        }
+    fn circuit_open(service: &'static str) -> Self {
+        Self::CircuitOpen { service }
     }
 }
 

@@ -40,15 +40,11 @@ impl CircuitBreakingNatsClient {
         max_age: Option<Duration>,
     ) -> Result<async_nats::jetstream::stream::Stream, NatsError> {
         self.breaker
-            .call_with_filter(
-                || {
-                    self.client
-                        .create_or_update_stream(stream_name, subjects.clone(), max_age)
-                },
-                NatsError::is_transient,
-            )
+            .call_transient(|| {
+                self.client
+                    .create_or_update_stream(stream_name, subjects.clone(), max_age)
+            })
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn get_stream(
@@ -56,12 +52,8 @@ impl CircuitBreakingNatsClient {
         stream_name: &str,
     ) -> Result<async_nats::jetstream::stream::Stream, NatsError> {
         self.breaker
-            .call_with_filter(
-                || self.client.get_stream(stream_name),
-                NatsError::is_transient,
-            )
+            .call_transient(|| self.client.get_stream(stream_name))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn ensure_kv_bucket_exists(
@@ -70,19 +62,14 @@ impl CircuitBreakingNatsClient {
         config: KvBucketConfig,
     ) -> Result<(), NatsError> {
         self.breaker
-            .call_with_filter(
-                || self.client.ensure_kv_bucket_exists(bucket, config.clone()),
-                NatsError::is_transient,
-            )
+            .call_transient(|| self.client.ensure_kv_bucket_exists(bucket, config.clone()))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn kv_get(&self, bucket: &str, key: &str) -> Result<Option<KvEntry>, NatsError> {
         self.breaker
-            .call_with_filter(|| self.client.kv_get(bucket, key), NatsError::is_transient)
+            .call_transient(|| self.client.kv_get(bucket, key))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn kv_put(
@@ -93,29 +80,20 @@ impl CircuitBreakingNatsClient {
         options: KvPutOptions,
     ) -> Result<KvPutResult, NatsError> {
         self.breaker
-            .call_with_filter(
-                || self.client.kv_put(bucket, key, value.clone(), options),
-                NatsError::is_transient,
-            )
+            .call_transient(|| self.client.kv_put(bucket, key, value.clone(), options))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn kv_delete(&self, bucket: &str, key: &str) -> Result<(), NatsError> {
         self.breaker
-            .call_with_filter(
-                || self.client.kv_delete(bucket, key),
-                NatsError::is_transient,
-            )
+            .call_transient(|| self.client.kv_delete(bucket, key))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 
     pub async fn kv_keys(&self, bucket: &str) -> Result<Vec<String>, NatsError> {
         self.breaker
-            .call_with_filter(|| self.client.kv_keys(bucket), NatsError::is_transient)
+            .call_transient(|| self.client.kv_keys(bucket))
             .await
-            .map_err(NatsError::from_circuit_breaker)
     }
 }
 
