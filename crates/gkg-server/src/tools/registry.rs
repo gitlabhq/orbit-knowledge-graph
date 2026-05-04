@@ -39,14 +39,47 @@ mod params {
         })
     }
 
-    pub fn schema_include() -> Value {
+    pub fn graph_info_sections() -> Value {
         json!({
             "type": "array",
-            "items": { "type": "string", "enum": ["dsl", "response_format"] },
-            "description": "Extra blocks to merge into the schema response. \
-                            'dsl' adds the query DSL grammar (input shape for query_graph). \
-                            'response_format' adds the formatter output JSON Schema and its semver. \
-                            Composes any subset in a single call to keep tool counts down."
+            "minItems": 1,
+            "uniqueItems": true,
+            "items": {
+                "type": "string",
+                "enum": ["schema", "dsl", "response_format", "status"]
+            },
+            "description": "Which discovery sections to return. Pick only what you need."
+        })
+    }
+
+    pub fn schema_options() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "description": "Only used when 'schema' is in sections.",
+            "properties": {
+                "expand_nodes": {
+                    "type": "array",
+                    "minItems": 1,
+                    "items": { "type": "string" },
+                    "description": "Node names to expand with full property details. Use [\"*\"] to expand every node. Omit for a shape-only listing."
+                }
+            }
+        })
+    }
+
+    pub fn status_target() -> Value {
+        json!({
+            "type": "object",
+            "additionalProperties": false,
+            "minProperties": 1,
+            "maxProperties": 1,
+            "description": "Required when 'status' is in sections. Provide exactly one of namespace_id, project_id, or full_path.",
+            "properties": {
+                "namespace_id": { "type": "integer", "minimum": 1 },
+                "project_id":   { "type": "integer", "minimum": 1 },
+                "full_path":    { "type": "string", "minLength": 1, "description": "e.g. 'gitlab-org/gitlab'" }
+            }
         })
     }
 }
@@ -116,20 +149,39 @@ impl ToolRegistry {
     fn get_graph_info() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_info".into(),
-            description: "One-stop discovery tool. Returns the graph ontology and, on demand, \
-                          the query DSL grammar and the formatter output JSON Schema in the \
-                          same response. Pass include=[\"dsl\", \"response_format\"] to merge \
-                          either or both into the result. Prefer this over get_graph_schema \
-                          for new agents; get_graph_schema stays for back-compat."
+            description: "Discovery tool for the GitLab Knowledge Graph. Call this BEFORE \
+                          composing a query to learn the graph's shape, query language, response \
+                          format, or indexing status. Returns any subset of four sections in one \
+                          call.\n\n\
+                          Sections (pass via `sections`, pick only what you need):\n\
+                          - `schema`: ontology of node/edge types and domains. Add \
+                          `schema_options.expand_nodes=[\"Node1\",...]` or `[\"*\"]` to include \
+                          property details. Omit for a lightweight listing.\n\
+                          - `dsl`: JSON Schema describing valid query inputs. No options.\n\
+                          - `response_format`: JSON Schema + semver of the formatter's output. \
+                          No options.\n\
+                          - `status`: indexing progress and entity counts. REQUIRES \
+                          `status_target` with exactly one of {namespace_id:int, project_id:int, \
+                          full_path:string}.\n\n\
+                          `format` controls output: \"llm\" (default, compact text) or \"raw\" \
+                          (JSON). Errors if `status` is requested without `status_target`."
                 .into(),
             parameters: json!({
                 "type": "object",
+                "additionalProperties": false,
+                "required": ["sections"],
                 "properties": {
-                    "expand_nodes": params::expand_nodes(),
-                    "include": params::schema_include(),
+                    "sections": params::graph_info_sections(),
+                    "schema_options": params::schema_options(),
+                    "status_target": params::status_target(),
                     "format": params::format()
                 },
-                "additionalProperties": false
+                "allOf": [
+                    {
+                        "if":   { "properties": { "sections": { "contains": { "const": "status" } } }, "required": ["sections"] },
+                        "then": { "required": ["status_target"] }
+                    }
+                ]
             }),
         }
     }
@@ -266,17 +318,54 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_include_param_lists_known_blocks() {
+    fn get_graph_info_sections_enum_lists_all_four_blocks() {
         let tool = find_tool("get_graph_info");
-        let include = &tool.parameters["properties"]["include"];
-        assert_eq!(include["type"], "array");
+        let sections = &tool.parameters["properties"]["sections"];
+        assert_eq!(sections["type"], "array");
 
-        let values: Vec<&str> = include["items"]["enum"]
+        let values: Vec<&str> = sections["items"]["enum"]
             .as_array()
-            .expect("include.items.enum must be an array")
+            .expect("sections.items.enum must be an array")
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(values, vec!["dsl", "response_format"]);
+        assert_eq!(values, vec!["schema", "dsl", "response_format", "status"]);
+    }
+
+    #[test]
+    fn get_graph_info_requires_sections() {
+        let tool = find_tool("get_graph_info");
+        let required = tool.parameters["required"]
+            .as_array()
+            .expect("required should be an array");
+        assert!(required.iter().any(|v| v == "sections"));
+    }
+
+    #[test]
+    fn get_graph_info_status_target_is_oneof() {
+        let tool = find_tool("get_graph_info");
+        let status_target = &tool.parameters["properties"]["status_target"];
+        assert_eq!(status_target["type"], "object");
+        assert_eq!(status_target["minProperties"], 1);
+        assert_eq!(status_target["maxProperties"], 1);
+        let props = status_target["properties"]
+            .as_object()
+            .expect("status_target.properties is an object");
+        for key in ["namespace_id", "project_id", "full_path"] {
+            assert!(props.contains_key(key), "missing status_target key: {key}");
+        }
+    }
+
+    #[test]
+    fn get_graph_info_status_implies_status_target_required() {
+        // The if/then in the schema requires status_target when sections includes status.
+        let tool = find_tool("get_graph_info");
+        let all_of = tool.parameters["allOf"]
+            .as_array()
+            .expect("allOf should be an array");
+        assert!(
+            !all_of.is_empty(),
+            "allOf must encode the status -> status_target rule"
+        );
     }
 }

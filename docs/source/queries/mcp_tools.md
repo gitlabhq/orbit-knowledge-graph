@@ -113,13 +113,14 @@ Return the Orbit graph schema so agents can understand which entities, relations
 
 ## `get_graph_info`
 
-One-stop discovery tool. Returns the graph ontology and, on demand, the query DSL grammar and the formatter output JSON Schema in the same response. Pass `include=["dsl", "response_format"]` to merge either or both into the result.
+One-stop discovery tool. Returns any subset of four sections in a single call: graph ontology, query DSL grammar, formatter output JSON Schema, and indexing status.
 
-| Parameter      | Type             | Required | Description |
-|----------------|------------------|----------|-------------|
-| `expand_nodes` | array of strings | No       | A list of nodes to fetch details for. Pass `["*"]` to expand every node. |
-| `include`      | array of strings | No       | Extra blocks to merge into the response. Allowed values: `dsl` (the query input grammar) and `response_format` (the formatter output JSON Schema and its semver). |
-| `format`       | string           | No       | `llm` (default) returns compact TOON. `raw` returns structured JSON. |
+| Parameter        | Type             | Required | Description |
+|------------------|------------------|----------|-------------|
+| `sections`       | array of strings | Yes      | Which discovery sections to return. Allowed values: `schema`, `dsl`, `response_format`, `status`. Must be non-empty and unique. |
+| `schema_options` | object           | No       | Options for the `schema` section. Currently supports `expand_nodes` (array of node names, or `["*"]` for all). |
+| `status_target`  | object           | Conditional | Required when `sections` includes `status`. Provide exactly one of `namespace_id` (int), `project_id` (int), or `full_path` (string like `gitlab-org/gitlab`). |
+| `format`         | string           | No       | `llm` (default) returns compact TOON with labelled blocks. `raw` returns structured JSON keyed by section. |
 
 Example request:
 
@@ -131,7 +132,8 @@ Example request:
   "params": {
     "name": "get_graph_info",
     "arguments": {
-      "include": ["dsl", "response_format"],
+      "sections": ["schema", "dsl", "response_format"],
+      "schema_options": { "expand_nodes": ["MergeRequest"] },
       "format": "raw"
     }
   }
@@ -142,10 +144,12 @@ Raw response payload (truncated):
 
 ```json
 {
-  "schema_version": "0.1",
-  "domains": [...],
-  "nodes": [...],
-  "edges": [...],
+  "schema": {
+    "schema_version": "0.1",
+    "domains": [...],
+    "nodes": [...],
+    "edges": [...]
+  },
   "dsl": {
     "$schema": "https://json-schema.org/draft/2020-12/schema",
     "title": "GraphQueryAsJSON",
@@ -162,7 +166,7 @@ Raw response payload (truncated):
 }
 ```
 
-The `response_format.version` matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` field stamped on every query response.
+When `sections` includes `status`, the response also carries a `status` key with `projects`, `domains`, and `indexing` (mirroring the existing `get_graph_status` tool). The `response_format.version` matches `config/RAW_OUTPUT_FORMAT_VERSION` and the `format_version` field stamped on every query response.
 
 Example request:
 

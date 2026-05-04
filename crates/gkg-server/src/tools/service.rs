@@ -152,67 +152,105 @@ impl ToolService {
         let args: GetGraphInfoArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
+        if args.sections.is_empty() {
+            return Err(ExecutorError::InvalidArguments(
+                "sections must be a non-empty array".to_string(),
+            ));
+        }
+
+        let sections: HashSet<&str> = args.sections.iter().map(String::as_str).collect();
+        for section in &sections {
+            if !["schema", "dsl", "response_format", "status"].contains(section) {
+                return Err(ExecutorError::InvalidArguments(format!(
+                    "unknown section: {section}"
+                )));
+            }
+        }
+
+        if sections.contains("status") && args.status_target.is_none() {
+            return Err(ExecutorError::InvalidArguments(
+                "sections includes 'status' but status_target is missing".to_string(),
+            ));
+        }
+
+        // Status RPC needs auth + ClickHouse access; the in-process tool_service
+        // does not own those. Production status fan-out happens monolith-side.
+        if sections.contains("status") {
+            return Err(ExecutorError::InvalidArguments(
+                "the 'status' section is dispatched by the monolith MCP handler, not by the in-process tool service"
+                    .to_string(),
+            ));
+        }
+
         let format = parse_format(arguments);
-        let expand_nodes = args.expand_nodes.as_deref().unwrap_or(&[]);
-        let includes: HashSet<&str> = args
-            .include
-            .as_deref()
-            .unwrap_or(&[])
-            .iter()
-            .map(String::as_str)
-            .collect();
+        let expand_nodes = args
+            .schema_options
+            .as_ref()
+            .and_then(|o| o.expand_nodes.as_deref())
+            .unwrap_or(&[]);
         let response = self.build_graph_schema_response(expand_nodes);
 
         let result = match format {
             OutputFormat::Llm => {
-                let mut toon = encode(&response, &EncodeOptions::default()).map_err(|e| {
-                    ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
-                })?;
-                if includes.contains("dsl") {
-                    toon.push_str("\n\nQuery DSL Schema:\n");
+                let mut toon = String::new();
+                if sections.contains("schema") {
+                    toon.push_str("== schema ==\n");
+                    toon.push_str(&encode(&response, &EncodeOptions::default()).map_err(|e| {
+                        ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
+                    })?);
+                }
+                if sections.contains("dsl") {
+                    if !toon.is_empty() {
+                        toon.push_str("\n\n");
+                    }
+                    toon.push_str("== dsl ==\n");
                     toon.push_str(&Self::build_query_dsl_toon()?);
                 }
-                if includes.contains("response_format") {
-                    let version = Self::build_response_format_version();
-                    toon.push_str("\n\nResponseFormat v");
-                    toon.push_str(&version);
-                    toon.push_str(" (JSON Schema):\n");
+                if sections.contains("response_format") {
+                    if !toon.is_empty() {
+                        toon.push_str("\n\n");
+                    }
+                    toon.push_str("== response_format v");
+                    toon.push_str(&Self::build_response_format_version());
+                    toon.push_str(" ==\n");
                     toon.push_str(Self::build_response_format_schema());
                 }
                 json!(toon)
             }
             OutputFormat::Raw => {
-                let mut value = serde_json::to_value(&response)
-                    .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
-                if let Some(obj) = value.as_object_mut() {
-                    if includes.contains("dsl") {
-                        let dsl: Value = serde_json::from_str(Self::build_query_dsl_raw())
-                            .map_err(|e| {
-                                ExecutorError::InvalidArguments(format!(
-                                    "Failed to parse DSL schema: {e}"
-                                ))
-                            })?;
-                        obj.insert("dsl".to_string(), dsl);
-                    }
-                    if includes.contains("response_format") {
-                        let schema: Value = serde_json::from_str(
-                            Self::build_response_format_schema(),
-                        )
+                let mut payload = serde_json::Map::new();
+                if sections.contains("schema") {
+                    payload.insert(
+                        "schema".to_string(),
+                        serde_json::to_value(&response)
+                            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
+                    );
+                }
+                if sections.contains("dsl") {
+                    let dsl: Value =
+                        serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
+                            ExecutorError::InvalidArguments(format!(
+                                "Failed to parse DSL schema: {e}"
+                            ))
+                        })?;
+                    payload.insert("dsl".to_string(), dsl);
+                }
+                if sections.contains("response_format") {
+                    let schema: Value = serde_json::from_str(Self::build_response_format_schema())
                         .map_err(|e| {
                             ExecutorError::InvalidArguments(format!(
                                 "Failed to parse response format schema: {e}"
                             ))
                         })?;
-                        obj.insert(
-                            "response_format".to_string(),
-                            json!({
-                                "schema": schema,
-                                "version": Self::build_response_format_version(),
-                            }),
-                        );
-                    }
+                    payload.insert(
+                        "response_format".to_string(),
+                        json!({
+                            "schema": schema,
+                            "version": Self::build_response_format_version(),
+                        }),
+                    );
                 }
-                value
+                Value::Object(payload)
             }
         };
 
@@ -248,10 +286,31 @@ struct GetGraphSchemaArgs {
 
 #[derive(Debug, Deserialize)]
 struct GetGraphInfoArgs {
+    sections: Vec<String>,
+    #[serde(default)]
+    schema_options: Option<SchemaOptions>,
+    #[serde(default)]
+    status_target: Option<StatusTarget>,
+}
+
+#[derive(Debug, Deserialize)]
+struct SchemaOptions {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
+}
+
+// Production-side `status` dispatch happens in the monolith CallTool. The
+// orbit in-process resolve only validates that this struct deserializes; the
+// concrete fields are not consumed here.
+#[derive(Debug, Deserialize)]
+#[allow(dead_code)]
+struct StatusTarget {
     #[serde(default)]
-    include: Option<Vec<String>>,
+    namespace_id: Option<i64>,
+    #[serde(default)]
+    project_id: Option<i64>,
+    #[serde(default)]
+    full_path: Option<String>,
 }
 
 #[cfg(test)]
@@ -610,17 +669,41 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_default_omits_extras() {
-        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_graph_info");
-        assert!(result.is_object());
+    fn get_graph_info_schema_only_raw() {
+        let result = resolve_immediate(
+            r#"{"sections": ["schema"], "format": "raw"}"#,
+            "get_graph_info",
+        );
+        let schema = result.get("schema").expect("schema key must be present");
+        assert!(schema.is_object());
         assert!(result.get("dsl").is_none());
         assert!(result.get("response_format").is_none());
     }
 
     #[test]
-    fn get_graph_info_include_dsl_raw_merges_full_grammar() {
-        let result =
-            resolve_immediate(r#"{"format": "raw", "include": ["dsl"]}"#, "get_graph_info");
+    fn get_graph_info_schema_with_expand_nodes_raw() {
+        let result = resolve_immediate(
+            r#"{
+                "sections": ["schema"],
+                "schema_options": { "expand_nodes": ["User"] },
+                "format": "raw"
+            }"#,
+            "get_graph_info",
+        );
+        let schema = result.get("schema").expect("schema key must be present");
+        let json_str = serde_json::to_string(schema).unwrap();
+        assert!(
+            json_str.contains("username"),
+            "expanded User should include the username property"
+        );
+    }
+
+    #[test]
+    fn get_graph_info_dsl_section_raw_carries_full_grammar() {
+        let result = resolve_immediate(
+            r#"{"sections": ["dsl"], "format": "raw"}"#,
+            "get_graph_info",
+        );
         let dsl = result.get("dsl").expect("dsl key must be present");
         assert_eq!(
             dsl.get("title").and_then(Value::as_str),
@@ -629,9 +712,9 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_include_response_format_raw() {
+    fn get_graph_info_response_format_section_raw() {
         let result = resolve_immediate(
-            r#"{"format": "raw", "include": ["response_format"]}"#,
+            r#"{"sections": ["response_format"], "format": "raw"}"#,
             "get_graph_info",
         );
         let rf = result
@@ -650,35 +733,78 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_include_both_raw() {
+    fn get_graph_info_three_sections_raw() {
         let result = resolve_immediate(
-            r#"{"format": "raw", "include": ["dsl", "response_format"]}"#,
+            r#"{"sections": ["schema", "dsl", "response_format"], "format": "raw"}"#,
             "get_graph_info",
         );
+        assert!(result.get("schema").is_some());
         assert!(result.get("dsl").is_some());
         assert!(result.get("response_format").is_some());
     }
 
     #[test]
-    fn get_graph_info_include_llm_appends_blocks() {
+    fn get_graph_info_llm_appends_labelled_blocks() {
         let result = resolve_immediate(
-            r#"{"format": "llm", "include": ["dsl", "response_format"]}"#,
+            r#"{"sections": ["schema", "dsl", "response_format"], "format": "llm"}"#,
             "get_graph_info",
         );
         let toon = result.as_str().expect("LLM format returns a string");
-        assert!(toon.contains("Query DSL Schema"));
-        assert!(toon.contains("ResponseFormat v"));
+        assert!(toon.contains("== schema =="));
+        assert!(toon.contains("== dsl =="));
+        assert!(toon.contains("== response_format v"));
         assert!(toon.contains("GKG unified query response"));
     }
 
     #[test]
-    fn get_graph_info_unknown_include_keys_are_ignored() {
-        let result = resolve_immediate(
-            r#"{"format": "raw", "include": ["bogus"]}"#,
+    fn get_graph_info_status_in_process_returns_error() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve(
             "get_graph_info",
+            r#"{"sections": ["status"], "status_target": {"project_id": 42}}"#,
         );
-        assert!(result.get("bogus").is_none());
-        assert!(result.get("dsl").is_none());
-        assert!(result.get("response_format").is_none());
+        let err = result.expect_err("status section should error in-process");
+        assert!(
+            err.to_string().contains("monolith"),
+            "error should explain that status is dispatched monolith-side, got: {err}"
+        );
+    }
+
+    #[test]
+    fn get_graph_info_status_without_target_errors() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve("get_graph_info", r#"{"sections": ["status"]}"#);
+        let err = result.expect_err("status without status_target should error");
+        assert!(
+            err.to_string().contains("status_target"),
+            "error should mention status_target, got: {err}"
+        );
+    }
+
+    #[test]
+    fn get_graph_info_unknown_section_errors() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve("get_graph_info", r#"{"sections": ["bogus"]}"#);
+        let err = result.expect_err("unknown section should error");
+        assert!(err.to_string().contains("bogus"));
+    }
+
+    #[test]
+    fn get_graph_info_empty_sections_errors() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve("get_graph_info", r#"{"sections": []}"#);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn get_graph_info_missing_sections_errors() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve("get_graph_info", r#"{"format": "raw"}"#);
+        assert!(result.is_err());
     }
 }

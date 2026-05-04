@@ -32,9 +32,10 @@ Do **not** pass `-R owner/repo`.
 | `orbit/status`                          | GET    | Cluster health (always returns 200).                                          |
 | `orbit/schema`                          | GET    | Graph ontology: domains, nodes, edges.                                        |
 | `orbit/schema?expand=A,B`               | GET    | Drill into nodes for properties and relationships.                            |
-| `orbit/info?include=dsl,response_format`| GET    | Ontology plus optional `dsl` and/or `response_format` blocks. Comma-separated include list; monolith fans out to extra gRPCs and merges under `dsl` and `response_format`. Prefer this for one-shot discovery. |
-| `orbit/dsl`                       | GET    | Query DSL grammar. `?format=raw` returns the full JSON Schema; default is condensed TOON. |
-| `orbit/tools`                           | GET    | MCP tool manifest. Three tools: `query_graph`, `get_graph_schema` (back-compat), `get_graph_info` (use `include=["dsl","response_format"]` for grammar / output shape). |
+| `orbit/dsl`                             | GET    | Query DSL grammar. `?format=raw` returns the full JSON Schema; default is condensed TOON. |
+| `orbit/response_format`                 | GET    | Formatter output JSON Schema + semver. |
+| `orbit/graph_status`                    | GET    | Indexing progress + entity counts. Pass exactly one of `namespace_id`, `project_id`, or `full_path`. |
+| `orbit/tools`                           | GET    | MCP tool manifest. Three discovery tools: `query_graph`, `get_graph_schema` (back-compat), `get_graph_info` (one-stop, accepts `sections=[schema,dsl,response_format,status]` plus `schema_options` and `status_target`). |
 | `orbit/query`                           | POST   | Execute a query. **Requires `Content-Type` header.**                          |
 
 ## Discovery workflow (always start here)
