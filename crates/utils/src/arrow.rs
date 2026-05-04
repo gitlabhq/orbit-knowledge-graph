@@ -1,6 +1,6 @@
 //! Arrow array utilities: extraction helpers and RecordBatch builder.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
 
 use arrow::array::{
@@ -10,6 +10,7 @@ use arrow::array::{
     TimestampMicrosecondBuilder, TimestampMillisecondArray, TimestampNanosecondArray,
     TimestampSecondArray, UInt8Array, UInt16Array, UInt32Array, UInt64Array,
 };
+use arrow::compute;
 use arrow::datatypes::{ArrowPrimitiveType, DataType, Field, Schema};
 use arrow::record_batch::RecordBatch;
 
@@ -670,6 +671,89 @@ pub trait AsRecordBatch<Ctx = ()>: Sized {
 fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
     dt.map(|d| ColumnValue::String(d.format("%Y-%m-%dT%H:%M:%SZ").to_string()))
         .unwrap_or(ColumnValue::Null)
+}
+
+/// Single-pass column type fixup for RecordBatches before ClickHouse insertion.
+/// Mutates the vector in place.
+/// - Casts `Utf8View` / `List<Utf8View>` to `Utf8` / `List<Utf8>` (ClickHouse
+///   26.x rejects `utf8_view` in Arrow IPC).
+/// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
+///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
+pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
+    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
+    for batch in batches.iter_mut() {
+        let schema = batch.schema();
+        let num_columns = schema.fields().len();
+        let mut new_fields = Vec::with_capacity(num_columns);
+        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(num_columns);
+        let mut changed = false;
+
+        for (i, field) in schema.fields().iter().enumerate() {
+            let col = batch.column(i);
+
+            // StringView -> Utf8
+            if *field.data_type() == DataType::Utf8View {
+                new_fields.push(Field::new(
+                    field.name(),
+                    DataType::Utf8,
+                    field.is_nullable(),
+                ));
+                new_columns.push(
+                    compute::cast(col, &DataType::Utf8)
+                        .expect("StringView -> Utf8 cast should not fail"),
+                );
+                changed = true;
+                continue;
+            }
+
+            // List<StringView> -> List<Utf8>
+            if let DataType::List(inner) = field.data_type()
+                && *inner.data_type() == DataType::Utf8View
+            {
+                let target = DataType::List(Arc::new(Field::new(
+                    inner.name(),
+                    DataType::Utf8,
+                    inner.is_nullable(),
+                )));
+                new_fields.push(Field::new(
+                    field.name(),
+                    target.clone(),
+                    field.is_nullable(),
+                ));
+                new_columns.push(
+                    compute::cast(col, &target)
+                        .expect("List<StringView> -> List<Utf8> cast should not fail"),
+                );
+                changed = true;
+                continue;
+            }
+
+            // Utf8 -> Dictionary<Int32, Utf8> for low-cardinality columns
+            if *field.data_type() == DataType::Utf8 && dict_columns.contains(field.name().as_str())
+            {
+                new_fields.push(Field::new(
+                    field.name(),
+                    dict_type.clone(),
+                    field.is_nullable(),
+                ));
+                new_columns.push(
+                    compute::cast(col, &dict_type)
+                        .expect("Utf8 -> Dictionary cast should not fail"),
+                );
+                changed = true;
+                continue;
+            }
+
+            new_fields.push(field.as_ref().clone());
+            new_columns.push(Arc::clone(col));
+        }
+
+        if changed {
+            *batch = RecordBatch::try_new(Arc::new(Schema::new(new_fields)), new_columns)
+                .expect("schema/column mismatch in prepare_batches");
+        }
+    }
 }
 
 #[cfg(test)]

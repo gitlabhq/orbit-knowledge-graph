@@ -4,6 +4,7 @@ pub(crate) mod lower;
 pub(crate) use crate::llqm_v1::ast;
 use crate::llqm_v1::ast::TableRef;
 pub(crate) use crate::llqm_v1::codegen;
+use std::collections::HashSet;
 
 pub(in crate::modules::sdlc) const SOURCE_DATA_TABLE: &str = "source_data";
 
@@ -179,7 +180,7 @@ pub(in crate::modules::sdlc) struct Transformation {
     /// Low-cardinality columns to dictionary-encode before Arrow IPC
     /// serialization. Derived from the ontology's `LowCardinality(String)`
     /// storage columns. Empty for node transforms.
-    pub dict_encode_columns: Vec<String>,
+    pub dict_encode_columns: HashSet<String>,
 }
 
 impl Transformation {
