@@ -1372,9 +1372,20 @@ impl FamilyPipeline {
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
-        // Use the first member's rules for the graph-wide FQN separator.
+        // All family members must share the same FQN separator -- the
+        // graph can only have one. Reject mismatches at construction
+        // rather than silently producing broken FQNs.
         let primary_ctx = member_ctxs.values().next().expect("family has no members");
         let primary_rules = primary_ctx.rules.clone();
+        let expected_sep = primary_rules.fqn_separator;
+        for lctx in member_ctxs.values() {
+            assert_eq!(
+                lctx.rules.fqn_separator, expected_sep,
+                "FamilyPipeline: all members must share the same fqn_separator, \
+                 got {:?} vs {:?}",
+                lctx.rules.fqn_separator, expected_sep
+            );
+        }
 
         // Sentinel: use the shortest per_file_timeout across members.
         let per_file_timeout = member_ctxs
