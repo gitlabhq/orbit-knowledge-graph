@@ -14,8 +14,8 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-use super::plan::*;
-use super::shared::{
+use super::super::plan::*;
+use super::super::shared::{
     filter_to_expr, id_list_predicate, id_range_predicate, rel_kind_filter_values,
 };
 
@@ -119,7 +119,7 @@ fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
     if !np.emit_select {
         return vec![];
     }
-    super::shared::requested_columns(&np.columns)
+    super::super::shared::requested_columns(&np.columns)
         .into_iter()
         .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
         .collect()

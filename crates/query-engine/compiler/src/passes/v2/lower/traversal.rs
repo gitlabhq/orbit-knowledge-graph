@@ -7,9 +7,9 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::plan::EdgeChainPlan;
-use super::shared::edge_select_columns;
-use super::shared::edge_select_columns_with_prefix;
+use super::super::plan::EdgeChainPlan;
+use super::super::shared::edge_select_columns;
+use super::super::shared::edge_select_columns_with_prefix;
 use crate::constants::*;
 
 pub fn emit_traversal(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {

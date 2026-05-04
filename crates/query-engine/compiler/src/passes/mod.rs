@@ -89,7 +89,7 @@ where
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
         let input = state.input_mut()?;
-        let plan = v2::lower::plan(input)?;
+        let plan = v2::plan::plan(input)?;
         state.set_query_plan(plan);
         Ok(())
     }

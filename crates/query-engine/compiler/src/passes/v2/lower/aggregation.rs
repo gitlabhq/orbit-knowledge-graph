@@ -7,8 +7,8 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::plan::*;
-use super::shared::requested_columns;
+use super::super::plan::*;
+use super::super::shared::requested_columns;
 
 pub fn emit_aggregation(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
     let output = plan.emit(input)?;

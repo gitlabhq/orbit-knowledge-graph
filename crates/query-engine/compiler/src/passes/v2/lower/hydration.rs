@@ -1,4 +1,4 @@
-//! Hydration: fetch node properties for a set of IDs.
+//! Hydration emit: fetch node properties for a set of IDs.
 //!
 //! Produces a UNION ALL of per-entity dedup scans with inline
 //! `LIMIT 1 BY id` dedup and `_deleted=false` filtering.
@@ -7,50 +7,8 @@ use ontology::constants::*;
 
 use crate::ast::*;
 use crate::error::{QueryError, Result};
-use crate::input::*;
 
-use super::plan::{HydrationNodePlan, HydrationPlan};
-
-// ─── Plan ────────────────────────────────────────────────────────────────────
-
-pub fn plan_hydration(input: &Input) -> Result<HydrationPlan> {
-    if input.nodes.is_empty() {
-        return Err(QueryError::Lowering(
-            "hydration requires at least one node".into(),
-        ));
-    }
-    let nodes = input
-        .nodes
-        .iter()
-        .map(|node| {
-            let table = node
-                .table
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering("hydration node has no table".into()))?;
-            let entity = node
-                .entity
-                .as_ref()
-                .ok_or_else(|| QueryError::Lowering("hydration node has no entity".into()))?;
-            let columns = match &node.columns {
-                Some(ColumnSelection::List(cols)) => cols.clone(),
-                _ => vec![],
-            };
-            Ok(HydrationNodePlan {
-                alias: node.id.clone(),
-                table: table.clone(),
-                entity: entity.clone(),
-                id_property: node.id_property.clone(),
-                node_ids: node.node_ids.clone(),
-                columns,
-            })
-        })
-        .collect::<Result<Vec<_>>>()?;
-
-    Ok(HydrationPlan {
-        nodes,
-        limit: input.limit,
-    })
-}
+use super::super::plan::{HydrationNodePlan, HydrationPlan};
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 

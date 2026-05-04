@@ -1,4 +1,4 @@
-//! Shared helpers used by both plan and emit, plus neighbors and pathfinding.
+//! Shared helpers used by both plan and lower (emit), plus neighbors and pathfinding.
 
 use ontology::constants::*;
 
@@ -146,7 +146,7 @@ pub fn resolve_edge_table(input: &Input, rel_types: &[String]) -> String {
 // Data type conversion
 // ─────────────────────────────────────────────────────────────────────────────
 
-pub(super) fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
+pub fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
     match dt {
         Some(ontology::DataType::String | ontology::DataType::Enum | ontology::DataType::Uuid) => {
             ChType::String
@@ -159,7 +159,7 @@ pub(super) fn data_type_to_ch(dt: Option<&ontology::DataType>) -> ChType {
     }
 }
 
-pub(super) fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
+pub fn rel_kind_filter_values(types: &[String]) -> Option<Vec<String>> {
     if types.is_empty() || (types.len() == 1 && types[0] == "*") {
         None
     } else {
