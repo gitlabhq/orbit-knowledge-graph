@@ -52,20 +52,13 @@ pub(crate) fn build_query(claims: &Claims, tool_name: ToolName) -> Option<OrbitQ
         .ok()
 }
 
-/// Leaf namespace ID per scoped traversal path. A path like `"1/22/"` resolves
-/// to `22`. Empty paths and unparseable segments are skipped; duplicates are
-/// preserved in input order.
+/// Leaf namespace ID per scoped traversal path. Empty paths and unparseable
+/// segments are skipped; duplicates are preserved in input order.
 fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
     claims
         .group_traversal_ids
         .iter()
-        .filter_map(|tp| {
-            tp.path
-                .trim_end_matches('/')
-                .rsplit('/')
-                .next()
-                .and_then(|s| s.parse::<i64>().ok())
-        })
+        .filter_map(|tp| gkg_utils::traversal_path::leaf_id(&tp.path))
         .collect()
 }
 
