@@ -9,6 +9,7 @@
 //! run inline for convenience.
 
 pub mod aggregation;
+pub mod emit;
 pub mod hydration;
 pub mod neighbors;
 pub mod pathfinding;
