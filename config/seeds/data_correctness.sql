@@ -197,13 +197,13 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
 
 INSERT INTO gl_definition (
     id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name,
-    definition_type, start_line, end_line, start_byte, end_byte
+    definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char
 ) VALUES
-    (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
-    (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300),
-    (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550),
-    (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
-    (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550);
+    (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
+    (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300, 4, 10),
+    (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13),
+    (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
+    (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13);
 
 INSERT INTO gl_code_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/1000/', 12000, 'Definition', 'CALLS', 12001, 'Definition'),

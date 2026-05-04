@@ -117,3 +117,12 @@ tests:
       - { where: { kind: "Defines" }, row: { parent: "service.UserService", child: "service.UserService.create_user" } }
       - { where: { kind: "Calls" }, row_count: 1 }
       - { where: { kind: "Calls" }, row: { parent: "service.UserService.create_user", child: "service.UserService.get_user" } }
+
+  - name: Definition start_char and end_char are populated
+    query: |
+      MATCH (d:Definition)
+      RETURN d.name AS name, d.start_char AS start_char
+    assert:
+      - { row: { name: "UserService", start_char: 0 } }
+      - { row: { name: "get_user", start_char: 4 } }
+      - { row: { name: "create_user", start_char: 4 } }
