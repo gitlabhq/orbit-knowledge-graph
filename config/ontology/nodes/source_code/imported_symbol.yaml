@@ -117,6 +117,7 @@ properties:
 
 storage:
   settings:
+    allow_part_offset_column_in_projections: "1"
     index_granularity: "1024"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
