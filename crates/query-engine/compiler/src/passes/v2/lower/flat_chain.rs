@@ -11,8 +11,8 @@ use super::super::plan::*;
 use super::super::shared::filter_to_expr;
 use super::EmitOutput;
 use super::helpers::{
-    build_multi_hop_union, emit_denorm_tags, emit_filter_subquery, emit_node_ids_on_edge,
-    emit_node_join_with_narrowing, push_edge_predicates,
+    build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
+    emit_node_ids_on_edge, emit_node_join_with_narrowing, push_edge_predicates,
 };
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
@@ -87,6 +87,14 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             &alias,
             hop,
             &plan.nodes,
+            start_col,
+            end_col,
+        );
+        emit_filter_narrowing(
+            &mut where_parts,
+            hop,
+            &plan.nodes,
+            &alias,
             start_col,
             end_col,
         );
