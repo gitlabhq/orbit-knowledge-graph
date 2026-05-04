@@ -193,6 +193,8 @@ fn default_granularity() -> u32 {
 pub(crate) enum StorageProjectionYaml {
     #[serde(rename = "reorder")]
     Reorder { name: String, order_by: Vec<String> },
+    #[serde(rename = "lightweight")]
+    Lightweight { name: String, order_by: Vec<String> },
     #[serde(rename = "aggregate")]
     Aggregate {
         name: String,
@@ -518,6 +520,9 @@ pub(crate) fn convert_storage_projection(yaml: StorageProjectionYaml) -> Storage
     match yaml {
         StorageProjectionYaml::Reorder { name, order_by } => {
             StorageProjection::Reorder { name, order_by }
+        }
+        StorageProjectionYaml::Lightweight { name, order_by } => {
+            StorageProjection::Lightweight { name, order_by }
         }
         StorageProjectionYaml::Aggregate {
             name,

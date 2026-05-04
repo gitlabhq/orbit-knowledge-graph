@@ -5,4 +5,5 @@ description: Files changed in a merge request diff
 variants:
   - from_node: { type: MergeRequestDiff, id: id }
     to_node: { type: MergeRequestDiffFile, id: id }
+    fk_column: merge_request_diff_id
     description: "Merge request diff contains changed file."

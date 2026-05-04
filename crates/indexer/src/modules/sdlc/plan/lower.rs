@@ -1,6 +1,8 @@
-use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
+use std::collections::HashSet;
 
-use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
+use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
+
+use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
 use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
@@ -12,6 +14,7 @@ const DELETED_ALIAS: &str = "_deleted";
 
 pub(in crate::modules::sdlc) fn lower(
     inputs: PlanInput,
+    ontology: &Ontology,
     global_batch_size: u64,
     namespaced_batch_size: u64,
     batch_size_overrides: &std::collections::HashMap<String, u64>,
@@ -29,7 +32,7 @@ pub(in crate::modules::sdlc) fn lower(
             .copied()
             .unwrap_or(scope_default);
         let scope = node.scope;
-        let plan = lower_node_plan(node, batch_size);
+        let plan = lower_node_plan(node, batch_size, ontology);
         match scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
@@ -46,7 +49,7 @@ pub(in crate::modules::sdlc) fn lower(
             .copied()
             .unwrap_or(scope_default);
         let scope = edge.scope;
-        let plan = lower_standalone_edge_plan(edge, batch_size);
+        let plan = lower_standalone_edge_plan(edge, batch_size, ontology);
         match scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
@@ -56,17 +59,30 @@ pub(in crate::modules::sdlc) fn lower(
     Plans { global, namespaced }
 }
 
-fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
+fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> PipelinePlan {
     let node_destination = input.extract.destination_table.clone();
     let extract_query = lower_extract_plan(input.extract, batch_size);
+
+    let dict_columns = ontology
+        .get_node(&input.name)
+        .map(|node| {
+            node.storage
+                .columns
+                .iter()
+                .filter(|col| col.ch_type.starts_with("LowCardinality"))
+                .map(|col| col.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
 
     let mut transforms = vec![Transformation {
         query: lower_node_transform(&input.columns),
         destination_table: node_destination,
+        dict_encode_columns: dict_columns,
     }];
 
     for fk_edge in &input.edges {
-        transforms.push(lower_fk_edge_transform(fk_edge));
+        transforms.push(lower_fk_edge_transform(fk_edge, ontology));
     }
 
     PipelinePlan {
@@ -76,7 +92,50 @@ fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
     }
 }
 
-fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
+/// Resolve the ORDER BY and dictionary-encode columns for an edge table
+/// from the ontology's storage metadata. `relationship_kind` is used to
+/// look up the unprefixed table name via the ontology.
+fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTableMetadata {
+    let table = ontology.edge_table_for_relationship(relationship_kind);
+
+    let sort_key = ontology
+        .sort_key_for_table(table)
+        .map(|keys| {
+            keys.iter()
+                .map(|col| OrderExpr {
+                    expr: Expr::col("", col),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
+
+    let dict_columns = ontology
+        .edge_table_config(table)
+        .map(|config| {
+            config
+                .storage
+                .columns
+                .iter()
+                .filter(|col| col.ch_type.starts_with("LowCardinality"))
+                .map(|col| col.name.clone())
+                .collect()
+        })
+        .unwrap_or_default();
+
+    EdgeTableMetadata {
+        sort_key,
+        dict_columns,
+    }
+}
+
+struct EdgeTableMetadata {
+    sort_key: Vec<OrderExpr>,
+    dict_columns: HashSet<String>,
+}
+
+fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
+    let meta = edge_table_metadata(&fk_edge.relationship_kind, ontology);
+
     let transform_query = Query {
         select: lower_edge_select(
             lower_edge_id(&fk_edge.source_id),
@@ -89,13 +148,14 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&fk_edge.filters),
-        order_by: vec![],
+        order_by: meta.sort_key,
         limit: None,
     };
 
     Transformation {
         query: transform_query,
         destination_table: fk_edge.destination_table.clone(),
+        dict_encode_columns: meta.dict_columns,
     }
 }
 
@@ -145,10 +205,15 @@ fn lower_node_column(column: &NodeColumn) -> SelectExpr {
     }
 }
 
-fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> PipelinePlan {
+fn lower_standalone_edge_plan(
+    input: StandaloneEdgePlan,
+    batch_size: u64,
+    ontology: &Ontology,
+) -> PipelinePlan {
     let destination_table = input.extract.destination_table.clone();
     let name = plan_name(&input.relationship_kind, &input.extract.source);
     let extract_query = lower_extract_plan(input.extract, batch_size);
+    let meta = edge_table_metadata(&input.relationship_kind, ontology);
 
     let transform_query = Query {
         select: lower_edge_select(
@@ -162,7 +227,7 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&input.filters),
-        order_by: vec![],
+        order_by: meta.sort_key,
         limit: None,
     };
 
@@ -172,6 +237,7 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
         transforms: vec![Transformation {
             query: transform_query,
             destination_table,
+            dict_encode_columns: meta.dict_columns,
         }],
     }
 }
@@ -481,9 +547,14 @@ mod tests {
         super::super::codegen::emit_sql(query)
     }
 
+    fn test_ontology() -> ontology::Ontology {
+        ontology::Ontology::load_embedded().expect("should load ontology")
+    }
+
     fn build_plans(ontology: &ontology::Ontology, batch_size: u64) -> Plans {
         lower(
             input::from_ontology(ontology),
+            ontology,
             batch_size,
             batch_size,
             &std::collections::HashMap::new(),
@@ -515,6 +586,7 @@ mod tests {
         let overrides = std::collections::HashMap::from([("WorkItem".to_string(), 50_000u64)]);
         let plans = lower(
             input::from_ontology(&ontology),
+            &ontology,
             1_000_000,
             1_000_000,
             &overrides,
@@ -744,7 +816,8 @@ mod tests {
             denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("id AS source_id"));
@@ -767,7 +840,8 @@ mod tests {
             denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("author_id AS source_id"));
@@ -809,7 +883,8 @@ mod tests {
             denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         // Mapped values collapse to ontology names via CASE.
@@ -847,7 +922,8 @@ mod tests {
             denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(
@@ -876,7 +952,8 @@ mod tests {
             denormalized_columns: vec![],
         };
 
-        let transform = lower_fk_edge_transform(&fk_edge);
+        let ontology = test_ontology();
+        let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
         assert!(sql.contains("unnest(assignees)['user_id']"), "sql: {sql}");

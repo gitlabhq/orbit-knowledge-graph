@@ -54,7 +54,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
-| Query response JSON schema | `crates/gkg-server/schemas/query_response.json` |
+| Query response JSON schema | `config/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
 | Graph DDL (ClickHouse) | `config/graph.sql` |
 | Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |

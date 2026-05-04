@@ -41,7 +41,7 @@ pre-commit:
       glob:
         - "crates/query-engine/formatters/src/graph.rs"
         - "crates/query-engine/formatters/src/lib.rs"
-        - "crates/gkg-server/schemas/query_response.json"
+        - "config/schemas/query_response.json"
     - name: metrics-catalog-check
       run: mise run metrics:catalog:check
       glob:

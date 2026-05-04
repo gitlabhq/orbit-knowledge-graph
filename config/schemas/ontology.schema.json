@@ -911,7 +911,7 @@
       "type": "object",
       "description": "A materialized projection.",
       "properties": {
-        "type": { "type": "string", "enum": ["reorder", "aggregate"] },
+        "type": { "type": "string", "enum": ["reorder", "lightweight", "aggregate"] },
         "name": {
           "type": "string",
           "pattern": "^[a-z_][a-z0-9_]*$",

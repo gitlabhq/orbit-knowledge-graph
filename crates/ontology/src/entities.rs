@@ -67,6 +67,13 @@ pub enum StorageProjection {
         name: String,
         order_by: Vec<String>,
     },
+    /// Lightweight projection: stores only the key columns + `_part_offset`,
+    /// acting as a secondary index without duplicating full rows.
+    /// Requires ClickHouse 26.1+.
+    Lightweight {
+        name: String,
+        order_by: Vec<String>,
+    },
     Aggregate {
         name: String,
         select: Vec<String>,
