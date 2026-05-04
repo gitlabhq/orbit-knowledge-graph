@@ -1158,12 +1158,12 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "eq", "value": "failed"}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
@@ -1172,13 +1172,13 @@ mod tests {
 
         // v2 lowerer pushes the denorm filter to edge tags — no _nf CTE.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "denorm filter must be pushed to edge source_tags, got:\n{sql}"
+            sql.contains("has(e0.target_tags, 'state:merged')"),
+            "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
-        // No _nf_pipe CTE needed — filter is fully on the edge.
+        // No _nf_mr CTE needed — filter is fully on the edge.
         assert!(
-            !sql.contains("_nf_pipe"),
-            "v2 lowerer should not emit _nf_pipe CTE, got:\n{sql}"
+            !sql.contains("_nf_mr"),
+            "v2 lowerer should not emit _nf_mr CTE, got:\n{sql}"
         );
     }
 
@@ -1188,12 +1188,12 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "in", "value": ["failed", "canceled"]}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "in", "value": ["merged", "opened"]}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
@@ -1202,11 +1202,11 @@ mod tests {
 
         // v2 lowerer pushes IN-list filter to edge tags via hasAny.
         assert!(
-            sql.contains("hasAny(e0.source_tags"),
-            "IN-list denorm filter must use hasAny on edge source_tags, got:\n{sql}"
+            sql.contains("hasAny(e0.target_tags"),
+            "IN-list denorm filter must use hasAny on edge target_tags, got:\n{sql}"
         );
         assert!(
-            sql.contains("status:failed") && sql.contains("status:canceled"),
+            sql.contains("state:merged") && sql.contains("state:opened"),
             "both filter values must appear in tag predicate, got:\n{sql}"
         );
     }
@@ -1217,12 +1217,12 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "in", "value": ["failed"]}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "in", "value": ["merged"]}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
@@ -1231,8 +1231,8 @@ mod tests {
 
         // v2 lowerer pushes single-value IN-list to edge tags via has.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "single-value IN-list denorm must use has on edge source_tags, got:\n{sql}"
+            sql.contains("has(e0.target_tags, 'state:merged')"),
+            "single-value IN-list denorm must use has on edge target_tags, got:\n{sql}"
         );
     }
 
@@ -1245,51 +1245,51 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "eq", "value": "failed"},
-                    "source": {"op": "eq", "value": "push"}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"},
+                    "source_branch": {"op": "eq", "value": "main"}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // v2 lowerer emits a _filter_pipe CTE for the non-denormalized filter
+        // v2 lowerer emits a _filter_mr CTE for the non-denormalized filter
         // and pushes the denormalized filter to edge tags.
         assert!(
-            sql.contains("_filter_pipe"),
+            sql.contains("_filter_mr"),
             "partial denorm must keep a filter CTE for non-denormalized filters, got:\n{sql}"
         );
-        // The denormalized status filter is pushed to edge tags.
+        // The denormalized state filter is pushed to edge tags.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "denormalized status filter must be pushed to edge tags, got:\n{sql}"
+            sql.contains("has(e0.target_tags, 'state:merged')"),
+            "denormalized state filter must be pushed to edge tags, got:\n{sql}"
         );
-        // CTE retains the non-denormalized source filter.
+        // CTE retains the non-denormalized source_branch filter.
         assert!(
-            sql.contains("push"),
-            "filter CTE must retain non-denormalized source filter, got:\n{sql}"
+            sql.contains("main"),
+            "filter CTE must retain non-denormalized source_branch filter, got:\n{sql}"
         );
     }
 
     /// When node_ids are present alongside filters, the v2 lowerer applies
-    /// both the node_ids filter (e0.source_id IN [...]) and the denorm tag
-    /// filter (has on source_tags) to the edge. Both filters narrow the scan.
+    /// both the node_ids filter (e0.target_id IN [...]) and the denorm tag
+    /// filter (has on target_tags) to the edge. Both filters narrow the scan.
     #[test]
     fn denorm_skips_rewrite_when_node_ids_present() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "node_ids": [1, 2, 3],
-                 "filters": {"status": {"op": "eq", "value": "failed"}}},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "node_ids": [1, 2, 3],
+                 "filters": {"state": {"op": "eq", "value": "merged"}}}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10
         }"#;
 
@@ -1298,12 +1298,12 @@ mod tests {
 
         // Node_ids filter is pushed to the edge.
         assert!(
-            sql.contains("e0.source_id IN [1, 2, 3]"),
-            "node_ids must be pushed to edge source_id filter, got:\n{sql}"
+            sql.contains("e0.target_id IN [1, 2, 3]"),
+            "node_ids must be pushed to edge target_id filter, got:\n{sql}"
         );
         // Denorm tag is also applied on the edge for additional selectivity.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
+            sql.contains("has(e0.target_tags, 'state:merged')"),
             "denorm tag filter is applied alongside node_ids, got:\n{sql}"
         );
     }
@@ -1314,16 +1314,16 @@ mod tests {
         let query = r#"{
             "query_type": "aggregation",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "eq", "value": "failed"}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "aggregations": [{
                 "function": "count",
-                "target": "pipe",
-                "group_by": "proj",
+                "target": "mr",
+                "group_by": "u",
                 "alias": "n"
             }],
             "limit": 10
@@ -1334,13 +1334,13 @@ mod tests {
 
         // v2 lowerer pushes the denorm filter to edge tags directly.
         assert!(
-            sql.contains("has(e0.source_tags, 'status:failed')"),
-            "denorm filter must be pushed to edge source_tags, got:\n{sql}"
+            sql.contains("has(e0.target_tags, 'state:merged')"),
+            "denorm filter must be pushed to edge target_tags, got:\n{sql}"
         );
-        // No _nf_pipe CTE needed — edge tag handles the filter.
+        // No _nf_mr CTE needed — edge tag handles the filter.
         assert!(
-            !sql.contains("_nf_pipe"),
-            "v2 lowerer should not emit _nf_pipe when filter is fully denormalized, got:\n{sql}"
+            !sql.contains("_nf_mr"),
+            "v2 lowerer should not emit _nf_mr when filter is fully denormalized, got:\n{sql}"
         );
     }
 
@@ -1380,12 +1380,12 @@ mod tests {
         let query = r#"{
             "query_type": "traversal",
             "nodes": [
-                {"id": "pipe", "entity": "Pipeline", "filters": {
-                    "status": {"op": "eq", "value": "failed"}
-                }},
-                {"id": "proj", "entity": "Project", "node_ids": [1]}
+                {"id": "u", "entity": "User", "node_ids": [1]},
+                {"id": "mr", "entity": "MergeRequest", "filters": {
+                    "state": {"op": "eq", "value": "merged"}
+                }}
             ],
-            "relationships": [{"type": "IN_PROJECT", "from": "pipe", "to": "proj"}],
+            "relationships": [{"type": "REVIEWER", "from": "u", "to": "mr"}],
             "limit": 10,
             "options": {"skip_dedup": true}
         }"#;
