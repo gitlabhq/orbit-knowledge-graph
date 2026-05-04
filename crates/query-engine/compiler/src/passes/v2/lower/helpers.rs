@@ -1,11 +1,6 @@
-//! Edge chain plan emitters: read the IR, produce SQL AST fragments.
-//!
-//! `EdgeChainPlan::emit()` dispatches by strategy to one of:
-//! - `emit_single_node` — no edges
-//! - `emit_flat_chain` — flat edge chain
-//! - `emit_fk_star` — FK star (all hops FK to same center)
+//! Shared emit helpers: dedup, columns, predicates, node hydration, edge predicates.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use ontology::constants::*;
 
@@ -20,59 +15,11 @@ use super::super::shared::{
 };
 
 // ─────────────────────────────────────────────────────────────────────────────
-// EdgeChainPlan::emit()
-// ─────────────────────────────────────────────────────────────────────────────
-
-impl EdgeChainPlan {
-    /// Emit SQL AST from the plan. Pure AST generation — reads only
-    /// from plan fields, does not consult Input.
-    pub fn emit(&self, _input: &mut Input) -> Result<EmitOutput> {
-        match self.strategy {
-            Strategy::SingleNode => emit_single_node(self),
-            Strategy::FkStar { ref center } => emit_fk_star(self, center),
-            Strategy::Flat | Strategy::Bidirectional { .. } => emit_flat_chain(self),
-        }
-    }
-}
-
-/// The output of emitting a plan — ready for query-type modules to wrap.
-pub struct EmitOutput {
-    pub from: TableRef,
-    pub edge_aliases: Vec<String>,
-    pub where_parts: Vec<Expr>,
-    pub select: Vec<SelectExpr>,
-    pub ctes: Vec<Cte>,
-}
-
-impl EmitOutput {
-    /// Assemble into a final Query.
-    pub fn into_query(
-        self,
-        mut select: Vec<SelectExpr>,
-        group_by: Vec<Expr>,
-        order_by: Vec<OrderExpr>,
-        limit: u32,
-    ) -> Query {
-        select.extend(self.select);
-        Query {
-            ctes: self.ctes,
-            select,
-            from: self.from,
-            where_clause: Expr::conjoin(self.where_parts),
-            group_by,
-            order_by,
-            limit: Some(limit),
-            ..Default::default()
-        }
-    }
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Shared primitives: dedup, columns, predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
 /// Build a dedup subquery: SELECT cols FROM table ORDER BY _version DESC LIMIT 1 BY id.
-fn build_dedup_subquery(alias: &str, table: &str, select: Vec<SelectExpr>) -> Query {
+pub(super) fn build_dedup_subquery(alias: &str, table: &str, select: Vec<SelectExpr>) -> Query {
     Query {
         select,
         from: TableRef::scan(table, alias),
@@ -86,7 +33,7 @@ fn build_dedup_subquery(alias: &str, table: &str, select: Vec<SelectExpr>) -> Qu
 }
 
 /// Build SelectExpr list from the pre-computed dedup_columns on NodePlan.
-fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
+pub(super) fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
     np.dedup_columns
         .iter()
         .map(|col| SelectExpr::new(Expr::col(alias, col), col.as_str()))
@@ -94,7 +41,7 @@ fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
 }
 
 /// WHERE predicates for a node: filters + _deleted=false.
-fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
+pub(super) fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
     let mut w = Vec::new();
     w.push(Expr::eq(
         Expr::col(alias, DELETED_COLUMN),
@@ -115,7 +62,7 @@ fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
 /// Node columns for the outer SELECT, aliased as `{alias}_{col}` for the
 /// graph formatter. Only for non-aggregation queries (aggregation builds
 /// its own SELECT).
-fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
+pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
     if !np.emit_select {
         return vec![];
     }
@@ -126,355 +73,10 @@ fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Emit: single node (no edges)
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
-    let (_, np) = plan
-        .nodes
-        .iter()
-        .next()
-        .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
-    let table = np
-        .table
-        .as_deref()
-        .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", np.alias)))?;
-    let alias = &np.alias;
-
-    let from = TableRef::Subquery {
-        query: Box::new(build_dedup_subquery(alias, table, vec![SelectExpr::star()])),
-        alias: alias.to_string(),
-    };
-
-    let where_parts = node_where_predicates(alias, np);
-    let select = node_select_columns(alias, np);
-
-    Ok(EmitOutput {
-        from,
-        edge_aliases: vec![],
-        where_parts,
-        select,
-        ctes: vec![],
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit: flat edge chain
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn emit_flat_chain(plan: &EdgeChainPlan) -> Result<EmitOutput> {
-    let mut where_parts = Vec::new();
-    let mut edge_aliases = Vec::new();
-    let mut ctes = Vec::new();
-    let mut from: Option<TableRef> = None;
-
-    for (i, hop) in plan.hops.iter().enumerate() {
-        let alias = format!("e{i}");
-        let (start_col, end_col) = hop.direction.edge_columns();
-        let is_multi_hop = hop.max_hops > 1;
-
-        // Build edge source: UNION ALL for multi-hop, plain scan for single.
-        let edge_source = if is_multi_hop {
-            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
-            where_parts.extend(union_wheres);
-            union
-        } else {
-            TableRef::scan(&hop.edge_table, &alias)
-        };
-
-        // JOIN to previous hop (or set as initial FROM) using pre-resolved
-        // join columns.
-        if let Some(prev_from) = from.take() {
-            let jc = hop
-                .join_prev
-                .as_ref()
-                .expect("non-first hop must have join_prev");
-            from = Some(TableRef::join(
-                JoinType::Inner,
-                prev_from,
-                edge_source,
-                Expr::eq(
-                    Expr::col(&jc.prev_alias, &jc.prev_col),
-                    Expr::col(&alias, &jc.curr_col),
-                ),
-            ));
-        } else {
-            from = Some(edge_source);
-        }
-
-        if !is_multi_hop {
-            push_edge_predicates(
-                &mut where_parts,
-                &alias,
-                hop,
-                &plan.nodes,
-                start_col,
-                end_col,
-            );
-        }
-
-        // Relationship-level filters (edge property predicates from the query).
-        for (prop, filter) in &hop.filters {
-            where_parts.push(filter_to_expr(&alias, prop, filter));
-        }
-
-        // Apply pre-computed denorm tags from the plan nodes.
-        emit_precomputed_denorm_tags(&mut where_parts, &plan.nodes, hop, start_col, end_col);
-        emit_node_ids_on_edge(
-            &mut where_parts,
-            &alias,
-            hop,
-            &plan.nodes,
-            start_col,
-            end_col,
-        );
-
-        edge_aliases.push(alias);
-    }
-
-    let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in plan".into()))?;
-    let mut selects = Vec::new();
-    let mut hydrated: HashSet<String> = HashSet::new();
-
-    for (i, hop) in plan.hops.iter().enumerate() {
-        let edge_alias = &edge_aliases[i];
-        let (start_col, end_col) = hop.direction.edge_columns();
-
-        for (node_alias, edge_col) in [(&hop.from_node, start_col), (&hop.to_node, end_col)] {
-            if !hydrated.insert(node_alias.clone()) {
-                continue;
-            }
-            let Some(np) = plan.nodes.get(node_alias) else {
-                continue;
-            };
-            match np.hydration {
-                HydrationStrategy::Join => {
-                    // Use pre-resolved narrowing decision from plan().
-                    let narrow_cte = if np.use_narrowing
-                        && ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
-                    {
-                        let narrow_name = format!("_narrow_{}", np.alias);
-                        let narrow_query = Query {
-                            select: vec![SelectExpr::new(
-                                Expr::col(edge_alias, edge_col),
-                                DEFAULT_PRIMARY_KEY,
-                            )],
-                            from: TableRef::scan(&hop.edge_table, format!("{edge_alias}n")),
-                            where_clause: {
-                                let mut nw = Vec::new();
-                                push_edge_predicates(
-                                    &mut nw,
-                                    &format!("{edge_alias}n"),
-                                    hop,
-                                    &plan.nodes,
-                                    start_col,
-                                    end_col,
-                                );
-                                Expr::conjoin(nw)
-                            },
-                            ..Default::default()
-                        };
-                        ctes.push(Cte::new(&narrow_name, narrow_query));
-                        Some(narrow_name)
-                    } else {
-                        None
-                    };
-
-                    let (new_from, ns, nw) = emit_node_join_with_narrowing(
-                        from,
-                        np,
-                        edge_alias,
-                        edge_col,
-                        false,
-                        narrow_cte.as_deref(),
-                    )?;
-                    from = new_from;
-                    selects.extend(ns);
-                    where_parts.extend(nw);
-                }
-                HydrationStrategy::FilterOnly => {
-                    where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
-                }
-                HydrationStrategy::Skip => {
-                    // Use pre-resolved elevated-access decision from plan().
-                    if np.needs_elevated_filter {
-                        where_parts
-                            .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
-                    }
-                }
-            }
-        }
-    }
-
-    Ok(EmitOutput {
-        from,
-        edge_aliases,
-        where_parts,
-        select: selects,
-        ctes,
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Emit: FK star (all hops FK to same center node, zero edges)
-// Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<EmitOutput> {
-    let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
-        QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
-    })?;
-    let center_table = center_np.table.as_deref().ok_or_else(|| {
-        QueryError::Lowering(format!("FK star center '{center_alias}' has no table"))
-    })?;
-
-    // Build center dedup columns from pre-computed list + FK columns.
-    let mut center_cols = collect_dedup_columns(center_alias, center_np);
-    // Add FK columns for each hop (not covered by dedup_columns).
-    for hop in &plan.hops {
-        if let Some(ref fk) = hop.fk
-            && !center_cols
-                .iter()
-                .any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str()))
-        {
-            center_cols.push(SelectExpr::new(
-                Expr::col(center_alias, &fk.fk_column),
-                fk.fk_column.as_str(),
-            ));
-        }
-    }
-
-    let center_dedup = build_dedup_subquery(center_alias, center_table, center_cols);
-    let mut from = TableRef::Subquery {
-        query: Box::new(center_dedup),
-        alias: center_alias.to_string(),
-    };
-
-    let mut where_parts = node_where_predicates(center_alias, center_np);
-    let mut selects = node_select_columns(center_alias, center_np);
-    let mut ctes = Vec::new();
-
-    // Each hop: target node connected via FK column.
-    for hop in &plan.hops {
-        let fk = hop
-            .fk
-            .as_ref()
-            .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
-        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
-            QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
-        })?;
-
-        let fk_alias = if fk.fk_node == center_alias {
-            center_alias.to_string()
-        } else {
-            fk.fk_node.clone()
-        };
-
-        // Pinned target IDs.
-        if !target_np.node_ids.is_empty() {
-            where_parts.push(id_list_predicate(
-                &fk_alias,
-                &fk.fk_column,
-                &target_np.node_ids,
-            ));
-        }
-
-        // Target hydration — use pre-resolved fk_needs_join.
-        if target_np.fk_needs_join {
-            let (new_from, ns, nw) =
-                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, true)?;
-            from = new_from;
-            selects.extend(ns);
-            where_parts.extend(nw);
-        } else if target_np.hydration == HydrationStrategy::FilterOnly
-            || target_np.needs_elevated_filter
-        {
-            where_parts.extend(emit_filter_subquery(
-                target_np,
-                &fk_alias,
-                &fk.fk_column,
-                &mut ctes,
-            )?);
-        }
-    }
-
-    // Synthesize edge metadata columns for the graph formatter.
-    // FK paths have no edge table, but traversal queries need e0_type,
-    // e0_src, e0_src_type, e0_dst, e0_dst_type for each relationship.
-    // Aggregation queries don't need edge columns — the flag was pre-computed.
-    let mut edge_aliases = Vec::new();
-    if !plan.synthesize_fk_edge_metadata {
-        return Ok(EmitOutput {
-            from,
-            edge_aliases,
-            where_parts,
-            select: selects,
-            ctes,
-        });
-    }
-    for (i, hop) in plan.hops.iter().enumerate() {
-        let ea = format!("e{i}");
-        let fk = hop.fk.as_ref().unwrap();
-        let from_np = plan.nodes.get(&hop.from_node);
-        let to_np = plan.nodes.get(&hop.to_node);
-        let from_entity = from_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
-        let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
-        let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
-
-        // Source ID/kind and target ID/kind from the FK relationship.
-        let (src_id_expr, src_kind, tgt_id_expr, tgt_kind) = if fk.fk_node == hop.from_node {
-            (
-                Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                from_entity,
-                Expr::col(center_alias, &fk.fk_column),
-                to_entity,
-            )
-        } else {
-            (
-                Expr::col(center_alias, &fk.fk_column),
-                from_entity,
-                Expr::col(center_alias, DEFAULT_PRIMARY_KEY),
-                to_entity,
-            )
-        };
-
-        selects.push(SelectExpr::new(
-            Expr::string(rel_type),
-            format!("{ea}_{EDGE_TYPE_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            src_id_expr,
-            format!("{ea}_{EDGE_SRC_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::string(src_kind),
-            format!("{ea}_{EDGE_SRC_TYPE_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            tgt_id_expr,
-            format!("{ea}_{EDGE_DST_SUFFIX}"),
-        ));
-        selects.push(SelectExpr::new(
-            Expr::string(tgt_kind),
-            format!("{ea}_{EDGE_DST_TYPE_SUFFIX}"),
-        ));
-        edge_aliases.push(ea);
-    }
-
-    Ok(EmitOutput {
-        from,
-        edge_aliases,
-        where_parts,
-        select: selects,
-        ctes,
-    })
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_node_join_with_narrowing(
+pub(super) fn emit_node_join_with_narrowing(
     from: TableRef,
     np: &NodePlan,
     edge_alias: &str,
@@ -496,7 +98,7 @@ fn emit_node_join_with_narrowing(
 ///
 /// `use_traversal_path_join`: true for FK paths (node-to-node), false for
 /// edge paths (edge.traversal_path has different semantics than node's).
-fn emit_node_join(
+pub(super) fn emit_node_join(
     from: TableRef,
     np: &NodePlan,
     edge_alias: &str,
@@ -596,7 +198,7 @@ fn emit_node_join_inner(
     Ok((joined, selects, wheres))
 }
 
-fn emit_filter_subquery(
+pub(super) fn emit_filter_subquery(
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
@@ -668,7 +270,7 @@ fn emit_filter_subquery(
 // Emit helpers: edge predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn push_edge_predicates(
+pub(super) fn push_edge_predicates(
     where_parts: &mut Vec<Expr>,
     alias: &str,
     hop: &Hop,
@@ -699,7 +301,7 @@ fn push_edge_predicates(
 }
 
 /// Emit pre-computed denorm tags from the plan's NodePlans.
-fn emit_precomputed_denorm_tags(
+pub(super) fn emit_precomputed_denorm_tags(
     where_parts: &mut Vec<Expr>,
     nodes: &HashMap<String, NodePlan>,
     hop: &Hop,
@@ -735,7 +337,7 @@ fn emit_precomputed_denorm_tags(
     }
 }
 
-fn emit_node_ids_on_edge(
+pub(super) fn emit_node_ids_on_edge(
     where_parts: &mut Vec<Expr>,
     alias: &str,
     hop: &Hop,
@@ -759,7 +361,7 @@ fn emit_node_ids_on_edge(
     }
 }
 
-fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
+pub(super) fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
     if types.is_empty() || (types.len() == 1 && types[0] == "*") {
         return None;
     }
@@ -785,7 +387,7 @@ fn rel_kind_filter(alias: &str, types: &[String]) -> Option<Expr> {
 // Variable-length: UNION ALL of edge chains
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn build_multi_hop_union(
+pub(super) fn build_multi_hop_union(
     hop: &Hop,
     alias: &str,
     nodes: &HashMap<String, NodePlan>,
@@ -839,7 +441,7 @@ fn build_multi_hop_union(
     (union, where_parts)
 }
 
-fn build_depth_arm(
+pub(super) fn build_depth_arm(
     depth: u32,
     edge_table: &str,
     start_col: &str,

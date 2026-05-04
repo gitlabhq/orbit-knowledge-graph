@@ -12,8 +12,11 @@
 //! └── hydration.rs     — HydrationPlan + plan_hydration
 //!
 //! lower/
-//! ├── mod.rs           — emit() dispatch
-//! ├── emit.rs          — EmitOutput, SQL AST emission
+//! ├── mod.rs           — emit() dispatch, EmitOutput, EdgeChainPlan::emit()
+//! ├── flat_chain.rs    — emit_flat_chain (flat edge chain)
+//! ├── fk_star.rs       — emit_fk_star (FK star joins)
+//! ├── single_node.rs   — emit_single_node (no edges)
+//! ├── helpers.rs       — shared emit helpers (dedup, predicates, node joins)
 //! ├── traversal.rs     — emit_traversal
 //! ├── aggregation.rs   — emit_aggregation
 //! ├── neighbors.rs     — emit_neighbors
