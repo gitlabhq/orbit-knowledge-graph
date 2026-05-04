@@ -12,6 +12,7 @@ use code_graph::v2::linker::graph::{DefinitionRow, DirectoryRow, FileRow, GraphO
 use gkg_utils::arrow::{AsRecordBatch, BatchBuilder, ColumnSpec, ColumnType, RowEnvelope};
 use ontology::DataType as OntDataType;
 use ontology::Ontology;
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 
@@ -118,24 +119,20 @@ fn convert_semantic_graph(
     })
 }
 
-/// Ontology-driven specs for a node entity, plus ClickHouse
-/// infrastructure columns (_version, _deleted) that aren't in
-/// the ontology but are required by the ReplacingMergeTree schema.
-/// Fields with a small set of distinct values — stored as dictionary-encoded
-/// Arrow arrays (integer indices + unique value table) instead of plain strings.
-const DICT_ENCODED_FIELDS: &[&str] = &[
-    "definition_type",
-    "language",
-    "relationship_kind",
-    "source_node_kind",
-    "target_node_kind",
-    "import_type",
-];
+/// Collect LowCardinality column names from ClickHouse storage metadata.
+fn low_cardinality_columns(storage_columns: &[ontology::StorageColumn]) -> HashSet<String> {
+    storage_columns
+        .iter()
+        .filter(|col| col.ch_type.starts_with("LowCardinality"))
+        .map(|col| col.name.clone())
+        .collect()
+}
 
 fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
     let node = ontology
         .get_node(entity_name)
         .unwrap_or_else(|| panic!("entity '{entity_name}' not in ontology"));
+    let dict_fields = low_cardinality_columns(&node.storage.columns);
     let mut specs: Vec<ColumnSpec> = node
         .fields
         .iter()
@@ -146,7 +143,7 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if DICT_ENCODED_FIELDS.contains(&f.name.as_str()) => ColumnType::DictStr,
+                _ if dict_fields.contains(&f.name) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: f.nullable,
@@ -167,6 +164,15 @@ fn entity_specs(ontology: &Ontology, entity_name: &str) -> Vec<ColumnSpec> {
 
 /// Ontology-driven specs for edges, plus infrastructure columns.
 fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
+    let dict_fields: HashSet<String> = ontology
+        .edge_tables()
+        .iter()
+        .filter_map(|t| ontology.edge_table_config(t))
+        .flat_map(|c| &c.storage.columns)
+        .filter(|col| col.ch_type.starts_with("LowCardinality"))
+        .map(|col| col.name.clone())
+        .collect();
+
     let mut specs: Vec<ColumnSpec> = ontology
         .edge_columns()
         .iter()
@@ -176,7 +182,7 @@ fn edge_specs(ontology: &Ontology) -> Vec<ColumnSpec> {
                 OntDataType::Int => ColumnType::Int,
                 OntDataType::Bool => ColumnType::Bool,
                 OntDataType::DateTime => ColumnType::TimestampMicros,
-                _ if DICT_ENCODED_FIELDS.contains(&c.name.as_str()) => ColumnType::DictStr,
+                _ if dict_fields.contains(&c.name) => ColumnType::DictStr,
                 _ => ColumnType::Str,
             },
             nullable: false,
