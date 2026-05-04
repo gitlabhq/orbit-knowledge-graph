@@ -176,6 +176,10 @@ pub(in crate::modules::sdlc) struct PipelinePlan {
 pub(in crate::modules::sdlc) struct Transformation {
     pub query: Query,
     pub destination_table: String,
+    /// Low-cardinality columns to dictionary-encode before Arrow IPC
+    /// serialization. Derived from the ontology's `LowCardinality(String)`
+    /// storage columns. Empty for node transforms.
+    pub dict_encode_columns: Vec<String>,
 }
 
 impl Transformation {
@@ -197,6 +201,7 @@ pub(in crate::modules::sdlc) fn build_plans(
 ) -> Plans {
     lower::lower(
         input::from_ontology(ontology),
+        ontology,
         global_batch_size,
         namespaced_batch_size,
         batch_size_overrides,
