@@ -176,8 +176,7 @@ impl Pipeline {
         let elapsed = started_at.elapsed();
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics
-            .record_watermark_lag(&plan.name, &context.watermark);
+        self.metrics.record_watermark_lag(&context.watermark);
 
         if total_rows > 0 {
             info!(
@@ -329,7 +328,7 @@ impl Pipeline {
         }
 
         self.metrics
-            .record_transform_duration(pipeline_name, transform_duration.as_secs_f64());
+            .record_transform_duration(transform_duration.as_secs_f64());
 
         Ok(())
     }

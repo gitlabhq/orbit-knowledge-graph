@@ -60,16 +60,15 @@ impl SdlcMetrics {
     }
 
     pub(super) fn record_datalake_query(&self, entity: &str, duration: f64, bytes: u64) {
-        let labels = [KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())];
-        self.datalake_query_duration.record(duration, &labels);
-        self.datalake_query_bytes.add(bytes, &labels);
-    }
-
-    pub(super) fn record_transform_duration(&self, entity: &str, duration: f64) {
-        self.transform_duration.record(
-            duration,
+        self.datalake_query_duration.record(duration, &[]);
+        self.datalake_query_bytes.add(
+            bytes,
             &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
         );
+    }
+
+    pub(super) fn record_transform_duration(&self, duration: f64) {
+        self.transform_duration.record(duration, &[]);
     }
 
     pub(super) fn record_handler_duration(&self, handler: &'static str, duration: f64) {
@@ -77,16 +76,13 @@ impl SdlcMetrics {
             .record(duration, &[KeyValue::new(sdlc::labels::HANDLER, handler)]);
     }
 
-    pub(super) fn record_watermark_lag(&self, entity: &str, watermark: &DateTime<Utc>) {
+    pub(super) fn record_watermark_lag(&self, watermark: &DateTime<Utc>) {
         let lag = Utc::now()
             .signed_duration_since(*watermark)
             .num_milliseconds()
             .max(0) as f64
             / 1000.0;
-        self.watermark_lag.record(
-            lag,
-            &[KeyValue::new(sdlc::labels::ENTITY, entity.to_owned())],
-        );
+        self.watermark_lag.record(lag, &[]);
     }
 }
 
