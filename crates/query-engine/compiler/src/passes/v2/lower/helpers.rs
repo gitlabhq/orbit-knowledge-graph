@@ -12,7 +12,7 @@ use crate::input::*;
 
 use super::super::plan::*;
 use super::super::shared::{
-    dedup_query, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
+    dedup_query, dedup_subquery, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
     id_range_predicate, rel_kind_filter, rel_kind_filter_values,
 };
 
@@ -49,7 +49,7 @@ pub(super) fn build_dedup_subquery(
 pub(super) fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
     np.dedup_columns
         .iter()
-        .map(|col| SelectExpr::new(Expr::col(alias, col), col.as_str()))
+        .map(|col| SelectExpr::col(alias, col.as_str()))
         .collect()
 }
 
@@ -185,26 +185,33 @@ pub(super) fn emit_filter_subquery(
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    let dedup = build_dedup_subquery(
+    let (from, deleted) = dedup_subquery(
         alias,
         table,
         vec![
-            SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
-            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+            SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
+            SelectExpr::col(alias, DELETED_COLUMN),
         ],
-        np,
+        {
+            let mut sw = Vec::new();
+            for (prop, filter) in &np.filters {
+                sw.push(filter_to_expr(alias, prop, filter));
+            }
+            if !np.node_ids.is_empty() {
+                sw.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+            }
+            if let Some(ref range) = np.id_range {
+                sw.push(id_range_predicate(alias, range));
+            }
+            sw
+        },
+        DEFAULT_PRIMARY_KEY,
     );
 
     let inner = Query {
-        select: vec![SelectExpr::new(
-            Expr::col(alias, DEFAULT_PRIMARY_KEY),
-            DEFAULT_PRIMARY_KEY,
-        )],
-        from: TableRef::Subquery {
-            query: Box::new(dedup),
-            alias: alias.to_string(),
-        },
-        where_clause: Some(deleted_false(alias)),
+        select: vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)],
+        from,
+        where_clause: Some(deleted),
         ..Default::default()
     };
 
@@ -450,8 +457,8 @@ pub(super) fn build_depth_arm(
 
     Query {
         select: vec![
-            SelectExpr::new(Expr::col("e1", start_col), start_col),
-            SelectExpr::new(Expr::col(&last, end_col), end_col),
+            SelectExpr::col("e1", start_col),
+            SelectExpr::col(&last, end_col),
             SelectExpr::new(rel_kind, RELATIONSHIP_KIND_COLUMN),
             SelectExpr::new(src_id, SOURCE_ID_COLUMN),
             SelectExpr::new(src_kind, SOURCE_KIND_COLUMN),
@@ -459,11 +466,8 @@ pub(super) fn build_depth_arm(
             SelectExpr::new(tgt_kind, TARGET_KIND_COLUMN),
             SelectExpr::new(path_nodes, PATH_NODES_COLUMN),
             SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
-            SelectExpr::new(Expr::col("e1", DELETED_COLUMN), DELETED_COLUMN),
-            SelectExpr::new(
-                Expr::col("e1", TRAVERSAL_PATH_COLUMN),
-                TRAVERSAL_PATH_COLUMN,
-            ),
+            SelectExpr::col("e1", DELETED_COLUMN),
+            SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN),
         ],
         from,
         where_clause,

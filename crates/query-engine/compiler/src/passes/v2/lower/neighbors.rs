@@ -14,7 +14,7 @@ use crate::input::*;
 
 use super::super::plan::{EdgeTableConfig, Plan};
 use super::super::shared::{
-    dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
+    dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };
 
@@ -57,38 +57,25 @@ pub fn emit_neighbors(
             scan_where.push(id_range_predicate(alias, range));
         }
         let select = vec![
-            SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
-            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+            SelectExpr::col(alias, DEFAULT_PRIMARY_KEY),
+            SelectExpr::col(alias, DELETED_COLUMN),
         ];
-        let query = dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY);
-        let from = TableRef::Subquery {
-            query: Box::new(query),
-            alias: alias.to_string(),
-        };
-        (from, deleted_false(alias))
+        dedup_subquery(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY)
     }
 
     let edge_tiebreakers = || -> Vec<OrderExpr> {
         vec![
-            OrderExpr {
-                expr: Expr::col(edge_alias, SOURCE_ID_COLUMN),
-                desc: false,
-            },
-            OrderExpr {
-                expr: Expr::col(edge_alias, TARGET_ID_COLUMN),
-                desc: false,
-            },
-            OrderExpr {
-                expr: Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN),
-                desc: false,
-            },
+            OrderExpr::asc(Expr::col(edge_alias, SOURCE_ID_COLUMN)),
+            OrderExpr::asc(Expr::col(edge_alias, TARGET_ID_COLUMN)),
+            OrderExpr::asc(Expr::col(edge_alias, RELATIONSHIP_KIND_COLUMN)),
         ]
     };
     let order_by = match &plan.order_by {
         Some(ob) => {
-            let mut exprs = vec![OrderExpr {
-                expr: Expr::col(&ob.node, &ob.property),
-                desc: ob.direction == OrderDirection::Desc,
+            let mut exprs = vec![if ob.direction == OrderDirection::Desc {
+                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+            } else {
+                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
             }];
             if plan.cursor.is_some() {
                 exprs.extend(edge_tiebreakers());

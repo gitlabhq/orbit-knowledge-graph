@@ -66,9 +66,10 @@ fn build_aggregation(
         && let Some(agg) = aggregations.get(sort.agg_index)
     {
         let alias = agg.alias.as_deref().unwrap_or("agg_result");
-        order_by.push(OrderExpr {
-            expr: Expr::ident(alias),
-            desc: matches!(sort.direction, OrderDirection::Desc),
+        order_by.push(if matches!(sort.direction, OrderDirection::Desc) {
+            OrderExpr::desc(Expr::ident(alias))
+        } else {
+            OrderExpr::asc(Expr::ident(alias))
         });
     }
 

@@ -32,10 +32,7 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
                 .iter()
                 .any(|s| s.alias.as_deref() == Some(fk.fk_column.as_str()))
         {
-            center_cols.push(SelectExpr::new(
-                Expr::col(center_alias, &fk.fk_column),
-                fk.fk_column.as_str(),
-            ));
+            center_cols.push(SelectExpr::col(center_alias, fk.fk_column.as_str()));
         }
     }
 

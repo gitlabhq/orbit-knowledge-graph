@@ -278,13 +278,28 @@ pub fn dedup_query(
         select,
         from: TableRef::scan(table, alias),
         where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
+        order_by: vec![OrderExpr::desc(Expr::col(alias, VERSION_COLUMN))],
         limit_by: Some((1, vec![Expr::col(alias, pk)])),
         ..Default::default()
     }
+}
+
+/// Dedup scan wrapped as a subquery TableRef + outer `_deleted=false` filter.
+pub fn dedup_subquery(
+    alias: &str,
+    table: &str,
+    select: Vec<SelectExpr>,
+    scan_where: Vec<Expr>,
+    pk: &str,
+) -> (TableRef, Expr) {
+    let query = dedup_query(alias, table, select, scan_where, pk);
+    (
+        TableRef::Subquery {
+            query: Box::new(query),
+            alias: alias.to_string(),
+        },
+        deleted_false(alias),
+    )
 }
 
 /// Whether any filter property lacks a denormalized edge column.

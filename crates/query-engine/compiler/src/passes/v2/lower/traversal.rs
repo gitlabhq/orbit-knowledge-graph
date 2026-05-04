@@ -42,9 +42,10 @@ pub fn emit_traversal(plan: &Plan) -> Result<Node> {
         .order_by
         .as_ref()
         .map(|ob| {
-            vec![OrderExpr {
-                expr: Expr::col(&ob.node, &ob.property),
-                desc: matches!(ob.direction, OrderDirection::Desc),
+            vec![if matches!(ob.direction, OrderDirection::Desc) {
+                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+            } else {
+                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
             }]
         })
         .unwrap_or_default();
@@ -60,9 +61,10 @@ fn emit_single_node(plan: &Plan) -> Result<Node> {
         .order_by
         .as_ref()
         .map(|ob| {
-            vec![OrderExpr {
-                expr: Expr::col(&ob.node, &ob.property),
-                desc: matches!(ob.direction, OrderDirection::Desc),
+            vec![if matches!(ob.direction, OrderDirection::Desc) {
+                OrderExpr::desc(Expr::col(&ob.node, &ob.property))
+            } else {
+                OrderExpr::asc(Expr::col(&ob.node, &ob.property))
             }]
         })
         .unwrap_or_default();

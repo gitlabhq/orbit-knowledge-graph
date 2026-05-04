@@ -112,7 +112,7 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
     // Direct depth-1 paths.
     let direct_query = Query {
         select: vec![
-            SelectExpr::new(Expr::col(FORWARD_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
+            SelectExpr::col(FORWARD_ALIAS, DEPTH_COLUMN),
             SelectExpr::new(
                 Expr::func(
                     "arrayConcat",
@@ -223,23 +223,17 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
         TableRef::union_all(vec![direct_query, intersection_query], PATHS_ALIAS)
     };
 
-    let mut order_by = vec![OrderExpr {
-        expr: Expr::col(PATHS_ALIAS, DEPTH_COLUMN),
-        desc: false,
-    }];
+    let mut order_by = vec![OrderExpr::asc(Expr::col(PATHS_ALIAS, DEPTH_COLUMN))];
     if plan.cursor.is_some() {
         order_by.extend([
-            OrderExpr {
-                expr: Expr::func("toString", vec![Expr::col(PATHS_ALIAS, path_column())]),
-                desc: false,
-            },
-            OrderExpr {
-                expr: Expr::func(
-                    "toString",
-                    vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
-                ),
-                desc: false,
-            },
+            OrderExpr::asc(Expr::func(
+                "toString",
+                vec![Expr::col(PATHS_ALIAS, path_column())],
+            )),
+            OrderExpr::asc(Expr::func(
+                "toString",
+                vec![Expr::col(PATHS_ALIAS, edge_kinds_column())],
+            )),
         ]);
     }
 
@@ -256,12 +250,9 @@ pub fn emit_pathfinding(plan: &Plan, pf: &PathFindingBody) -> Result<Node> {
             ctes
         },
         select: vec![
-            SelectExpr::new(Expr::col(PATHS_ALIAS, path_column()), path_column()),
-            SelectExpr::new(
-                Expr::col(PATHS_ALIAS, edge_kinds_column()),
-                edge_kinds_column(),
-            ),
-            SelectExpr::new(Expr::col(PATHS_ALIAS, DEPTH_COLUMN), DEPTH_COLUMN),
+            SelectExpr::col(PATHS_ALIAS, path_column()),
+            SelectExpr::col(PATHS_ALIAS, edge_kinds_column()),
+            SelectExpr::col(PATHS_ALIAS, DEPTH_COLUMN),
         ],
         from: paths_union,
         order_by,
@@ -322,32 +313,17 @@ fn build_anchor(np: &NodePlan, edge_col: &str, ctes: &mut Vec<Cte>, force_cte: b
         scan_where.push(id_range_predicate(alias, range));
     }
 
-    let mut select = vec![SelectExpr::new(
-        Expr::col(alias, DEFAULT_PRIMARY_KEY),
-        DEFAULT_PRIMARY_KEY,
-    )];
+    let mut select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
     if has_tp {
-        select.push(SelectExpr::new(
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            TRAVERSAL_PATH_COLUMN,
-        ));
+        select.push(SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN));
     }
-    select.push(SelectExpr::new(
-        Expr::col(alias, DELETED_COLUMN),
-        DELETED_COLUMN,
-    ));
+    select.push(SelectExpr::col(alias, DELETED_COLUMN));
 
     let dedup_scan = dedup_query(alias, table, select, scan_where, DEFAULT_PRIMARY_KEY);
 
-    let mut outer_select = vec![SelectExpr::new(
-        Expr::col(alias, DEFAULT_PRIMARY_KEY),
-        DEFAULT_PRIMARY_KEY,
-    )];
+    let mut outer_select = vec![SelectExpr::col(alias, DEFAULT_PRIMARY_KEY)];
     if has_tp {
-        outer_select.push(SelectExpr::new(
-            Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-            TRAVERSAL_PATH_COLUMN,
-        ));
+        outer_select.push(SelectExpr::col(alias, TRAVERSAL_PATH_COLUMN));
     }
 
     let cte_query = Query {
@@ -382,8 +358,8 @@ fn build_scope_cte(start: &Anchor, end: &Anchor) -> Option<Cte> {
     Some(Cte::new(
         PATH_SCOPE_CTE,
         Query {
-            select: vec![SelectExpr::new(
-                Expr::col(PATH_SCOPE_START_ALIAS, TRAVERSAL_PATH_COLUMN),
+            select: vec![SelectExpr::col(
+                PATH_SCOPE_START_ALIAS,
                 TRAVERSAL_PATH_COLUMN,
             )],
             from: TableRef::join(
@@ -567,10 +543,7 @@ fn build_frontier_arm(
         SelectExpr::new(Expr::int(depth as i64), DEPTH_COLUMN),
     ];
     if opts.include_tp {
-        select.push(SelectExpr::new(
-            Expr::col("e1", TRAVERSAL_PATH_COLUMN),
-            TRAVERSAL_PATH_COLUMN,
-        ));
+        select.push(SelectExpr::col("e1", TRAVERSAL_PATH_COLUMN));
     }
 
     let deleted_cond = Some(deleted_false("e1"));

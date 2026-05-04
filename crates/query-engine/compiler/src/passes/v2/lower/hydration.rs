@@ -9,7 +9,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use super::super::plan::HydrationNodePlan;
-use super::super::shared::{dedup_query, deleted_false};
+use super::super::shared::dedup_subquery;
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
@@ -58,12 +58,12 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
         scan_where.push(id_filter);
     }
 
-    let dedup_scan = dedup_query(
+    let (from, deleted) = dedup_subquery(
         alias,
         &node.table,
         vec![
-            SelectExpr::new(Expr::col(alias, pk), pk),
-            SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
+            SelectExpr::col(alias, pk),
+            SelectExpr::col(alias, DELETED_COLUMN),
             SelectExpr::star(),
         ],
         scan_where,
@@ -76,11 +76,8 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
             SelectExpr::new(Expr::string(&node.entity), format!("{alias}_entity_type")),
             SelectExpr::new(json_expr, format!("{alias}_props")),
         ],
-        from: TableRef::Subquery {
-            query: Box::new(dedup_scan),
-            alias: alias.to_string(),
-        },
-        where_clause: Some(deleted_false(alias)),
+        from,
+        where_clause: Some(deleted),
         ..Default::default()
     })
 }
