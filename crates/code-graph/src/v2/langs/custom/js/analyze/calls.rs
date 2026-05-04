@@ -31,6 +31,8 @@ fn imported_binding_from_import(import: &JsImport) -> Option<JsImportedBinding> 
 
     Some(JsImportedBinding {
         specifier: import.specifier.clone(),
+        fallback_imported_name: imported_name.clone(),
+        import_local_name: import.local_name.clone(),
         imported_name,
         resolution_mode,
     })
@@ -85,6 +87,8 @@ fn imported_binding_from_expression(
             }
             Some(JsImportedBinding {
                 specifier: base_binding.specifier,
+                fallback_imported_name: base_binding.fallback_imported_name,
+                import_local_name: base_binding.import_local_name,
                 imported_name: ImportedName::Named(member.property.name.to_string()),
                 resolution_mode: base_binding.resolution_mode,
             })
@@ -111,11 +115,13 @@ pub(super) fn imported_call_from_member_expression(
             oxc::ast::ast::Expression::Identifier(identifier) => {
                 let mut binding =
                     binding_from_identifier_reference(ctx, identifier, import_bindings)?;
+                let fallback_binding = binding.clone();
                 member_path.reverse();
 
                 retarget_imported_member_binding(&mut binding, &mut member_path)?;
 
                 return Some(JsImportedCall {
+                    fallback_binding,
                     binding,
                     member_path,
                     invocation_kind,
@@ -144,11 +150,13 @@ pub(super) fn imported_call_from_jsx_member_expression(
             oxc::ast::ast::JSXMemberExpressionObject::IdentifierReference(identifier) => {
                 let mut binding =
                     binding_from_identifier_reference(ctx, identifier, import_bindings)?;
+                let fallback_binding = binding.clone();
                 member_path.reverse();
 
                 retarget_imported_member_binding(&mut binding, &mut member_path)?;
 
                 return Some(JsImportedCall {
+                    fallback_binding,
                     binding,
                     member_path,
                     invocation_kind,
@@ -195,6 +203,8 @@ fn imported_namespace_binding_from_require_call(
     let specifier = call.common_js_require()?.value.to_string();
     Some(JsImportedBinding {
         specifier,
+        fallback_imported_name: ImportedName::Namespace,
+        import_local_name: String::new(),
         imported_name: ImportedName::Namespace,
         resolution_mode: JsResolutionMode::Require,
     })
@@ -210,18 +220,33 @@ fn collect_aliases_from_binding_pattern(
         None,
         matches!(base_binding.imported_name, ImportedName::Namespace),
         false,
-        &mut |binding, imported_name| {
-            let Some(symbol_id) = binding.symbol_id.get() else {
+        &mut |local_binding, imported_name| {
+            let Some(symbol_id) = local_binding.symbol_id.get() else {
                 return;
             };
-            let binding = imported_name.map_or_else(
+            let mut binding = imported_name.map_or_else(
                 || base_binding.clone(),
-                |member_name| JsImportedBinding {
-                    specifier: base_binding.specifier.clone(),
-                    imported_name: ImportedName::Named(member_name),
-                    resolution_mode: base_binding.resolution_mode,
+                |member_name| {
+                    let fallback_imported_name =
+                        if matches!(base_binding.resolution_mode, JsResolutionMode::Require)
+                            && base_binding.import_local_name.is_empty()
+                        {
+                            ImportedName::Named(member_name.clone())
+                        } else {
+                            base_binding.fallback_imported_name.clone()
+                        };
+                    JsImportedBinding {
+                        specifier: base_binding.specifier.clone(),
+                        fallback_imported_name,
+                        import_local_name: base_binding.import_local_name.clone(),
+                        imported_name: ImportedName::Named(member_name),
+                        resolution_mode: base_binding.resolution_mode,
+                    }
                 },
             );
+            if binding.import_local_name.is_empty() {
+                binding.import_local_name = local_binding.name.to_string();
+            }
             aliases.push((symbol_id, binding));
         },
     );
@@ -299,6 +324,7 @@ pub(super) fn build_import_binding_map(
             )
         ) {
             base_binding.imported_name = ImportedName::Default;
+            base_binding.fallback_imported_name = ImportedName::Default;
         }
 
         let mut discovered = Vec::new();

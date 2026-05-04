@@ -70,6 +70,8 @@ enum EtlYaml {
         #[serde(default)]
         traversal_path_filter: Option<String>,
         #[serde(default)]
+        table_alias: Option<String>,
+        #[serde(default)]
         edges: BTreeMap<String, EdgeMappingYamlEntry>,
     },
 }
@@ -191,6 +193,8 @@ fn default_granularity() -> u32 {
 pub(crate) enum StorageProjectionYaml {
     #[serde(rename = "reorder")]
     Reorder { name: String, order_by: Vec<String> },
+    #[serde(rename = "lightweight")]
+    Lightweight { name: String, order_by: Vec<String> },
     #[serde(rename = "aggregate")]
     Aggregate {
         name: String,
@@ -457,6 +461,7 @@ impl EtlYaml {
                 deleted,
                 order_by,
                 traversal_path_filter,
+                table_alias,
                 edges,
             } => Ok(EtlConfig::Query {
                 scope,
@@ -467,6 +472,7 @@ impl EtlYaml {
                 deleted: deleted.unwrap_or_else(|| etl_settings.deleted.clone()),
                 order_by: order_by.unwrap_or_else(|| etl_settings.order_by.clone()),
                 traversal_path_filter,
+                table_alias,
                 edges: convert_edge_mappings(edges)?,
             }),
         }
@@ -514,6 +520,9 @@ pub(crate) fn convert_storage_projection(yaml: StorageProjectionYaml) -> Storage
     match yaml {
         StorageProjectionYaml::Reorder { name, order_by } => {
             StorageProjection::Reorder { name, order_by }
+        }
+        StorageProjectionYaml::Lightweight { name, order_by } => {
+            StorageProjection::Lightweight { name, order_by }
         }
         StorageProjectionYaml::Aggregate {
             name,

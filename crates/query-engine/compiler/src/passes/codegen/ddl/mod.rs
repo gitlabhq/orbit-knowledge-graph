@@ -266,6 +266,10 @@ fn convert_projection(proj: &StorageProjection) -> ProjectionDef {
             name: name.clone(),
             order_by: order_by.clone(),
         },
+        StorageProjection::Lightweight { name, order_by } => ProjectionDef::Lightweight {
+            name: name.clone(),
+            order_by: order_by.clone(),
+        },
         StorageProjection::Aggregate {
             name,
             select,

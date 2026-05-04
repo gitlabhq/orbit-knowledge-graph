@@ -232,6 +232,60 @@ properties:
     nullable: true
     description: "Timestamp when the first reviewer was assigned."
 
+  author_id:
+    type: int64
+    source: author_id
+    nullable: true
+    description: "User who created the merge request."
+
+  merge_user_id:
+    type: int64
+    source: merge_user_id
+    nullable: true
+    description: "User who merged the merge request."
+
+  updated_by_id:
+    type: int64
+    source: updated_by_id
+    nullable: true
+    description: "User who last updated the merge request."
+
+  last_edited_by_id:
+    type: int64
+    source: last_edited_by_id
+    nullable: true
+    description: "User who last edited the merge request description."
+
+  closed_by_id:
+    type: int64
+    source: metric_latest_closed_by_id
+    nullable: true
+    description: "User who most recently closed the merge request."
+
+  milestone_id:
+    type: int64
+    source: milestone_id
+    nullable: true
+    description: "Milestone this merge request is associated with."
+
+  source_project_id:
+    type: int64
+    source: source_project_id
+    nullable: true
+    description: "Source project for the merge request (may differ from target for cross-project MRs)."
+
+  head_pipeline_id:
+    type: int64
+    source: head_pipeline_id
+    nullable: true
+    description: "Pipeline running on the merge request's head commit."
+
+  latest_merge_request_diff_id:
+    type: int64
+    source: latest_merge_request_diff_id
+    nullable: true
+    description: "Most recent diff snapshot for this merge request."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -401,6 +455,7 @@ etl:
       GROUP BY traversal_path, merge_request_id
     ) AS approvals ON m.traversal_path = approvals._ap_tp AND m.id = approvals._ap_mr
   watermark: m._siphon_replicated_at
+  table_alias: m
   deleted: m._siphon_deleted
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
@@ -459,10 +514,11 @@ etl:
 storage:
   primary_key: [traversal_path, id]
   settings:
+    allow_part_offset_column_in_projections: "1"
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -497,6 +553,15 @@ storage:
     - {name: removed_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_contribution, type: "Bool", default: "false"}
     - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: merge_user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: updated_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: last_edited_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: closed_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: source_project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: head_pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: latest_merge_request_diff_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(6)", granularity: 2}
@@ -516,6 +581,16 @@ storage:
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_author_id, order_by: [author_id]}
+    - {type: lightweight, name: by_merge_user_id, order_by: [merge_user_id]}
+    - {type: lightweight, name: by_milestone_id, order_by: [milestone_id]}
+    - {type: lightweight, name: by_source_project_id, order_by: [source_project_id]}
+    - {type: lightweight, name: by_updated_by_id, order_by: [updated_by_id]}
+    - {type: lightweight, name: by_last_edited_by_id, order_by: [last_edited_by_id]}
+    - {type: lightweight, name: by_closed_by_id, order_by: [closed_by_id]}
+    - {type: lightweight, name: by_head_pipeline_id, order_by: [head_pipeline_id]}
+    - {type: lightweight, name: by_latest_merge_request_diff_id, order_by: [latest_merge_request_diff_id]}
     - {type: reorder, name: by_state_id, order_by: [state, id]}
     - {type: reorder, name: by_project_state, order_by: [traversal_path, project_id, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

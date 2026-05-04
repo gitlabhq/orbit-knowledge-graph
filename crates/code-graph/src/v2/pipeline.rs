@@ -3,15 +3,16 @@ use crate::v2::sink::{BatchSink, GraphConverter};
 use arrow::record_batch::RecordBatch;
 use crossbeam_channel::Sender;
 use indicatif::{ProgressBar, ProgressStyle};
+use petgraph::graph::NodeIndex;
 use rayon::prelude::*;
-use rustc_hash::FxHashMap;
+use rustc_hash::{FxHashMap, FxHashSet};
 use std::any::Any;
 use std::marker::PhantomData;
 use std::path::{Component, Path};
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
-use crate::v2::linker::CodeGraph;
+use crate::v2::linker::{CodeGraph, GraphEdge};
 use crate::v2::trace::Tracer;
 
 /// Cooperative cancellation token. Clone-cheap (`Arc`).
@@ -37,14 +38,50 @@ impl CancellationToken {
     }
 }
 
-/// A chain reference that failed resolution in Phase 2,
-/// stored for re-resolution in Phase 3 after return types are merged.
-type FailedChain = (
-    String,
-    Vec<crate::v2::types::ExpressionStep>,
-    smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
-    Option<u32>,
-);
+type EdgeTriple = (NodeIndex, NodeIndex, GraphEdge);
+
+/// A chain reference that failed resolution in Phase 2, stored for
+/// re-resolution in Phase 3 after return types are merged.
+struct FailedChain {
+    name: String,
+    chain: Vec<crate::v2::types::ExpressionStep>,
+    reaching: smallvec::SmallVec<[crate::v2::types::ssa::ParseValue; 2]>,
+    enclosing_def: Option<u32>,
+    pending_import_edges: Vec<EdgeTriple>,
+}
+
+fn dedupe_edge_triples(edges: &mut Vec<EdgeTriple>) {
+    let mut seen = FxHashSet::default();
+    edges.retain(|(source, target, edge)| {
+        edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
+            || seen.insert((source.index(), target.index(), edge.relationship.edge_kind))
+    });
+}
+
+fn graph_has_edge_kind(
+    graph: &CodeGraph,
+    source: NodeIndex,
+    target: NodeIndex,
+    edge: &GraphEdge,
+) -> bool {
+    graph
+        .graph
+        .edges_connecting(source, target)
+        .any(|existing| existing.weight().relationship.edge_kind == edge.relationship.edge_kind)
+}
+
+fn add_edge_if_missing(
+    graph: &mut CodeGraph,
+    source: NodeIndex,
+    target: NodeIndex,
+    edge: GraphEdge,
+) {
+    if edge.relationship.target_node != crate::v2::types::NodeKind::ImportedSymbol
+        || !graph_has_edge_kind(graph, source, target, &edge)
+    {
+        graph.graph.add_edge(source, target, edge);
+    }
+}
 
 /// Per-file inferred return types keyed by the graph node indices of definitions.
 type InferredReturns = (Vec<petgraph::graph::NodeIndex>, Vec<(u32, String)>);
@@ -1076,11 +1113,7 @@ where
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
 
         type Phase2Result = (
-            Vec<(
-                petgraph::graph::NodeIndex,
-                petgraph::graph::NodeIndex,
-                crate::v2::linker::GraphEdge,
-            )>,
+            Vec<EdgeTriple>,
             Vec<(u32, String)>,
             Option<FileInfo>,
             Vec<FailedChain>,
@@ -1130,17 +1163,21 @@ where
                         killed = true;
                         break; // file killed by sentinel
                     }
+                    let import_edges = resolver.drain_import_edges();
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
-                        failed_chains.push((
-                            r.name.to_string(),
-                            r.chain.clone().unwrap(),
-                            r.reaching.clone().into(),
-                            r.enclosing_def,
-                        ));
+                        failed_chains.push(FailedChain {
+                            name: r.name.to_string(),
+                            chain: r.chain.clone().unwrap(),
+                            reaching: r.reaching.clone().into(),
+                            enclosing_def: r.enclosing_def,
+                            pending_import_edges: import_edges,
+                        });
+                    } else {
+                        edges.extend(import_edges);
                     }
                 }
 
-                edges.extend(resolver.drain_import_edges());
+                dedupe_edge_triples(&mut edges);
                 total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
                 pb2.inc(1);
                 (
@@ -1176,7 +1213,7 @@ where
                 );
             }
             for (src, tgt, edge) in edges {
-                graph.graph.add_edge(src, tgt, edge);
+                add_edge_if_missing(&mut graph, src, tgt, edge);
             }
             if let Some(info) = info_opt {
                 if !inferred.is_empty() {
@@ -1203,45 +1240,61 @@ where
                     }
                 }
             }
+        }
 
-            if !all_failed.is_empty() {
-                let phase3_results: Vec<_> = all_failed
-                    .par_iter()
-                    .map(|(info, failed_chains)| {
-                        let guard = sentinel
-                            .as_ref()
-                            .map(|(handle, _)| handle.file_start("phase3"));
-                        let mut resolver = crate::v2::linker::FileResolver::new(
-                            &graph,
-                            info.file_node,
-                            &info.def_nodes,
-                            &info.import_nodes,
-                            &lang_ctx,
-                            guard,
-                        );
-                        let mut edges = Vec::new();
-                        for (name, chain, reaching, enclosing_def) in failed_chains {
-                            if resolver
-                                .resolve(name, Some(chain), reaching, *enclosing_def, &mut edges)
-                                .is_err()
-                            {
-                                break; // file killed by sentinel
+        if !all_failed.is_empty() {
+            let phase3_results: Vec<_> = all_failed
+                .par_iter()
+                .map(|(info, failed_chains)| {
+                    let guard = sentinel
+                        .as_ref()
+                        .map(|(handle, _)| handle.file_start("phase3"));
+                    let mut resolver = crate::v2::linker::FileResolver::new(
+                        &graph,
+                        info.file_node,
+                        &info.def_nodes,
+                        &info.import_nodes,
+                        &lang_ctx,
+                        guard,
+                    );
+                    let mut edges = Vec::new();
+                    for failed in failed_chains {
+                        let before = edges.len();
+                        if resolver
+                            .resolve(
+                                &failed.name,
+                                Some(&failed.chain),
+                                &failed.reaching,
+                                failed.enclosing_def,
+                                &mut edges,
+                            )
+                            .is_err()
+                        {
+                            break; // file killed by sentinel
+                        }
+                        let import_edges = resolver.drain_import_edges();
+                        if edges.len() == before {
+                            if import_edges.is_empty() {
+                                edges.extend(failed.pending_import_edges.clone());
+                            } else {
+                                edges.extend(import_edges);
                             }
                         }
-                        edges
-                    })
-                    .collect();
-
-                let mut phase3_edges = 0usize;
-                for edges in phase3_results {
-                    phase3_edges += edges.len();
-                    for (src, tgt, edge) in edges {
-                        graph.graph.add_edge(src, tgt, edge);
                     }
+                    dedupe_edge_triples(&mut edges);
+                    edges
+                })
+                .collect();
+
+            let mut phase3_edges = 0usize;
+            for edges in phase3_results {
+                phase3_edges += edges.len();
+                for (src, tgt, edge) in edges {
+                    add_edge_if_missing(&mut graph, src, tgt, edge);
                 }
-                if phase3_edges > 0 {
-                    tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
-                }
+            }
+            if phase3_edges > 0 {
+                tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
             }
         }
 

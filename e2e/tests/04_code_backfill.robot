@@ -53,11 +53,13 @@ Enabling Knowledge Graph Backfills Code For Existing Projects
     ...                fixture cardinalities, proving the backfill path ran end-to-end.
     [Tags]    code-backfill
     Enable Knowledge Graph    ${BACKFILL_NAMESPACE_ID}
-    Wait For Node Indexed    Group    ${BACKFILL_NAMESPACE_ID}    ${BACKFILL_NAMESPACE_NAME}
-    ...    timeout=60s
+    Start Indexing Budget    180
+    Wait For Node Indexed Within Budget    Group    ${BACKFILL_NAMESPACE_ID}    ${BACKFILL_NAMESPACE_NAME}
 
     ${ruby_pid}=    Set Variable    ${BACKFILL_RUBY_PROJECT}[id]
     ${java_pid}=    Set Variable    ${BACKFILL_JAVA_PROJECT}[id]
 
-    File Count For Project Is    ${ruby_pid}    ${RUBY_FILE_COUNT}    timeout=60s
-    File Count For Project Is    ${java_pid}    ${JAVA_FILE_COUNT}    timeout=60s
+    ${ruby_budget}=    Remaining Budget
+    File Count For Project Is    ${ruby_pid}    ${RUBY_FILE_COUNT}    timeout=${ruby_budget}
+    ${java_budget}=    Remaining Budget
+    File Count For Project Is    ${java_pid}    ${JAVA_FILE_COUNT}    timeout=${java_budget}

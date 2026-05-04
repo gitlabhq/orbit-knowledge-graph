@@ -356,13 +356,13 @@ pub(crate) fn load_with(reader: &impl ReadOntologyFile) -> Result<Ontology, Onto
                 name: "source_tags".to_string(),
                 ch_type: "Array(LowCardinality(String))".to_string(),
                 default: None,
-                codec: None,
+                codec: Some(vec!["LZ4".to_string()]),
             },
             crate::entities::StorageColumn {
                 name: "target_tags".to_string(),
                 ch_type: "Array(LowCardinality(String))".to_string(),
                 default: None,
-                codec: None,
+                codec: Some(vec!["LZ4".to_string()]),
             },
         ]
     } else {

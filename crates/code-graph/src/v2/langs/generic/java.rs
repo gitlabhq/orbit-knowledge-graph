@@ -10,7 +10,8 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
-    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
+    ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
@@ -320,7 +321,11 @@ impl HasRules for JavaRules {
             &["this", "self"],
             Some("super"),
         )
-        .with_hooks(ResolverHooks::default())
+        .with_hooks(ResolverHooks {
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &["print", "println"],
+            ..Default::default()
+        })
         .with_settings(ResolveSettings {
             per_file_timeout: Some(std::time::Duration::from_millis(10000)),
             ..ResolveSettings::default()

@@ -14,6 +14,12 @@ fixtures:
 
           pub fn helper() {}
 
+          pub struct LocalClient;
+
+          impl LocalClient {
+              pub fn do_work(&self) {}
+          }
+
           pub struct Service;
 
           pub trait Pinger {
@@ -38,7 +44,17 @@ fixtures:
       }
 
       use crate::dep::{Pinger, Service};
+      use crate::dep::LocalClient;
       use crate::dep as dep_mod;
+      use external_actions;
+      use external_actions as actions;
+      use external_actions::do_work;
+      use external_actions::renamed as renamed_work;
+      use external_actions::*;
+      use external_macros as macros;
+      use serde_json::json;
+      use top_level_actions::shared;
+      use tracing::info;
 
       pub fn module_alias_call() {
           dep_mod::imported();
@@ -49,8 +65,76 @@ fixtures:
           imported();
       }
 
+      pub fn local_callable_shadows_external_import() {
+          let info = || {};
+          info();
+      }
+
       pub fn external_only() {
           let _ = std::mem::size_of::<usize>();
+      }
+
+      pub fn external_imported_calls() {
+          info!("ready");
+          let _ = json!({ "ok": true });
+          do_work();
+          renamed_work();
+      }
+
+      pub fn imported_function_reference_only() {
+          let _handler = do_work;
+      }
+
+      pub fn imported_module_constant_reference() {
+          let _ = external_actions::READY;
+      }
+
+      pub fn scoped_import_user() {
+          use external_actions::scoped;
+          scoped();
+      }
+
+      pub fn another_scoped_import_user() {
+          use other_external_actions::scoped;
+          scoped();
+      }
+
+      pub fn scoped_import_out_of_scope() {
+          scoped();
+      }
+
+      pub fn top_level_import_user() {
+          shared();
+      }
+
+      pub fn scoped_import_shadows_top_level() {
+          use other_external_actions::shared;
+          shared();
+      }
+
+      pub fn wildcard_external_import_user() {
+          globbed();
+      }
+
+      pub fn builtin_macro_and_std_calls() {
+          println!("debug");
+          let _ = format!("debug");
+          let _ = vec![1, 2, 3];
+          let _ = Vec::<u8>::new();
+      }
+
+      pub fn explicit_std_import_user() {
+          use core::mem::align_of;
+          use std::mem::size_of;
+
+          let _ = size_of::<usize>();
+          let _ = align_of::<usize>();
+      }
+
+      pub fn qualified_external_imported_calls() {
+          external_actions::do_work();
+          actions::renamed();
+          macros::ready!();
       }
 
       pub fn fn_pointer_from_assoc() {
@@ -69,6 +153,11 @@ fixtures:
       pub fn inherent_call() {
           let service = Service::new();
           service.inherent_ping();
+      }
+
+      pub fn local_method_same_name_as_external_import() {
+          let client = LocalClient;
+          client.do_work();
       }
 
 tests:
@@ -94,6 +183,98 @@ tests:
       MATCH (caller:Definition)-[:DefinitionToDefinition]->(callee:Definition)
       WHERE caller.name = 'external_only'
       RETURN callee.name AS callee
+    assert:
+      - { empty: true }
+
+  - name: "external imported Rust calls target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'external_imported_calls'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, name, alias
+    assert:
+      - { row_count: 4 }
+      - { row: { caller: "external_imported_calls", path: "external_actions::do_work", name: "do_work", alias: null } }
+      - { row: { caller: "external_imported_calls", path: "external_actions::renamed", name: "renamed", alias: "renamed_work" } }
+      - { row: { caller: "external_imported_calls", path: "serde_json::json", name: "json", alias: null } }
+      - { row: { caller: "external_imported_calls", path: "tracing::info", name: "info", alias: null } }
+
+  - name: "local callable shadowing does not target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'local_callable_shadows_external_import'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "function-scoped Rust imports only affect their own function"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['scoped_import_user', 'another_scoped_import_user', 'scoped_import_out_of_scope']
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "another_scoped_import_user", path: "other_external_actions::scoped", name: "scoped" } }
+      - { row: { caller: "scoped_import_user", path: "external_actions::scoped", name: "scoped" } }
+
+  - name: "function-scoped Rust imports shadow top-level imports with the same name"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN ['top_level_import_user', 'scoped_import_shadows_top_level']
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "scoped_import_shadows_top_level", path: "other_external_actions::shared", name: "shared" } }
+      - { row: { caller: "top_level_import_user", path: "top_level_actions::shared", name: "shared" } }
+
+  - name: "qualified Rust external imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name = 'qualified_external_imported_calls'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name, sym.alias AS alias
+      ORDER BY path, alias
+    assert:
+      - { row_count: 3 }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: null } }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_actions", name: "external_actions", alias: "actions" } }
+      - { row: { caller: "qualified_external_imported_calls", path: "external_macros", name: "external_macros", alias: "macros" } }
+
+  - name: "resolved Rust aliases and local dispatch do not emit imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN [
+        'module_alias_call',
+        'fn_pointer_from_assoc',
+        'generic_trait_bound',
+        'trait_default_dispatch',
+        'inherent_call',
+        'local_method_same_name_as_external_import'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
+    assert:
+      - { empty: true }
+
+  - name: "Rust built-ins references std calls and wildcard imports do not emit imported-symbol fallback"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.name IN [
+        'external_only',
+        'builtin_macro_and_std_calls',
+        'explicit_std_import_user',
+        'imported_function_reference_only',
+        'imported_module_constant_reference',
+        'wildcard_external_import_user'
+      ]
+        AND e.edge_kind = 'Calls'
+      RETURN caller.name AS caller, sym.path AS path, sym.name AS name
     assert:
       - { empty: true }
 

@@ -115,6 +115,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     let mut el_b = Int64Builder::with_capacity(n);
     let mut sb_b = Int64Builder::with_capacity(n);
     let mut eb_b = Int64Builder::with_capacity(n);
+    let mut sc_b = Int64Builder::with_capacity(n);
+    let mut ec_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, d) in &defs {
         id_b.append_value(ids[idx.index()]);
@@ -126,6 +128,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
         el_b.append_value(d.range.end.line as i64);
         sb_b.append_value(d.range.byte_offset.0 as i64);
         eb_b.append_value(d.range.byte_offset.1 as i64);
+        sc_b.append_value(d.range.start.column as i64);
+        ec_b.append_value(d.range.end.column as i64);
     }
 
     make_batch(
@@ -139,6 +143,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
             ("end_line", DataType::Int64, false),
             ("start_byte", DataType::Int64, false),
             ("end_byte", DataType::Int64, false),
+            ("start_char", DataType::Int64, false),
+            ("end_char", DataType::Int64, false),
         ],
         vec![
             Box::new(id_b),
@@ -150,6 +156,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
             Box::new(el_b),
             Box::new(sb_b),
             Box::new(eb_b),
+            Box::new(sc_b),
+            Box::new(ec_b),
         ],
     )
 }

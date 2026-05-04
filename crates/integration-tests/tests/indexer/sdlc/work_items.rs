@@ -129,8 +129,8 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
         "WorkItem",
         "target_tags",
         &[
-            (1, &["state:opened", "wi_type:issue"]),
-            (2, &["state:opened", "wi_type:task"]),
+            (1, &["confidential:false", "state:opened", "wi_type:issue"]),
+            (2, &["confidential:false", "state:opened", "wi_type:task"]),
         ],
     )
     .await;

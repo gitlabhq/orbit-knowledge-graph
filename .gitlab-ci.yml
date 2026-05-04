@@ -522,17 +522,34 @@ code-indexing-benchmark-build:
       vault: access_tokens/${VAULT_SECRETS_PATH}/danger/token@ci
       token: $VAULT_ID_TOKEN
   cache:
-    key:
-      files:
-        - code-indexing-benchmark.yaml
-      prefix: "benchmark-repos-${GROUP}"
+    key: "benchmark-repos-${GROUP}"
     paths:
       - temp/
+    policy: pull-push
+    when: always
   variables:
     SCENARIO: index
   script:
     - |
       OUTPUT_FILE="gkg-benchmark-${CI_COMMIT_REF_SLUG}-${CI_COMMIT_SHORT_SHA}-${ARCH}-${SCENARIO}-${GROUP}.json"
+
+      for attempt in 1 2 3; do
+        if gitlab-xtasks benchmark download-repos \
+          --config code-indexing-benchmark.yaml \
+          --output-dir temp \
+          --group "$GROUP"; then
+          break
+        fi
+
+        if [ "$attempt" = "3" ]; then
+          exit 1
+        fi
+
+        delay="$((attempt * 30))"
+        echo "Repository download failed; retrying in ${delay}s."
+        sleep "$delay"
+      done
+
       gitlab-xtasks benchmark hyperfine \
         --config code-indexing-benchmark.yaml \
         --architecture "$ARCH" \

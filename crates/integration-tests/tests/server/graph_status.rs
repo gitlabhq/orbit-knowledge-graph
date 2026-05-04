@@ -94,7 +94,8 @@ async fn setup(ctx: &TestContext) {
     ctx.execute(&format!(
         "INSERT INTO {} (traversal_path, project_id, branch, last_task_id, indexed_at) VALUES
          ('1/100/1000/', 1000, 'main', 1, now()),
-         ('1/101/1001/', 1001, 'main', 2, now())",
+         ('1/101/1001/', 1001, 'main', 2, now()),
+         ('1/100/1999/', 1999, 'main', 3, now())",
         t("code_indexing_checkpoint")
     ))
     .await;

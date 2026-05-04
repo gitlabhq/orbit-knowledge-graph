@@ -1,7 +1,7 @@
 use crate::v2::config::Language;
 use crate::v2::dsl::extractors::metadata;
 use crate::v2::dsl::types::{self, *};
-use crate::v2::types::{BindingKind, DefKind};
+use crate::v2::types::{BindingKind, CanonicalImport, DefKind, ImportBindingKind, ImportMode};
 use treesitter_visit::Axis::*;
 use treesitter_visit::Match::*;
 use treesitter_visit::extract::{Extract, field, text};
@@ -10,7 +10,8 @@ use treesitter_visit::tree_sitter::StrDoc;
 use treesitter_visit::{Node, SupportLang};
 
 use crate::v2::linker::rules::{
-    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
+    ResolverHooks,
 };
 use crate::v2::linker::{HasRules, ResolveSettings};
 
@@ -49,6 +50,7 @@ impl DslLanguage for CSharpDsl {
         LanguageHooks {
             return_kinds: &["return_statement"],
             adopt_sibling_refs: &["attribute_list"],
+            on_import: Some(csharp_extract_alias_using),
             ..LanguageHooks::default()
         }
     }
@@ -142,6 +144,7 @@ impl DslLanguage for CSharpDsl {
                     Child,
                     AnyKind(&["qualified_name", "identifier"]),
                 ))
+                .alias_from(field("name"))
                 .classify(csharp_import_classify)
                 // C# using directives import all types from a namespace.
                 // `using MyApp.Models;` ≈ Java's `import MyApp.Models.*;`
@@ -264,6 +267,45 @@ impl DslLanguage for CSharpDsl {
     }
 }
 
+fn csharp_extract_alias_using(node: &N<'_>, imports: &mut Vec<CanonicalImport>) -> bool {
+    if node.kind().as_ref() != "using_directive" {
+        return false;
+    }
+
+    let Some(alias_node) = node.field("name") else {
+        return false;
+    };
+    let alias = alias_node.text().to_string();
+    let target = node
+        .children_matching(AnyKind(&[
+            "qualified_name",
+            "identifier",
+            "generic_name",
+            "alias_qualified_name",
+        ]))
+        .find(|child| child.range().start > alias_node.range().end)
+        .map(|child| child.text().to_string());
+
+    let Some(path) = target else {
+        return true;
+    };
+
+    imports.push(CanonicalImport {
+        import_type: "AliasedImport",
+        binding_kind: ImportBindingKind::Named,
+        mode: ImportMode::Declarative,
+        path,
+        name: None,
+        alias: Some(alias),
+        scope_fqn: None,
+        range: crate::v2::types::Range::empty(),
+        is_type_only: false,
+        wildcard: false,
+    });
+
+    true
+}
+
 // ── Resolution rules ────────────────────────────────────────────
 
 pub struct CSharpRules;
@@ -293,7 +335,11 @@ impl HasRules for CSharpRules {
             &["this"],
             Some("base"),
         )
-        .with_hooks(ResolverHooks::default())
+        .with_hooks(ResolverHooks {
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &["Read", "ReadLine", "Write", "WriteLine"],
+            ..Default::default()
+        })
         .with_settings(ResolveSettings::default())
     }
 }

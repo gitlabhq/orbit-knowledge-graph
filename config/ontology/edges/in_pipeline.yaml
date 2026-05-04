@@ -6,6 +6,7 @@ table: gl_ci_edge
 variants:
   - from_node: { type: SecurityScan, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: pipeline_id
     description: "Security scan belongs to pipeline."
 
   - from_node: { type: Job, id: id }

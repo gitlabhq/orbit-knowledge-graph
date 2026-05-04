@@ -21,6 +21,17 @@ pub fn org_id(path: &str) -> Option<i64> {
         .and_then(|s| s.parse().ok())
 }
 
+/// Extract the leaf namespace ID (last segment) from a traversal path.
+///
+/// `"1/22/" → Some(22)`, `"1/22/33/" → Some(33)`. Returns `None` when the
+/// path is empty or the last segment isn't numeric.
+pub fn leaf_id(path: &str) -> Option<i64> {
+    path.trim_end_matches('/')
+        .rsplit('/')
+        .next()
+        .and_then(|s| s.parse().ok())
+}
+
 /// A traversal path is valid when it matches `<org_id>/<namespace_id>/`
 /// where both segments are unsigned integers.
 ///
@@ -78,6 +89,36 @@ mod tests {
     #[test]
     fn org_id_empty() {
         assert_eq!(org_id(""), None);
+    }
+
+    #[test]
+    fn leaf_id_extracts_last_segment() {
+        assert_eq!(leaf_id("1/22/"), Some(22));
+    }
+
+    #[test]
+    fn leaf_id_handles_deeper_paths() {
+        assert_eq!(leaf_id("1/22/33/"), Some(33));
+    }
+
+    #[test]
+    fn leaf_id_no_trailing_slash() {
+        assert_eq!(leaf_id("1/22"), Some(22));
+    }
+
+    #[test]
+    fn leaf_id_non_numeric() {
+        assert_eq!(leaf_id("1/abc/"), None);
+    }
+
+    #[test]
+    fn leaf_id_empty() {
+        assert_eq!(leaf_id(""), None);
+    }
+
+    #[test]
+    fn leaf_id_only_slash() {
+        assert_eq!(leaf_id("/"), None);
     }
 
     #[test]

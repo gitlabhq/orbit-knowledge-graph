@@ -14,7 +14,8 @@ etl:
     from:
       id: user_id
       type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
     to:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]

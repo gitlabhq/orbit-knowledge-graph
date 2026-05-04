@@ -188,7 +188,9 @@ Example NATS KV:
 
 After acquiring the lock, the service downloads the full repository archive from the Rails internal API. During archive extraction, the Gitaly archive root directory (`<slug>-<ref>/`) is stripped so that indexed paths are repo-relative and match the paths used by content resolution's `list_blobs` revisions. After indexing completes (or fails), the downloaded files are immediately deleted from disk to prevent unbounded storage growth across indexer pods.
 
-The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to avoid writing obvious binary/media/archive/document/datastore blobs or oversized blobs to disk. Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
+The extractor records a repository file inventory from archive metadata before it applies byte-level filtering. That inventory drives `File` and `Directory` node creation, so files do not need to be unpacked or parsed to appear in the graph. After inventory recording, extraction uses an exclusion denylist (`code_graph::v2::config::is_excluded_from_indexing`) and the configured per-file size ceiling to avoid writing obvious binary/media/archive/document/datastore blobs or oversized blobs to disk.
+
+Source files, manifests, lockfiles, dotfiles, unknown extensions, and resolver inputs are intentionally allowed through unless they exceed the size ceiling. Symlinks, hardlinks, and directories bypass the byte filter: symlinks cost negligible disk and may legitimately point at parsable files; directories are created lazily as files are unpacked.
 
 The reason and byte volume of skipped entries are exposed via the `gkg.indexer.code.archive.entries.skipped` and `gkg.indexer.code.archive.bytes.skipped` counters so operators can quantify the disk savings per indexing run.
 
@@ -216,7 +218,7 @@ For each file, the parser extracts three categories of information:
 - **References** including call sites and property accesses. A reference can be resolved to a single target, ambiguous across multiple candidates, or unresolved.
 
 For JavaScript and TypeScript, phase 1 also populates the normal v2 `CodeGraph` and a JS-local module index together. Each source file synthesizes a top-level `Module` definition keyed by the repository-relative file path plus export-member definitions so namespace imports, primary exports, named exports, star re-exports, and module-level cross-file navigation can reuse the same nested and member resolution machinery as other v2 definitions without exposing a magic synthetic prefix as the user-facing identity.
-A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer.
+A second OXC-driven pass records invocation sites, including React and Next.js JSX/TSX component usages, feeds local bindings through the shared SSA engine, resolves intrafile targets through the generic v2 `FileResolver`, and leaves JS-specific cross-file import and module resolution in the custom JS resolver layer. When an imported call cannot resolve to a repository-local definition, the graph preserves the call as a `Definition` to `ImportedSymbol` `CALLS` edge instead of dropping the call site.
 
 ##### Inventory-driven indexing pipeline
 
@@ -250,7 +252,7 @@ The graph captures fine-grained relationships across several categories:
 - **Containment** tracks which directories contain other directories or files.
 - **Definitions** link files to the code entities they define, and capture the nesting hierarchy (e.g., a class containing methods, a module containing classes).
 - **Imports** connect files and symbols to the definitions or files they import.
-- **References** represent call sites, property accesses, and ambiguous calls where the target cannot be resolved to a single definition.
+- **References** represent call sites, property accesses, and ambiguous calls where the target cannot be resolved to a single definition. Unresolved imported calls are retained as calls to imported symbols when the parser can associate the call with an import.
 
 Internally the graph uses roughly 50 fine-grained relationship types spread across these categories, for example distinguishing a method call from a property access, or a re-export from a direct import. During the load phase, these fine-grained types are collapsed into five high-level ontology labels: **CONTAINS**, **DEFINES**, **IMPORTS**, **CALLS**, and **EXTENDS**. This simplification keeps the query layer consistent while the internal graph retains full detail for analysis.
 

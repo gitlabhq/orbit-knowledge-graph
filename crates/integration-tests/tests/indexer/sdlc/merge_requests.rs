@@ -317,7 +317,28 @@ pub async fn processes_standalone_reviewer_edges(ctx: &TestContext) {
         "User",
         "MergeRequest",
         "target_tags",
-        &[(10, &["state:opened"]), (20, &["state:merged"])],
+        &[
+            (
+                10,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:can_be_merged",
+                    "squash:false",
+                    "state:opened",
+                ],
+            ),
+            (
+                20,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:merged",
+                    "squash:false",
+                    "state:merged",
+                ],
+            ),
+        ],
     )
     .await;
 }
@@ -361,7 +382,28 @@ pub async fn processes_standalone_approved_edges(ctx: &TestContext) {
         "User",
         "MergeRequest",
         "target_tags",
-        &[(10, &["state:merged"]), (20, &["state:merged"])],
+        &[
+            (
+                10,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:merged",
+                    "squash:false",
+                    "state:merged",
+                ],
+            ),
+            (
+                20,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:merged",
+                    "squash:false",
+                    "state:merged",
+                ],
+            ),
+        ],
     )
     .await;
 }
@@ -404,7 +446,28 @@ pub async fn processes_standalone_assigned_edges(ctx: &TestContext) {
         "User",
         "MergeRequest",
         "target_tags",
-        &[(10, &["state:opened"]), (20, &["state:merged"])],
+        &[
+            (
+                10,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:can_be_merged",
+                    "squash:false",
+                    "state:opened",
+                ],
+            ),
+            (
+                20,
+                &[
+                    "discussion_locked:null",
+                    "draft:false",
+                    "merge_status:merged",
+                    "squash:false",
+                    "state:merged",
+                ],
+            ),
+        ],
     )
     .await;
 }
