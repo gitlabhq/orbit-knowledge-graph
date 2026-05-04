@@ -1,5 +1,7 @@
 //! Shared helpers used by both plan and lower (emit), plus neighbors and pathfinding.
 
+use std::collections::HashMap;
+
 use ontology::constants::*;
 
 use crate::ast::*;
@@ -283,4 +285,19 @@ pub fn dedup_query(
         limit_by: Some((1, vec![Expr::col(alias, pk)])),
         ..Default::default()
     }
+}
+
+/// Whether any filter property lacks a denormalized edge column.
+pub fn has_non_denorm_filters(
+    entity: &str,
+    filters: &[(String, InputFilter)],
+    denorm_map: &HashMap<(String, String, String), (String, String)>,
+) -> bool {
+    filters.iter().any(|(prop, _)| {
+        let src =
+            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "source".to_string()));
+        let tgt =
+            denorm_map.contains_key(&(entity.to_string(), prop.clone(), "target".to_string()));
+        !src && !tgt
+    })
 }

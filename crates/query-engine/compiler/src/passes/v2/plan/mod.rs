@@ -11,13 +11,15 @@ pub mod pathfinding;
 
 use std::collections::HashMap;
 
-use crate::error::Result;
+use ontology::constants::DEFAULT_PRIMARY_KEY;
+
+use crate::error::{QueryError, Result};
 use crate::input::*;
 
 pub use edge_chain::*;
 pub use hydration::{HydrationNodePlan, HydrationPlan};
 pub use neighbors::NeighborsPlan;
-pub use pathfinding::{PathEndpoint, PathFindingPlan};
+pub use pathfinding::PathFindingPlan;
 
 /// Top-level plan — one variant per query type.
 pub enum QueryPlan {
@@ -40,6 +42,73 @@ impl QueryPlan {
             Self::Traversal(p) | Self::Aggregation(p) => p.node_edge_mappings.clone(),
             Self::Neighbors(p) => p.node_edge_mappings.clone(),
             Self::PathFinding(_) | Self::Hydration(_) => HashMap::new(),
+        }
+    }
+}
+
+/// Look up a node by alias from Input, returning an error if not found.
+pub fn find_node<'a>(input: &'a Input, alias: &str) -> Result<&'a InputNode> {
+    input
+        .nodes
+        .iter()
+        .find(|n| n.id == alias)
+        .ok_or_else(|| QueryError::Lowering(format!("node '{alias}' not found")))
+}
+
+/// Resolved node identity and constraints, shared across plan types.
+pub struct PlanNode {
+    pub id: String,
+    pub entity: String,
+    pub table: String,
+    pub node_ids: Vec<i64>,
+    pub filters: Vec<(String, InputFilter)>,
+    pub id_range: Option<InputIdRange>,
+    pub has_traversal_path: bool,
+    pub redaction_id_column: String,
+}
+
+impl PlanNode {
+    pub fn from_input(node: &InputNode) -> Result<Self> {
+        Ok(Self {
+            id: node.id.clone(),
+            entity: node
+                .entity
+                .as_ref()
+                .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no entity", node.id)))?
+                .clone(),
+            table: node
+                .table
+                .as_ref()
+                .ok_or_else(|| QueryError::Lowering(format!("node '{}' has no table", node.id)))?
+                .clone(),
+            node_ids: node.node_ids.clone(),
+            filters: node.filters.clone().into_iter().collect(),
+            id_range: node.id_range.clone(),
+            has_traversal_path: node.has_traversal_path,
+            redaction_id_column: node.redaction_id_column.clone(),
+        })
+    }
+
+    pub fn uses_default_pk(&self) -> bool {
+        self.redaction_id_column == DEFAULT_PRIMARY_KEY
+    }
+}
+
+/// Resolved edge table(s) and relationship type filter.
+pub struct EdgeTableConfig {
+    pub tables: Vec<String>,
+    pub rel_type_filter: Option<Vec<String>>,
+}
+
+impl EdgeTableConfig {
+    pub fn from_input(metadata: &CompilerMetadata, rel_types: &[String]) -> Self {
+        Self {
+            tables: metadata.resolve_edge_tables(rel_types),
+            rel_type_filter: if rel_types.is_empty() {
+                None
+            } else {
+                Some(rel_types.to_vec())
+            },
         }
     }
 }

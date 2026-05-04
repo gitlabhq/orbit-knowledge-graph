@@ -21,16 +21,16 @@ use super::super::shared::{
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
 pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
-    let center_id = p.center_id.clone();
-    let center_entity = p.center_entity.clone();
-    let center_table = p.center_table.clone();
-    let center_uses_default_pk = p.center_uses_default_pk;
-    let center_redaction_col = p.center_redaction_col.clone();
-    let center_node_ids = p.center_node_ids.clone();
-    let center_filters = p.center_filters.clone();
-    let center_id_range = p.center_id_range.clone();
+    let center_id = p.center.id.clone();
+    let center_entity = p.center.entity.clone();
+    let center_table = p.center.table.clone();
+    let center_uses_default_pk = p.center.uses_default_pk();
+    let center_redaction_col = p.center.redaction_id_column.clone();
+    let center_node_ids = p.center.node_ids.clone();
+    let center_filters = p.center.filters.clone();
+    let center_id_range = p.center.id_range.clone();
     let has_non_denorm = p.has_non_denorm;
-    let edge_table = p.edge_tables.clone();
+    let edge_table = p.edge.tables.clone();
     let edge_alias = "e";
 
     fn build_center_dedup(
@@ -144,7 +144,7 @@ pub fn emit_neighbors(p: &NeighborsPlan, _input: &mut Input) -> Result<Node> {
             }
         }
 
-        if let Some(ref types) = p.rel_type_filter
+        if let Some(ref types) = p.edge.rel_type_filter
             && let Some(f) = rel_kind_filter(edge_alias, types)
         {
             where_parts.push(f);

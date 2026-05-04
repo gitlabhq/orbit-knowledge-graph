@@ -16,7 +16,7 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::{PathEndpoint, PathFindingPlan};
+use super::super::plan::{PathFindingPlan, PlanNode};
 use super::super::shared::{
     dedup_query, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
@@ -58,10 +58,10 @@ pub fn emit_pathfinding(plan: &PathFindingPlan, _input: &mut Input) -> Result<No
     );
 
     let frontier_opts = FrontierOpts {
-        rel_type_filter: &plan.rel_type_filter,
+        rel_type_filter: &plan.edge.rel_type_filter,
         first_hop_filter: &plan.forward_first_hop_filter,
         anchor_entity: Some(&plan.start.entity),
-        edge_tables: &plan.edge_tables,
+        edge_tables: &plan.edge.tables,
         scope_cte: path_scope_cte.as_ref().map(|c| c.name.as_str()),
         include_tp: plan.scoped_by_tp,
         anchor_denorm_tags: start_denorm,
@@ -284,7 +284,7 @@ struct Anchor {
 }
 
 fn build_anchor(
-    endpoint: &PathEndpoint,
+    endpoint: &PlanNode,
     edge_col: &str,
     ctes: &mut Vec<Cte>,
     force_cte: bool,
@@ -320,7 +320,7 @@ fn build_anchor(
 
     let table = &endpoint.table;
     let cte_name = node_filter_cte(&endpoint.id);
-    let has_tp = endpoint.has_tp;
+    let has_tp = endpoint.has_traversal_path;
 
     let alias = &endpoint.id;
     let mut scan_where = Vec::new();
@@ -421,7 +421,7 @@ const PATH_SCOPE_CTE: &str = "_path_scope_traversal_paths";
 const PATH_SCOPE_START_ALIAS: &str = "_path_scope_start";
 const PATH_SCOPE_END_ALIAS: &str = "_path_scope_end";
 
-fn endpoint_filter(endpoint: &PathEndpoint, alias: &str, col: &str) -> Option<Expr> {
+fn endpoint_filter(endpoint: &PlanNode, alias: &str, col: &str) -> Option<Expr> {
     if !endpoint.node_ids.is_empty() {
         return Expr::col_in(
             alias,
@@ -620,7 +620,7 @@ fn build_denorm_tags(
     entity: &str,
     dir_prefix: &str,
     edge_alias: &str,
-    filters: &HashMap<String, InputFilter>,
+    filters: &[(String, InputFilter)],
     denorm_map: &HashMap<(String, String, String), (String, String)>,
 ) -> Vec<Expr> {
     let mut exprs = Vec::new();

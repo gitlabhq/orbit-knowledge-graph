@@ -601,13 +601,11 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
         return HydrationStrategy::Join;
     }
 
-    let has_non_denorm_filters = node_plan.filters.iter().any(|(prop, _)| {
-        let entity = node_plan.entity.as_deref().unwrap_or("");
-        let k1 = (entity.to_string(), prop.clone(), "source".to_string());
-        let k2 = (entity.to_string(), prop.clone(), "target".to_string());
-        !input.compiler.denormalized_columns.contains_key(&k1)
-            && !input.compiler.denormalized_columns.contains_key(&k2)
-    });
+    let has_non_denorm_filters = super::super::shared::has_non_denorm_filters(
+        node_plan.entity.as_deref().unwrap_or(""),
+        &node_plan.filters,
+        &input.compiler.denormalized_columns,
+    );
 
     if has_non_denorm_filters {
         return HydrationStrategy::FilterOnly;
