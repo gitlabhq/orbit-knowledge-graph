@@ -7,7 +7,7 @@ BASE_REF="${1:-origin/main}"
 
 response_files_changed() {
     git diff --name-only "$BASE_REF"...HEAD \
-        | grep -qE '^(crates/query-engine/formatters/src/(graph|lib)\.rs|crates/gkg-server/schemas/query_response\.json)$'
+        | grep -qE '^(crates/query-engine/formatters/src/(graph|lib)\.rs|config/schemas/query_response\.json)$'
 }
 
 skip_requested() {
@@ -33,7 +33,7 @@ if response_files_changed; then
         echo "❌ Response format files changed but config/RAW_OUTPUT_FORMAT_VERSION was not bumped."
         echo ""
         echo "Any MR that modifies the response format (crates/query-engine/formatters/src/graph.rs,"
-        echo "crates/query-engine/formatters/src/lib.rs, or crates/gkg-server/schemas/query_response.json)"
+        echo "crates/query-engine/formatters/src/lib.rs, or config/schemas/query_response.json)"
         echo "in a way that affects the output shape must also bump config/RAW_OUTPUT_FORMAT_VERSION."
         echo ""
         echo "If this change does not affect the response shape (e.g. comments, refactoring,"
