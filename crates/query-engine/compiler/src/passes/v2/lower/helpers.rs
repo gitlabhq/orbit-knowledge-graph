@@ -18,11 +18,32 @@ use super::super::shared::{
 // Shared primitives: dedup, columns, predicates
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Build a dedup subquery: SELECT cols FROM table ORDER BY _version DESC LIMIT 1 BY id.
-pub(super) fn build_dedup_subquery(alias: &str, table: &str, select: Vec<SelectExpr>) -> Query {
+/// Build a dedup subquery with user filters pushed inside for prewhere.
+///
+/// Filters, node_ids, and id_range go INTO the scan so ClickHouse can
+/// use them as prewhere predicates to skip granules. The caller applies
+/// `_deleted=false` OUTSIDE (after LIMIT 1 BY) so a deleted latest
+/// version correctly suppresses the entity.
+pub(super) fn build_dedup_subquery(
+    alias: &str,
+    table: &str,
+    select: Vec<SelectExpr>,
+    np: &NodePlan,
+) -> Query {
+    let mut scan_where = Vec::new();
+    for (prop, filter) in &np.filters {
+        scan_where.push(filter_to_expr(alias, prop, filter));
+    }
+    if !np.node_ids.is_empty() {
+        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
+    }
+    if let Some(ref range) = np.id_range {
+        scan_where.push(id_range_predicate(alias, range));
+    }
     Query {
         select,
         from: TableRef::scan(table, alias),
+        where_clause: Expr::conjoin(scan_where),
         order_by: vec![OrderExpr {
             expr: Expr::col(alias, VERSION_COLUMN),
             desc: true,
@@ -41,24 +62,6 @@ pub(super) fn collect_dedup_columns(alias: &str, np: &NodePlan) -> Vec<SelectExp
 }
 
 /// WHERE predicates for a node: filters + _deleted=false.
-pub(super) fn node_where_predicates(alias: &str, np: &NodePlan) -> Vec<Expr> {
-    let mut w = Vec::new();
-    w.push(Expr::eq(
-        Expr::col(alias, DELETED_COLUMN),
-        Expr::param(ChType::Bool, false),
-    ));
-    for (prop, filter) in &np.filters {
-        w.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        w.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        w.push(id_range_predicate(alias, range));
-    }
-    w
-}
-
 /// Node columns for the outer SELECT, aliased as `{alias}_{col}` for the
 /// graph formatter. Only for non-aggregation queries (aggregation builds
 /// its own SELECT).
@@ -130,36 +133,18 @@ fn emit_node_join_inner(
     let alias = &np.alias;
 
     let dedup_cols = collect_dedup_columns(alias, np);
-    let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols);
-
-    // Push user filters + node_ids + id_range INTO the dedup scan so
-    // ClickHouse can use them as prewhere predicates to skip granules.
-    // _deleted stays OUTSIDE (after LIMIT 1 BY) so a deleted latest
-    // version correctly suppresses the entity.
-    let mut scan_where = Vec::new();
-    for (prop, filter) in &np.filters {
-        scan_where.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        scan_where.push(id_range_predicate(alias, range));
-    }
+    let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols, np);
 
     // IN-narrowing: restrict the dedup scan to IDs from the narrow CTE.
     if let Some(cte_name) = narrow_cte {
-        scan_where.push(Expr::InSubquery {
+        let in_pred = Expr::InSubquery {
             expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
             cte_name: cte_name.to_string(),
             column: DEFAULT_PRIMARY_KEY.to_string(),
-        });
-    }
-
-    if let Some(combined) = Expr::conjoin(scan_where) {
+        };
         dedup_query.where_clause = match dedup_query.where_clause {
-            Some(existing) => Some(Expr::and(existing, combined)),
-            None => Some(combined),
+            Some(existing) => Some(Expr::and(existing, in_pred)),
+            None => Some(in_pred),
         };
     }
 
@@ -211,35 +196,15 @@ pub(super) fn emit_filter_subquery(
     let alias = &np.alias;
     let cte_name = format!("_filter_{alias}");
 
-    // User filters + node_ids + id_range go INSIDE the scan so ClickHouse
-    // can use them as prewhere predicates and skip non-matching granules.
-    // _deleted goes OUTSIDE (after dedup) so a deleted latest version
-    // correctly suppresses the entity even if an older version matches.
-    let mut scan_where = Vec::new();
-    for (prop, filter) in &np.filters {
-        scan_where.push(filter_to_expr(alias, prop, filter));
-    }
-    if !np.node_ids.is_empty() {
-        scan_where.push(id_list_predicate(alias, DEFAULT_PRIMARY_KEY, &np.node_ids));
-    }
-    if let Some(ref range) = np.id_range {
-        scan_where.push(id_range_predicate(alias, range));
-    }
-
-    let dedup = Query {
-        select: vec![
+    let dedup = build_dedup_subquery(
+        alias,
+        table,
+        vec![
             SelectExpr::new(Expr::col(alias, DEFAULT_PRIMARY_KEY), DEFAULT_PRIMARY_KEY),
             SelectExpr::new(Expr::col(alias, DELETED_COLUMN), DELETED_COLUMN),
         ],
-        from: TableRef::scan(table, alias),
-        where_clause: Expr::conjoin(scan_where),
-        order_by: vec![OrderExpr {
-            expr: Expr::col(alias, VERSION_COLUMN),
-            desc: true,
-        }],
-        limit_by: Some((1, vec![Expr::col(alias, DEFAULT_PRIMARY_KEY)])),
-        ..Default::default()
-    };
+        np,
+    );
 
     let inner = Query {
         select: vec![SelectExpr::new(

@@ -5,7 +5,7 @@ use crate::error::{QueryError, Result};
 
 use super::super::plan::*;
 use super::EmitOutput;
-use super::helpers::{build_dedup_subquery, node_select_columns, node_where_predicates};
+use super::helpers::{build_dedup_subquery, node_select_columns};
 
 pub(super) fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
     let (_, np) = plan
@@ -20,11 +20,20 @@ pub(super) fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
     let alias = &np.alias;
 
     let from = TableRef::Subquery {
-        query: Box::new(build_dedup_subquery(alias, table, vec![SelectExpr::star()])),
+        query: Box::new(build_dedup_subquery(
+            alias,
+            table,
+            vec![SelectExpr::star()],
+            np,
+        )),
         alias: alias.to_string(),
     };
 
-    let where_parts = node_where_predicates(alias, np);
+    // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
+    let where_parts = vec![Expr::eq(
+        Expr::col(alias, ontology::constants::DELETED_COLUMN),
+        Expr::param(crate::ast::ChType::Bool, false),
+    )];
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {

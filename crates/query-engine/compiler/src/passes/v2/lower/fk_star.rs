@@ -12,7 +12,7 @@ use super::super::shared::id_list_predicate;
 use super::EmitOutput;
 use super::helpers::{
     build_dedup_subquery, collect_dedup_columns, emit_filter_subquery, emit_node_join,
-    node_select_columns, node_where_predicates,
+    node_select_columns,
 };
 
 pub(super) fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<EmitOutput> {
@@ -39,13 +39,18 @@ pub(super) fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<E
         }
     }
 
-    let center_dedup = build_dedup_subquery(center_alias, center_table, center_cols);
+    let center_dedup = build_dedup_subquery(center_alias, center_table, center_cols, center_np);
+
     let mut from = TableRef::Subquery {
         query: Box::new(center_dedup),
         alias: center_alias.to_string(),
     };
 
-    let mut where_parts = node_where_predicates(center_alias, center_np);
+    // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
+    let mut where_parts = vec![Expr::eq(
+        Expr::col(center_alias, DELETED_COLUMN),
+        Expr::param(ChType::Bool, false),
+    )];
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
 
