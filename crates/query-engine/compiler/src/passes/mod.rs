@@ -223,7 +223,7 @@ pub struct SettingsPass;
 impl<E, S> CompilerPass<E, S> for SettingsPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode + HasQueryConfig,
+    S: PipelineState + HasInput + HasNode + HasQueryConfig + HasQueryPlan,
 {
     const NAME: &'static str = "settings";
 
@@ -241,6 +241,17 @@ where
         {
             config.compiler_derived.enable_materialized_cte = true;
         }
+
+        // Enable DP join reordering for queries with 3+ edge hops.
+        // ClickHouse's dpsize algorithm finds better join orders for
+        // multi-join chains than our fixed left-to-right emit order.
+        // Skipped for 1-2 hops where our selectivity reordering is
+        // already optimal and dpsize can make worse choices.
+        let plan = state.take_query_plan()?;
+        if plan.hops.len() >= 3 {
+            config.compiler_derived.join_order_algorithm = Some("dpsize".into());
+        }
+        state.set_query_plan(plan);
 
         state.set_query_config(config);
         Ok(())
