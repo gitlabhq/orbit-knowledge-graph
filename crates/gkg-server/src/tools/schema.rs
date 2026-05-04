@@ -3,13 +3,8 @@ use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 
-// Anchored at the crate manifest dir so sccache (which copies sources to its
-// cache before compiling) still resolves the path. A pure source-relative
-// include_str! breaks under sccache.
-const RESPONSE_FORMAT_SCHEMA: &str = include_str!(concat!(
-    env!("CARGO_MANIFEST_DIR"),
-    "/schemas/query_response.json"
-));
+const RESPONSE_FORMAT_SCHEMA: &str =
+    include_str!(concat!(env!("SCHEMA_DIR"), "/query_response.json"));
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
