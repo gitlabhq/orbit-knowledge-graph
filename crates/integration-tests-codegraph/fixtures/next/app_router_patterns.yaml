@@ -1,0 +1,224 @@
+name: "Next.js app router graph patterns"
+pipeline: js
+fixtures:
+  - path: tsconfig.json
+    content: |
+      {
+        "compilerOptions": {
+          "baseUrl": ".",
+          "paths": {
+            "@/*": ["src/*"]
+          }
+        }
+      }
+
+  - path: app/layout.tsx
+    content: |
+      import type { Metadata } from 'next';
+      import Header from '@/components/Header';
+
+      export const metadata: Metadata = {
+        title: 'Orbit',
+      };
+
+      export default function RootLayout({ children }) {
+        return (
+          <html>
+            <body>
+              <Header />
+              {children}
+            </body>
+          </html>
+        );
+      }
+
+  - path: app/page.tsx
+    content: |
+      import Dashboard from '@/features/dashboard/Dashboard';
+      import { getDashboard } from '@/lib/dashboard';
+
+      export default async function HomePage() {
+        const data = await getDashboard();
+        return <Dashboard data={data} />;
+      }
+
+  - path: app/blog/[slug]/page.tsx
+    content: |
+      import PostView from '@/components/PostView';
+      import { fetchPost } from '@/lib/posts';
+
+      export async function generateMetadata({ params }) {
+        const post = await fetchPost(params.slug);
+        return { title: post.title };
+      }
+
+      export default async function BlogPost({ params }) {
+        const post = await fetchPost(params.slug);
+        return <PostView post={post} />;
+      }
+
+  - path: app/api/health/route.ts
+    content: |
+      import { NextResponse } from 'next/server';
+      import { getHealth } from '@/lib/health';
+
+      export async function GET() {
+        return NextResponse.json(getHealth());
+      }
+
+      export async function POST() {
+        return NextResponse.json(getHealth());
+      }
+
+  - path: src/components/Header.tsx
+    content: |
+      export default function Header() {
+        return <header />;
+      }
+
+  - path: src/components/PostView.tsx
+    content: |
+      export default function PostView({ post }) {
+        return <article>{post.title}</article>;
+      }
+
+  - path: src/features/dashboard/Dashboard.tsx
+    content: |
+      export default function Dashboard({ data }) {
+        return <section>{data.title}</section>;
+      }
+
+  - path: src/lib/dashboard.ts
+    content: |
+      export function getDashboard() {
+        return { title: 'Dashboard' };
+      }
+
+  - path: src/lib/posts.ts
+    content: |
+      export function fetchPost(slug: string) {
+        return { slug, title: slug };
+      }
+
+  - path: src/lib/health.ts
+    content: |
+      export function getHealth() {
+        return { ok: true };
+      }
+
+tests:
+  - name: Next app router files are indexed as ordinary module definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+        'app/layout.tsx',
+        'app/page.tsx',
+        'app/blog/[slug]/page.tsx',
+        'app/api/health/route.ts'
+      ]
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path
+    assert:
+      - { row_count: 4 }
+      - { row: { file_path: "app/layout.tsx", fqn: "app/layout.tsx", type: "Module" } }
+      - { row: { file_path: "app/page.tsx", fqn: "app/page.tsx", type: "Module" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", fqn: "app/blog/[slug]/page.tsx", type: "Module" } }
+      - { row: { file_path: "app/api/health/route.ts", fqn: "app/api/health/route.ts", type: "Module" } }
+
+  - name: Next app router route exports are ordinary definitions
+    query: |
+      MATCH (d:Definition)
+      WHERE d.file_path IN [
+        'app/layout.tsx',
+        'app/page.tsx',
+        'app/blog/[slug]/page.tsx',
+        'app/api/health/route.ts'
+      ]
+        AND d.fqn IN ['RootLayout', 'HomePage', 'BlogPost', 'generateMetadata', 'GET', 'POST']
+      RETURN d.file_path AS file_path, d.fqn AS fqn, d.definition_type AS type
+      ORDER BY file_path, fqn
+    assert:
+      - { row_count: 6 }
+      - { row: { file_path: "app/layout.tsx", fqn: "RootLayout", type: "Function" } }
+      - { row: { file_path: "app/page.tsx", fqn: "HomePage", type: "Function" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", fqn: "BlogPost", type: "Function" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", fqn: "generateMetadata", type: "Function" } }
+      - { row: { file_path: "app/api/health/route.ts", fqn: "GET", type: "Function" } }
+      - { row: { file_path: "app/api/health/route.ts", fqn: "POST", type: "Function" } }
+
+  - name: Next app router tsconfig aliases resolve local imports
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN [
+        'app/layout.tsx',
+        'app/page.tsx',
+        'app/blog/[slug]/page.tsx',
+        'app/api/health/route.ts'
+      ]
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only, d.fqn AS target
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 6 }
+      - { row: { file_path: "app/api/health/route.ts", path: "@/lib/health", name: "getHealth", is_type_only: false, target: "src/lib/health.ts::getHealth" } }
+      - { row: { file_path: "app/layout.tsx", path: "@/components/Header", name: "default", is_type_only: false, target: "src/components/Header.tsx::default" } }
+      - { row: { file_path: "app/page.tsx", path: "@/features/dashboard/Dashboard", name: "default", is_type_only: false, target: "src/features/dashboard/Dashboard.tsx::default" } }
+      - { row: { file_path: "app/page.tsx", path: "@/lib/dashboard", name: "getDashboard", is_type_only: false, target: "src/lib/dashboard.ts::getDashboard" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/components/PostView", name: "default", is_type_only: false, target: "src/components/PostView.tsx::default" } }
+      - { row: { file_path: "app/blog/[slug]/page.tsx", path: "@/lib/posts", name: "fetchPost", is_type_only: false, target: "src/lib/posts.ts::fetchPost" } }
+
+  - name: Next app router external Next imports remain unresolved
+    query: |
+      MATCH (i:ImportedSymbol)
+      WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
+        AND i.path IN ['next', 'next/server']
+      RETURN i.file_path AS file_path, i.path AS path, i.name AS name, i.is_type_only AS is_type_only
+      ORDER BY file_path, path, name
+    assert:
+      - { row_count: 2 }
+      - { row: { file_path: "app/layout.tsx", path: "next", name: "Metadata", is_type_only: true } }
+      - { row: { file_path: "app/api/health/route.ts", path: "next/server", name: "NextResponse", is_type_only: false } }
+
+  - name: Next app router external Next imports have no local targets
+    query: |
+      MATCH (i:ImportedSymbol)-[:ImportedSymbolToDefinition]->(d:Definition)
+      WHERE i.file_path IN ['app/layout.tsx', 'app/api/health/route.ts']
+        AND i.path IN ['next', 'next/server']
+      RETURN i.path AS path, d.fqn AS target
+    assert:
+      - { empty: true }
+
+  - name: Next app router cross-file calls resolve helpers and JSX components
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path IN [
+          'app/layout.tsx',
+          'app/page.tsx',
+          'app/blog/[slug]/page.tsx',
+          'app/api/health/route.ts'
+        ]
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+      ORDER BY caller, callee_file, callee
+    assert:
+      - { row_count: 8 }
+      - { row: { caller: "RootLayout", callee_file: "src/components/Header.tsx", callee: "Header" } }
+      - { row: { caller: "HomePage", callee_file: "src/features/dashboard/Dashboard.tsx", callee: "Dashboard" } }
+      - { row: { caller: "HomePage", callee_file: "src/lib/dashboard.ts", callee: "getDashboard" } }
+      - { row: { caller: "BlogPost", callee_file: "src/components/PostView.tsx", callee: "PostView" } }
+      - { row: { caller: "BlogPost", callee_file: "src/lib/posts.ts", callee: "fetchPost" } }
+      - { row: { caller: "generateMetadata", callee_file: "src/lib/posts.ts", callee: "fetchPost" } }
+      - { row: { caller: "GET", callee_file: "src/lib/health.ts", callee: "getHealth" } }
+      - { row: { caller: "POST", callee_file: "src/lib/health.ts", callee: "getHealth" } }
+
+  - name: Next route handler methods share one helper edge per method
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/api/health/route.ts'
+        AND callee.file_path = 'src/lib/health.ts'
+      RETURN caller.fqn AS caller, callee.fqn AS callee
+      ORDER BY caller
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "GET", callee: "getHealth" } }
+      - { row: { caller: "POST", callee: "getHealth" } }

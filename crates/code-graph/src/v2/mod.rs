@@ -12,8 +12,8 @@ pub mod types;
 
 pub use error::{AnalyzerError, CodeGraphError, FaultedFile, FileFault, FileSkip, SkippedFile};
 pub use pipeline::{
-    BatchTx, CancellationToken, GenericPipeline, LanguageContext, LanguagePipeline, Pipeline,
-    PipelineConfig, PipelineContext, PipelineResult,
+    BatchTx, CancellationToken, FileInventoryEntry, GenericPipeline, GraphStatsCounters,
+    LanguageContext, LanguagePipeline, Pipeline, PipelineConfig, PipelineContext, PipelineResult,
 };
 pub use registry::{dispatch_by_tag, dispatch_language};
 pub use sink::{BatchSink, CollectSink, GraphConverter, NullSink, SinkError};

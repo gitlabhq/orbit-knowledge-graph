@@ -98,6 +98,11 @@ pub enum ProjectionDef {
     /// Re-sorted copy of the data for alternative access patterns.
     /// Emits: `SELECT * ORDER BY (cols...)`.
     Reorder { name: String, order_by: Vec<String> },
+    /// Lightweight projection: stores only key columns + `_part_offset`,
+    /// acting as a secondary index without duplicating full rows.
+    /// Emits: `SELECT col1, col2 ORDER BY (col1, col2)`.
+    /// Requires ClickHouse 26.1+.
+    Lightweight { name: String, order_by: Vec<String> },
     /// Pre-aggregated rollup.
     /// `select` contains raw column refs and aggregate expressions (e.g. `count()`, `uniq(col)`).
     /// `group_by` contains the grouping columns.

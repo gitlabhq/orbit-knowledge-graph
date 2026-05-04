@@ -10,4 +10,5 @@ variants:
 
   - from_node: { type: Job, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: pipeline_id
     description: "Job belongs to pipeline (skips the Stage hop)."

@@ -14,8 +14,8 @@ etl:
     from:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]
     to:
       id: vulnerability_id
       type: Vulnerability
-      enrich: [state, severity]
+      enrich: [state, severity, report_type, resolved_on_default_branch, present_on_default_branch]

@@ -159,8 +159,8 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: name, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: slug, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: external_url, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -170,7 +170,7 @@ storage:
     - {name: auto_stop_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: auto_delete_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: auto_stop_setting, type: "LowCardinality(String)", default: "'always'", codec: ["LZ4"]}
-    - {name: cluster_agent_id, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: cluster_agent_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: kubernetes_namespace, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: flux_resource_path, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -187,5 +187,6 @@ storage:
     - {name: idx_name_ngram, column: name, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: reorder, name: by_tier_state, order_by: [tier, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

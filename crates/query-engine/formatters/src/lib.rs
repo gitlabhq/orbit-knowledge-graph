@@ -72,7 +72,7 @@ mod tests {
         // `/vN` where N is the major component of RAW_OUTPUT_FORMAT_VERSION.
         // Guards against the two drifting silently when the semver major bumps.
         let schema: Value = serde_json::from_str(include_str!(concat!(
-            env!("GKG_SERVER_SCHEMAS_DIR"),
+            env!("SCHEMA_DIR"),
             "/query_response.json"
         )))
         .expect("query_response.json must be valid JSON");

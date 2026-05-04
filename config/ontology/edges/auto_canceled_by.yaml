@@ -6,8 +6,10 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: auto_canceled_by_id
     description: "Pipeline was auto-canceled by a newer pipeline."
 
   - from_node: { type: Job, id: id }
     to_node: { type: Job, id: id }
+    fk_column: auto_canceled_by_id
     description: "Job was auto-canceled when its pipeline was superseded."

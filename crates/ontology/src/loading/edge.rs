@@ -25,6 +25,8 @@ pub(crate) struct EdgeYaml {
 struct EdgeVariantYaml {
     from_node: EdgeNodeRef,
     to_node: EdgeNodeRef,
+    #[serde(default)]
+    fk_column: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -77,6 +79,7 @@ impl EdgeYaml {
                 target: v.to_node.id.clone(),
                 target_kind: v.to_node.node_type.clone(),
                 destination_table: table.clone(),
+                fk_column: v.fk_column.clone(),
             })
             .collect()
     }

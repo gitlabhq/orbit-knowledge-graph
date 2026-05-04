@@ -18,17 +18,19 @@ etl:
     from:
       id: user_id
       type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
     to:
       id: merge_request_id
       type: MergeRequest
-      enrich: [state_id]
+      enrich: [state_id, merge_status, draft, squash, discussion_locked]
   - scope: namespaced
     source: siphon_issue_assignees
     order_by: [traversal_path, issue_id, user_id]
     from:
       id: user_id
       type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
     to:
       id: issue_id
       type: WorkItem
-      enrich: [state_id, work_item_type_id]
+      enrich: [state_id, work_item_type_id, confidential]

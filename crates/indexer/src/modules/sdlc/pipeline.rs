@@ -2,14 +2,15 @@ use std::collections::BTreeMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::array::ArrayRef;
-use arrow::compute;
-use arrow::datatypes::{DataType, Field};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
+use futures::StreamExt;
+use futures::stream::FuturesUnordered;
+use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
+use tokio::sync::Semaphore;
 use tracing::{debug, info, warn};
 
 use crate::clickhouse::TIMESTAMP_FORMAT;
@@ -58,14 +59,24 @@ impl Pipeline {
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
+        max_concurrent_entities: usize,
     ) -> Result<(), HandlerError> {
-        let mut errors = Vec::new();
+        let semaphore = Semaphore::new(max_concurrent_entities.max(1));
+        let mut futures = FuturesUnordered::new();
 
         for plan in plans {
-            if let Err(err) = self.run_plan(plan, context, destination, progress).await {
-                self.metrics
-                    .record_pipeline_error(&plan.name, err.error_kind());
-                errors.push(format!("{}: {err}", plan.name));
+            futures.push(async {
+                let _permit = semaphore.acquire().await.expect("semaphore is not closed");
+                let result = self.run_plan(plan, context, destination, progress).await;
+                (&plan.name, result)
+            });
+        }
+
+        let mut errors = Vec::new();
+        while let Some((name, result)) = futures.next().await {
+            if let Err(err) = result {
+                self.metrics.record_pipeline_error(name, err.error_kind());
+                errors.push(format!("{name}: {err}"));
             }
         }
 
@@ -281,7 +292,7 @@ impl Pipeline {
 
         for transform in transforms {
             let transform_start = Instant::now();
-            let result_batches = self
+            let mut result_batches = self
                 .execute_transform(session, &transform.to_sql())
                 .await
                 .map_err(|err| {
@@ -292,10 +303,7 @@ impl Pipeline {
                 })?;
             transform_duration += transform_start.elapsed();
 
-            // DataFusion may produce StringView (utf8_view) arrays which
-            // ClickHouse 26.x doesn't support in Arrow IPC ingestion.
-            // Cast them to Utf8 before writing.
-            let result_batches = downcast_string_views(&result_batches);
+            prepare_batches(&mut result_batches, &transform.dict_encode_columns);
 
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
@@ -377,62 +385,6 @@ impl Pipeline {
     }
 }
 
-/// Cast StringView / List<StringView> columns to Utf8 / List<Utf8>.
-/// DataFusion 53+ produces StringView for `make_array(concat(...))` results,
-/// but ClickHouse 26.x rejects the `utf8_view` Arrow type during IPC ingestion.
-fn downcast_string_views(batches: &[RecordBatch]) -> Vec<RecordBatch> {
-    batches
-        .iter()
-        .map(|batch| {
-            let schema = batch.schema();
-            let mut new_fields: Vec<Field> = Vec::new();
-            let mut new_columns: Vec<ArrayRef> = Vec::new();
-            let mut changed = false;
-
-            for (i, field) in schema.fields().iter().enumerate() {
-                let col = batch.column(i);
-                match field.data_type() {
-                    DataType::Utf8View => {
-                        let casted = compute::cast(col, &DataType::Utf8)
-                            .expect("StringView -> Utf8 cast should not fail");
-                        new_fields.push(Field::new(
-                            field.name(),
-                            DataType::Utf8,
-                            field.is_nullable(),
-                        ));
-                        new_columns.push(casted);
-                        changed = true;
-                    }
-                    DataType::List(inner) if *inner.data_type() == DataType::Utf8View => {
-                        let target = DataType::List(Arc::new(Field::new(
-                            inner.name(),
-                            DataType::Utf8,
-                            inner.is_nullable(),
-                        )));
-                        let casted = compute::cast(col, &target)
-                            .expect("List<StringView> -> List<Utf8> cast should not fail");
-                        new_fields.push(Field::new(field.name(), target, field.is_nullable()));
-                        new_columns.push(casted);
-                        changed = true;
-                    }
-                    _ => {
-                        new_fields.push(field.as_ref().clone());
-                        new_columns.push(Arc::clone(col));
-                    }
-                }
-            }
-
-            if changed {
-                let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
-                RecordBatch::try_new(new_schema, new_columns)
-                    .expect("schema/column mismatch in downcast_string_views")
-            } else {
-                batch.clone()
-            }
-        })
-        .collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -445,6 +397,7 @@ mod tests {
     use arrow::array::{BooleanArray, Int64Array, StringArray};
     use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
     use async_trait::async_trait;
+    use std::collections::HashSet;
     use std::sync::Mutex;
 
     fn simple_extract_query(batch_size: u64) -> ExtractQuery {
@@ -496,6 +449,7 @@ mod tests {
             transforms: vec![Transformation {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
+                dict_encode_columns: HashSet::new(),
             }],
         }
     }
@@ -632,6 +586,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
         assert!(result.is_ok());
@@ -660,6 +615,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -686,6 +642,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -764,6 +721,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -803,6 +761,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -841,6 +800,7 @@ mod tests {
                 &test_context(),
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 
@@ -875,6 +835,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
             )
             .await;
 

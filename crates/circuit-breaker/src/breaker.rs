@@ -5,6 +5,7 @@ use std::time::Instant;
 
 use parking_lot::RwLock;
 
+use crate::classifiable::CircuitBreakableError;
 use crate::config::CircuitConfig;
 use crate::error::CircuitBreakerError;
 use crate::observer::{CircuitBreakerObserver, NoopObserver};
@@ -166,6 +167,17 @@ impl CircuitBreaker {
         }
 
         result.map_err(CircuitBreakerError::Inner)
+    }
+
+    pub async fn call_transient<F, Fut, T, E>(&self, f: F) -> Result<T, E>
+    where
+        F: FnOnce() -> Fut,
+        Fut: Future<Output = Result<T, E>>,
+        E: CircuitBreakableError,
+    {
+        self.call_with_filter(f, E::is_transient)
+            .await
+            .map_err(E::from_circuit_breaker)
     }
 
     pub fn is_available(&self) -> bool {
@@ -426,6 +438,67 @@ mod tests {
 
         let _ = db.call(|| async { Ok::<_, &str>(1) }).await;
         assert_eq!(observer.rejections.load(Ordering::Relaxed), 1);
+    }
+
+    #[derive(Debug, PartialEq)]
+    enum ClassifiedError {
+        Transient,
+        Permanent,
+        CircuitOpen { service: &'static str },
+    }
+
+    impl CircuitBreakableError for ClassifiedError {
+        fn is_transient(&self) -> bool {
+            matches!(self, Self::Transient)
+        }
+
+        fn circuit_open(service: &'static str) -> Self {
+            Self::CircuitOpen { service }
+        }
+    }
+
+    async fn trip_transient(breaker: &CircuitBreaker) {
+        for _ in 0..2 {
+            let _ = breaker
+                .call_transient(|| async { Err::<(), _>(ClassifiedError::Transient) })
+                .await;
+        }
+    }
+
+    #[tokio::test]
+    async fn call_transient_returns_concrete_error_type() {
+        let db = db(&test_registry());
+        let result: Result<i32, ClassifiedError> = db
+            .call_transient(|| async { Err(ClassifiedError::Transient) })
+            .await;
+        assert_eq!(result.unwrap_err(), ClassifiedError::Transient);
+    }
+
+    #[tokio::test]
+    async fn call_transient_trips_on_transient_errors() {
+        let db = db(&test_registry());
+        trip_transient(&db).await;
+
+        let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(1) }).await;
+        assert_eq!(
+            result.unwrap_err(),
+            ClassifiedError::CircuitOpen { service: "db" }
+        );
+    }
+
+    #[tokio::test]
+    async fn call_transient_ignores_permanent_errors() {
+        let db = db(&test_registry());
+
+        for _ in 0..5 {
+            let result: Result<i32, ClassifiedError> = db
+                .call_transient(|| async { Err(ClassifiedError::Permanent) })
+                .await;
+            assert_eq!(result.unwrap_err(), ClassifiedError::Permanent);
+        }
+
+        let result: Result<i32, ClassifiedError> = db.call_transient(|| async { Ok(42) }).await;
+        assert_eq!(result.unwrap(), 42);
     }
 
     #[test]

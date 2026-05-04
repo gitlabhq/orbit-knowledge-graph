@@ -3,7 +3,7 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
@@ -18,6 +18,7 @@ const ENABLED_NAMESPACE_QUERY: &str = r#"
 SELECT root_namespace_id, traversal_path
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = false
+  AND traversal_path != ''
 "#;
 
 pub struct NamespaceDispatcher {
@@ -94,6 +95,15 @@ impl NamespaceDispatcher {
         let mut skipped: u64 = 0;
 
         for (namespace_id, traversal_path) in namespace_ids.iter().zip(traversal_paths.iter()) {
+            if !is_dispatchable_traversal_path(traversal_path) {
+                warn!(
+                    namespace_id = *namespace_id,
+                    traversal_path = %traversal_path,
+                    "skipping enabled namespace with invalid traversal_path"
+                );
+                continue;
+            }
+
             let request = NamespaceIndexingRequest {
                 namespace: *namespace_id,
                 traversal_path: traversal_path.clone(),
@@ -139,5 +149,27 @@ impl NamespaceDispatcher {
             skipped, "dispatched namespace indexing requests"
         );
         Ok(())
+    }
+}
+
+fn is_dispatchable_traversal_path(path: &str) -> bool {
+    gkg_utils::traversal_path::is_valid(path)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ENABLED_NAMESPACE_QUERY, is_dispatchable_traversal_path};
+
+    #[test]
+    fn enabled_namespace_query_excludes_empty_traversal_paths() {
+        assert!(ENABLED_NAMESPACE_QUERY.contains("traversal_path != ''"));
+    }
+
+    #[test]
+    fn dispatchable_traversal_paths_require_org_and_namespace_segments() {
+        assert!(is_dispatchable_traversal_path("1/9/"));
+        assert!(!is_dispatchable_traversal_path(""));
+        assert!(!is_dispatchable_traversal_path("0/"));
+        assert!(!is_dispatchable_traversal_path("1/"));
     }
 }

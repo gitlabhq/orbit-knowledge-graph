@@ -9,6 +9,11 @@
 //! The `RulesResolver` uses the resolution rules to chase imports.
 //!
 //!
+use petgraph::graph::NodeIndex;
+
+use super::graph::CodeGraph;
+use crate::v2::types::ExpressionStep;
+
 pub trait HasRules {
     fn rules() -> ResolutionRules;
 }
@@ -65,6 +70,10 @@ pub enum ImportStrategy {
     /// Used by languages where require/include makes all symbols globally
     /// available (Ruby) or where the source root prefix is unknown (Python).
     GlobalName,
+    /// Resolve bare names via `#include` graph traversal. Finds
+    /// definitions in files reachable through this file's include
+    /// chain (direct + transitive). For C, C++, Objective-C.
+    IncludeGraph,
 }
 
 // ── Chain / receiver ────────────────────────────────────────────
@@ -94,6 +103,51 @@ pub enum ResolveStage {
 
 // ── Resolver hooks ──────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub enum AmbientImportFallback {
+    #[default]
+    None,
+    Wildcard,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ImportedSymbolFallbackPolicy {
+    pub explicit_reaching_imports: bool,
+    pub ambient: AmbientImportFallback,
+    pub max_ambient_candidates: usize,
+}
+
+impl ImportedSymbolFallbackPolicy {
+    pub const fn ambient_wildcard() -> Self {
+        Self {
+            explicit_reaching_imports: true,
+            ambient: AmbientImportFallback::Wildcard,
+            max_ambient_candidates: 1,
+        }
+    }
+}
+
+impl Default for ImportedSymbolFallbackPolicy {
+    fn default() -> Self {
+        Self {
+            explicit_reaching_imports: true,
+            ambient: AmbientImportFallback::None,
+            max_ambient_candidates: 1,
+        }
+    }
+}
+
+pub type ExternalImportTypeHook = fn(&CodeGraph, NodeIndex) -> Option<String>;
+
+#[derive(Debug, Clone, Copy)]
+pub struct ImportedSymbolFallbackContext<'a> {
+    pub name: &'a str,
+    pub chain: Option<&'a [ExpressionStep]>,
+}
+
+pub type ImportedSymbolFallbackCandidatesHook =
+    fn(&CodeGraph, &[NodeIndex], ImportedSymbolFallbackContext<'_>) -> Vec<NodeIndex>;
+
 /// Language-specific resolver behavior. All fields default to `None`.
 #[derive(Default)]
 pub struct ResolverHooks {
@@ -103,6 +157,19 @@ pub struct ResolverHooks {
     /// Method names that act as constructors — `Call("new")` on a class
     /// returns an instance of that class. e.g. `&["new"]` for Ruby.
     pub constructor_methods: &'static [&'static str],
+    /// Controls when unresolved references materialize
+    /// `Definition -> ImportedSymbol` fallback edges.
+    pub imported_symbol_fallback: ImportedSymbolFallbackPolicy,
+    /// Ambient fallback names to suppress for language built-ins. Named
+    /// reaching imports are still eligible, but wildcard imports are not.
+    pub excluded_ambient_imported_symbol_names: &'static [&'static str],
+    /// Language-owned candidates for unresolved `Definition -> ImportedSymbol`
+    /// fallback edges. The generic resolver supplies unresolved ref data and
+    /// same-file imports, but language modules own their matching semantics.
+    pub imported_symbol_candidates: Option<ImportedSymbolFallbackCandidatesHook>,
+    /// Derive a synthetic external base type for unresolved import chains.
+    /// Language modules own any source-language semantics here.
+    pub external_import_type: Option<ExternalImportTypeHook>,
 }
 
 // ── Top-level config ────────────────────────────────────────────

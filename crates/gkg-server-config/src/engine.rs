@@ -166,6 +166,10 @@ impl Default for GlobalHandlerConfig {
     }
 }
 
+fn default_max_concurrent_entities() -> usize {
+    3
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
 pub struct NamespaceHandlerConfig {
     #[serde(flatten)]
@@ -176,6 +180,11 @@ pub struct NamespaceHandlerConfig {
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
+
+    /// Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)
+    /// to run concurrently within a single namespace indexing pass.
+    #[serde(default = "default_max_concurrent_entities")]
+    pub max_concurrent_entities: usize,
 }
 
 impl Default for NamespaceHandlerConfig {
@@ -184,6 +193,7 @@ impl Default for NamespaceHandlerConfig {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
+            max_concurrent_entities: default_max_concurrent_entities(),
         }
     }
 }
@@ -194,10 +204,6 @@ fn default_code_indexing_max_file_size_bytes() -> u64 {
 
 fn default_code_indexing_max_files() -> usize {
     1_000_000
-}
-
-fn default_code_indexing_respect_gitignore() -> bool {
-    true
 }
 
 fn default_code_indexing_per_file_timeout_ms() -> u64 {
@@ -211,8 +217,6 @@ pub struct CodeIndexingPipelineConfig {
     pub max_file_size_bytes: u64,
     #[serde(default = "default_code_indexing_max_files")]
     pub max_files: usize,
-    #[serde(default = "default_code_indexing_respect_gitignore")]
-    pub respect_gitignore: bool,
     #[serde(default)]
     pub worker_threads: usize,
     #[serde(default)]
@@ -229,7 +233,6 @@ impl Default for CodeIndexingPipelineConfig {
         Self {
             max_file_size_bytes: default_code_indexing_max_file_size_bytes(),
             max_files: default_code_indexing_max_files(),
-            respect_gitignore: default_code_indexing_respect_gitignore(),
             worker_threads: 0,
             max_concurrent_languages: 0,
             per_file_timeout_ms: default_code_indexing_per_file_timeout_ms(),

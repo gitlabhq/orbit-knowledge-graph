@@ -401,6 +401,7 @@ etl:
       GROUP BY traversal_path, merge_request_id
     ) AS approvals ON m.traversal_path = approvals._ap_tp AND m.id = approvals._ap_mr
   watermark: m._siphon_replicated_at
+  table_alias: m
   deleted: m._siphon_deleted
   traversal_path_filter: "startsWith(m.traversal_path, {traversal_path:String})"
   order_by: [traversal_path, id]
@@ -462,8 +463,8 @@ storage:
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: iid, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: iid, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: title, type: "String", default: "''", codec: ["ZSTD(1)"]}
     - {name: description, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: source_branch, type: "String", default: "''", codec: ["ZSTD(1)"]}
@@ -477,7 +478,7 @@ storage:
     - {name: merge_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: discussion_locked, type: "Nullable(Bool)"}
     - {name: prepared_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: merged_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: squash_commit_sha, type: "Nullable(String)", codec: ["ZSTD(1)"]}
     - {name: latest_build_started_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
@@ -488,13 +489,13 @@ storage:
     - {name: first_comment_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: last_commit_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: diff_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: commits_count, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: diff_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: modified_paths_size, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: commits_count, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_approved_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: first_reassigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: added_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
-    - {name: removed_lines, type: "Nullable(Int64)", codec: ["ZSTD(1)"]}
+    - {name: added_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: removed_lines, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: first_contribution, type: "Bool", default: "false"}
     - {name: reviewer_first_assigned_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
@@ -516,6 +517,7 @@ storage:
     - {name: idx_merge_status, column: merge_status, type: "set(8)", granularity: 2}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: reorder, name: by_state_id, order_by: [state, id]}
     - {type: reorder, name: by_project_state, order_by: [traversal_path, project_id, state, id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

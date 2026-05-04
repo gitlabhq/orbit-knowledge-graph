@@ -9,7 +9,8 @@ use code_graph::v2::dispatch_by_tag;
 use code_graph::v2::linker::graph::RowContext;
 use code_graph::v2::trace::Tracer;
 use code_graph::v2::{
-    BatchTx, GraphConverter, NullSink, Pipeline, PipelineConfig, PipelineContext,
+    BatchTx, FileInventoryEntry, GraphConverter, GraphStatsCounters, NullSink, Pipeline,
+    PipelineConfig, PipelineContext,
 };
 
 use super::assertions::{Severity, TestSuite};
@@ -81,7 +82,11 @@ fn workspace_root() -> std::path::PathBuf {
 }
 
 /// Copy all files from `src_dir` into `dst_dir`, preserving relative paths.
-fn copy_dir_recursive(src_dir: &std::path::Path, dst_dir: &std::path::Path) {
+fn copy_dir_recursive(
+    src_dir: &std::path::Path,
+    dst_dir: &std::path::Path,
+    inventory: &mut Vec<FileInventoryEntry>,
+) {
     for entry in walkdir::WalkDir::new(src_dir)
         .into_iter()
         .filter_map(|e| e.ok())
@@ -96,6 +101,10 @@ fn copy_dir_recursive(src_dir: &std::path::Path, dst_dir: &std::path::Path) {
             }
             std::fs::copy(entry.path(), &dst)
                 .unwrap_or_else(|e| panic!("Failed to copy {}: {e}", entry.path().display()));
+            inventory.push(FileInventoryEntry {
+                path: rel.to_string_lossy().to_string(),
+                size: entry.metadata().map_or(0, |metadata| metadata.len()),
+            });
         }
     }
 }
@@ -127,13 +136,14 @@ pub async fn run_yaml_suite(yaml: &str) {
     }
 
     let tmp = tempfile::tempdir().expect("Failed to create temp dir");
+    let mut file_inventory = Vec::new();
 
     // Copy fixture_dir contents first (if set)
     if let Some(dir) = &suite.fixture_dir {
         let root = workspace_root();
         let src = root.join(dir);
         assert!(src.is_dir(), "fixture_dir not found: {}", src.display());
-        copy_dir_recursive(&src, tmp.path());
+        copy_dir_recursive(&src, tmp.path(), &mut file_inventory);
     }
 
     // Write inline fixtures (override anything from fixture_dir)
@@ -145,6 +155,10 @@ pub async fn run_yaml_suite(yaml: &str) {
         }
         std::fs::write(&path, &fixture.content)
             .unwrap_or_else(|e| panic!("Failed to write {}: {e}", path.display()));
+        file_inventory.push(FileInventoryEntry {
+            path: fixture.path.clone(),
+            size: fixture.content.len() as u64,
+        });
     }
 
     let root = tmp.path().to_string_lossy().to_string();
@@ -169,13 +183,18 @@ pub async fn run_yaml_suite(yaml: &str) {
             let config = PipelineConfig::default();
             let converter = Arc::new(LanceConverter::new());
             let sink: Arc<dyn code_graph::v2::BatchSink> = Arc::new(NullSink);
+            let inventory: Arc<[FileInventoryEntry]> = Arc::from(file_inventory.clone());
             let result = if let Some(pool) = &pool {
                 let c = converter.clone() as Arc<dyn GraphConverter>;
                 let s = sink.clone();
-                pool.install(|| Pipeline::run_with_tracer(tmp.path(), config, tracer, c, s))
+                let inventory = inventory.clone();
+                pool.install(move || {
+                    Pipeline::run_with_tracer(tmp.path(), inventory, config, tracer, c, s)
+                })
             } else {
                 Pipeline::run_with_tracer(
                     tmp.path(),
+                    inventory,
                     config,
                     tracer,
                     converter.clone() as Arc<dyn GraphConverter>,
@@ -205,12 +224,19 @@ pub async fn run_yaml_suite(yaml: &str) {
             });
             let converter = LanceConverter::new();
             let (tx, rx) = crossbeam_channel::unbounded();
+            let dirs = AtomicUsize::new(0);
+            let files_count = AtomicUsize::new(0);
             let defs = AtomicUsize::new(0);
             let imps = AtomicUsize::new(0);
             let edgs = AtomicUsize::new(0);
             {
                 let errors = std::sync::Mutex::new(Vec::new());
-                let btx = BatchTx::new(&tx, &converter, &errors, &defs, &imps, &edgs);
+                let btx = BatchTx::new(
+                    &tx,
+                    &converter,
+                    &errors,
+                    GraphStatsCounters::new(&dirs, &files_count, &defs, &imps, &edgs),
+                );
                 dispatch_by_tag(tag, &files, &ctx, &btx)
                     .unwrap_or_else(|| panic!("unknown pipeline tag: {tag}"))
                     .unwrap_or_else(|e| panic!("pipeline {tag} failed: {e:?}"));

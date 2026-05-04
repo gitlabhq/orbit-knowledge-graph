@@ -36,6 +36,12 @@ fixtures:
   - path: app/assets/javascripts/components/child_badge.vue
     content: |
       <script>
+      export class Helper {
+        open() {
+          return 'helper';
+        }
+      }
+
       export default {
         name: 'ChildBadge',
         methods: {
@@ -46,11 +52,20 @@ fixtures:
       };
       </script>
 
+  - path: app/assets/javascripts/components/component_host.ts
+    content: |
+      import ChildBadge from './child_badge.vue';
+
+      export function mountBadge() {
+        return new ChildBadge();
+      }
+
   - path: app/assets/javascripts/components/parent_panel.vue
     content: |
       <script>
       import { logError } from '~/lib/logger';
       import * as Tracking from '~/tracking';
+      import * as ExternalTracking from '@external/tracking';
       import getItemsQuery from '../graphql/get_items.query.graphql';
       import ChildBadge from './child_badge.vue';
 
@@ -79,6 +94,9 @@ fixtures:
           emitTrack() {
             return Tracking.trackEvent('panel_loaded');
           },
+          emitExternal() {
+            return ExternalTracking.emit('panel_loaded');
+          },
         },
       };
       </script>
@@ -93,6 +111,17 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { import_type: "DefaultImport", target: "app/assets/javascripts/components/child_badge.vue::default" } }
+
+  - name: Vue default import resolves to virtual component when SFC also exports classes
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE e.edge_kind = 'Calls'
+        AND caller.file_path = 'app/assets/javascripts/components/component_host.ts'
+      RETURN caller.fqn AS caller, callee.file_path AS callee_file, callee.fqn AS callee
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "mountBadge", callee_file: "app/assets/javascripts/components/child_badge.vue", callee: "ChildBadge" } }
+      - { not: true, row: { callee: "Helper" } }
 
   - name: Vue GraphQL default import targets primary export proxy
     query: |
@@ -161,3 +190,14 @@ tests:
     assert:
       - { row_count: 1 }
       - { row: { caller: "emitTrack", callee: "trackEvent" } }
+
+  - name: Vue unresolved external namespace calls target imported symbols
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.file_path = 'app/assets/javascripts/components/parent_panel.vue'
+        AND e.edge_kind = 'Calls'
+        AND sym.path = '@external/tracking'
+      RETURN caller.name AS caller, sym.import_type AS import_type, sym.alias AS alias
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "emitExternal", import_type: "NamespaceImport", alias: "ExternalTracking" } }

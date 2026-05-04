@@ -167,7 +167,6 @@ handlers:
     pipeline:
       max_file_size_bytes: 10000000
       max_files: 200000
-      respect_gitignore: false
       worker_threads: 2
       max_concurrent_languages: 3
   namespace-deletion:
@@ -220,13 +219,6 @@ handlers:
         assert_eq!(
             engine.handlers.code_indexing_task.pipeline.max_files,
             200_000
-        );
-        assert!(
-            !engine
-                .handlers
-                .code_indexing_task
-                .pipeline
-                .respect_gitignore
         );
         assert_eq!(
             engine.handlers.code_indexing_task.pipeline.worker_threads,

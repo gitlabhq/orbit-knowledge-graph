@@ -41,6 +41,7 @@ pub(in crate::modules::sdlc) enum NodeColumn {
         source: String,
         target: String,
         values: BTreeMap<i64, String>,
+        nullable: bool,
     },
 }
 
@@ -233,6 +234,7 @@ fn resolve_node_columns(fields: &[ontology::Field]) -> Vec<NodeColumn> {
                     source: col.to_string(),
                     target: field.name.clone(),
                     values: field.enum_values.clone().unwrap(),
+                    nullable: field.nullable,
                 });
             }
             Some(if col == field.name {
@@ -470,6 +472,14 @@ fn resolve_standalone_edge(
         let deleted_col = etl.deleted();
         let fk_col = &endpoint.id_column;
 
+        // For Query-type ETLs the `from` is a JOIN expression and bare `id`
+        // is ambiguous. Use the explicit table_alias to qualify `id`.
+        let qualified_id = if let Some(alias) = etl.table_alias() {
+            format!("{alias}.id")
+        } else {
+            "id".to_string()
+        };
+
         let alias = format!("_e{enrich_idx}");
         enrich_idx += 1;
 
@@ -478,7 +488,7 @@ fn resolve_standalone_edge(
             .iter()
             .map(|c| format!("argMax({c}, {watermark_col}) AS {c}"))
             .collect();
-        let sub_cols = std::iter::once("id".to_string())
+        let sub_cols = std::iter::once(format!("{qualified_id} AS id"))
             .chain(agg_cols)
             .collect::<Vec<_>>()
             .join(", ");
@@ -486,8 +496,8 @@ fn resolve_standalone_edge(
         cte_defs.push(format!(
             "{alias} AS (SELECT {sub_cols} FROM {node_table} \
              WHERE {deleted_col} = false \
-             AND id IN (SELECT DISTINCT {fk_col} FROM _batch) \
-             GROUP BY id)"
+             AND {qualified_id} IN (SELECT DISTINCT {fk_col} FROM _batch) \
+             GROUP BY {qualified_id})"
         ));
 
         join_clauses.push(format!("LEFT JOIN {alias} ON _batch.{fk_col} = {alias}.id"));

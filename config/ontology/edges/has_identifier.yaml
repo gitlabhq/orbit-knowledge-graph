@@ -18,6 +18,7 @@ etl:
     from:
       id: occurrence_id
       type: VulnerabilityOccurrence
+      enrich: [severity, report_type, detection_method]
     to:
       id: identifier_id
       type: VulnerabilityIdentifier

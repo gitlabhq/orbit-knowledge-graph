@@ -136,17 +136,18 @@ etl:
     file.binary AS binary,
     file.generated AS generated,
     file.a_mode AS a_mode, file.b_mode AS b_mode,
-    file.traversal_path AS traversal_path,
+    diff.traversal_path AS traversal_path,
     file.relative_order AS relative_order
   from: >-
     siphon_merge_request_diff_files file
     INNER JOIN (
-      SELECT id, merge_request_id, project_id
+      SELECT id, merge_request_id, project_id, traversal_path
       FROM siphon_merge_request_diffs
       WHERE startsWith(traversal_path, {traversal_path:String})
     ) diff ON file.merge_request_diff_id = diff.id
   traversal_path_filter: "startsWith(file.traversal_path, {traversal_path:String})"
   watermark: file._siphon_replicated_at
+  table_alias: file
   deleted: file._siphon_deleted
   order_by: [traversal_path, merge_request_diff_id, relative_order]
   edges:
@@ -160,10 +161,10 @@ storage:
   settings:
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
-    - {name: id, type: "Int64", codec: ["Delta(8)", "ZSTD(1)"]}
-    - {name: merge_request_id, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: merge_request_diff_id, type: "Int64", codec: ["ZSTD(1)"]}
-    - {name: project_id, type: "Int64", codec: ["ZSTD(1)"]}
+    - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: merge_request_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: merge_request_diff_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
     - {name: too_large, type: "Bool", default: "false"}
     - {name: new_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
     - {name: old_path, type: "String", default: "''", codec: ["ZSTD(3)"]}
@@ -188,4 +189,7 @@ storage:
     - {name: idx_old_path_ngram, column: old_path, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_merge_request_id, order_by: [merge_request_id]}
+    - {type: lightweight, name: by_merge_request_diff_id, order_by: [merge_request_diff_id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

@@ -52,6 +52,7 @@ tower = { workspace = true }
 tempfile = { workspace = true }
 reqwest = { workspace = true }
 labkit = { workspace = true, features = ["http"] }
+labkit-events = { workspace = true }
 opentelemetry = { workspace = true }
 opentelemetry_sdk = { version = "0.31", features = ["metrics", "rt-tokio", "testing"] }
 zstd = "0.13.3"

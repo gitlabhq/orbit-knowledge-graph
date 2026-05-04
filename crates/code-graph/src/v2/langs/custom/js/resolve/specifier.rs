@@ -171,6 +171,7 @@ impl JsCrossFileResolver {
                 let JsCallTarget::ImportedCall {
                     imported_call:
                         super::super::types::JsImportedCall {
+                            fallback_binding: _,
                             binding,
                             member_path,
                             invocation_kind,

@@ -14,7 +14,8 @@ use crate::v2::types::BindingKind;
 
 use crate::v2::linker::HasRules;
 use crate::v2::linker::rules::{
-    ImportStrategy, ReceiverMode, ResolutionRules, ResolveStage, ResolverHooks,
+    ImportStrategy, ImportedSymbolFallbackPolicy, ReceiverMode, ResolutionRules, ResolveStage,
+    ResolverHooks,
 };
 
 // ── DSL parser spec ─────────────────────────────────────────────
@@ -229,6 +230,9 @@ impl DslLanguage for KotlinDsl {
             import("import_header")
                 .classify(kotlin_import_classify)
                 .split_last(".")
+                .alias_from(
+                    Extract::one(Child, Kind("import_alias")).child_of_kind("type_identifier"),
+                )
                 .wildcard_child("wildcard_import"),
         ]
     }
@@ -360,6 +364,8 @@ impl HasRules for KotlinRules {
         .with_implicit_sub_scopes(&["Companion"])
         .with_hooks(ResolverHooks {
             call_method: Some("invoke"),
+            imported_symbol_fallback: ImportedSymbolFallbackPolicy::ambient_wildcard(),
+            excluded_ambient_imported_symbol_names: &["print", "println"],
             ..Default::default()
         })
     }

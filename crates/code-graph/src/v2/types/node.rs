@@ -174,6 +174,12 @@ pub struct CanonicalFile {
     pub path: String,
     pub name: String,
     pub extension: String,
-    pub language: Language,
+    pub language: Option<Language>,
     pub size: u64,
+}
+
+impl CanonicalFile {
+    pub fn language_name(&self) -> &'static str {
+        self.language.map_or("unknown", |lang| lang.names()[0])
+    }
 }

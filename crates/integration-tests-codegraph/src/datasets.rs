@@ -16,8 +16,10 @@ pub(crate) fn to_lance_datasets(
     let ids = graph.assign_ids(ctx.project_id, ctx.branch);
     let mut datasets = HashMap::new();
 
-    datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
-    datasets.insert("File".into(), build_file_batch(graph, &ids)?);
+    if graph.output.writes_repository_structure() {
+        datasets.insert("Directory".into(), build_directory_batch(graph, &ids)?);
+        datasets.insert("File".into(), build_file_batch(graph, &ids)?);
+    }
     datasets.insert("Definition".into(), build_definition_batch(graph, &ids)?);
     datasets.insert("ImportedSymbol".into(), build_import_batch(graph, &ids)?);
 
@@ -80,7 +82,7 @@ fn build_file_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<RecordBa
         path_b.append_value(&f.path);
         name_b.append_value(&f.name);
         ext_b.append_value(&f.extension);
-        lang_b.append_value(f.language.names()[0]);
+        lang_b.append_value(f.language_name());
     }
 
     make_batch(
@@ -113,6 +115,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
     let mut el_b = Int64Builder::with_capacity(n);
     let mut sb_b = Int64Builder::with_capacity(n);
     let mut eb_b = Int64Builder::with_capacity(n);
+    let mut sc_b = Int64Builder::with_capacity(n);
+    let mut ec_b = Int64Builder::with_capacity(n);
 
     for (idx, fp, d) in &defs {
         id_b.append_value(ids[idx.index()]);
@@ -124,6 +128,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
         el_b.append_value(d.range.end.line as i64);
         sb_b.append_value(d.range.byte_offset.0 as i64);
         eb_b.append_value(d.range.byte_offset.1 as i64);
+        sc_b.append_value(d.range.start.column as i64);
+        ec_b.append_value(d.range.end.column as i64);
     }
 
     make_batch(
@@ -137,6 +143,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
             ("end_line", DataType::Int64, false),
             ("start_byte", DataType::Int64, false),
             ("end_byte", DataType::Int64, false),
+            ("start_char", DataType::Int64, false),
+            ("end_char", DataType::Int64, false),
         ],
         vec![
             Box::new(id_b),
@@ -148,6 +156,8 @@ fn build_definition_batch(graph: &CodeGraph, ids: &NodeIds) -> anyhow::Result<Re
             Box::new(el_b),
             Box::new(sb_b),
             Box::new(eb_b),
+            Box::new(sc_b),
+            Box::new(ec_b),
         ],
     )
 }
@@ -222,6 +232,10 @@ fn build_edge_rows(graph: &CodeGraph, ids: &NodeIds) -> Vec<EdgeRow> {
     graph
         .graph
         .edge_indices()
+        .filter(|&edge_idx| {
+            graph.output.writes_repository_structure()
+                || graph.graph[edge_idx].relationship.edge_kind.as_ref() != "CONTAINS"
+        })
         .filter_map(|edge_idx| {
             let (src, tgt) = graph.graph.edge_endpoints(edge_idx)?;
             let weight = &graph.graph[edge_idx];

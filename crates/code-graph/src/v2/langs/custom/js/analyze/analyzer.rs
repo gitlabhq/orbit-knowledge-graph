@@ -9,7 +9,9 @@ use oxc::syntax::scope::ScopeFlags;
 use oxc::syntax::symbol::{SymbolFlags, SymbolId};
 use std::collections::HashMap;
 
-use super::super::frameworks::extract_vue_options_api;
+use super::super::frameworks::{
+    extract_vue_options_api, is_vue_like_path, vue_default_component_def,
+};
 use super::super::types::{
     ExportedBinding, ImportedName, JsClassInfo, JsDef, JsDefKind, JsFileAnalysis, JsImport,
     JsImportKind, JsInvocationSupport, JsModuleInfo,
@@ -871,9 +873,9 @@ impl JsAnalyzer {
         // Ensure Vue SFC default export binding exists and points to the virtual class.
         // OXC's module_record may not include `export default { ... }` for anonymous
         // object expressions, so we synthesize the binding if a Vue virtual class exists.
-        if let Some(vc) = defs
-            .iter()
-            .find(|d| d.kind == JsDefKind::Class && d.is_exported)
+        if is_vue_like_path(relative_path)
+            && let Some(default_range) = module_info.exports.get("default").map(|b| b.range)
+            && let Some(vc) = vue_default_component_def(&defs, default_range)
         {
             module_info
                 .exports

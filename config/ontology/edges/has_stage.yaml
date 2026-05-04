@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Pipeline, id: id }
     to_node: { type: Stage, id: id }
+    fk_column: pipeline_id
     description: "Pipeline contains stage."

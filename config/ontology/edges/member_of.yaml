@@ -10,13 +10,14 @@ properties:
     description: "User's access level in the group or project."
     values:
       0: no_access
-      10: minimal_access
-      20: guest
-      25: planner
-      30: reporter
-      40: developer
-      50: maintainer
-      60: owner
+      5: minimal_access
+      10: guest
+      15: planner
+      20: reporter
+      25: security_manager
+      30: developer
+      40: maintainer
+      50: owner
 
   expires_at:
     type: date
@@ -49,9 +50,11 @@ etl:
     from:
       id: user_id
       type: User
+      enrich: [state, private_profile, admin, auditor, external, user_type]
     to:
       id: source_id
       type_column: source_type
       type_mapping:
         Namespace: Group
         Project: Project
+      enrich: [visibility_level, archived]

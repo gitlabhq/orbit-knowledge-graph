@@ -1,4 +1,4 @@
-use query_engine::compiler::{Expr, Node, Query, SelectExpr, TableRef};
+use query_engine::compiler::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
 
 use super::input::{GraphStatusInput, NodeTable, ProjectTables};
 
@@ -15,46 +15,72 @@ pub fn lower_entity_counts(input: &GraphStatusInput) -> Node {
 }
 
 pub fn lower_projects(tables: &ProjectTables, traversal_path: &str) -> Node {
-    let total_known = build_projects_query("total_known", &tables.project, "id", traversal_path);
-
-    let mut indexed = build_projects_query(
-        "indexed",
-        &tables.code_checkpoint,
-        "project_id",
-        traversal_path,
-    );
+    let total_known = build_total_known_projects_query(&tables.project, traversal_path);
+    let mut indexed =
+        build_indexed_projects_query(&tables.project, &tables.code_checkpoint, traversal_path);
 
     indexed.union_all = vec![total_known];
 
     Node::Query(Box::new(indexed))
 }
 
-fn build_projects_query(
-    label: &str,
-    table: &str,
-    count_column: &str,
-    traversal_path: &str,
-) -> Query {
-    let alias = "t";
+fn build_total_known_projects_query(project_table: &str, traversal_path: &str) -> Query {
+    let alias = "p";
 
     let select = vec![
-        SelectExpr::new(Expr::string(label), "metric"),
+        SelectExpr::new(Expr::string("total_known"), "metric"),
+        SelectExpr::new(Expr::func("uniq", vec![Expr::col(alias, "id")]), "cnt"),
+    ];
+
+    let from = TableRef::scan_final(project_table, alias);
+
+    let where_clause = live_project_scope_filter(alias, traversal_path);
+
+    Query {
+        select,
+        from,
+        where_clause: Some(where_clause),
+        ..Default::default()
+    }
+}
+
+fn build_indexed_projects_query(
+    project_table: &str,
+    code_checkpoint_table: &str,
+    traversal_path: &str,
+) -> Query {
+    let checkpoint_alias = "c";
+    let project_alias = "p";
+
+    let select = vec![
+        SelectExpr::new(Expr::string("indexed"), "metric"),
         SelectExpr::new(
-            Expr::func("uniq", vec![Expr::col(alias, count_column)]),
+            Expr::func("uniq", vec![Expr::col(checkpoint_alias, "project_id")]),
             "cnt",
         ),
     ];
 
-    let from = TableRef::scan(table, alias);
+    let from = TableRef::join(
+        JoinType::Inner,
+        TableRef::scan_final(code_checkpoint_table, checkpoint_alias),
+        TableRef::scan_final(project_table, project_alias),
+        Expr::eq(
+            Expr::col(checkpoint_alias, "project_id"),
+            Expr::col(project_alias, "id"),
+        ),
+    );
 
     let where_clause = Expr::and(
-        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
-        Expr::func(
-            "startsWith",
-            vec![
-                Expr::col(alias, "traversal_path"),
-                Expr::string(traversal_path),
-            ],
+        live_project_scope_filter(project_alias, traversal_path),
+        Expr::and(
+            Expr::eq(Expr::col(checkpoint_alias, "_deleted"), Expr::int(0)),
+            Expr::func(
+                "startsWith",
+                vec![
+                    Expr::col(checkpoint_alias, "traversal_path"),
+                    Expr::string(traversal_path),
+                ],
+            ),
         ),
     );
 
@@ -66,17 +92,51 @@ fn build_projects_query(
     }
 }
 
+fn live_project_scope_filter(alias: &str, traversal_path: &str) -> Expr {
+    Expr::and(
+        Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0)),
+        Expr::func(
+            "startsWith",
+            vec![
+                Expr::col(alias, "traversal_path"),
+                Expr::string(traversal_path),
+            ],
+        ),
+    )
+}
+
 fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
-    let alias = "t";
+    let alias = "d";
 
     let select = vec![
         SelectExpr::new(Expr::string(&node.name), "entity"),
-        SelectExpr::new(Expr::func("uniq", vec![Expr::col(alias, "id")]), "cnt"),
+        SelectExpr::new(Expr::func("count", vec![]), "cnt"),
     ];
 
-    let from = TableRef::scan(&node.table, alias);
+    let from = TableRef::subquery(build_deduplicated_node_query(node, traversal_path), alias);
 
-    let deleted_filter = Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0));
+    Query {
+        select,
+        from,
+        where_clause: Some(Expr::eq(Expr::col(alias, "_deleted"), Expr::int(0))),
+        ..Default::default()
+    }
+}
+
+fn build_deduplicated_node_query(node: &NodeTable, traversal_path: &str) -> Query {
+    let alias = "t";
+
+    let select = vec![
+        SelectExpr::new(Expr::col(alias, "id"), "id"),
+        SelectExpr::new(
+            Expr::func(
+                "argMax",
+                vec![Expr::col(alias, "_deleted"), Expr::col(alias, "_version")],
+            ),
+            "_deleted",
+        ),
+    ];
+
     let traversal_filter = Expr::func(
         "startsWith",
         vec![
@@ -87,8 +147,9 @@ fn build_node_query(node: &NodeTable, traversal_path: &str) -> Query {
 
     Query {
         select,
-        from,
-        where_clause: Some(Expr::and(deleted_filter, traversal_filter)),
+        from: TableRef::scan(&node.table, alias),
+        where_clause: Some(traversal_filter),
+        group_by: vec![Expr::col(alias, "id")],
         ..Default::default()
     }
 }
@@ -160,21 +221,35 @@ mod tests {
     }
 
     #[test]
-    fn entity_counts_uses_uniq_id() {
+    fn entity_counts_deduplicates_by_id() {
         let input = test_input();
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
-        let uniq_count = result.sql.matches("uniq(").count();
+        let argmax_count = result.sql.matches("argMax(").count();
         assert_eq!(
-            uniq_count,
+            argmax_count,
             input.nodes.len(),
-            "Each subquery should use uniq(id). SQL: {}",
+            "Each subquery should use argMax to select the latest row per id. SQL: {}",
             result.sql
         );
         assert!(
-            !result.sql.contains("count()"),
-            "Should not use count(). SQL: {}",
+            result.sql.contains("GROUP BY t.id"),
+            "Each subquery should group by id. SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn entity_counts_avoids_final_table_scans() {
+        let input = test_input();
+        let ast = lower_entity_counts(&input);
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        let final_count = result.sql.matches(" FINAL").count();
+        assert_eq!(
+            final_count, 0,
+            "Entity counts should deduplicate after traversal filtering instead of using FINAL. SQL: {}",
             result.sql
         );
     }
@@ -185,13 +260,8 @@ mod tests {
         let ast = lower_entity_counts(&input);
         let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
 
-        let deleted_count = result.sql.matches("_deleted").count();
-        assert_eq!(
-            deleted_count,
-            input.nodes.len(),
-            "Each subquery should have _deleted filter. SQL: {}",
-            result.sql
-        );
+        assert!(result.sql.contains("_deleted"), "SQL: {}", result.sql);
+        assert!(result.sql.contains("d._deleted"), "SQL: {}", result.sql);
     }
 
     #[test]
@@ -203,6 +273,29 @@ mod tests {
         assert!(result.sql.contains(&tables.project), "SQL: {}", result.sql);
         assert!(
             result.sql.contains(&tables.code_checkpoint),
+            "SQL: {}",
+            result.sql
+        );
+    }
+
+    #[test]
+    fn projects_query_joins_checkpoints_to_live_projects() {
+        let ast = lower_projects(&test_tables(), "1/2/");
+        let result = codegen(&ast, ResultContext::new(), QueryConfig::default()).unwrap();
+
+        assert!(result.sql.contains("INNER JOIN"), "SQL: {}", result.sql);
+        assert!(
+            result.sql.contains("c.project_id = p.id"),
+            "SQL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("startsWith(p.traversal_path"),
+            "SQL: {}",
+            result.sql
+        );
+        assert!(
+            result.sql.contains("startsWith(c.traversal_path"),
             "SQL: {}",
             result.sql
         );
@@ -228,8 +321,8 @@ mod tests {
 
         assert_eq!(
             result.sql.matches("_deleted").count(),
-            2,
-            "Both subqueries should have _deleted filter. SQL: {}",
+            3,
+            "Project coverage should filter deleted checkpoint and project rows. SQL: {}",
             result.sql
         );
     }

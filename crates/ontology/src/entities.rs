@@ -67,6 +67,13 @@ pub enum StorageProjection {
         name: String,
         order_by: Vec<String>,
     },
+    /// Lightweight projection: stores only the key columns + `_part_offset`,
+    /// acting as a secondary index without duplicating full rows.
+    /// Requires ClickHouse 26.1+.
+    Lightweight {
+        name: String,
+        order_by: Vec<String>,
+    },
     Aggregate {
         name: String,
         select: Vec<String>,
@@ -281,6 +288,10 @@ pub struct EdgeEntity {
     pub target_kind: String,
     /// ClickHouse table that stores this edge (defaults to the global edge table).
     pub destination_table: String,
+    /// Foreign key column on one of the two node tables that encodes this
+    /// relationship (e.g. "project_id", "author_id"). When present, the
+    /// compiler can join node tables directly instead of scanning the edge table.
+    pub fk_column: Option<String>,
 }
 
 /// ETL configuration for edges sourced from join tables.

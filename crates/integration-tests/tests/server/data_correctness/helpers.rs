@@ -37,7 +37,7 @@ pub(super) use serde_json::Value;
 pub(super) static RESPONSE_SCHEMA: std::sync::LazyLock<jsonschema::Validator> =
     std::sync::LazyLock::new(|| {
         let schema: Value = serde_json::from_str(include_str!(concat!(
-            env!("GKG_SERVER_SCHEMAS_DIR"),
+            env!("SCHEMA_DIR"),
             "/query_response.json"
         )))
         .unwrap();

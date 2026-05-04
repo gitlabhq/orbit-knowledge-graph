@@ -101,6 +101,28 @@ repos:
     commit_sha: 7fff56f5172c48b6f3aedf17ee14ef5c2533dfd1
     groups: [python]
 
+  # C
+  - name: redis
+    source: github
+    project: redis/redis
+    version: "8.0.1"
+    commit_sha: 63b87554f0a0459692d44d06f62b0c10296c8a1f
+    groups: [c]
+
+  - name: curl
+    source: github
+    project: curl/curl
+    version: curl-8_12_1
+    commit_sha: 57495c64871d18905a0941db9196ef90bafe9a29
+    groups: [c]
+
+  - name: jq
+    source: github
+    project: jqlang/jq
+    version: jq-1.7.1
+    commit_sha: 71c2ab509a8628dbbad4bc7b3f98a64aa90d3297
+    groups: [c]
+
   # Rust
   - name: orbit-knowledge-graph
     source: gitlab

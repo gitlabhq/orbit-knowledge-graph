@@ -74,7 +74,7 @@ pub const REPOSITORY_INDEXING_COMPLETED: MetricSpec = MetricSpec::counter(
 
 pub const REPOSITORY_SOURCE_SIZE: MetricSpec = MetricSpec::histogram_u64(
     "gkg.indexer.code.repository.source.size",
-    "Total bytes of language-supported source files discovered during one code indexing run.",
+    "Total bytes of repository files discovered during one code indexing run.",
     Some("By"),
     &[],
     MEMORY_BYTES,

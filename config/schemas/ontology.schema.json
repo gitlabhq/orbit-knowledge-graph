@@ -271,6 +271,10 @@
               "type": "string",
               "description": "Custom traversal_path filter expression for namespace scoping. When set, replaces the default startsWith(traversal_path, ...) filter. Must contain {traversal_path:String} placeholder."
             },
+            "table_alias": {
+              "type": "string",
+              "description": "Alias of the main table in the from clause. Required when from contains JOINs so that bare column references (e.g. id) can be qualified to avoid ambiguity."
+            },
             "edges": {
               "type": "object",
               "description": "Edge generation config keyed by source column name. Each value may be a single edge mapping or a list of mappings when one column emits multiple edges.",
@@ -689,6 +693,10 @@
       "properties": {
         "from_node": { "$ref": "#/definitions/edgeNodeReference" },
         "to_node": { "$ref": "#/definitions/edgeNodeReference" },
+        "fk_column": {
+          "type": "string",
+          "description": "Foreign key column on one of the two node tables that encodes this relationship (e.g. 'project_id', 'author_id'). The loader resolves which node has the column. When present, the compiler can join node tables directly instead of scanning the edge table."
+        },
         "description": {
           "type": "string",
           "description": "Human-readable description of this edge variant."
@@ -903,7 +911,7 @@
       "type": "object",
       "description": "A materialized projection.",
       "properties": {
-        "type": { "type": "string", "enum": ["reorder", "aggregate"] },
+        "type": { "type": "string", "enum": ["reorder", "lightweight", "aggregate"] },
         "name": {
           "type": "string",
           "pattern": "^[a-z_][a-z0-9_]*$",

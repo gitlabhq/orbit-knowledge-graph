@@ -1,0 +1,78 @@
+name: "Java: imported-symbol fallback matrix"
+fixtures:
+  - path: com/example/app/Main.java
+    content: |
+      package com.example.app;
+
+      import java.util.ArrayList;
+      import java.util.List;
+      import static java.util.Collections.emptyList;
+
+      public class Main {
+          public void directImports() {
+              var list = new ArrayList<String>();
+              var values = List.of("a", "b");
+          }
+
+          public void staticImport() {
+              var values = emptyList();
+          }
+      }
+
+  - path: com/example/app/WildcardMain.java
+    content: |
+      package com.example.app;
+
+      import java.time.*;
+
+      public class WildcardMain {
+          public void wildcardImport() {
+              var now = LocalDate.now();
+          }
+
+          public void builtinPrintln() {
+              println("debug");
+          }
+      }
+
+tests:
+  - name: "named constructor and class calls target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Main.directImports'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name
+      ORDER BY name
+    assert:
+      - { row_count: 2 }
+      - { row: { caller: "com.example.app.Main.directImports", path: "java.util", name: "ArrayList" } }
+      - { row: { caller: "com.example.app.Main.directImports", path: "java.util", name: "List" } }
+
+  - name: "static imports target imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.Main.staticImport'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "com.example.app.Main.staticImport", path: "java.util.Collections", name: "emptyList", import_type: "StaticImport" } }
+
+  - name: "wildcard imports target wildcard imported symbols"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.WildcardMain.wildcardImport'
+        AND e.edge_kind = 'Calls'
+      RETURN caller.fqn AS caller, sym.path AS path, sym.name AS name, sym.import_type AS import_type
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "com.example.app.WildcardMain.wildcardImport", path: "java.time", name: null, import_type: "WildcardImport" } }
+
+  - name: "println does not target wildcard imports"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToImportedSymbol]->(sym:ImportedSymbol)
+      WHERE caller.fqn = 'com.example.app.WildcardMain.builtinPrintln'
+        AND e.edge_kind = 'Calls'
+      RETURN sym.path AS path
+    assert:
+      - { empty: true }
