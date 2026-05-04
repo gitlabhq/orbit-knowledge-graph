@@ -1,0 +1,82 @@
+@startuml
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam componentStyle rectangle
+skinparam defaultFontSize 11
+skinparam padding 4
+
+title GitLab Knowledge Graph — Architecture Block Diagram
+
+rectangle "GKG Module Boundary" as module #E8F4FD {
+
+  rectangle "CLI (gkg)" as cli #B3D9FF {
+    component "index" as cmd_index
+    component "serve" as cmd_serve
+    component "query" as cmd_query
+  }
+
+  rectangle "HTTP Server\n(Axum)" as http #B3D9FF {
+    component "REST API\n/api/*" as rest
+    component "SSE Events\n/api/events" as sse
+    component "MCP Endpoints\n/mcp/" as mcp_ep
+    component "Frontend SPA\n(Vue 3 / Sigma.js)" as spa
+  }
+
+  rectangle "Core Engine" as engine #CCE5CC {
+    component "Indexer\n(Rayon parallel)" as indexer
+    component "MCP Server\n(rmcp)" as mcp
+    component "Workspace\nManager" as wm
+    component "Event Bus\n(Tokio broadcast)" as ebus
+  }
+
+  rectangle "Data Layer" as data #FFE0B2 {
+    component "Ladybug\nGraph DB\n(embedded)" as lbug
+    component "Arrow / Parquet\nStorage" as parquet
+  }
+
+  rectangle "Observability" as obs #E0E0E0 {
+    component "Prometheus\nMetrics" as prom
+    component "OpenTelemetry\nTraces" as otel
+  }
+}
+
+rectangle "External Dependencies" as ext #FFF3E0 {
+  component "parser-core\n(Rust, Git)" as parser
+  component "gitalisk-core\n(Rust, Git)" as gitalisk
+}
+
+rectangle "Consumers" as consumers #F3E5F5 {
+  component "LLM / AI Agent\n(via MCP)" as llm
+  component "Developer\n(Browser UI)" as dev
+  component "CLI User" as cliuser
+}
+
+' Internal flows
+indexer --> lbug : write graph
+indexer --> parser : parse AST
+indexer --> ebus : progress events
+wm --> gitalisk : git operations
+wm --> lbug : project state
+rest --> lbug : query
+rest --> wm : workspace ops
+rest --> indexer : trigger index
+sse --> ebus : subscribe
+mcp --> lbug : query
+mcp --> indexer : index
+mcp_ep --> mcp : forward
+spa --> rest : HTTP/JSON
+spa --> sse : EventSource
+lbug --> parquet : read/write
+
+' External flows
+llm --> mcp_ep : MCP (HTTP+SSE)
+dev --> spa : HTTPS
+cliuser --> cli : shell
+cli --> indexer
+cli --> wm
+
+' Observability
+engine -[dotted]-> prom : metrics
+engine -[dotted]-> otel : traces
+
+@enduml

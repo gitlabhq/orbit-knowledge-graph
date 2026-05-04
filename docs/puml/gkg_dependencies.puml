@@ -1,0 +1,54 @@
+@startuml gkg_dependencies
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 10
+skinparam componentStyle rectangle
+
+title Orbit Dependency Map
+
+rectangle "Orbit Module" as gkg #E8F4FD {
+  component "SDLC Indexer" as sdlc
+  component "Code Indexer" as code
+  component "Query Engine" as qe
+  component "HTTP/gRPC Server" as http
+}
+
+rectangle "Orbit Depends On" as deps #FFE0B2 {
+  component "ClickHouse Cloud" as ch
+  component "NATS JetStream" as nats
+  component "Gitaly" as gitaly
+  component "PostgreSQL\n(via Siphon CDC)" as pg
+  component "Redis\n(auth cache)" as redis
+  component "Rails Redaction\n(Ability.allowed?)" as redact
+  component "parser-core\n(compiled in)" as parser
+  component "gitalisk-core\n(compiled in)" as gitalisk
+}
+
+rectangle "What Depends on Orbit" as consumers #F3E5F5 {
+  component "Rails gRPC Client\n(5 RPCs)" as grpc
+  component "Orbit Dashboard\n(Vue 3)" as dash
+  component "DAP / AI Gateway\n(2 tools)" as dap
+  component "Web IDE / Duo Chat\n(MCP)" as ide
+  component "Snowplow -> CDot\n(billing)" as billing
+}
+
+' Dependencies
+sdlc --> pg : "sync, keyset pagination"
+sdlc --> nats : "async, JetStream sub"
+sdlc --> ch : "sync, write"
+code --> gitaly : "sync, streaming archive"
+code --> parser : "sync, AST parsing"
+code --> gitalisk : "sync, git ops"
+code --> ch : "sync, write"
+qe --> ch : "sync, SQL query"
+qe --> redis : "sync, prefix-tree lookup"
+qe --> redact : "sync, batch redaction"
+
+' Consumers
+grpc --> http : "gRPC, required"
+dash --> http : "REST, optional"
+dap --> http : "HTTP+JWT, optional"
+ide --> http : "MCP, optional"
+http --> billing : "Snowplow events"
+
+@enduml

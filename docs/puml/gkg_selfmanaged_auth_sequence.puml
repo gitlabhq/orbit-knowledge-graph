@@ -1,0 +1,103 @@
+@startuml gkg_selfmanaged_auth_sequence
+
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 11
+skinparam padding 5
+skinparam roundCorner 8
+skinparam shadowing false
+skinparam sequenceArrowThickness 2
+skinparam sequenceMessageAlign center
+
+title Hybrid Self-Managed: Auth Flow\n(Cloud-hosted GKG ↔ On-Prem Monolith)
+
+box "Customer On-Premises" #FFF3E0
+  actor "User /\nLLM Agent" as user
+  participant "GitLab Rails\n(Self-Managed)" as rails
+  participant "Gitaly" as gitaly
+end box
+
+box "GitLab Cloud Infrastructure" #E8F4FD
+  participant "DAP\n(Data Access Proxy)" as dap
+  participant "Orbit\n(Graph Query Engine)" as orbit
+  participant "Redis\n(Auth Cache)" as redis
+  database "ClickHouse\nCloud" as ch
+end box
+
+== Query Request ==
+
+user -> rails : Graph query request
+rails -> dap : HTTP + JWT\n(user identity + scopes)
+dap -> orbit : Forwarded request\n(validated JWT)
+
+== Authorization Check ==
+
+orbit -> redis : Check auth cache\n(traversal_id, user_id)
+
+alt Cache HIT
+  redis --> orbit : Cached authorization result
+else Cache MISS
+  redis --> orbit : No cached result
+
+  orbit -> rails : **HTTP callback: Ability.allowed?**\n//This crosses the network boundary//\n//Cloud → Customer on-prem//
+  note right #FFCCCC
+    **Challenge 1: Network connectivity**
+    Requires stable, low-latency path from
+    GitLab cloud back to customer firewall.
+    Customer must expose Rails auth endpoint
+    or establish a secure tunnel (e.g. VPN,
+    Private Link, or reverse proxy).
+  end note
+
+  rails --> orbit : Authorization decision\n(allowed/denied + scope)
+  note right #FFCCCC
+    **Challenge 2: Latency**
+    Round-trip to on-prem adds 10-100ms+
+    per uncached auth check. Under load,
+    this can dominate query time.
+  end note
+
+  orbit -> redis : Cache authorization result\n(TTL-bounded)
+end
+
+== Query Execution (if authorized) ==
+
+orbit -> ch : Parameterized SQL query
+ch --> orbit : Result set
+
+orbit --> dap : Query response
+dap --> rails : Response
+rails --> user : Graph data
+
+== Batch Redaction (row-level) ==
+
+orbit -> rails : **HTTP callback: batch redaction**\n//Filters rows user cannot see//\n//Also crosses network boundary//
+note right #FFCCCC
+  **Challenge 3: Redaction at scale**
+  Every result set may require a
+  round-trip to on-prem Rails for
+  row-level permission filtering.
+  Batching helps but doesn't eliminate
+  the cross-boundary call.
+end note
+
+rails --> orbit : Redacted row set
+orbit --> dap : Final filtered response
+dap --> rails : Response
+rails --> user : Redacted graph data
+
+== Key Risks ==
+
+note over user, ch #FFE0E0
+  **Summary of cross-boundary auth challenges:**
+
+  1. **Firewall / network policy** — customer must allow inbound connections
+     from GitLab cloud to their on-prem Rails instance for auth callbacks.
+  2. **Latency budget** — every cache miss adds a cross-network round-trip;
+     cold-cache bursts (e.g. first query after TTL expiry) can spike P99.
+  3. **Availability coupling** — if the on-prem monolith is unreachable,
+     Orbit cannot authorize queries (fail-open is not acceptable).
+  4. **Security posture** — exposing an auth endpoint externally increases
+     attack surface; mutual TLS or equivalent is required.
+end note
+
+@enduml

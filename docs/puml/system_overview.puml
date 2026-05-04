@@ -1,0 +1,84 @@
+@startuml system_overview
+!theme plain
+skinparam linetype ortho
+skinparam defaultFontName Helvetica
+skinparam componentStyle rectangle
+
+skinparam package {
+    BackgroundColor #F8F9FA
+    BorderColor #6C757D
+    FontStyle bold
+}
+skinparam component {
+    BackgroundColor #FFFFFF
+    BorderColor #495057
+}
+skinparam database {
+    BackgroundColor #E8F4FD
+    BorderColor #2980B9
+}
+skinparam actor {
+    BackgroundColor #FFFFFF
+}
+
+title Architecture Extraction — System Overview
+
+actor "Developer / CI" as user
+
+package "Phase 1 — Extract" {
+    component "arch-extract CLI" as cli
+    component "Extraction\nOrchestrator" as orch
+
+    package "Skill Collection" {
+        component "detect-identity" as s_id
+        component "detect-technology" as s_tech
+        component "detect-interfaces" as s_iface
+        component "detect-dependencies" as s_dep
+        component "detect-deployment" as s_deploy
+        component "detect-data" as s_data
+        component "synthesize-architecture" as s_synth
+    }
+
+    component "Claude API" as claude <<external>>
+    component "component.json" as cjson <<artifact>>
+}
+
+package "Phase 2 — Aggregate" {
+    component "Aggregation Job\n(GitLab CI)" as agg
+    database "Postgres\nArchitecture Catalog" as pg
+}
+
+package "Phase 3 — Project" {
+    component "Web App\n(FastAPI + React)" as webapp
+    component "PlantUML Server" as pumlserver
+}
+
+user --> cli : arch-extract extract <repo>
+cli --> orch
+orch --> s_id
+orch --> s_tech
+orch --> s_iface
+orch --> s_dep
+orch --> s_deploy
+orch --> s_data
+orch --> s_synth
+
+s_id ..> claude : prompt + file context
+s_tech ..> claude
+s_iface ..> claude
+s_dep ..> claude
+s_deploy ..> claude
+s_data ..> claude
+s_synth ..> claude : all skill outputs
+
+orch --> cjson : writes .architecture/component.json
+
+cjson --> agg : collected from all repos
+agg --> pg : load + resolve cross-references
+
+user --> webapp : view / filter diagrams
+webapp --> pg : SQL queries
+webapp --> pumlserver : PlantUML source
+pumlserver --> webapp : SVG
+
+@enduml

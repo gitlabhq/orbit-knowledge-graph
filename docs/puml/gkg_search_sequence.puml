@@ -1,0 +1,58 @@
+@startuml gkg_search_sequence
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam defaultFontSize 11
+skinparam sequenceMessageAlign center
+
+title Orbit Code Search --- Runtime Sequence
+
+participant "Developer /\nLLM Agent" as user
+participant "GitLab Workhorse" as rails #FFB3B3
+participant "DAP" as dap #FFE0B2
+participant "Orbit Server\n(Axum)" as gkg #B3D9FF
+participant "Query Engine\n(DSL compiler)" as qe #B3D9FF
+participant "ClickHouse\nCloud" as ch #CCE5CC
+participant "Redis\n(auth cache)" as redis #E0E0E0
+participant "Rails Redaction\n(Ability.allowed?)" as redact #FFB3B3
+
+user -> rails : Search / query request
+activate rails #FFB3B3
+
+rails -> dap : Forward request
+activate dap
+
+dap -> gkg : HTTP + JWT token
+activate gkg
+gkg -> gkg : JWT validation
+
+gkg -> qe : JSON DSL query
+activate qe
+qe -> qe : 1. Validate\n2. Normalize\n3. AST lower\n4. Codegen
+qe -> redis : Lookup traversal_path\n(auth prefix-tree)
+redis --> qe : Allowed ID set
+qe -> qe : Inject traversal_path\nfilter into SQL
+qe -> ch : Parameterized\nClickHouse SQL
+activate ch
+ch --> qe : Raw result rows
+deactivate ch
+qe -> qe : Extract global IDs\nfor redaction
+deactivate qe
+
+loop For each batch of result IDs
+  gkg -> redact : POST global IDs\n(Ability.allowed? check)
+  activate redact #FFB3B3
+  redact --> gkg : Permitted row set
+  deactivate redact
+end
+
+gkg --> dap : Filtered results
+deactivate gkg
+
+dap --> rails : Response
+deactivate dap
+
+rails --> user : Search results
+deactivate rails
+
+
+@enduml

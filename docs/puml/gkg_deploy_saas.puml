@@ -1,0 +1,33 @@
+@startuml gkg_deploy_saas
+!include gkg_common.puml
+
+title Deployment: GitLab.com (Multi-tenant SaaS)
+
+' ===================================================================
+' SAAS-SPECIFIC: ClickHouse Cloud, consumers, billing
+' ===================================================================
+actor "**LLM Agents**\nvia DAP" as agents #F3E5F5
+
+database "**ClickHouse Cloud**\nCode + SDLC data lake\n(per-tenant schema)" as ch #d09191
+
+' Data layer connections
+sdlc_idx --> ch : TCP native (write)
+code_idx --> ch : TCP native (write)
+query_eng --> ch : TCP native (read, parameterized SQL)
+
+' Consumer -> monolith -> module
+agents --> rails : HTTP (get_graph_entities,\nexecute_query)
+
+note bottom of module
+  **Tenant isolation:** Per-tenant ClickHouse schema.
+  Three-layer auth: org isolation (JWT), prefix-tree
+  traversal filter (Redis), Rails redaction.
+
+  **Billing:** Credit-based. Zero-rated for GitLab-driven
+  queries, charged for customer-driven. Snowplow -> CDot.
+
+  **Independent release:** Yes --- Orbit binary versioned
+  separately from monolith.
+end note
+
+@enduml
