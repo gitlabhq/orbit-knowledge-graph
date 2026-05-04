@@ -321,6 +321,7 @@ pub(super) fn emit_node_ids_on_edge(
 /// For FilterOnly nodes, the `_filter_*` CTE is created later in the node
 /// processing phase — we just reference it here. For Join nodes with property
 /// filters, we create a lightweight narrowing CTE on the spot.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn emit_filter_narrowing(
     where_parts: &mut Vec<Expr>,
     hop: &Hop,
