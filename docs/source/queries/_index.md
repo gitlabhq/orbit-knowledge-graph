@@ -2,13 +2,13 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query the Orbit knowledge graph to explore your GitLab instance.
+description: Query Orbit to explore connected GitLab data.
 title: Queries
 ---
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
@@ -25,51 +25,72 @@ title: Queries
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Queries are the main way to work with the knowledge graph. A query is
-a JSON object that defines what data to retrieve and how to structure
-the results.
+Orbit queries retrieve connected GitLab data from the knowledge graph. A query is
+a JSON object that describes the nodes, relationships, filters, and result shape
+you want.
 
-Queries respect role-based access control. When you query the
-knowledge graph, you see only data you have permission to see in
-GitLab.
+Orbit supports these query types:
 
-## Run a query
+- `traversal`: find nodes and follow relationships between them.
+- `aggregation`: group and count graph data.
+- `path_finding`: find paths between nodes.
+- `neighbors`: find nodes directly connected to a starting node.
 
-You can query the graph directly by using the [Orbit query language](query_language.md), or
-have an AI agent like GitLab Duo write and run queries for you.
+Queries respect GitLab permissions. When you query Orbit through GitLab, you see
+only data you can access in GitLab.
+
+## Run a query in the dashboard
 
 Prerequisites:
 
-- Turn on Orbit.
-- The Reporter, Developer, Maintainer, or Owner role for the group or project.
-- For external AI tools. Connect to the Orbit MCP server.
-
-### With the UI
-
-Use the query editor to write and run queries in the UI.
+- Orbit is turned on for a top-level group.
+- You have access to that group.
 
 To run a query:
 
-1. In the top bar, select **Search or go to** > **Your work**.
-1. Select **Orbit**, then select the **Explore** tab.
-1. In the query editor, enter a query.
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Select **Explore**.
+1. Select **Advanced query**.
+1. Enter an Orbit JSON query.
 1. Select **Execute query**.
 
-### With AI
+Example query:
 
-When Orbit is turned on, GitLab Duo Agentic Chat automatically uses
-the knowledge graph as a data source to improve results.
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "p",
+    "entity": "Project",
+    "columns": ["name", "full_path"]
+  },
+  "limit": 10
+}
+```
 
-Other AI tools connect to the Orbit MCP server to query the knowledge graph.
-For a list of available MCP tools, see [Orbit MCP tools](mcp_tools.md).
+For all fields and examples, see [Orbit query language](query_language.md).
 
-#### Example prompts
+## Run a query with AI
 
-Use these example prompts with Agentic Chat or an MCP-compatible AI agent.
+GitLab Duo and MCP-compatible tools can write and run Orbit queries for you. Use
+natural language prompts that ask for connected GitLab data.
 
-- "List merged merge requests in the last 30 days for `my-project`, grouped by author."
-- "Show all open issues that are blocked by merge requests with failing pipelines in `my-project`."
-- "List services that directly depend on `payments-api` and show their last five deployments."
-- "Find all vulnerabilities that are linked to merge requests merged in the last seven days in `my-group`, grouped by severity."
-- "Show all projects where `@alice` has authored merge requests, with a count of merged vs open merge requests per project."
-- "List the top 10 files in `my-group/my-project` that changed in the most failed pipelines over the past month."
+Example prompts:
+
+- "Show all open issues blocked by merge requests with failing pipelines."
+- "Find vulnerabilities linked to merge requests merged in the last seven days."
+- "List projects where `@alice` authored merge requests, grouped by project."
+- "Find files changed in the most failed pipelines over the past month."
+- "Show code definitions related to this project and their connected files."
+
+For the MCP tool contract, see [Orbit MCP tools](mcp_tools.md).
+
+## Run a local query
+
+The source-built local Orbit indexer can run a subset of Orbit queries against a
+local DuckDB graph. Local queries are for developer preview workflows and use
+local repository code, not the deployed GitLab.com graph.
+
+For details, see [Local Orbit indexer developer preview](../local_indexer.md).

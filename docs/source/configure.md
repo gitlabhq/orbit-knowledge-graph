@@ -2,12 +2,13 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see the Technical Writing assignments in the GitLab handbook.
-title: Configure Orbit
+description: Turn on Orbit, inspect indexed data, and connect AI tools.
+title: Get started with Orbit
 ---
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
@@ -24,76 +25,137 @@ title: Configure Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-## Turn Orbit on or off
+Use the Orbit dashboard to turn on indexing for top-level groups, inspect the
+indexed graph, browse the schema, and connect AI tools.
 
-Turn Orbit on for a top-level group to start indexing its data and add it to the knowledge graph.
-
-Turn Orbit off to stop indexing and remove the group’s data from the graph.
+## Before you begin
 
 Prerequisites:
 
-- The Owner role for the top-level group.
+- The Owner role for a top-level group.
+- A group on Premium or Ultimate.
+- The `knowledge_graph` feature flag enabled for your user or instance.
 
-To turn Orbit on or off:
+Orbit indexes top-level groups. Subgroups and projects inherit indexing from the
+top-level group.
 
-1. In the top bar, select **Search or go to** and find your group.
-1. In the left sidebar, select **Settings** > **Orbit**.
+## Turn on Orbit for a group
+
+To turn on Orbit:
+
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. In **Available groups**, find the top-level group you want to index.
 1. Select **Get started**.
 1. In the confirmation dialog, select **Turn on indexing**.
 
-Orbit indexes your group, and all its subgroups and projects.
+Orbit creates an enabled namespace record for the group. The deployed Orbit
+service uses that record to schedule indexing work.
 
-The indexer job typically completes in seconds. For large
-repositories, you might have to wait several minutes for the indexer
-to finish.
+Initial indexing usually starts within a few minutes. Large groups and large
+repositories can take longer.
 
-## View the knowledge graph
+## Check indexed content
 
-View the knowledge graph when you want to:
+After you turn on Orbit, use the dashboard to check what the graph contains.
 
-- Verify that Orbit has correctly indexed your data.
-- Visualize your software development lifecycle.
+To check indexed content:
 
-Prerequisites:
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Select the group you turned on.
+1. Review **Indexed content** for entity and relationship counts.
+1. Optional. Filter by subgroup or project.
 
-- Turn on Orbit for a group or project.
-- The Reporter, Developer, Maintainer, or Owner role for the group or project.
+The indexed content view shows the latest graph status for the selected scope,
+including entity counts grouped by domain.
 
-To view the knowledge graph:
+## Explore the graph
 
-1. In the top bar, select **Search or go to** > **Your work**.
-1. In the **Explore** tab, make sure your groups appear in the knowledge graph.
-1. Optional. Double-click a node to view its details.
+Use the **Explore** tab to view and query the graph.
 
-## Orbit with GitLab Duo
+To explore the graph:
 
-By default, the GitLab Duo Agent Platform uses the knowledge graph as
-a data source to respond to improve results.
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Select **Explore**.
+1. Use **Map** or **Table** view.
+1. Optional. Select **2D** or **3D** map mode.
+1. Optional. Select **Advanced query** to run an Orbit JSON query.
 
-You can use Orbit with:
+The map begins with enabled groups and expands to connected graph data. To view
+more details, select a node.
 
-- GitLab Duo Agentic Chat
-- Foundational agents
-- Foundational flows
+## Browse the schema
 
-## Connect to the Orbit MCP server
+Use the **Schema** tab to understand which objects and relationships are
+available.
 
-Use the GitLab CLI to connect external AI tools like Claude Code to
-Orbit.
+To browse the schema:
+
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Select **Schema**.
+1. Search or filter by entity type.
+1. Optional. Select an entity type to show matching instances in the graph.
+
+The schema comes from the deployed Orbit service, so it reflects the ontology
+available to your instance.
+
+## Use Orbit with GitLab Duo
+
+When Orbit is available for your user and group, GitLab Duo can use the knowledge
+graph as a context source. Agentic Chat and other Duo agent experiences can ask
+Orbit for connected GitLab data instead of relying only on the current page or
+repository.
+
+Try prompts such as:
+
+- "Show me recent merge requests with failing pipelines."
+- "What open vulnerabilities exist in my projects?"
+- "Who merged the most this quarter?"
+- "List pipelines that failed in the last week."
+
+## Connect external AI tools
+
+External tools connect to Orbit through the Orbit MCP endpoint.
 
 Prerequisites:
 
 - Install the [GitLab CLI](https://docs.gitlab.com/cli/).
+- Turn on Orbit for at least one top-level group you can access.
 
 To connect to the MCP server:
 
-- From the command line, run the setup command:
+1. From the command line, run:
 
-  ```shell
-  glab orbit setup
-  ```
+   ```shell
+   glab orbit setup
+   ```
 
-  This command detects your agents, installs the Orbit skills, and
-  configures the MCP automatically.
+1. Follow the prompts.
 
-  To preview the results of the command without applying changes, use the flag `--dry-run`.
+The setup command detects supported agents, installs Orbit skills, and configures
+the MCP connection. To preview the changes without applying them, use:
+
+```shell
+glab orbit setup --dry-run
+```
+
+For the MCP tool contract, see [Orbit MCP tools](queries/mcp_tools.md).
+
+## Turn off Orbit for a group
+
+To turn off Orbit:
+
+1. Go to the top-level group.
+1. Select **Settings** > **Orbit**.
+1. Select **Turn off indexing**.
+1. Confirm the change.
+
+Turning off Orbit stops indexing for the group. Orbit also removes the group's
+data from the graph.

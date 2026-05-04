@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use Orbit MCP tools to query the knowledge graph and discover available entities and relationships.
+description: Use Orbit MCP tools to query the knowledge graph, inspect schema, and check indexing status.
 title: Orbit MCP tools
 ---
 
@@ -25,13 +25,26 @@ title: Orbit MCP tools
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+Orbit exposes MCP tools so AI agents can query GitLab graph data through a
+structured tool contract.
+
+Available tools:
+
+- `query_graph`: run an Orbit JSON query.
+- `get_graph_schema`: retrieve available nodes, relationships, and properties.
+- `get_graph_status`: retrieve indexing status for a group or project.
+
 ## `query_graph`
 
-Query the knowledge graph and return matching nodes, relationships, and aggregations.
+Runs a query against the deployed Orbit service and returns matching nodes,
+relationships, aggregations, or paths.
 
-| Parameter | Type   | Required | Description |
-|-----------|--------|----------|-------------|
-| `query`   | object | Yes      | An [Orbit query language object](query_language.md). Valid query types: `traversal`, `aggregation`, `path_finding`, and `neighbors`. |
+Parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `query` | object | Yes | An [Orbit query language](query_language.md) object. |
+| `format` | string | No | Response format. Use `raw` for structured JSON or `llm` for agent-oriented text. Default is `llm`. |
 
 Example request:
 
@@ -43,17 +56,15 @@ Example request:
   "params": {
     "name": "query_graph",
     "arguments": {
+      "format": "raw",
       "query": {
         "query_type": "traversal",
         "node": {
           "id": "p",
           "entity": "Project",
-          "columns": ["name", "full_path"],
-          "filters": {
-            "name": { "op": "is_not_null" }
-          }
+          "columns": ["name", "full_path"]
         },
-        "limit": 1
+        "limit": 5
       }
     }
   }
@@ -85,7 +96,6 @@ Example response:
             "edges": []
           },
           "query_type": "traversal",
-          "raw_query_strings": null,
           "row_count": 1
         }
       }
@@ -97,11 +107,15 @@ Example response:
 
 ## `get_graph_schema`
 
-Return the Orbit graph schema so agents can understand which entities, relationships, and properties are available.
+Returns the Orbit graph schema so agents can see which entities,
+relationships, and properties are available before writing a query.
 
-| Parameter     | Type             | Required | Description |
-|---------------|------------------|----------|-------------|
-| `expand_nodes` | array of strings | No       | A list of nodes to fetch details for. If empty, returns the base graph schema. |
+Parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `expand_nodes` | array of strings | No | Node names to expand. Use an empty array for the base schema. |
+| `format` | string | No | Response format. Use `raw` or `llm`. Default is `llm`. |
 
 Example request:
 
@@ -113,6 +127,7 @@ Example request:
   "params": {
     "name": "get_graph_schema",
     "arguments": {
+      "format": "raw",
       "expand_nodes": ["Project"]
     }
   }
@@ -133,83 +148,97 @@ Example response:
           "schema_version": "0.1",
           "domains": [
             {
-              "name": "ci",
-              "description": "Entities related to CI/CD pipelines, stages, jobs, deployments, environments, and runners.",
-              "node_names": ["Deployment", "Environment", "Job", "Pipeline", "Runner", "Stage"]
-            },
-            {
               "name": "core",
-              "description": "Entities which represent the structure of a GitLab instance.",
-              "node_names": ["Group", "Note", "Project", "User"]
+              "description": "Entities that represent the structure of a GitLab instance.",
+              "node_names": ["Group", "Project", "User"]
             }
           ],
           "nodes": [
             {
-              "name": "MergeRequest",
-              "domain": "code_review",
-              "description": "A merge request for code review and merging changes into a target branch",
-              "primary_key": "id",
-              "label_field": "title"
-            },
-            {
               "name": "Project",
               "domain": "core",
-              "description": "A GitLab project/repository",
+              "description": "A GitLab project or repository",
               "primary_key": "id",
-              "label_field": "name",
-              "properties": [
-                { "name": "id", "data_type": "Int", "nullable": false, "enum_values": [] },
-                { "name": "full_path", "data_type": "String", "nullable": true, "enum_values": [] },
-                { "name": "name", "data_type": "String", "nullable": true, "enum_values": [] },
-                { "name": "visibility_level", "data_type": "Enum", "nullable": false, "enum_values": ["private", "internal", "public"] },
-                { "name": "archived", "data_type": "Bool", "nullable": false, "enum_values": [] },
-                { "name": "star_count", "data_type": "Int", "nullable": false, "enum_values": [] }
-              ],
-              "style": { "size": 40, "color": "#3B82F6" },
-              "outgoing_edges": [],
-              "incoming_edges": ["CONTAINS", "CREATOR", "IN_PROJECT", "MEMBER_OF"]
-            },
-            {
-              "name": "User",
-              "domain": "core",
-              "description": "A GitLab user account",
-              "primary_key": "id",
-              "label_field": "username"
+              "label_field": "name"
             }
           ],
           "edges": [
             {
-              "name": "AUTHORED",
-              "description": "Authorship relationship between users and entities",
-              "variants": [
-                { "source_type": "User", "target_type": "MergeRequest" },
-                { "source_type": "User", "target_type": "WorkItem" }
-              ]
-            },
-            {
-              "name": "CREATOR",
-              "description": "User created project",
-              "variants": [
-                { "source_type": "User", "target_type": "Project" }
-              ]
-            },
-            {
               "name": "IN_PROJECT",
-              "description": "Project association for entities",
-              "variants": [
-                { "source_type": "MergeRequest", "target_type": "Project" },
-                { "source_type": "Pipeline", "target_type": "Project" }
-              ]
-            },
-            {
-              "name": "MEMBER_OF",
-              "description": "A user is a member of a group or project",
-              "variants": [
-                { "source_type": "User", "target_type": "Group" },
-                { "source_type": "User", "target_type": "Project" }
-              ]
+              "description": "Project association for entities"
             }
           ]
+        }
+      }
+    ],
+    "isError": false
+  }
+}
+```
+
+## `get_graph_status`
+
+Returns indexing progress and entity counts for a group or project.
+
+Parameters:
+
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `full_path` | string | Yes if `namespace_id` and `project_id` are not provided | Full path of a group or project. |
+| `namespace_id` | integer | Yes if `full_path` and `project_id` are not provided | Group namespace ID. |
+| `project_id` | integer | Yes if `full_path` and `namespace_id` are not provided | Project ID. |
+| `format` | string | No | Response format. Use `raw` or `llm`. Default is `llm`. |
+
+Provide exactly one of `full_path`, `namespace_id`, or `project_id`.
+
+Example request:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": "1",
+  "params": {
+    "name": "get_graph_status",
+    "arguments": {
+      "format": "raw",
+      "full_path": "example-group/example-project"
+    }
+  }
+}
+```
+
+Example response:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "result": {
+    "content": [
+      {
+        "type": "text",
+        "text": {
+          "projects": {
+            "indexed": 1,
+            "total_known": 1
+          },
+          "domains": [
+            {
+              "name": "core",
+              "items": [
+                { "name": "Project", "count": 1 },
+                { "name": "User", "count": 42 }
+              ]
+            }
+          ],
+          "indexing": {
+            "state": "indexed",
+            "last_started_at": "2026-04-29T12:00:00Z",
+            "last_completed_at": "2026-04-29T12:02:00Z",
+            "last_duration_ms": 120000,
+            "last_error": null
+          }
         }
       }
     ],

@@ -2,63 +2,107 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Troubleshoot common issues with Orbit indexing and knowledge graph results.
+description: Troubleshoot common Orbit indexing, query, and MCP connection issues.
 availability_details: no
 title: Troubleshooting Orbit
 ---
 
-When working with Orbit, you might encounter the following issues.
+When Orbit returns less data than expected, start by checking whether the data is
+indexed and whether the same user can see that data in GitLab.
 
-## Data missing from knowledge graph
+## Data is missing from Orbit
 
-You might notice that certain data does not appear in the knowledge graph or in AI agent answers.
+You might notice that data is missing from the dashboard, query results, or AI
+agent answers.
 
 ### Orbit is not turned on for the top-level group
 
-This issue occurs when Orbit is not turned on for the top-level group that contains the subgroup, project, or repository you expect.
+Orbit indexes top-level groups. If Orbit is not turned on for the root group that
+contains the project, Orbit does not index that project.
 
 To resolve this issue:
 
-1. Turn Orbit on for the top-level group.
-1. Wait for the initial indexing to complete.
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Turn on Orbit for the top-level group.
+1. Wait for indexing to start.
 
-### Indexing is in progress
+### Indexing has not finished
 
-This issue occurs when indexing for the group or project is in progress or is temporarily backlogged.
-
-To resolve this issue:
-
-- Wait for indexing to complete.
-
-### User does not have permission to view the data
-
-This issue occurs when you do not have permission to view the data in GitLab.
+Initial indexing and reindexing can take time, especially for large groups or
+large repositories.
 
 To resolve this issue:
 
-1. Confirm you can see the data in the GitLab UI with the same user account.
-1. If you cannot, adjust GitLab project or group membership and roles to grant access.
+1. On the left sidebar, select **Search or go to**.
+1. Select **Your work**.
+1. Select **Orbit**.
+1. Check **Indexed content** for the group or project.
+1. Wait for indexing to complete.
 
-### Code is not on the project's default branch
+### You do not have permission to view the data
 
-This issue occurs when the code you expect to see is not on the project's default branch.
+Orbit applies GitLab permissions to query results. If you cannot see an issue,
+merge request, pipeline, vulnerability, project, or file in GitLab, Orbit should
+not return it to you.
 
 To resolve this issue:
 
-1. Confirm the code exists on the default branch. In most projects, the default branch is `main` or `master`.
-1. If the code exists only on a feature branch, merge or cherry-pick it into the default branch.
+1. Sign in as the same user who ran the Orbit query.
+1. Open the object in the GitLab UI.
+1. If GitLab denies access, ask a group or project owner to update your role.
 
-## `Error: 403 incorrect_scope`
+### Code is not on the default branch
 
-GitLab uses `mcp-remote` to establish secure connections between Orbit
-and AI tools running on your local computer. A known issue can cause
-the connection to fail with a `403 incorrect_scope` error. To resolve
-this issue, you must manually register the client before establishing
-the connection.
+Orbit indexes code from the project's default branch.
 
-To resolve this issue, use the GitLab CLI to configure Orbit.
+To resolve this issue:
 
-If you cannot use the GitLab CLI, you can manually register an MCP client:
+1. Confirm the code exists on the default branch. In most projects, the default
+   branch is `main` or `master`.
+1. If the code exists only on a feature branch, merge or cherry-pick it into the
+   default branch.
+
+## Query returns an error
+
+### Query type is not supported
+
+Orbit supports these query types:
+
+- `traversal`
+- `aggregation`
+- `path_finding`
+- `neighbors`
+
+To resolve this issue, update the `query_type` field. For more information, see
+[Orbit query language](queries/query_language.md).
+
+### Node or relationship does not exist
+
+If a query names a node type, relationship, or property that is not in the
+schema, Orbit rejects the query.
+
+To resolve this issue:
+
+1. Open **Orbit** > **Schema**.
+1. Confirm the node type, relationship, and property names.
+1. Update the query to use names from the schema.
+
+## MCP connection returns `403 incorrect_scope`
+
+GitLab uses `mcp-remote` to establish secure connections between Orbit and AI
+tools running on your local computer. A known issue can cause the connection to
+fail with a `403 incorrect_scope` error. To resolve this issue, manually
+register the client before establishing the connection.
+
+To resolve this issue, use the GitLab CLI to configure Orbit:
+
+```shell
+glab orbit setup
+```
+
+If you cannot use the GitLab CLI, manually register an MCP client:
 
 1. From the command line, run:
 
@@ -67,12 +111,14 @@ If you cannot use the GitLab CLI, you can manually register an MCP client:
    ```
 
 1. In your browser, review and approve the authorization request.
-   The `mcp-remote` command fails to establish a connection and displays a `403 incorrect_scope` error. It creates a cache directory at `~/.mcp-auth/mcp-remote-<version>/` with two files:
+
+   The command fails with `403 incorrect_scope`. It also creates a cache
+   directory at `~/.mcp-auth/mcp-remote-<version>/` with two files:
+
    - `<hash>-_client_info.json`
    - `<hash>_tokens.json`
 
-   Save the file names for the next steps.
-
+1. Save the file names for the next steps.
 1. Register a client:
 
    ```shell
@@ -82,7 +128,9 @@ If you cannot use the GitLab CLI, you can manually register an MCP client:
      --url "https://gitlab.com/oauth/register"
    ```
 
-1. In the response, verify that `scope` is set to `mcp_orbit` and save the values of:
+1. In the response, verify that `scope` is set to `mcp_orbit` and save the
+   values of:
+
    - `client_id`
    - `client_id_issued_at`
 
@@ -113,6 +161,33 @@ If you cannot use the GitLab CLI, you can manually register an MCP client:
    ```
 
 1. In your browser, review and approve the authorization request.
-   The connection should now succeed.
-1. Follow the instructions to [connect a client to the GitLab MCP server](https://docs.gitlab.com/user/gitlab_duo/model_context_protocol/mcp_server/#connect-a-client-to-the-gitlab-mcp-server).
-   Use the URL `https://gitlab.com/api/v4/orbit/mcp`.
+
+The connection should now succeed. Use the MCP URL
+`https://gitlab.com/api/v4/orbit/mcp`.
+
+## Local indexer cannot find data
+
+The local indexer stores local code graph data in `~/.orbit/graph.duckdb` by
+default. It does not query the deployed GitLab.com graph.
+
+To resolve this issue:
+
+1. Confirm you indexed the repository:
+
+   ```shell
+   ./target/release/orbit index /path/to/repository
+   ```
+
+1. Confirm you are querying the same local data directory:
+
+   ```shell
+   echo "$ORBIT_DATA_DIR"
+   ```
+
+1. Inspect the local schema:
+
+   ```shell
+   ./target/release/orbit schema --ontology
+   ```
+
+For more information, see [Local Orbit indexer developer preview](local_indexer.md).
