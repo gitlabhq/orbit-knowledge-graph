@@ -55,7 +55,11 @@ pub struct ToolRegistry;
 
 impl ToolRegistry {
     pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
-        vec![Self::query_graph(), Self::get_graph_schema()]
+        vec![
+            Self::query_graph(),
+            Self::get_graph_schema(),
+            Self::get_graph_info(),
+        ]
     }
 
     fn query_graph() -> ToolDefinition {
@@ -94,11 +98,29 @@ impl ToolRegistry {
     fn get_graph_schema() -> ToolDefinition {
         ToolDefinition {
             name: "get_graph_schema".into(),
-            description: "Return the GitLab Knowledge Graph schema (nodes, edges, and their \
-                          source/target types). Pass expand_nodes to drill into property \
-                          details. Pass include=[\"dsl\", \"response_format\"] to fetch the \
-                          query DSL grammar and the formatter output JSON Schema in the \
-                          same call."
+            description: "List the GitLab Knowledge Graph schema. Returns the available nodes \
+                          and edges with their source/target types. Use expand_nodes to get \
+                          property details for specific types."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "expand_nodes": params::expand_nodes(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_graph_info() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_graph_info".into(),
+            description: "One-stop discovery tool. Returns the graph ontology and, on demand, \
+                          the query DSL grammar and the formatter output JSON Schema in the \
+                          same response. Pass include=[\"dsl\", \"response_format\"] to merge \
+                          either or both into the result. Prefer this over get_graph_schema \
+                          for new agents; get_graph_schema stays for back-compat."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -132,7 +154,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 2);
+        assert_eq!(tools.len(), 3);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -155,6 +177,7 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
+        assert!(names.contains(&"get_graph_info".into()));
     }
 
     #[test]
@@ -231,8 +254,20 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_include_param_lists_known_blocks() {
+    fn get_graph_schema_has_no_include_param() {
+        // back-compat: clients on get_graph_schema must keep the old shape
         let tool = find_tool("get_graph_schema");
+        let props = tool.parameters["properties"]
+            .as_object()
+            .expect("properties should be an object");
+        assert!(!props.contains_key("include"));
+        assert!(props.contains_key("expand_nodes"));
+        assert!(props.contains_key("format"));
+    }
+
+    #[test]
+    fn get_graph_info_include_param_lists_known_blocks() {
+        let tool = find_tool("get_graph_info");
         let include = &tool.parameters["properties"]["include"];
         assert_eq!(include["type"], "array");
 

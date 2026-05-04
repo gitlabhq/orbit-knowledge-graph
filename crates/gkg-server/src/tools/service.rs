@@ -79,6 +79,7 @@ impl ToolService {
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_info" => self.execute_get_graph_info(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -127,6 +128,28 @@ impl ToolService {
 
     fn execute_get_graph_schema(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
         let args: GetGraphSchemaArgs = serde_json::from_value(arguments.clone())
+            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+
+        let format = parse_format(arguments);
+        let expand_nodes = args.expand_nodes.as_deref().unwrap_or(&[]);
+        let response = self.build_graph_schema_response(expand_nodes);
+
+        let result = match format {
+            OutputFormat::Llm => {
+                let toon = encode(&response, &EncodeOptions::default()).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
+                })?;
+                json!(toon)
+            }
+            OutputFormat::Raw => serde_json::to_value(&response)
+                .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
+        };
+
+        Ok(ToolPlan::Immediate { result })
+    }
+
+    fn execute_get_graph_info(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        let args: GetGraphInfoArgs = serde_json::from_value(arguments.clone())
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         let format = parse_format(arguments);
@@ -219,6 +242,12 @@ fn parse_format(arguments: &Value) -> OutputFormat {
 
 #[derive(Debug, Deserialize)]
 struct GetGraphSchemaArgs {
+    #[serde(default)]
+    expand_nodes: Option<Vec<String>>,
+}
+
+#[derive(Debug, Deserialize)]
+struct GetGraphInfoArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
     #[serde(default)]
@@ -559,19 +588,39 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_default_omits_extras() {
-        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_graph_schema");
+    fn get_graph_schema_does_not_accept_include() {
+        // back-compat: get_graph_schema must keep its old shape. Passing
+        // unknown args (like include) is a hard error from the args struct.
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve(
+            "get_graph_schema",
+            r#"{"format": "raw", "include": ["dsl"]}"#,
+        );
+        // The include key is silently dropped (serde-default semantics) but
+        // must not cause merging into the response.
+        match result.expect("Should resolve") {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_object());
+                assert!(result.get("dsl").is_none());
+                assert!(result.get("response_format").is_none());
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn get_graph_info_default_omits_extras() {
+        let result = resolve_immediate(r#"{"format": "raw"}"#, "get_graph_info");
         assert!(result.is_object());
         assert!(result.get("dsl").is_none());
         assert!(result.get("response_format").is_none());
     }
 
     #[test]
-    fn get_graph_schema_include_dsl_raw_merges_full_grammar() {
-        let result = resolve_immediate(
-            r#"{"format": "raw", "include": ["dsl"]}"#,
-            "get_graph_schema",
-        );
+    fn get_graph_info_include_dsl_raw_merges_full_grammar() {
+        let result =
+            resolve_immediate(r#"{"format": "raw", "include": ["dsl"]}"#, "get_graph_info");
         let dsl = result.get("dsl").expect("dsl key must be present");
         assert_eq!(
             dsl.get("title").and_then(Value::as_str),
@@ -580,10 +629,10 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_include_response_format_raw() {
+    fn get_graph_info_include_response_format_raw() {
         let result = resolve_immediate(
             r#"{"format": "raw", "include": ["response_format"]}"#,
-            "get_graph_schema",
+            "get_graph_info",
         );
         let rf = result
             .get("response_format")
@@ -601,20 +650,20 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_include_both_raw() {
+    fn get_graph_info_include_both_raw() {
         let result = resolve_immediate(
             r#"{"format": "raw", "include": ["dsl", "response_format"]}"#,
-            "get_graph_schema",
+            "get_graph_info",
         );
         assert!(result.get("dsl").is_some());
         assert!(result.get("response_format").is_some());
     }
 
     #[test]
-    fn get_graph_schema_include_llm_appends_blocks() {
+    fn get_graph_info_include_llm_appends_blocks() {
         let result = resolve_immediate(
             r#"{"format": "llm", "include": ["dsl", "response_format"]}"#,
-            "get_graph_schema",
+            "get_graph_info",
         );
         let toon = result.as_str().expect("LLM format returns a string");
         assert!(toon.contains("Query DSL Schema"));
@@ -623,10 +672,10 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_schema_unknown_include_keys_are_ignored() {
+    fn get_graph_info_unknown_include_keys_are_ignored() {
         let result = resolve_immediate(
             r#"{"format": "raw", "include": ["bogus"]}"#,
-            "get_graph_schema",
+            "get_graph_info",
         );
         assert!(result.get("bogus").is_none());
         assert!(result.get("dsl").is_none());
