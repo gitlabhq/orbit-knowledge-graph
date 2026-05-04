@@ -1,23 +1,23 @@
 //! Traversal query lowering.
 //!
 //! Single-node: direct node table scan.
-//! Multi-node: skeleton edge chain + edge metadata SELECT + ORDER BY.
+//! Multi-node: edge chain plan + edge metadata SELECT + ORDER BY.
 
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
+use super::plan::EdgeChainPlan;
 use super::shared::edge_select_columns;
 use super::shared::edge_select_columns_with_prefix;
-use super::types::Skeleton;
 use crate::constants::*;
 
-pub fn emit_traversal(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
+pub fn emit_traversal(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
     if input.is_search() || input.relationships.is_empty() {
-        return emit_single_node(skeleton, input);
+        return emit_single_node(plan, input);
     }
 
-    let output = skeleton.emit(input)?;
+    let output = plan.emit(input)?;
 
     let mut select = Vec::new();
     let already_has_edge_cols = output.select.iter().any(|s| {
@@ -56,8 +56,8 @@ pub fn emit_traversal(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
     Ok(Node::Query(Box::new(q)))
 }
 
-fn emit_single_node(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
-    let output = skeleton.emit(input)?;
+fn emit_single_node(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
+    let output = plan.emit(input)?;
 
     let order_by = input
         .order_by

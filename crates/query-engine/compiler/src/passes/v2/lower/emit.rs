@@ -1,6 +1,6 @@
-//! Skeleton emitters: read the IR, produce SQL AST fragments.
+//! Edge chain plan emitters: read the IR, produce SQL AST fragments.
 //!
-//! `Skeleton::emit()` dispatches by strategy to one of:
+//! `EdgeChainPlan::emit()` dispatches by strategy to one of:
 //! - `emit_single_node` — no edges
 //! - `emit_flat_chain` — flat edge chain
 //! - `emit_fk_star` — FK star (all hops FK to same center)
@@ -14,19 +14,19 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
+use super::plan::*;
 use super::shared::{
     filter_to_expr, id_list_predicate, id_range_predicate, rel_kind_filter_values,
 };
-use super::types::*;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Skeleton::emit()
+// EdgeChainPlan::emit()
 // ─────────────────────────────────────────────────────────────────────────────
 
-impl Skeleton {
+impl EdgeChainPlan {
     /// Emit SQL AST from the plan. Pure AST generation — reads only
-    /// from Skeleton fields, does not consult Input.
-    pub fn emit(&self, _input: &mut Input) -> Result<SkeletonOutput> {
+    /// from plan fields, does not consult Input.
+    pub fn emit(&self, _input: &mut Input) -> Result<EmitOutput> {
         match self.strategy {
             Strategy::SingleNode => emit_single_node(self),
             Strategy::FkStar { ref center } => emit_fk_star(self, center),
@@ -35,8 +35,8 @@ impl Skeleton {
     }
 }
 
-/// The output of emitting a skeleton — ready for query-type modules to wrap.
-pub struct SkeletonOutput {
+/// The output of emitting a plan — ready for query-type modules to wrap.
+pub struct EmitOutput {
     pub from: TableRef,
     pub edge_aliases: Vec<String>,
     pub where_parts: Vec<Expr>,
@@ -44,7 +44,7 @@ pub struct SkeletonOutput {
     pub ctes: Vec<Cte>,
 }
 
-impl SkeletonOutput {
+impl EmitOutput {
     /// Assemble into a final Query.
     pub fn into_query(
         self,
@@ -129,12 +129,12 @@ fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr> {
 // Emit: single node (no edges)
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_single_node(skeleton: &Skeleton) -> Result<SkeletonOutput> {
-    let (_, np) = skeleton
+fn emit_single_node(plan: &EdgeChainPlan) -> Result<EmitOutput> {
+    let (_, np) = plan
         .nodes
         .iter()
         .next()
-        .ok_or_else(|| QueryError::Lowering("no nodes in skeleton".into()))?;
+        .ok_or_else(|| QueryError::Lowering("no nodes in plan".into()))?;
     let table = np
         .table
         .as_deref()
@@ -149,7 +149,7 @@ fn emit_single_node(skeleton: &Skeleton) -> Result<SkeletonOutput> {
     let where_parts = node_where_predicates(alias, np);
     let select = node_select_columns(alias, np);
 
-    Ok(SkeletonOutput {
+    Ok(EmitOutput {
         from,
         edge_aliases: vec![],
         where_parts,
@@ -162,20 +162,20 @@ fn emit_single_node(skeleton: &Skeleton) -> Result<SkeletonOutput> {
 // Emit: flat edge chain
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
+fn emit_flat_chain(plan: &EdgeChainPlan) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
     let mut edge_aliases = Vec::new();
     let mut ctes = Vec::new();
     let mut from: Option<TableRef> = None;
 
-    for (i, hop) in skeleton.hops.iter().enumerate() {
+    for (i, hop) in plan.hops.iter().enumerate() {
         let alias = format!("e{i}");
         let (start_col, end_col) = hop.direction.edge_columns();
         let is_multi_hop = hop.max_hops > 1;
 
         // Build edge source: UNION ALL for multi-hop, plain scan for single.
         let edge_source = if is_multi_hop {
-            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &skeleton.nodes);
+            let (union, union_wheres) = build_multi_hop_union(hop, &alias, &plan.nodes);
             where_parts.extend(union_wheres);
             union
         } else {
@@ -207,7 +207,7 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
                 &mut where_parts,
                 &alias,
                 hop,
-                &skeleton.nodes,
+                &plan.nodes,
                 start_col,
                 end_col,
             );
@@ -218,13 +218,13 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
             where_parts.push(filter_to_expr(&alias, prop, filter));
         }
 
-        // Apply pre-computed denorm tags from the skeleton nodes.
-        emit_precomputed_denorm_tags(&mut where_parts, &skeleton.nodes, hop, start_col, end_col);
+        // Apply pre-computed denorm tags from the plan nodes.
+        emit_precomputed_denorm_tags(&mut where_parts, &plan.nodes, hop, start_col, end_col);
         emit_node_ids_on_edge(
             &mut where_parts,
             &alias,
             hop,
-            &skeleton.nodes,
+            &plan.nodes,
             start_col,
             end_col,
         );
@@ -232,11 +232,11 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
         edge_aliases.push(alias);
     }
 
-    let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in skeleton".into()))?;
+    let mut from = from.ok_or_else(|| QueryError::Lowering("no hops in plan".into()))?;
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
 
-    for (i, hop) in skeleton.hops.iter().enumerate() {
+    for (i, hop) in plan.hops.iter().enumerate() {
         let edge_alias = &edge_aliases[i];
         let (start_col, end_col) = hop.direction.edge_columns();
 
@@ -244,7 +244,7 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
             if !hydrated.insert(node_alias.clone()) {
                 continue;
             }
-            let Some(np) = skeleton.nodes.get(node_alias) else {
+            let Some(np) = plan.nodes.get(node_alias) else {
                 continue;
             };
             match np.hydration {
@@ -266,7 +266,7 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
                                     &mut nw,
                                     &format!("{edge_alias}n"),
                                     hop,
-                                    &skeleton.nodes,
+                                    &plan.nodes,
                                     start_col,
                                     end_col,
                                 );
@@ -306,7 +306,7 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
         }
     }
 
-    Ok(SkeletonOutput {
+    Ok(EmitOutput {
         from,
         edge_aliases,
         where_parts,
@@ -320,8 +320,8 @@ fn emit_flat_chain(skeleton: &Skeleton) -> Result<SkeletonOutput> {
 // Also handles single-hop FK (FkDirect is just FkStar with 1 hop).
 // ─────────────────────────────────────────────────────────────────────────────
 
-fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutput> {
-    let center_np = skeleton.nodes.get(center_alias).ok_or_else(|| {
+fn emit_fk_star(plan: &EdgeChainPlan, center_alias: &str) -> Result<EmitOutput> {
+    let center_np = plan.nodes.get(center_alias).ok_or_else(|| {
         QueryError::Lowering(format!("FK star center '{center_alias}' not found"))
     })?;
     let center_table = center_np.table.as_deref().ok_or_else(|| {
@@ -331,7 +331,7 @@ fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutpu
     // Build center dedup columns from pre-computed list + FK columns.
     let mut center_cols = collect_dedup_columns(center_alias, center_np);
     // Add FK columns for each hop (not covered by dedup_columns).
-    for hop in &skeleton.hops {
+    for hop in &plan.hops {
         if let Some(ref fk) = hop.fk
             && !center_cols
                 .iter()
@@ -355,12 +355,12 @@ fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutpu
     let mut ctes = Vec::new();
 
     // Each hop: target node connected via FK column.
-    for hop in &skeleton.hops {
+    for hop in &plan.hops {
         let fk = hop
             .fk
             .as_ref()
             .ok_or_else(|| QueryError::Lowering("FkStar hop missing FK metadata".into()))?;
-        let target_np = skeleton.nodes.get(&fk.target_node).ok_or_else(|| {
+        let target_np = plan.nodes.get(&fk.target_node).ok_or_else(|| {
             QueryError::Lowering(format!("FK target '{}' not found", fk.target_node))
         })?;
 
@@ -403,8 +403,8 @@ fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutpu
     // e0_src, e0_src_type, e0_dst, e0_dst_type for each relationship.
     // Aggregation queries don't need edge columns — the flag was pre-computed.
     let mut edge_aliases = Vec::new();
-    if !skeleton.synthesize_fk_edge_metadata {
-        return Ok(SkeletonOutput {
+    if !plan.synthesize_fk_edge_metadata {
+        return Ok(EmitOutput {
             from,
             edge_aliases,
             where_parts,
@@ -412,11 +412,11 @@ fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutpu
             ctes,
         });
     }
-    for (i, hop) in skeleton.hops.iter().enumerate() {
+    for (i, hop) in plan.hops.iter().enumerate() {
         let ea = format!("e{i}");
         let fk = hop.fk.as_ref().unwrap();
-        let from_np = skeleton.nodes.get(&hop.from_node);
-        let to_np = skeleton.nodes.get(&hop.to_node);
+        let from_np = plan.nodes.get(&hop.from_node);
+        let to_np = plan.nodes.get(&hop.to_node);
         let from_entity = from_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
         let to_entity = to_np.and_then(|n| n.entity.as_deref()).unwrap_or("");
         let rel_type = hop.rel_types.first().map(|s| s.as_str()).unwrap_or("");
@@ -461,7 +461,7 @@ fn emit_fk_star(skeleton: &Skeleton, center_alias: &str) -> Result<SkeletonOutpu
         edge_aliases.push(ea);
     }
 
-    Ok(SkeletonOutput {
+    Ok(EmitOutput {
         from,
         edge_aliases,
         where_parts,
@@ -698,8 +698,7 @@ fn push_edge_predicates(
     ));
 }
 
-/// Emit pre-computed denorm tags from the skeleton's NodePlans.
-/// Tags were resolved in plan() and stored on each NodePlan.
+/// Emit pre-computed denorm tags from the plan's NodePlans.
 fn emit_precomputed_denorm_tags(
     where_parts: &mut Vec<Expr>,
     nodes: &HashMap<String, NodePlan>,

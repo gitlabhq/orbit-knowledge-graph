@@ -1,17 +1,17 @@
 //! Aggregation query lowering.
 //!
 //! No-edge: direct node table scan with GROUP BY.
-//! With edges: skeleton edge chain + GROUP BY + aggregate functions.
+//! With edges: edge chain plan + GROUP BY + aggregate functions.
 
 use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
+use super::plan::*;
 use super::shared::requested_columns;
-use super::types::*;
 
-pub fn emit_aggregation(skeleton: &Skeleton, input: &mut Input) -> Result<Node> {
-    let output = skeleton.emit(input)?;
+pub fn emit_aggregation(plan: &EdgeChainPlan, input: &mut Input) -> Result<Node> {
+    let output = plan.emit(input)?;
     let (agg_select, group_by, order_by) = build_aggregation(input)?;
 
     let q = output.into_query(agg_select, group_by, order_by, input.limit);

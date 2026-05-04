@@ -1,4 +1,4 @@
-//! Query lowerer: skeleton-first, edge chain drives, nodes are lazy.
+//! Query lowerer: edge-chain-first, nodes are lazy.
 //!
 //! Two-phase architecture:
 //!   1. **Plan** (`plan()` / `plan_*`): reads Input, produces a QueryPlan
@@ -16,7 +16,6 @@ pub mod pathfinding;
 pub mod plan;
 pub mod shared;
 pub mod traversal;
-pub mod types;
 
 use crate::ast::Node;
 use crate::error::Result;
@@ -24,14 +23,18 @@ use crate::input::*;
 
 pub use plan::QueryPlan;
 
-use types::Skeleton;
+use plan::EdgeChainPlan;
 
 /// Build a query plan from the input (phase 1).
 pub fn plan(input: &mut Input) -> Result<QueryPlan> {
     match input.query_type {
-        QueryType::Traversal | QueryType::Aggregation => {
-            let skeleton = Skeleton::plan(input);
-            Ok(QueryPlan::Skeleton(skeleton))
+        QueryType::Traversal => {
+            let plan = EdgeChainPlan::plan(input);
+            Ok(QueryPlan::Traversal(plan))
+        }
+        QueryType::Aggregation => {
+            let plan = EdgeChainPlan::plan(input);
+            Ok(QueryPlan::Aggregation(plan))
         }
         QueryType::Neighbors => {
             let p = neighbors::plan_neighbors(input)?;
@@ -51,11 +54,8 @@ pub fn plan(input: &mut Input) -> Result<QueryPlan> {
 /// Emit SQL AST from a query plan (phase 2).
 pub fn emit(query_plan: &QueryPlan, input: &mut Input) -> Result<Node> {
     match query_plan {
-        QueryPlan::Skeleton(skeleton) => match input.query_type {
-            QueryType::Traversal => traversal::emit_traversal(skeleton, input),
-            QueryType::Aggregation => aggregation::emit_aggregation(skeleton, input),
-            _ => unreachable!("skeleton plan only for traversal/aggregation"),
-        },
+        QueryPlan::Traversal(plan) => traversal::emit_traversal(plan, input),
+        QueryPlan::Aggregation(plan) => aggregation::emit_aggregation(plan, input),
         QueryPlan::Neighbors(p) => neighbors::emit_neighbors(p, input),
         QueryPlan::PathFinding(p) => pathfinding::emit_pathfinding(p, input),
         QueryPlan::Hydration(p) => hydration::emit_hydration(p),

@@ -117,7 +117,7 @@ impl DuckDbState {
 // Pipeline presets
 // ═════════════════════════════════════════════════════════════════════════════
 
-/// Standard ClickHouse compilation pipeline. Skeleton-first lowering
+/// Standard ClickHouse compilation pipeline. Edge-chain-first lowering
 /// produces flat edge-chain JOINs with inline dedup. No CTEs for the
 /// common case.
 ///

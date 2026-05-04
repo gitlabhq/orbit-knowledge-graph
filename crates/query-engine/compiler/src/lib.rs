@@ -105,7 +105,7 @@ use std::sync::Arc;
 /// The context contains the parameterized SQL, bind parameters, result context
 /// for redaction, hydration plan, and the validated input.
 ///
-/// Runs the ClickHouse compilation pipeline. Skeleton-first lowering
+/// Runs the ClickHouse compilation pipeline. Edge-chain-first lowering
 /// produces flat edge-chain JOINs with inline dedup.
 ///
 /// ```text
