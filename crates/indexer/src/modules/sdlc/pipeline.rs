@@ -297,6 +297,16 @@ impl Pipeline {
             // Cast them to Utf8 before writing.
             let result_batches = downcast_string_views(&result_batches);
 
+            // Dictionary-encode low-cardinality string columns on edge
+            // batches. Stores each unique value once with i32 indices,
+            // reducing Arrow IPC payload size for repetitive columns like
+            // relationship_kind, source_kind, target_kind.
+            let result_batches = if is_edge_table(&transform.destination_table) {
+                dict_encode_columns(&result_batches, EDGE_DICT_COLUMNS)
+            } else {
+                result_batches
+            };
+
             let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
                 continue;
@@ -426,6 +436,58 @@ fn downcast_string_views(batches: &[RecordBatch]) -> Vec<RecordBatch> {
                 let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
                 RecordBatch::try_new(new_schema, new_columns)
                     .expect("schema/column mismatch in downcast_string_views")
+            } else {
+                batch.clone()
+            }
+        })
+        .collect()
+}
+
+const EDGE_DICT_COLUMNS: &[&str] = &["relationship_kind", "source_kind", "target_kind"];
+
+fn is_edge_table(table: &str) -> bool {
+    // Schema-versioned table names look like "v27_gl_edge", "v27_gl_ci_edge", etc.
+    // Strip the version prefix and check the base name.
+    let base = table.split('_').skip(1).collect::<Vec<_>>().join("_");
+    base.starts_with("gl_") && base.contains("edge")
+}
+
+/// Dictionary-encode named Utf8 columns for better Arrow IPC compression.
+fn dict_encode_columns(batches: &[RecordBatch], columns: &[&str]) -> Vec<RecordBatch> {
+    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
+    batches
+        .iter()
+        .map(|batch| {
+            let schema = batch.schema();
+            let mut new_fields: Vec<Field> = Vec::new();
+            let mut new_columns: Vec<ArrayRef> = Vec::new();
+            let mut changed = false;
+
+            for (i, field) in schema.fields().iter().enumerate() {
+                let col = batch.column(i);
+                if columns.contains(&field.name().as_str())
+                    && matches!(field.data_type(), DataType::Utf8)
+                {
+                    let casted = compute::cast(col, &dict_type)
+                        .expect("Utf8 -> Dictionary cast should not fail");
+                    new_fields.push(Field::new(
+                        field.name(),
+                        dict_type.clone(),
+                        field.is_nullable(),
+                    ));
+                    new_columns.push(casted);
+                    changed = true;
+                } else {
+                    new_fields.push(field.as_ref().clone());
+                    new_columns.push(Arc::clone(col));
+                }
+            }
+
+            if changed {
+                let new_schema = Arc::new(arrow::datatypes::Schema::new(new_fields));
+                RecordBatch::try_new(new_schema, new_columns)
+                    .expect("schema/column mismatch in dict_encode_columns")
             } else {
                 batch.clone()
             }

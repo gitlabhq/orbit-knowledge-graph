@@ -1,6 +1,6 @@
 use ontology::{EtlScope, constants::TRAVERSAL_PATH_COLUMN};
 
-use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
+use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
 use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
@@ -76,6 +76,25 @@ fn lower_node_plan(input: NodePlan, batch_size: u64) -> PipelinePlan {
     }
 }
 
+/// Matches the ClickHouse ORDER BY for edge tables so inserted blocks
+/// arrive pre-sorted, avoiding a re-sort on the ClickHouse side and
+/// producing better-compressed parts for background merges.
+fn edge_order_by() -> Vec<OrderExpr> {
+    [
+        "traversal_path",
+        "source_id",
+        "relationship_kind",
+        "target_id",
+        "source_kind",
+        "target_kind",
+    ]
+    .into_iter()
+    .map(|col| OrderExpr {
+        expr: Expr::col("", col),
+    })
+    .collect()
+}
+
 fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
     let transform_query = Query {
         select: lower_edge_select(
@@ -89,7 +108,7 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform) -> Transformation {
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&fk_edge.filters),
-        order_by: vec![],
+        order_by: edge_order_by(),
         limit: None,
     };
 
@@ -162,7 +181,7 @@ fn lower_standalone_edge_plan(input: StandaloneEdgePlan, batch_size: u64) -> Pip
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&input.filters),
-        order_by: vec![],
+        order_by: edge_order_by(),
         limit: None,
     };
 
