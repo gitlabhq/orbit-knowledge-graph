@@ -1350,6 +1350,438 @@ where
     }
 }
 
+// ── FamilyPipeline ──────────────────────────────────────────────
+
+/// Pipeline for language families with multiple member languages.
+///
+/// Parses each file with its language-specific `LanguageSpec`, but
+/// feeds all definitions into a single shared `CodeGraph`. Resolution
+/// (Phase 2/3) uses per-file `LanguageContext` so each file resolves
+/// with its own rules while seeing the unified symbol table.
+pub struct FamilyPipeline;
+
+impl FamilyPipeline {
+    pub fn run(
+        files: &[FamilyFileInput],
+        member_ctxs: &rustc_hash::FxHashMap<Language, Arc<LanguageContext>>,
+        ctx: &Arc<PipelineContext>,
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
+        let file_count = files.len();
+        let root_path = ctx.root_path.clone();
+        let tracer = &ctx.tracer;
+        let t0 = std::time::Instant::now();
+
+        // Use the first member's rules for the graph-wide FQN separator.
+        let primary_ctx = member_ctxs.values().next().expect("family has no members");
+        let primary_rules = primary_ctx.rules.clone();
+
+        // Sentinel: use the shortest per_file_timeout across members.
+        let per_file_timeout = member_ctxs
+            .values()
+            .filter_map(|lc| {
+                lc.rules
+                    .settings
+                    .per_file_timeout
+                    .or(ctx.config.per_file_timeout)
+            })
+            .min();
+        let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
+
+        // ── Phase 1a: parallel parse with per-file spec ─────────
+        let pb = progress_bar(file_count as u64, "parse + graph");
+
+        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::error::{FaultedFile, FileFault};
+
+        struct FileInfo {
+            file_node: petgraph::graph::NodeIndex,
+            def_nodes: Vec<petgraph::graph::NodeIndex>,
+            import_nodes: Vec<petgraph::graph::NodeIndex>,
+        }
+
+        enum ParseOutcome {
+            Ok(ParsedFile),
+            Err(FaultedFile),
+        }
+
+        struct ParsedFile {
+            path_idx: usize,
+            language: Language,
+            result: ParseFullResult,
+            ext: String,
+            file_size: u64,
+        }
+
+        let parse_outcomes: Vec<Option<ParseOutcome>> = files
+            .par_iter()
+            .enumerate()
+            .map(|(idx, f)| {
+                if ctx.is_cancelled() {
+                    pb.inc(1);
+                    return None;
+                }
+                let lctx = &member_ctxs[&f.language];
+                let abs_path = format!("{root_path}/{}", f.path);
+                let source = match std::fs::read(&abs_path) {
+                    Ok(s) => s,
+                    Err(e) => {
+                        tracing::debug!(path = f.path, error = %e, "failed to read file");
+                        pb.inc(1);
+                        return Some(ParseOutcome::Err(FaultedFile {
+                            path: f.path.to_string(),
+                            kind: FileFault::FileRead,
+                            detail: e.to_string(),
+                        }));
+                    }
+                };
+
+                let result = match lctx
+                    .spec
+                    .parse_full_collect(&source, &f.path, f.language, tracer)
+                {
+                    Ok(r) => r,
+                    Err(e) => {
+                        tracing::debug!(path = f.path, error = %e, "failed to parse file");
+                        pb.inc(1);
+                        let (kind, detail) = match e {
+                            crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err) => {
+                                (FileFault::InvalidUtf8, err.to_string())
+                            }
+                        };
+                        return Some(ParseOutcome::Err(FaultedFile {
+                            path: f.path.to_string(),
+                            kind,
+                            detail,
+                        }));
+                    }
+                };
+
+                let ext = f
+                    .path
+                    .rsplit_once('.')
+                    .map(|(_, e)| e)
+                    .unwrap_or("")
+                    .to_string();
+                let file_size = source.len() as u64;
+                pb.inc(1);
+                Some(ParseOutcome::Ok(ParsedFile {
+                    path_idx: idx,
+                    language: f.language,
+                    result,
+                    ext,
+                    file_size,
+                }))
+            })
+            .collect();
+
+        let mut parsed_faults: Vec<FaultedFile> = Vec::new();
+        let parsed: Vec<Option<ParsedFile>> = parse_outcomes
+            .into_iter()
+            .map(|outcome| match outcome {
+                Some(ParseOutcome::Ok(file)) => Some(file),
+                Some(ParseOutcome::Err(e)) => {
+                    parsed_faults.push(e);
+                    None
+                }
+                None => None,
+            })
+            .collect();
+
+        if !parsed_faults.is_empty()
+            && let Ok(mut faults) = ctx.faults.lock()
+        {
+            faults.extend(parsed_faults);
+        }
+
+        // ── Phase 1b: add all defs to one shared CodeGraph ──────
+        struct FileWithRefs {
+            info: FileInfo,
+            language: Language,
+            refs: Vec<CollectedRef>,
+            inferred_returns: Vec<(u32, String)>,
+            unresolved_aliases: Vec<(usize, String)>,
+        }
+
+        let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
+        if ctx.config.emit_file_inventory_graph {
+            graph.mark_parsed_only();
+        }
+        let mut total_defs = 0usize;
+        let mut total_imports = 0usize;
+        let mut files_with_refs: Vec<Option<FileWithRefs>> =
+            (0..file_count).map(|_| None).collect();
+
+        for parsed_file in parsed.into_iter().flatten() {
+            let path = &files[parsed_file.path_idx].path;
+            total_defs += parsed_file.result.definitions.len();
+            total_imports += parsed_file.result.imports.len();
+
+            let (file_node, def_nodes, import_nodes) = graph.add_file(
+                path,
+                &parsed_file.ext,
+                parsed_file.language,
+                parsed_file.file_size,
+                &parsed_file.result.definitions,
+                &parsed_file.result.imports,
+            );
+
+            files_with_refs[parsed_file.path_idx] = Some(FileWithRefs {
+                info: FileInfo {
+                    file_node,
+                    def_nodes,
+                    import_nodes,
+                },
+                language: parsed_file.language,
+                refs: parsed_file.result.refs,
+                inferred_returns: parsed_file.result.inferred_returns,
+                unresolved_aliases: parsed_file.result.unresolved_aliases,
+            });
+        }
+
+        pb.finish_with_message(format!(
+            "{total_defs} defs, {total_imports} imports in {:.2?}",
+            t0.elapsed()
+        ));
+
+        graph.finalize(tracer);
+        graph.drop_construction_indexes();
+
+        // ── Phase 1c: patch unresolved SSA aliases ──────────────
+        for fwr in files_with_refs.iter_mut().flatten() {
+            if fwr.unresolved_aliases.is_empty() {
+                continue;
+            }
+            for (ref_idx, alias_target) in &fwr.unresolved_aliases {
+                let nodes = graph.resolve_scope_nodes(alias_target);
+                if let Some(&n) = nodes.first()
+                    && graph.def_kind(n).is_type_container()
+                {
+                    let fqn = graph.def_fqn(n).to_string();
+                    if let Some(r) = fwr.refs.get_mut(*ref_idx) {
+                        r.reaching = vec![crate::v2::types::ssa::ParseValue::Type(fqn.into())];
+                    }
+                }
+            }
+        }
+
+        // ── Phase 2: resolve refs with per-file lang_ctx ────────
+        let t2 = std::time::Instant::now();
+        let pb2 = progress_bar(file_count as u64, "resolve");
+        let total_edges = std::sync::atomic::AtomicUsize::new(0);
+
+        type Phase2Result = (
+            Vec<EdgeTriple>,
+            Vec<(u32, String)>,
+            Option<(FileInfo, Language)>,
+            Vec<FailedChain>,
+            bool,
+        );
+
+        let resolve_results: Vec<Phase2Result> = files_with_refs
+            .into_par_iter()
+            .map(|fwr_opt| -> Phase2Result {
+                if ctx.is_cancelled() {
+                    pb2.inc(1);
+                    return Default::default();
+                }
+                let Some(fwr) = fwr_opt else {
+                    pb2.inc(1);
+                    return Default::default();
+                };
+
+                let lctx = &member_ctxs[&fwr.language];
+                let guard = sentinel
+                    .as_ref()
+                    .map(|(handle, _)| handle.file_start("family"));
+                let mut resolver = crate::v2::linker::FileResolver::new(
+                    &graph,
+                    fwr.info.file_node,
+                    &fwr.info.def_nodes,
+                    &fwr.info.import_nodes,
+                    lctx,
+                    guard,
+                );
+                resolver.set_inferred_returns(&fwr.inferred_returns);
+
+                let mut edges = Vec::new();
+                let mut failed_chains: Vec<FailedChain> = Vec::new();
+                let mut killed = false;
+
+                for r in &fwr.refs {
+                    let before = edges.len();
+                    if resolver
+                        .resolve(
+                            &r.name,
+                            r.chain.as_deref(),
+                            &r.reaching,
+                            r.enclosing_def,
+                            &mut edges,
+                        )
+                        .is_err()
+                    {
+                        killed = true;
+                        break;
+                    }
+                    let import_edges = resolver.drain_import_edges();
+                    if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
+                        failed_chains.push(FailedChain {
+                            name: r.name.to_string(),
+                            chain: r.chain.clone().unwrap(),
+                            reaching: r.reaching.clone().into(),
+                            enclosing_def: r.enclosing_def,
+                            pending_import_edges: import_edges,
+                        });
+                    } else {
+                        edges.extend(import_edges);
+                    }
+                }
+
+                dedupe_edge_triples(&mut edges);
+                total_edges.fetch_add(edges.len(), std::sync::atomic::Ordering::Relaxed);
+                pb2.inc(1);
+                (
+                    edges,
+                    fwr.inferred_returns,
+                    Some((fwr.info, fwr.language)),
+                    failed_chains,
+                    killed,
+                )
+            })
+            .collect();
+
+        pb2.finish_with_message(format!(
+            "{} edges in {:.2?}",
+            total_edges.load(std::sync::atomic::Ordering::Relaxed),
+            t2.elapsed()
+        ));
+
+        // Insert Phase 2 edges and collect failed chains
+        let mut all_inferred: Vec<InferredReturns> = Vec::new();
+        let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
+
+        for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
+            if killed && let Some((ref info, _)) = info_opt {
+                let path = match &graph.graph[info.file_node] {
+                    crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
+                    _ => "unknown",
+                };
+                ctx.record_skip(
+                    path.to_string(),
+                    crate::v2::error::FileSkip::TimeoutSentinel,
+                    "per-file watchdog killed analysis",
+                );
+            }
+            for (src, tgt, edge) in edges {
+                add_edge_if_missing(&mut graph, src, tgt, edge);
+            }
+            if let Some((info, lang)) = info_opt {
+                if !inferred.is_empty() {
+                    all_inferred.push((info.def_nodes.clone(), inferred));
+                }
+                if !failed_chains.is_empty() {
+                    all_failed.push((info, lang, failed_chains));
+                }
+            }
+        }
+
+        // ── Phase 3: re-resolve failed chains ───────────────────
+        if !all_inferred.is_empty() {
+            for (def_nodes, inferred) in &all_inferred {
+                for (def_idx, rt) in inferred {
+                    if let Some(&node) = def_nodes.get(*def_idx as usize)
+                        && let Some(did) = graph.graph[node].def_id()
+                    {
+                        let rt_id = graph.strings.alloc(rt);
+                        graph.defs[did.0 as usize]
+                            .metadata
+                            .get_or_insert_with(Default::default)
+                            .return_type = Some(rt_id);
+                    }
+                }
+            }
+        }
+
+        if !all_failed.is_empty() {
+            let phase3_results: Vec<_> = all_failed
+                .par_iter()
+                .map(|(info, lang, failed_chains)| {
+                    let lctx = &member_ctxs[lang];
+                    let guard = sentinel
+                        .as_ref()
+                        .map(|(handle, _)| handle.file_start("phase3"));
+                    let mut resolver = crate::v2::linker::FileResolver::new(
+                        &graph,
+                        info.file_node,
+                        &info.def_nodes,
+                        &info.import_nodes,
+                        lctx,
+                        guard,
+                    );
+                    let mut edges = Vec::new();
+                    for failed in failed_chains {
+                        let before = edges.len();
+                        if resolver
+                            .resolve(
+                                &failed.name,
+                                Some(&failed.chain),
+                                &failed.reaching,
+                                failed.enclosing_def,
+                                &mut edges,
+                            )
+                            .is_err()
+                        {
+                            break;
+                        }
+                        let import_edges = resolver.drain_import_edges();
+                        if edges.len() == before {
+                            if import_edges.is_empty() {
+                                edges.extend(failed.pending_import_edges.clone());
+                            } else {
+                                edges.extend(import_edges);
+                            }
+                        }
+                    }
+                    dedupe_edge_triples(&mut edges);
+                    edges
+                })
+                .collect();
+
+            let mut phase3_edges = 0usize;
+            for edges in phase3_results {
+                phase3_edges += edges.len();
+                for (src, tgt, edge) in edges {
+                    add_edge_if_missing(&mut graph, src, tgt, edge);
+                }
+            }
+            if phase3_edges > 0 {
+                tracing::info!(phase3_edges, "phase 3: cross-file edges resolved");
+            }
+        }
+
+        graph.indexes.definition_ranges.clear();
+        graph.indexes.definition_ranges.shrink_to_fit();
+
+        if let Some((handle, join)) = sentinel {
+            handle.shutdown();
+            let _ = join.join();
+        }
+
+        tracing::info!(
+            elapsed_ms = t0.elapsed().as_millis() as u64,
+            nodes = graph.graph.node_count(),
+            edges = graph.graph.edge_count(),
+            defs = graph.defs.len(),
+            imports = graph.imports.len(),
+            strings = graph.strings.len(),
+            "family pipeline complete"
+        );
+
+        btx.send_graph(graph);
+        Ok(())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
