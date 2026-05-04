@@ -123,8 +123,12 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             match np.hydration {
                 HydrationStrategy::Join => {
                     // Use pre-resolved narrowing decision from plan().
+                    // IMPORTANT NOTE: Only emit _narrow_* when NO _filter_* CTEs exist yet —
+                    // otherwise the _narrow_ CTE's edge predicates would
+                    // reference _filter_* via IN, creating a correlated
+                    // subquery that ClickHouse rejects for parameterized queries.
                     let narrow_cte = if np.use_narrowing
-                        && ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
+                        && !ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
                     {
                         let narrow_name = format!("_narrow_{}", np.alias);
                         let narrow_query = Query {
