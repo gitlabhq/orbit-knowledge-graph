@@ -20,7 +20,9 @@ use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{
+    ENRICHED_TABLE, PipelinePlan, SOURCE_DATA_TABLE, TagPrecomputation, Transformation,
+};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 const MAX_RETRIES: u32 = 3;
@@ -134,6 +136,7 @@ impl Pipeline {
                 &plan.name,
                 &batches,
                 &plan.transforms,
+                plan.tag_precomputation.as_ref(),
                 destination,
             )
             .await?;
@@ -267,11 +270,11 @@ impl Pipeline {
         pipeline_name: &str,
         batches: &[RecordBatch],
         transforms: &[Transformation],
+        tag_precomputation: Option<&TagPrecomputation>,
         destination: &dyn Destination,
     ) -> Result<(), HandlerError> {
         let schema = batches[0].schema();
 
-        // Deregister previous batch if present, then register the new one.
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
         let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
             HandlerError::Processing(format!(
@@ -288,6 +291,38 @@ impl Pipeline {
             })?;
 
         let mut transform_duration = Duration::ZERO;
+
+        if let Some(precomp) = tag_precomputation {
+            let precomp_start = Instant::now();
+            let precomp_sql = precomp.to_sql();
+            let enriched_batches = self
+                .execute_transform(session, &precomp_sql)
+                .await
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to precompute tags for {pipeline_name}: {err}"
+                    ))
+                })?;
+            transform_duration += precomp_start.elapsed();
+
+            if !enriched_batches.is_empty() {
+                let _ = session.deregister_table(ENRICHED_TABLE);
+                let enriched_table =
+                    MemTable::try_new(enriched_batches[0].schema(), vec![enriched_batches])
+                        .map_err(|err| {
+                            HandlerError::Processing(format!(
+                                "failed to create enriched table for {pipeline_name}: {err}"
+                            ))
+                        })?;
+                session
+                    .register_table(ENRICHED_TABLE, Arc::new(enriched_table))
+                    .map_err(|err| {
+                        HandlerError::Processing(format!(
+                            "failed to register enriched table for {pipeline_name}: {err}"
+                        ))
+                    })?;
+            }
+        }
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -450,6 +485,7 @@ mod tests {
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
             }],
+            tag_precomputation: None,
         }
     }
 
@@ -809,6 +845,300 @@ mod tests {
             vec![None, Some(4_096), Some(2_048), Some(2_048)],
             "halving should clamp at the configured floor; observed: {observed:?}"
         );
+    }
+
+    #[tokio::test]
+    async fn job_precomputed_tags_produce_correct_output() {
+        use arrow::array::*;
+        use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+        use std::collections::HashMap;
+
+        let ontology = ontology::Ontology::load_embedded().expect("load ontology");
+        let plans = super::super::plan::build_plans(&ontology, 1000, 1000, &HashMap::new());
+
+        let job_plan = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "Job")
+            .expect("Job plan should exist");
+
+        assert!(
+            job_plan.tag_precomputation.is_some(),
+            "Job should have tag precomputation (8 FK edges with denormalized cols)"
+        );
+
+        let n = 10usize;
+        let fields = vec![
+            ArrowField::new("id", ArrowDataType::Int64, false),
+            ArrowField::new("name", ArrowDataType::Utf8, true),
+            ArrowField::new("status", ArrowDataType::Utf8, true),
+            ArrowField::new("ref", ArrowDataType::Utf8, true),
+            ArrowField::new("tag", ArrowDataType::Boolean, true),
+            ArrowField::new("allow_failure", ArrowDataType::Boolean, true),
+            ArrowField::new("coverage", ArrowDataType::Float64, true),
+            ArrowField::new("environment", ArrowDataType::Utf8, true),
+            ArrowField::new("when", ArrowDataType::Utf8, true),
+            ArrowField::new("retried", ArrowDataType::Boolean, true),
+            ArrowField::new("failure_reason", ArrowDataType::Utf8, true),
+            ArrowField::new("created_at", ArrowDataType::Utf8, true),
+            ArrowField::new("started_at", ArrowDataType::Utf8, true),
+            ArrowField::new("finished_at", ArrowDataType::Utf8, true),
+            ArrowField::new("queued_at", ArrowDataType::Utf8, true),
+            ArrowField::new("type", ArrowDataType::Utf8, true),
+            ArrowField::new("runner_id", ArrowDataType::Int64, true),
+            ArrowField::new("timeout", ArrowDataType::Int64, true),
+            ArrowField::new("timeout_source", ArrowDataType::Utf8, true),
+            ArrowField::new("exit_code", ArrowDataType::Int64, true),
+            ArrowField::new("scheduling_type", ArrowDataType::Utf8, true),
+            ArrowField::new("commit_id", ArrowDataType::Int64, true),
+            ArrowField::new("auto_canceled_by_id", ArrowDataType::Int64, true),
+            ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
+            ArrowField::new("project_id", ArrowDataType::Int64, true),
+            ArrowField::new("stage_id", ArrowDataType::Int64, true),
+            ArrowField::new("user_id", ArrowDataType::Int64, true),
+            ArrowField::new("upstream_pipeline_id", ArrowDataType::Int64, true),
+            ArrowField::new("partition_id", ArrowDataType::Int64, true),
+            ArrowField::new("_version", ArrowDataType::Utf8, false),
+            ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+        ];
+        let schema = Arc::new(Schema::new(fields));
+
+        let const_str = |val: &str| -> StringArray { StringArray::from(vec![val; n]) };
+        let const_int = |val: i64| -> Int64Array { Int64Array::from(vec![Some(val); n]) };
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from_iter_values(0..n as i64)),
+                Arc::new(const_str("build_job")),
+                Arc::new(const_str("success")),
+                Arc::new(const_str("main")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(Float64Array::from(vec![95.5; n])),
+                Arc::new(const_str("production")),
+                Arc::new(const_str("on_success")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(const_str("script_failure")),
+                Arc::new(const_str("2026-05-04 21:00:00.000000")),
+                Arc::new(const_str("2026-05-04 21:00:01.000000")),
+                Arc::new(const_str("2026-05-04 21:00:05.000000")),
+                Arc::new(const_str("2026-05-04 21:00:00.500000")),
+                Arc::new(const_str("Ci::Build")),
+                Arc::new(const_int(42)),
+                Arc::new(const_int(3600)),
+                Arc::new(const_str("project")),
+                Arc::new(const_int(0)),
+                Arc::new(const_str("dag")),
+                Arc::new(const_int(999)),
+                Arc::new(const_int(888)),
+                Arc::new(const_str("1/9970/15846626/")),
+                Arc::new(const_int(777)),
+                Arc::new(const_int(666)),
+                Arc::new(const_int(555)),
+                Arc::new(const_int(444)),
+                Arc::new(const_int(1)),
+                Arc::new(const_str("2026-05-04 21:00:00.000000")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+            ],
+        )
+        .expect("build batch");
+
+        let precomp = job_plan.tag_precomputation.as_ref().unwrap();
+
+        let session = SessionContext::new();
+        let mem = MemTable::try_new(batch.schema(), vec![vec![batch.clone()]]).unwrap();
+        session
+            .register_table(super::SOURCE_DATA_TABLE, Arc::new(mem))
+            .unwrap();
+
+        let enriched_batches = session
+            .sql(&precomp.to_sql())
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+
+        assert!(!enriched_batches.is_empty());
+        let enriched_schema = enriched_batches[0].schema();
+        assert!(
+            enriched_schema.field_with_name("_precomputed_tags").is_ok(),
+            "enriched table should have _precomputed_tags column"
+        );
+
+        let enriched_table =
+            MemTable::try_new(enriched_schema.clone(), vec![enriched_batches]).unwrap();
+        session
+            .register_table(super::ENRICHED_TABLE, Arc::new(enriched_table))
+            .unwrap();
+
+        let edge_transforms: Vec<_> = job_plan.transforms[1..].to_vec();
+        for transform in &edge_transforms {
+            let sql = transform.to_sql();
+            let result = session.sql(&sql).await.unwrap().collect().await.unwrap();
+            assert!(
+                !result.is_empty(),
+                "edge transform should produce rows: {sql}"
+            );
+
+            let result_schema = result[0].schema();
+            assert!(result_schema.field_with_name("source_tags").is_ok());
+            assert!(result_schema.field_with_name("target_tags").is_ok());
+
+            let source_tags_col = result[0].column_by_name("source_tags").unwrap();
+            let target_tags_col = result[0].column_by_name("target_tags").unwrap();
+            let has_source_tags = !source_tags_col.as_list::<i32>().value(0).is_empty();
+            let has_target_tags = !target_tags_col.as_list::<i32>().value(0).is_empty();
+
+            assert!(
+                has_source_tags || has_target_tags,
+                "each edge should have tags on at least one side"
+            );
+        }
+    }
+
+    #[tokio::test]
+    #[ignore]
+    async fn job_edge_transform_benchmark() {
+        use arrow::array::*;
+        use arrow::datatypes::{DataType as ArrowDataType, Field as ArrowField, Schema};
+        use std::collections::HashMap;
+
+        let ontology = ontology::Ontology::load_embedded().expect("load ontology");
+        let plans = super::super::plan::build_plans(&ontology, 1000, 1000, &HashMap::new());
+
+        let job_plan = plans
+            .namespaced
+            .iter()
+            .find(|p| p.name == "Job")
+            .expect("Job plan should exist");
+
+        let n = 2_000_000usize;
+
+        let fields = vec![
+            ArrowField::new("id", ArrowDataType::Int64, false),
+            ArrowField::new("name", ArrowDataType::Utf8, true),
+            ArrowField::new("status", ArrowDataType::Utf8, true),
+            ArrowField::new("ref", ArrowDataType::Utf8, true),
+            ArrowField::new("tag", ArrowDataType::Boolean, true),
+            ArrowField::new("allow_failure", ArrowDataType::Boolean, true),
+            ArrowField::new("coverage", ArrowDataType::Float64, true),
+            ArrowField::new("environment", ArrowDataType::Utf8, true),
+            ArrowField::new("when", ArrowDataType::Utf8, true),
+            ArrowField::new("retried", ArrowDataType::Boolean, true),
+            ArrowField::new("failure_reason", ArrowDataType::Utf8, true),
+            ArrowField::new("created_at", ArrowDataType::Utf8, true),
+            ArrowField::new("started_at", ArrowDataType::Utf8, true),
+            ArrowField::new("finished_at", ArrowDataType::Utf8, true),
+            ArrowField::new("queued_at", ArrowDataType::Utf8, true),
+            ArrowField::new("type", ArrowDataType::Utf8, true),
+            ArrowField::new("runner_id", ArrowDataType::Int64, true),
+            ArrowField::new("timeout", ArrowDataType::Int64, true),
+            ArrowField::new("timeout_source", ArrowDataType::Utf8, true),
+            ArrowField::new("exit_code", ArrowDataType::Int64, true),
+            ArrowField::new("scheduling_type", ArrowDataType::Utf8, true),
+            ArrowField::new("commit_id", ArrowDataType::Int64, true),
+            ArrowField::new("auto_canceled_by_id", ArrowDataType::Int64, true),
+            ArrowField::new("traversal_path", ArrowDataType::Utf8, false),
+            ArrowField::new("project_id", ArrowDataType::Int64, true),
+            ArrowField::new("stage_id", ArrowDataType::Int64, true),
+            ArrowField::new("user_id", ArrowDataType::Int64, true),
+            ArrowField::new("upstream_pipeline_id", ArrowDataType::Int64, true),
+            ArrowField::new("partition_id", ArrowDataType::Int64, true),
+            ArrowField::new("_version", ArrowDataType::Utf8, false),
+            ArrowField::new("_deleted", ArrowDataType::Boolean, false),
+        ];
+        let schema = Arc::new(Schema::new(fields));
+
+        let const_str = |val: &str| -> StringArray { StringArray::from(vec![val; n]) };
+        let const_int = |val: i64| -> Int64Array { Int64Array::from(vec![Some(val); n]) };
+
+        let batch = RecordBatch::try_new(
+            schema,
+            vec![
+                Arc::new(Int64Array::from_iter_values(0..n as i64)),
+                Arc::new(const_str("build_job")),
+                Arc::new(const_str("success")),
+                Arc::new(const_str("main")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(Float64Array::from(vec![95.5; n])),
+                Arc::new(const_str("production")),
+                Arc::new(const_str("on_success")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+                Arc::new(const_str("script_failure")),
+                Arc::new(const_str("2026-05-04 21:00:00.000000")),
+                Arc::new(const_str("2026-05-04 21:00:01.000000")),
+                Arc::new(const_str("2026-05-04 21:00:05.000000")),
+                Arc::new(const_str("2026-05-04 21:00:00.500000")),
+                Arc::new(const_str("Ci::Build")),
+                Arc::new(const_int(42)),
+                Arc::new(const_int(3600)),
+                Arc::new(const_str("project")),
+                Arc::new(const_int(0)),
+                Arc::new(const_str("dag")),
+                Arc::new(const_int(999)),
+                Arc::new(const_int(888)),
+                Arc::new(const_str("1/9970/15846626/")),
+                Arc::new(const_int(777)),
+                Arc::new(const_int(666)),
+                Arc::new(const_int(555)),
+                Arc::new(const_int(444)),
+                Arc::new(const_int(1)),
+                Arc::new(const_str("2026-05-04 21:00:00.000000")),
+                Arc::new(BooleanArray::from(vec![false; n])),
+            ],
+        )
+        .expect("build batch");
+
+        let batches = vec![batch];
+        let edge_transforms: Vec<_> = job_plan.transforms[1..].to_vec();
+        let precomp = job_plan.tag_precomputation.as_ref().unwrap();
+
+        eprintln!(
+            "\n=== Job edge transforms: precomputed path ({n} rows, {} edges) ===",
+            edge_transforms.len()
+        );
+
+        let session = SessionContext::new();
+        let mem = MemTable::try_new(batches[0].schema(), vec![batches.clone()]).unwrap();
+        session
+            .register_table(super::SOURCE_DATA_TABLE, Arc::new(mem))
+            .unwrap();
+
+        let precomp_start = Instant::now();
+        let enriched_batches = session
+            .sql(&precomp.to_sql())
+            .await
+            .unwrap()
+            .collect()
+            .await
+            .unwrap();
+        let precomp_ms = precomp_start.elapsed();
+        eprintln!("  tag precomputation:  {:>5}ms", precomp_ms.as_millis());
+
+        let enriched_table =
+            MemTable::try_new(enriched_batches[0].schema(), vec![enriched_batches]).unwrap();
+        session
+            .register_table(super::ENRICHED_TABLE, Arc::new(enriched_table))
+            .unwrap();
+
+        let proj_start = Instant::now();
+        for t in &edge_transforms {
+            let _ = session
+                .sql(&t.to_sql())
+                .await
+                .unwrap()
+                .collect()
+                .await
+                .unwrap();
+        }
+        let proj_ms = proj_start.elapsed();
+        eprintln!("  edge projections:    {:>5}ms", proj_ms.as_millis());
+
+        let total = precomp_ms + proj_ms;
+        eprintln!("  total:               {:>5}ms", total.as_millis());
     }
 
     #[tokio::test]

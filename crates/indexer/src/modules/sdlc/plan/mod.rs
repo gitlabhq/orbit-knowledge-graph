@@ -164,6 +164,19 @@ impl ExtractQuery {
     }
 }
 
+#[derive(Debug, Clone)]
+pub(in crate::modules::sdlc) struct TagPrecomputation {
+    pub query: Query,
+}
+
+impl TagPrecomputation {
+    pub fn to_sql(&self) -> String {
+        codegen::emit_sql(&self.query)
+    }
+}
+
+pub(in crate::modules::sdlc) const ENRICHED_TABLE: &str = "enriched_source";
+
 /// Unified over nodes and edges: a node plan produces node rows + FK edge rows,
 /// an edge plan produces only edge rows. The pipeline treats both identically.
 #[derive(Debug, Clone)]
@@ -171,6 +184,7 @@ pub(in crate::modules::sdlc) struct PipelinePlan {
     pub name: String,
     pub extract_query: ExtractQuery,
     pub transforms: Vec<Transformation>,
+    pub tag_precomputation: Option<TagPrecomputation>,
 }
 
 #[derive(Debug, Clone)]

@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use ontology::{EtlScope, Ontology, constants::TRAVERSAL_PATH_COLUMN};
 
-use super::ast::{Expr, Op, OrderExpr, Query, SelectExpr, TableRef};
+use super::ast::{Expr, Op, Query, SelectExpr, TableRef};
 use super::codegen;
 use super::input::{
     DenormalizedColumnProjection, EdgeFilter, EdgeId, EdgeKind, ExtractColumn, ExtractPlan,
@@ -81,35 +81,46 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
         dict_encode_columns: dict_columns,
     }];
 
-    for fk_edge in &input.edges {
-        transforms.push(lower_fk_edge_transform(fk_edge, ontology));
-    }
+    let has_denormalized = input
+        .edges
+        .iter()
+        .any(|e| !e.denormalized_columns.is_empty());
+    let multiple_edges_with_tags = input
+        .edges
+        .iter()
+        .filter(|e| !e.denormalized_columns.is_empty())
+        .count()
+        > 1;
+
+    let tag_precomputation = if has_denormalized && multiple_edges_with_tags {
+        let precomp = build_tag_precomputation(&input.edges);
+
+        for fk_edge in &input.edges {
+            transforms.push(lower_fk_edge_transform_precomputed(fk_edge, ontology));
+        }
+
+        Some(super::TagPrecomputation { query: precomp })
+    } else {
+        for fk_edge in &input.edges {
+            transforms.push(lower_fk_edge_transform(fk_edge, ontology));
+        }
+
+        None
+    };
 
     PipelinePlan {
         name: input.name,
         extract_query,
         transforms,
+        tag_precomputation,
     }
 }
 
-/// Resolve the ORDER BY and dictionary-encode columns for an edge table
-/// from the ontology's storage metadata. `relationship_kind` is used to
-/// look up the unprefixed table name via the ontology.
-fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTableMetadata {
+/// Resolve the dictionary-encode columns for an edge table from the
+/// ontology's storage metadata.
+fn edge_dict_columns(relationship_kind: &str, ontology: &Ontology) -> HashSet<String> {
     let table = ontology.edge_table_for_relationship(relationship_kind);
-
-    let sort_key = ontology
-        .sort_key_for_table(table)
-        .map(|keys| {
-            keys.iter()
-                .map(|col| OrderExpr {
-                    expr: Expr::col("", col),
-                })
-                .collect()
-        })
-        .unwrap_or_default();
-
-    let dict_columns = ontology
+    ontology
         .edge_table_config(table)
         .map(|config| {
             config
@@ -120,21 +131,11 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
                 .map(|col| col.name.clone())
                 .collect()
         })
-        .unwrap_or_default();
-
-    EdgeTableMetadata {
-        sort_key,
-        dict_columns,
-    }
-}
-
-struct EdgeTableMetadata {
-    sort_key: Vec<OrderExpr>,
-    dict_columns: HashSet<String>,
+        .unwrap_or_default()
 }
 
 fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Transformation {
-    let meta = edge_table_metadata(&fk_edge.relationship_kind, ontology);
+    let dict_columns = edge_dict_columns(&fk_edge.relationship_kind, ontology);
 
     let transform_query = Query {
         select: lower_edge_select(
@@ -148,14 +149,76 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Tr
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&fk_edge.filters),
-        order_by: meta.sort_key,
+        order_by: vec![],
         limit: None,
     };
 
     Transformation {
         query: transform_query,
         destination_table: fk_edge.destination_table.clone(),
-        dict_encode_columns: meta.dict_columns,
+        dict_encode_columns: dict_columns,
+    }
+}
+
+fn lower_fk_edge_transform_precomputed(
+    fk_edge: &FkEdgeTransform,
+    ontology: &Ontology,
+) -> Transformation {
+    let dict_columns = edge_dict_columns(&fk_edge.relationship_kind, ontology);
+
+    let transform_query = Query {
+        select: lower_edge_select_precomputed(
+            lower_edge_id(&fk_edge.source_id),
+            lower_edge_kind(&fk_edge.source_kind),
+            &fk_edge.relationship_kind,
+            lower_edge_id(&fk_edge.target_id),
+            lower_edge_kind(&fk_edge.target_kind),
+            fk_edge.namespaced,
+            &fk_edge.denormalized_columns,
+        ),
+        from: TableRef::scan(super::ENRICHED_TABLE, None),
+        where_clause: lower_filters(&fk_edge.filters),
+        order_by: vec![],
+        limit: None,
+    };
+
+    Transformation {
+        query: transform_query,
+        destination_table: fk_edge.destination_table.clone(),
+        dict_encode_columns: dict_columns,
+    }
+}
+
+const PRECOMPUTED_TAGS: &str = "_precomputed_tags";
+
+fn build_tag_precomputation(edges: &[FkEdgeTransform]) -> Query {
+    let mut seen = HashSet::new();
+    let mut tag_exprs: Vec<String> = Vec::new();
+
+    for edge in edges {
+        for d in &edge.denormalized_columns {
+            if !seen.insert(d.tag_key.clone()) {
+                continue;
+            }
+            tag_exprs.push(lower_tag_expr(d));
+        }
+    }
+
+    let array_expr = if tag_exprs.is_empty() {
+        "make_array()".to_string()
+    } else {
+        format!("make_array({})", tag_exprs.join(", "))
+    };
+
+    let mut select = vec![SelectExpr::bare(Expr::raw("*"))];
+    select.push(SelectExpr::new(Expr::raw(array_expr), PRECOMPUTED_TAGS));
+
+    Query {
+        select,
+        from: TableRef::scan(SOURCE_DATA_TABLE, None),
+        where_clause: None,
+        order_by: vec![],
+        limit: None,
     }
 }
 
@@ -213,7 +276,7 @@ fn lower_standalone_edge_plan(
     let destination_table = input.extract.destination_table.clone();
     let name = plan_name(&input.relationship_kind, &input.extract.source);
     let extract_query = lower_extract_plan(input.extract, batch_size);
-    let meta = edge_table_metadata(&input.relationship_kind, ontology);
+    let dict_columns = edge_dict_columns(&input.relationship_kind, ontology);
 
     let transform_query = Query {
         select: lower_edge_select(
@@ -227,7 +290,7 @@ fn lower_standalone_edge_plan(
         ),
         from: TableRef::scan(SOURCE_DATA_TABLE, None),
         where_clause: lower_filters(&input.filters),
-        order_by: meta.sort_key,
+        order_by: vec![],
         limit: None,
     };
 
@@ -237,8 +300,9 @@ fn lower_standalone_edge_plan(
         transforms: vec![Transformation {
             query: transform_query,
             destination_table,
-            dict_encode_columns: meta.dict_columns,
+            dict_encode_columns: dict_columns,
         }],
+        tag_precomputation: None,
     }
 }
 
@@ -315,14 +379,42 @@ fn lower_filters(filters: &[EdgeFilter]) -> Option<Expr> {
     Expr::and_all(filters.iter().map(|f| Some(lower_filter(f))))
 }
 
-fn lower_edge_select(
+fn lower_tag_expr(d: &DenormalizedColumnProjection) -> String {
+    match &d.enum_mapping {
+        Some(mapping) => {
+            let cases: Vec<String> = mapping
+                .iter()
+                .map(|(key, value)| {
+                    format!(
+                        "WHEN {} = {} THEN '{}'",
+                        d.source_column,
+                        key,
+                        value.replace('\'', "\\'")
+                    )
+                })
+                .collect();
+            format!(
+                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
+                key = d.tag_key,
+                cases = cases.join(" "),
+                col = d.source_column
+            )
+        }
+        None => format!(
+            "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
+            key = d.tag_key,
+            col = d.source_column
+        ),
+    }
+}
+
+fn lower_edge_base_columns(
     source_id: Expr,
     source_kind: Expr,
     relationship_kind: &str,
     target_id: Expr,
     target_kind: Expr,
     namespaced: bool,
-    denormalized: &[DenormalizedColumnProjection],
 ) -> Vec<SelectExpr> {
     let traversal_path = if namespaced {
         SelectExpr::bare(Expr::col("", "traversal_path"))
@@ -330,7 +422,7 @@ fn lower_edge_select(
         SelectExpr::new(Expr::raw("'0/'"), "traversal_path")
     };
 
-    let mut cols = vec![
+    vec![
         traversal_path,
         SelectExpr::new(source_id, "source_id"),
         SelectExpr::new(source_kind, "source_kind"),
@@ -342,48 +434,19 @@ fn lower_edge_select(
         SelectExpr::new(target_kind, "target_kind"),
         SelectExpr::bare(Expr::col("", VERSION_ALIAS)),
         SelectExpr::bare(Expr::col("", DELETED_ALIAS)),
-    ];
+    ]
+}
 
-    // Group denormalized columns by edge_column (source_tags / target_tags)
-    // and build a single array expression per direction.
+fn append_tag_columns(cols: &mut Vec<SelectExpr>, denormalized: &[DenormalizedColumnProjection]) {
     let mut tag_groups: std::collections::BTreeMap<String, Vec<String>> =
         std::collections::BTreeMap::new();
     for d in denormalized {
-        let tag_expr = match &d.enum_mapping {
-            Some(mapping) => {
-                let cases: Vec<String> = mapping
-                    .iter()
-                    .map(|(key, value)| {
-                        format!(
-                            "WHEN {} = {} THEN '{}'",
-                            d.source_column,
-                            key,
-                            value.replace('\'', "\\'")
-                        )
-                    })
-                    .collect();
-                format!(
-                    "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CASE {cases} ELSE CAST({col} AS VARCHAR) END) END",
-                    key = d.tag_key,
-                    cases = cases.join(" "),
-                    col = d.source_column
-                )
-            }
-            None => format!(
-                "CASE WHEN {col} IS NULL THEN '{key}:null' ELSE concat('{key}:', CAST({col} AS VARCHAR)) END",
-                key = d.tag_key,
-                col = d.source_column
-            ),
-        };
         tag_groups
             .entry(d.edge_column.clone())
             .or_default()
-            .push(tag_expr);
+            .push(lower_tag_expr(d));
     }
 
-    // Always emit both source_tags and target_tags. If no denormalized
-    // entries exist for a direction, emit an empty array so the Arrow
-    // batch schema matches the ClickHouse edge table.
     for col_name in &["source_tags", "target_tags"] {
         let expr = match tag_groups.remove(*col_name) {
             Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
@@ -391,6 +454,65 @@ fn lower_edge_select(
         };
         cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
     }
+}
+
+fn lower_edge_select(
+    source_id: Expr,
+    source_kind: Expr,
+    relationship_kind: &str,
+    target_id: Expr,
+    target_kind: Expr,
+    namespaced: bool,
+    denormalized: &[DenormalizedColumnProjection],
+) -> Vec<SelectExpr> {
+    let mut cols = lower_edge_base_columns(
+        source_id,
+        source_kind,
+        relationship_kind,
+        target_id,
+        target_kind,
+        namespaced,
+    );
+    append_tag_columns(&mut cols, denormalized);
+    cols
+}
+
+fn lower_edge_select_precomputed(
+    source_id: Expr,
+    source_kind: Expr,
+    relationship_kind: &str,
+    target_id: Expr,
+    target_kind: Expr,
+    namespaced: bool,
+    denormalized: &[DenormalizedColumnProjection],
+) -> Vec<SelectExpr> {
+    let mut cols = lower_edge_base_columns(
+        source_id,
+        source_kind,
+        relationship_kind,
+        target_id,
+        target_kind,
+        namespaced,
+    );
+
+    let has_source = denormalized.iter().any(|d| d.edge_column == "source_tags");
+    let has_target = denormalized.iter().any(|d| d.edge_column == "target_tags");
+
+    let precomp = Expr::col("", PRECOMPUTED_TAGS);
+    let empty = Expr::raw("make_array()".to_string());
+
+    cols.push(SelectExpr::new(
+        if has_source {
+            precomp.clone()
+        } else {
+            empty.clone()
+        },
+        "source_tags",
+    ));
+    cols.push(SelectExpr::new(
+        if has_target { precomp } else { empty },
+        "target_tags",
+    ));
 
     cols
 }
