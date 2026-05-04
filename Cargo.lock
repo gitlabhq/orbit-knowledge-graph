@@ -5157,8 +5157,10 @@ dependencies = [
 name = "gkg-observability"
 version = "0.1.0"
 dependencies = [
+ "circuit-breaker",
  "opentelemetry",
  "serde",
+ "tracing",
 ]
 
 [[package]]

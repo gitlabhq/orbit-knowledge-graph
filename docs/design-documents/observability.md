@@ -170,6 +170,16 @@ The query engine fires counters during compilation to track security-relevant re
 | `gkg.query.engine.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
 | `gkg.query.engine.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
 
+*Circuit breaker metrics (resilience):*
+
+The circuit breaker wraps external service calls (initially ClickHouse) and tracks state transitions and call outcomes. The `MetricsObserver` in [`gkg-observability::resilience`](../../crates/gkg-observability/src/resilience.rs) implements the `CircuitBreakerObserver` trait to emit these counters. State transitions also produce structured `tracing` events: `warn` when a circuit opens, `info` when it closes or enters half-open.
+
+| Metric | Type | Unit | Labels | Description |
+|---|---|---|---|---|
+| `gkg.circuit_breaker.state.transitions` | Counter | count | `service`, `from`, `to` | Circuit breaker state transitions (closed→open, open→half_open, half_open→closed, etc.) |
+| `gkg.circuit_breaker.calls.rejected` | Counter | count | `service` | Calls rejected because the circuit was open |
+| `gkg.circuit_breaker.calls` | Counter | count | `service`, `outcome` (success/failure) | Classified call outcomes through the circuit breaker |
+
 **Shared Infrastructure Metrics:**
 
 - Disk and Memory usage per container
@@ -202,6 +212,13 @@ Metrics flow through Prometheus scraping PodMonitor endpoints exposed by the GKG
 | `GKGExecutionFailureRate` | `gkg_query_pipeline_error_execution_failed_total` | > 1/min | warning | 5m | ClickHouse query execution is failing |
 | `GKGAuthorizationFailureRate` | `gkg_query_pipeline_error_authorization_failed_total` | > 1/min | warning | 5m | Rails authorization exchange is failing |
 | `GKGPipelineLatencyP95High` | `gkg_query_pipeline_duration_seconds` (histogram) | > 5s | warning | 10m | p95 end-to-end pipeline latency exceeds threshold |
+
+**Resilience alerts** (circuit breaker):
+
+| Alert | Metric | Default Threshold | Severity | `for` | Fires when |
+|---|---|---|---|---|---|
+| `GKGCircuitBreakerOpen` | `gkg_circuit_breaker_state_transitions_total{to="open"}` | > 0 in 5m | warning | 1m | A circuit breaker opened, meaning an external service is unreachable and calls are being shed |
+| `GKGCircuitBreakerRejectRateHigh` | `gkg_circuit_breaker_calls_rejected_total` | > 10/min | warning | 5m | High rate of rejected calls — circuit is open and shedding significant traffic |
 
 **Capacity alerts** (traffic and limit pressure):
 
