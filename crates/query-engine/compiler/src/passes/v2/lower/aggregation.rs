@@ -18,6 +18,12 @@ pub fn emit_aggregation(
     Ok(Node::Query(Box::new(q)))
 }
 
+/// Default alias for an aggregation function when the user doesn't supply one.
+/// Matches v1 behavior: lowercase function name (e.g. "count", "sum", "avg").
+fn default_alias(func: AggFunction) -> String {
+    func.as_sql().to_lowercase()
+}
+
 fn build_aggregation(
     plan: &Plan,
     aggregations: &[InputAggregation],
@@ -27,7 +33,8 @@ fn build_aggregation(
     let mut group_by = Vec::new();
 
     for agg in aggregations {
-        let alias = agg.alias.as_deref().unwrap_or("agg_result");
+        let owned_default = default_alias(agg.function);
+        let alias = agg.alias.as_deref().unwrap_or(&owned_default);
 
         let agg_expr = match agg.function {
             AggFunction::Count => {
@@ -65,7 +72,8 @@ fn build_aggregation(
     if let Some(sort) = agg_sort
         && let Some(agg) = aggregations.get(sort.agg_index)
     {
-        let alias = agg.alias.as_deref().unwrap_or("agg_result");
+        let owned_default = default_alias(agg.function);
+        let alias = agg.alias.as_deref().unwrap_or(&owned_default);
         order_by.push(if matches!(sort.direction, OrderDirection::Desc) {
             OrderExpr::desc(Expr::ident(alias))
         } else {
