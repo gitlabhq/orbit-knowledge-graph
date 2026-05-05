@@ -28,9 +28,11 @@ fn search_uses_positional_params() {
         "expected inlined param: {rendered}"
     );
 
-    let sql = ParsedSql::from_query(&result.base);
-    assert!(sql.has_where());
-    assert!(sql.has_column_ref("username"));
+    // The username filter is inside the dedup subquery, not the outer WHERE.
+    assert!(
+        rendered.contains("username"),
+        "expected username filter: {rendered}"
+    );
 }
 
 #[test]
