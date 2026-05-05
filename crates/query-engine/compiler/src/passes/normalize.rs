@@ -162,6 +162,8 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             .map(|r| r.id_column.clone())
             .unwrap_or_else(|| DEFAULT_PRIMARY_KEY.to_string());
 
+        node.has_traversal_path = node_entity.has_traversal_path;
+
         // Expand column selections to explicit lists. Strip virtual columns
         // into node.virtual_columns for the hydration plan.
         // PathFinding/Neighbors handle virtuals in build_dynamic_specs.
@@ -225,7 +227,50 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
         }
     }
     infer_wildcard_relationship_kinds(&mut input, ontology);
+    resolve_fk_metadata(&mut input, ontology);
     Ok(input)
+}
+
+fn resolve_fk_metadata(input: &mut Input, ontology: &Ontology) {
+    let entity_for: HashMap<&str, &str> = input
+        .nodes
+        .iter()
+        .filter_map(|n| Some((n.id.as_str(), n.entity.as_deref()?)))
+        .collect();
+
+    for rel in &mut input.relationships {
+        let from_entity = entity_for.get(rel.from.as_str()).copied();
+        let to_entity = entity_for.get(rel.to.as_str()).copied();
+
+        // Find FK: all rel types must agree on the same fk_column for this (from, to) pair.
+        let mut common_fk: Option<&str> = None;
+        let mut all_match = true;
+
+        for rel_type in &rel.types {
+            let fk_col = ontology
+                .edges()
+                .find(|e| {
+                    e.relationship_kind == *rel_type
+                        && Some(e.source_kind.as_str()) == from_entity
+                        && Some(e.target_kind.as_str()) == to_entity
+                })
+                .and_then(|e| e.fk_column.as_deref());
+
+            match (common_fk, fk_col) {
+                (None, Some(col)) => common_fk = Some(col),
+                (Some(c), Some(col)) if c == col => {}
+                (Some(_), Some(_)) | (Some(_), None) => {
+                    all_match = false;
+                    break;
+                }
+                (None, None) => {}
+            }
+        }
+
+        if all_match && let Some(col) = common_fk {
+            rel.fk_column = Some(col.to_string());
+        }
+    }
 }
 
 fn is_wildcard(types: &[String]) -> bool {

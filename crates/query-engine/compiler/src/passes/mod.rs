@@ -11,12 +11,14 @@ pub mod optimize;
 pub mod restrict;
 pub mod security;
 pub mod settings;
+pub mod v2;
 pub mod validate;
 
 use crate::ast::Node;
 use crate::error::Result;
 use crate::input::Input;
 use crate::pipeline::{CompilerPass, PipelineEnv, PipelineState};
+use crate::pipelines::HasQueryPlan;
 use crate::pipelines::{
     HasHydrationPlan, HasInput, HasJson, HasNode, HasOntology, HasOutput, HasQueryConfig,
     HasResultCtx, HasSecurityCtx,
@@ -76,18 +78,36 @@ where
     }
 }
 
+pub struct PlannerPass;
+
+impl<E, S> CompilerPass<E, S> for PlannerPass
+where
+    E: PipelineEnv,
+    S: PipelineState + HasInput + HasQueryPlan,
+{
+    const NAME: &'static str = "plan";
+
+    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let input = state.input_mut()?;
+        let plan = v2::plan::plan(input)?;
+        state.set_query_plan(plan);
+        Ok(())
+    }
+}
+
 pub struct LowerPass;
 
 impl<E, S> CompilerPass<E, S> for LowerPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode,
+    S: PipelineState + HasInput + HasQueryPlan + HasNode,
 {
     const NAME: &'static str = "lower";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        let input = state.input_mut()?;
-        let node = lower::lower(input)?;
+        let plan = state.take_query_plan()?;
+        let node = v2::lower::emit(&plan)?;
+        state.set_query_plan(plan);
         state.set_node(node);
         Ok(())
     }
@@ -117,14 +137,17 @@ pub struct EnforcePass;
 impl<E, S> CompilerPass<E, S> for EnforcePass
 where
     E: PipelineEnv,
-    S: PipelineState + HasNode + HasInput + HasResultCtx,
+    S: PipelineState + HasNode + HasInput + HasQueryPlan + HasResultCtx,
 {
     const NAME: &'static str = "enforce";
 
     fn run(&self, _env: &E, state: &mut S) -> Result<()> {
+        let plan = state.take_query_plan()?;
+        let node_edge_col = plan.node_edge_mappings();
+        state.set_query_plan(plan);
         let mut node = state.take_node()?;
         let input = state.input()?;
-        let result_context = enforce::enforce_return(&mut node, input)?;
+        let result_context = enforce::enforce_return(&mut node, input, &node_edge_col)?;
         state.set_node(node);
         state.set_result_ctx(result_context);
         Ok(())
@@ -200,7 +223,7 @@ pub struct SettingsPass;
 impl<E, S> CompilerPass<E, S> for SettingsPass
 where
     E: PipelineEnv,
-    S: PipelineState + HasInput + HasNode + HasQueryConfig,
+    S: PipelineState + HasInput + HasNode + HasQueryConfig + HasQueryPlan,
 {
     const NAME: &'static str = "settings";
 
@@ -218,6 +241,17 @@ where
         {
             config.compiler_derived.enable_materialized_cte = true;
         }
+
+        // Enable DP join reordering for queries with 3+ edge hops.
+        // ClickHouse's dpsize algorithm finds better join orders for
+        // multi-join chains than our fixed left-to-right emit order.
+        // Skipped for 1-2 hops where our selectivity reordering is
+        // already optimal and dpsize can make worse choices.
+        let plan = state.take_query_plan()?;
+        if plan.hops.len() >= 3 {
+            config.compiler_derived.join_order_algorithm = Some("dpsize".into());
+        }
+        state.set_query_plan(plan);
 
         state.set_query_config(config);
         Ok(())

@@ -90,11 +90,12 @@ fn seal_json_drops_json_after_validate() {
         .pass(compiler::ValidatePass)
         .seal(SealJson)
         .pass(compiler::NormalizePass)
+        .pass(compiler::PlannerPass)
         .pass(compiler::LowerPass)
-        .pass(compiler::OptimizePass)
         .pass(compiler::EnforcePass)
         .pass(compiler::SecurityPass)
         .pass(compiler::CheckPass)
+        .pass(compiler::SettingsPass)
         .pass(compiler::CodegenPass)
         .build()
         .seal();
@@ -228,10 +229,9 @@ fn observer_records_all_pass_completions() {
             "validate",
             "normalize",
             "restrict",
+            "plan",
             "lower",
-            "optimize",
             "enforce",
-            "deduplicate",
             "security",
             "check",
             "hydrate_plan",
@@ -442,13 +442,7 @@ fn hydration_preset_skips_security_and_check() {
     assert_eq!(
         pass_names,
         vec![
-            "restrict",
-            "lower",
-            "optimize",
-            "enforce",
-            "deduplicate",
-            "settings",
-            "codegen"
+            "restrict", "plan", "lower", "enforce", "settings", "codegen"
         ]
     );
     assert!(!pass_names.contains(&"security"));

@@ -69,6 +69,10 @@ pub struct QueryOptions {
     /// blocking hash aggregation barrier that prevents pipelining.
     #[serde(default)]
     pub cascade_distinct: bool,
+    /// No longer used. Kept for backward compatibility with clients that
+    /// still send it in query JSON.
+    #[serde(default)]
+    pub use_v2: bool,
 }
 
 /// Authorization config for an entity type, derived from the ontology and carried
@@ -364,6 +368,9 @@ pub struct InputNode {
     /// Virtual columns stripped by normalize, consumed by the hydration plan.
     #[serde(skip)]
     pub virtual_columns: Vec<crate::passes::hydrate::VirtualColumnRequest>,
+    /// Whether the node table has a traversal_path column. Set during normalization.
+    #[serde(skip)]
+    pub has_traversal_path: bool,
 }
 
 impl Default for InputNode {
@@ -379,6 +386,7 @@ impl Default for InputNode {
             id_property: DEFAULT_PRIMARY_KEY.to_string(),
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
+            has_traversal_path: false,
         }
     }
 }
@@ -536,6 +544,10 @@ pub struct InputRelationship {
     pub direction: Direction,
     #[serde(default, deserialize_with = "deserialize_filters")]
     pub filters: HashMap<String, InputFilter>,
+    /// FK column on a node table that encodes this relationship. Set during normalization.
+    /// The compiler resolves which node has the column from the edge variant's entity types.
+    #[serde(skip)]
+    pub fk_column: Option<String>,
 }
 
 fn default_hops() -> u32 {

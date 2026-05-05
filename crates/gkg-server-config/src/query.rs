@@ -29,7 +29,7 @@ const DEFAULT_MAX_EXECUTION_TIME: u64 = 30;
 /// Default query_cache_ttl: 60 seconds.
 const DEFAULT_QUERY_CACHE_TTL: u32 = 60;
 
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize, JsonSchema)]
 #[schemars(deny_unknown_fields)]
 pub struct QueryConfig {
     /// ClickHouse `max_execution_time` in seconds.
@@ -93,11 +93,15 @@ pub struct QueryConfig {
 /// ClickHouse settings derived from compiler AST inspection. Not
 /// user-configurable — set by the compiler's settings pass and appended
 /// to the SETTINGS clause by codegen.
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
+#[derive(Clone, Debug, Default, PartialEq)]
 pub struct CompilerDerivedSettings {
     /// ClickHouse `enable_materialized_cte`. Required when any CTE uses
     /// the `MATERIALIZED` keyword (ClickHouse 26.2+).
     pub enable_materialized_cte: bool,
+    /// ClickHouse `query_plan_optimize_join_order_algorithm`. When set,
+    /// enables dynamic-programming join reordering for queries with 3+
+    /// JOINs. Experimental in ClickHouse 26.x.
+    pub join_order_algorithm: Option<String>,
 }
 
 impl CompilerDerivedSettings {
@@ -106,6 +110,12 @@ impl CompilerDerivedSettings {
         let mut out = Vec::new();
         if self.enable_materialized_cte {
             out.push(("enable_materialized_cte".into(), "1".into()));
+        }
+        if let Some(ref algo) = self.join_order_algorithm {
+            out.push((
+                "query_plan_optimize_join_order_algorithm".into(),
+                format!("'{algo}'"),
+            ));
         }
         out
     }
@@ -165,7 +175,7 @@ impl QueryConfig {
             query_cache_ttl: overrides.query_cache_ttl.or(self.query_cache_ttl),
             // compiler_derived is never merged from YAML overrides — it's
             // set by the compiler after merge() runs.
-            compiler_derived: self.compiler_derived,
+            compiler_derived: self.compiler_derived.clone(),
             graph_query_cache_enabled: overrides
                 .graph_query_cache_enabled
                 .or(self.graph_query_cache_enabled),
@@ -238,7 +248,7 @@ impl QuerySettings {
     pub fn resolve(&self, query_type: &str) -> QueryConfig {
         match self.overrides.get(query_type) {
             Some(override_cfg) => self.default.merge(override_cfg),
-            None => self.default,
+            None => self.default.clone(),
         }
     }
 
