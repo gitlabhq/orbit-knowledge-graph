@@ -173,15 +173,12 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                     where_parts.extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                 }
                 HydrationStrategy::Skip => {
-                    // Elevated-access nodes need a FilterOnly CTE for the
-                    // security pass, but only if they have non-denorm filters
-                    // to push. Without filters the CTE degenerates to
-                    // `WHERE false` and wastes a scan.
-                    if np.needs_elevated_filter
-                        && (!np.filters.is_empty()
-                            || !np.node_ids.is_empty()
-                            || np.id_range.is_some())
-                    {
+                    // Elevated-access nodes always need a FilterOnly CTE so
+                    // the security pass can enforce the stricter
+                    // min_access_level. Without the CTE, SecurityPass never
+                    // sees the node's table and can't inject the role-gated
+                    // startsWith filter.
+                    if np.needs_elevated_filter {
                         where_parts
                             .extend(emit_filter_subquery(np, edge_alias, edge_col, &mut ctes)?);
                     }
