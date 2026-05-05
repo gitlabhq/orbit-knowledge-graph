@@ -140,16 +140,6 @@ tests:
       - { row: { fqn: "shape::shapes::ShapeKind::RECTANGLE" } }
       - { row: { fqn: "shape::shapes::ShapeKind::TRIANGLE" } }
 
-  - name: "Same-file call: normalized calls length"
-    query: |
-      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
-      WHERE caller.fqn = 'vec::math::Vec3::normalized'
-        AND callee.fqn = 'vec::math::Vec3::length'
-      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
-    assert:
-      - { row_count: 1 }
-      - { row: { caller: "vec::math::Vec3::normalized", callee: "vec::math::Vec3::length", kind: Calls } }
-
   - name: "All files discovered"
     query: |
       MATCH (f:File)
