@@ -959,6 +959,63 @@ pub(super) async fn aggregation_vulnerability_mixed_roles_only_surfaces_develope
     resp.assert_node_absent("Project", 1004);
 }
 
+/// Traversal with NO filters on Vulnerability. The node gets Skip hydration
+/// but needs_elevated_filter ensures a FilterOnly CTE is emitted for
+/// SecurityPass to inject the role-gated startsWith filter. A Reporter
+/// must not see any Vulnerability IDs even when querying via edge traversal
+/// with no property filters.
+pub(super) async fn traversal_vulnerability_reporter_no_filters_sees_nothing(ctx: &TestContext) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![reporter_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    // Reporter on 1/100/ cannot see Vulnerability nodes — even though the
+    // edge scan finds IN_PROJECT edges for project 1000, the Vulnerability
+    // FilterOnly CTE restricts to paths where the user has Security Manager
+    // access. Reporter is below that floor, so the CTE returns zero IDs.
+    resp.assert_node_absent("Vulnerability", 8000);
+}
+
+/// Same traversal, but with Security Manager access — should see the vulnerability.
+pub(super) async fn traversal_vulnerability_security_manager_no_filters_sees_data(
+    ctx: &TestContext,
+) {
+    let resp = run_query_with_security(
+        ctx,
+        r#"{
+            "query_type": "traversal",
+            "nodes": [
+                {"id": "p", "entity": "Project", "node_ids": [1000], "columns": ["name"]},
+                {"id": "v", "entity": "Vulnerability", "columns": ["title"]}
+            ],
+            "relationships": [{"type": "IN_PROJECT", "from": "v", "to": "p"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+        SecurityContext::new_with_roles(1, vec![security_manager_path("1/100/")]).unwrap(),
+    )
+    .await;
+
+    // Security Manager on 1/100/ clears the floor — Vulnerability 8000
+    // in project 1000 (path 1/100/1000/) should be visible.
+    resp.assert_node_count(2);
+    resp.assert_node_ids("Project", &[1000]);
+    resp.assert_node_ids("Vulnerability", &[8000]);
+    resp.assert_edge_exists("Vulnerability", 8000, "Project", 1000, "IN_PROJECT");
+}
+
 /// Security Manager (25) on a path hits the exact floor required by
 /// Vulnerability's `required_role`. This guards the exact floor: an SM-only
 /// user sees their own vuln counts without needing to escalate to Developer.
