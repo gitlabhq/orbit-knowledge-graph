@@ -4,7 +4,7 @@
 //!
 //! Generates forward + backward frontier CTEs (UNION ALL of depth arms),
 //! then combines via direct (depth-1) + intersection (forward meets backward).
-//! Dedup is baked into anchor CTEs (unlike v1 where DeduplicatePass adds it).
+//! Dedup is baked into anchor CTEs.
 
 use std::collections::HashMap;
 
