@@ -1,7 +1,7 @@
 ---
 name: orbit
 description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.3.0
+version: 0.4.0
 license: MIT
 metadata:
   audience: developers
@@ -52,12 +52,18 @@ memorised structures — the ontology evolves. Budget ≤ 1 discovery call per n
 POST to `orbit/query` requires an explicit `Content-Type`. Without it you get
 `HTTP 415: The provided content-type '' is not supported.`
 
+**Single-node traversal** — find nodes matching filters:
+
 ```bash
 cat > /tmp/q.json <<'JSON'
 {
   "query": {
     "query_type": "traversal",
-    "node": {"id": "p", "entity": "Project"},
+    "node": {
+      "id": "p",
+      "entity": "Project",
+      "filters": {"name": {"op": "eq", "value": "my-project"}}
+    },
     "limit": 5
   },
   "response_format": "llm"
@@ -68,6 +74,36 @@ glab api --method POST orbit/query \
   --header "Content-Type: application/json" \
   --input /tmp/q.json
 ```
+
+**Multi-node traversal** — follow relationships between nodes (the most common query shape):
+
+```bash
+cat > /tmp/q.json <<'JSON'
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+      {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"}
+    ],
+    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
+    "limit": 10
+  },
+  "response_format": "llm"
+}
+JSON
+
+glab api --method POST orbit/query \
+  --header "Content-Type: application/json" \
+  --input /tmp/q.json
+```
+
+Multi-node `traversal` requires at least two entries in `nodes` and one in `relationships`.
+`filters` is an **object** keyed by property name — not an array:
+`{"state": "opened"}` (shorthand equality) or `{"iid": {"op": "eq", "value": 1216}}` (operator form).
 
 Or use the bundled wrapper, which injects the header automatically.
 Invoke it by its absolute path (or put the skill's `scripts/` dir on `PATH`) —
@@ -114,6 +150,9 @@ External links (require internet):
 5. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
 6. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
    multi-node `traversal` / `aggregation` / `path_finding` → `nodes` (array).
+   `neighbors` also requires a `neighbors` object: `{"node": "<id>", "direction": "outgoing"|"incoming"|"both"}`.
+   Multi-node `traversal` requires `relationships`: `[{"type": "AUTHORED", "from": "<id>", "to": "<id>"}]`.
+   Do **not** use an `edges` key — relationships between nodes are specified via `relationships`.
 7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
    `offset + page_size` must not exceed `limit`. `page_size` max 100.
 8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.

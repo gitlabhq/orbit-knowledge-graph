@@ -25,6 +25,41 @@ from inside the skill directory:
 
 For the full field reference see [`query_language.md`](query_language.md).
 
+## Look up a GitLab project's numeric ID
+
+Many filters (e.g. `project_id` on MergeRequest) need the numeric project ID.
+Get it from the URL-encoded full path (`/` → `%2F`):
+
+```bash
+glab api "projects/gitlab-org%2Forbit%2Fknowledge-graph" | jq '.id'
+```
+
+`glab api` does not support `--jq`. Always pipe to `jq`.
+
+## Look up a merge request by IID
+
+The most common entry point: "tell me about MR !1216 in project X".
+Requires both `iid` and `project_id` filters (IID is only unique within a project):
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "mr", "entity": "MergeRequest", "columns": "*",
+       "filters": {"iid": {"op": "eq", "value": 1216},
+                   "project_id": {"op": "eq", "value": 77960826}}},
+      {"id": "author", "entity": "User", "columns": ["username"]}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "author", "to": "mr"}
+    ],
+    "limit": 1
+  },
+  "response_format": "llm"
+}
+```
+
 ## `traversal` (single-node) — find nodes matching filters
 
 Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
@@ -63,6 +98,29 @@ one relationship:
     "relationships": [
       {"type": "AUTHORED", "from": "u", "to": "mr"}
     ],
+    "limit": 10
+  },
+  "response_format": "llm"
+}
+```
+
+## `order_by` — sort traversal results
+
+Add `order_by` to any traversal. Fields are `node` (the node `id`), `property`,
+and `direction` (`ASC` or `DESC`):
+
+```json
+{
+  "query": {
+    "query_type": "traversal",
+    "nodes": [
+      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
+      {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state", "created_at"]}
+    ],
+    "relationships": [
+      {"type": "AUTHORED", "from": "u", "to": "mr"}
+    ],
+    "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
     "limit": 10
   },
   "response_format": "llm"
