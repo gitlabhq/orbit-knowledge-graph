@@ -160,26 +160,11 @@ impl ToolService {
 
         let sections: HashSet<&str> = args.sections.iter().map(String::as_str).collect();
         for section in &sections {
-            if !["schema", "dsl", "response_format", "status"].contains(section) {
+            if !["schema", "dsl", "response_format"].contains(section) {
                 return Err(ExecutorError::InvalidArguments(format!(
                     "unknown section: {section}"
                 )));
             }
-        }
-
-        if sections.contains("status") && args.status_target.is_none() {
-            return Err(ExecutorError::InvalidArguments(
-                "sections includes 'status' but status_target is missing".to_string(),
-            ));
-        }
-
-        // Status RPC needs auth + ClickHouse access; the in-process tool_service
-        // does not own those. Production status fan-out happens monolith-side.
-        if sections.contains("status") {
-            return Err(ExecutorError::InvalidArguments(
-                "the 'status' section is dispatched by the monolith MCP handler, not by the in-process tool service"
-                    .to_string(),
-            ));
         }
 
         let format = parse_format(arguments);
@@ -289,8 +274,6 @@ struct GetGraphInfoArgs {
     sections: Vec<String>,
     #[serde(default)]
     schema_options: Option<SchemaOptions>,
-    #[serde(default)]
-    status_target: Option<StatusTarget>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -299,19 +282,8 @@ struct SchemaOptions {
     expand_nodes: Option<Vec<String>>,
 }
 
-// Production-side `status` dispatch happens in the monolith CallTool. The
-// orbit in-process resolve only validates that this struct deserializes; the
-// concrete fields are not consumed here.
-#[derive(Debug, Deserialize)]
-#[allow(dead_code)]
-struct StatusTarget {
-    #[serde(default)]
-    namespace_id: Option<i64>,
-    #[serde(default)]
-    project_id: Option<i64>,
-    #[serde(default)]
-    full_path: Option<String>,
-}
+// Production-side `status` dispatch happens in the monolith CallTool via the
+// dedicated get_graph_status MCP tool, not via this in-process executor.
 
 #[cfg(test)]
 mod tests {
@@ -757,29 +729,14 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_status_in_process_returns_error() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve(
-            "get_graph_info",
-            r#"{"sections": ["status"], "status_target": {"project_id": 42}}"#,
-        );
-        let err = result.expect_err("status section should error in-process");
-        assert!(
-            err.to_string().contains("monolith"),
-            "error should explain that status is dispatched monolith-side, got: {err}"
-        );
-    }
-
-    #[test]
-    fn get_graph_info_status_without_target_errors() {
+    fn get_graph_info_status_section_is_rejected() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
         let result = service.resolve("get_graph_info", r#"{"sections": ["status"]}"#);
-        let err = result.expect_err("status without status_target should error");
+        let err = result.expect_err("status section is no longer accepted on get_graph_info");
         assert!(
-            err.to_string().contains("status_target"),
-            "error should mention status_target, got: {err}"
+            err.to_string().contains("status"),
+            "error should mention status, got: {err}"
         );
     }
 

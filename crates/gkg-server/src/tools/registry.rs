@@ -46,7 +46,7 @@ mod params {
             "uniqueItems": true,
             "items": {
                 "type": "string",
-                "enum": ["schema", "dsl", "response_format", "status"]
+                "enum": ["schema", "dsl", "response_format"]
             },
             "description": "Which discovery sections to return. Pick only what you need."
         })
@@ -68,17 +68,22 @@ mod params {
         })
     }
 
-    pub fn status_target() -> Value {
+    pub fn status_targets() -> Value {
         json!({
-            "type": "object",
-            "additionalProperties": false,
-            "minProperties": 1,
-            "maxProperties": 1,
-            "description": "Required when 'status' is in sections. Provide exactly one of namespace_id, project_id, or full_path.",
-            "properties": {
-                "namespace_id": { "type": "integer", "minimum": 1 },
-                "project_id":   { "type": "integer", "minimum": 1 },
-                "full_path":    { "type": "string", "minLength": 1, "description": "e.g. 'gitlab-org/gitlab'" }
+            "type": "array",
+            "minItems": 1,
+            "maxItems": 50,
+            "description": "One or more targets to fetch indexing status for. Each target must specify exactly one of namespace_id, project_id, or full_path.",
+            "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "minProperties": 1,
+                "maxProperties": 1,
+                "properties": {
+                    "namespace_id": { "type": "integer", "minimum": 1 },
+                    "project_id":   { "type": "integer", "minimum": 1 },
+                    "full_path":    { "type": "string", "minLength": 1, "description": "e.g. 'gitlab-org/gitlab'" }
+                }
             }
         })
     }
@@ -92,6 +97,7 @@ impl ToolRegistry {
             Self::query_graph(),
             Self::get_graph_schema(),
             Self::get_graph_info(),
+            Self::get_graph_status(),
         ]
     }
 
@@ -150,22 +156,19 @@ impl ToolRegistry {
         ToolDefinition {
             name: "get_graph_info".into(),
             description: "Discovery tool for Orbit - the GitLab Knowledge Graph. Call this BEFORE \
-                          composing a query to learn the graph's shape, query language, response \
-                          format, or indexing status. Returns any subset of four sections in one \
-                          call. At minimum call with `sections=[\"dsl\",\"schema\"]` before \
-                          writing a query.\n\n\
+                          composing a query to learn the graph's shape, query language, or \
+                          response format. At minimum call with `sections=[\"dsl\",\"schema\"]` \
+                          before writing a query. Use get_graph_status separately for indexing \
+                          progress.\n\n\
                           Sections (pass via `sections`, pick only what you need):\n\
                           - `schema`: ontology of node/edge types and domains. Add \
                           `schema_options.expand_nodes=[\"Node1\",...]` or `[\"*\"]` to include \
                           property details. Omit for a lightweight listing.\n\
                           - `dsl`: JSON Schema describing valid query inputs. No options.\n\
                           - `response_format`: JSON Schema + semver of the formatter's output. \
-                          No options.\n\
-                          - `status`: indexing progress and entity counts. REQUIRES \
-                          `status_target` with exactly one of {namespace_id:int, project_id:int, \
-                          full_path:string}.\n\n\
+                          No options.\n\n\
                           `format` controls output: \"llm\" (default, compact text) or \"raw\" \
-                          (JSON). Errors if `status` is requested without `status_target`."
+                          (JSON)."
                 .into(),
             parameters: json!({
                 "type": "object",
@@ -174,15 +177,30 @@ impl ToolRegistry {
                 "properties": {
                     "sections": params::graph_info_sections(),
                     "schema_options": params::schema_options(),
-                    "status_target": params::status_target(),
                     "format": params::format()
-                },
-                "allOf": [
-                    {
-                        "if":   { "properties": { "sections": { "contains": { "const": "status" } } }, "required": ["sections"] },
-                        "then": { "required": ["status_target"] }
-                    }
-                ]
+                }
+            }),
+        }
+    }
+
+    fn get_graph_status() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_graph_status".into(),
+            description: "Indexing progress and entity counts for one or more namespaces or \
+                          projects. Pass `targets` as an array; each target supplies exactly one \
+                          of `namespace_id` (int), `project_id` (int), or `full_path` (string \
+                          like \"gitlab-org/gitlab\"). Use this when the user asks whether \
+                          something has finished indexing or how many entities are present, or \
+                          when a query returns surprisingly few rows."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["targets"],
+                "properties": {
+                    "targets": params::status_targets(),
+                    "format": params::format()
+                }
             }),
         }
     }
@@ -207,7 +225,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 3);
+        assert_eq!(tools.len(), 4);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -231,6 +249,7 @@ mod tests {
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
         assert!(names.contains(&"get_graph_info".into()));
+        assert!(names.contains(&"get_graph_status".into()));
     }
 
     #[test]
@@ -319,7 +338,7 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_sections_enum_lists_all_four_blocks() {
+    fn get_graph_info_sections_enum_lists_three_blocks() {
         let tool = find_tool("get_graph_info");
         let sections = &tool.parameters["properties"]["sections"];
         assert_eq!(sections["type"], "array");
@@ -330,7 +349,25 @@ mod tests {
             .iter()
             .filter_map(|v| v.as_str())
             .collect();
-        assert_eq!(values, vec!["schema", "dsl", "response_format", "status"]);
+        assert_eq!(values, vec!["schema", "dsl", "response_format"]);
+    }
+
+    #[test]
+    fn get_graph_info_does_not_accept_status_section() {
+        // status moved to its own get_graph_status tool. The enum on get_graph_info
+        // must not list it.
+        let tool = find_tool("get_graph_info");
+        let values: Vec<&str> = tool.parameters["properties"]["sections"]["items"]["enum"]
+            .as_array()
+            .expect("enum array")
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        assert!(!values.contains(&"status"));
+        assert!(
+            tool.parameters["properties"].get("status_target").is_none(),
+            "status_target should be removed from get_graph_info"
+        );
     }
 
     #[test]
@@ -343,30 +380,23 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_status_target_is_oneof() {
-        let tool = find_tool("get_graph_info");
-        let status_target = &tool.parameters["properties"]["status_target"];
-        assert_eq!(status_target["type"], "object");
-        assert_eq!(status_target["minProperties"], 1);
-        assert_eq!(status_target["maxProperties"], 1);
-        let props = status_target["properties"]
-            .as_object()
-            .expect("status_target.properties is an object");
-        for key in ["namespace_id", "project_id", "full_path"] {
-            assert!(props.contains_key(key), "missing status_target key: {key}");
-        }
-    }
+    fn get_graph_status_accepts_target_array() {
+        let tool = find_tool("get_graph_status");
+        assert_eq!(tool.parameters["required"][0], "targets");
 
-    #[test]
-    fn get_graph_info_status_implies_status_target_required() {
-        // The if/then in the schema requires status_target when sections includes status.
-        let tool = find_tool("get_graph_info");
-        let all_of = tool.parameters["allOf"]
-            .as_array()
-            .expect("allOf should be an array");
-        assert!(
-            !all_of.is_empty(),
-            "allOf must encode the status -> status_target rule"
-        );
+        let targets = &tool.parameters["properties"]["targets"];
+        assert_eq!(targets["type"], "array");
+        assert_eq!(targets["minItems"], 1);
+
+        let item = &targets["items"];
+        assert_eq!(item["type"], "object");
+        assert_eq!(item["minProperties"], 1);
+        assert_eq!(item["maxProperties"], 1);
+        let props = item["properties"]
+            .as_object()
+            .expect("target item properties is an object");
+        for key in ["namespace_id", "project_id", "full_path"] {
+            assert!(props.contains_key(key), "missing target key: {key}");
+        }
     }
 }
