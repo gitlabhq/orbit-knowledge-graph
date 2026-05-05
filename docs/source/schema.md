@@ -130,6 +130,7 @@ The following relationships are available by default:
 |                    | `Directory`                | `File`                       |
 |                    | `Group`                    | `Group`                      |
 |                    | `Group`                    | `Project`                    |
+|                    | `Project`                  | `Branch`                     |
 |                    | `User`                     | `Project`                    |
 |                    | `WorkItem`                 | `WorkItem`                   |
 | `IN_PROJECT`       | `Branch`                   | `Project`                    |
@@ -181,10 +182,8 @@ The following relationships are available by default:
 | `RELATED_TO`       | `WorkItem`                 | `WorkItem`                   |
 | `FROM_BRANCH`      | `MergeRequest`             | `Branch`                     |
 | `TARGETS`          | `MergeRequest`             | `Branch`                     |
-| `ON_BRANCH`        | `Definition`               | `Branch`                     |
-|                    | `Directory`                | `Branch`                     |
+| `ON_BRANCH`        | `Directory`                | `Branch`                     |
 |                    | `File`                     | `Branch`                     |
-|                    | `ImportedSymbol`           | `Branch`                     |
 | `DEFINES`          | `Definition`               | `Definition`                 |
 |                    | `Definition`               | `ImportedSymbol`             |
 |                    | `File`                     | `Definition`                 |

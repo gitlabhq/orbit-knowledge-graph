@@ -15,6 +15,10 @@ variants:
     to_node: { type: Project, id: id }
     description: "User namespace contains project."
 
+  - from_node: { type: Project, id: id }
+    to_node: { type: Branch, id: id }
+    description: "Project contains branch."
+
   - from_node: { type: WorkItem, id: id }
     to_node: { type: WorkItem, id: id }
     description: "Work item contains child work item (e.g., epic contains issue, epic contains epic, etc.)."
