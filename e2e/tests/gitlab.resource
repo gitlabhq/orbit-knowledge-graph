@@ -140,7 +140,10 @@ Create Project
 Touch Project
     [Documentation]    No-op PUT that forces a fresh WAL event for the projects row so
     ...                Siphon re-replicates it and the ClickHouse MV chain re-fires. See
-    ...                Create Project for the race this works around.
+    ...                Create Project for the race this works around. Side effect: this
+    ...                overwrites the project's `description` with a fixed marker — fine
+    ...                for e2e fixtures (which start with empty description), not safe to
+    ...                call on projects whose description matters.
     [Arguments]    ${project_id}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    description=indexed-nudge
