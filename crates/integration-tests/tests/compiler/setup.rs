@@ -1,6 +1,8 @@
 //! Shared test setup for compiler tests.
 
-use compiler::{Node, SecurityContext, Validator, lower, normalize};
+use compiler::passes::lower::lower;
+use compiler::passes::validate::Validator;
+use compiler::{Node, SecurityContext, normalize};
 use ontology::{DataType, Ontology};
 
 pub fn test_ctx() -> SecurityContext {

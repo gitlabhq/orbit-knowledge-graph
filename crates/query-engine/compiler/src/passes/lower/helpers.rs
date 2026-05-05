@@ -10,8 +10,8 @@ use crate::constants::*;
 use crate::error::{QueryError, Result};
 use crate::input::*;
 
-use super::super::plan::*;
-use super::super::shared::{
+use crate::passes::plan::*;
+use crate::passes::shared::{
     dedup_query, dedup_subquery, deleted_false, denorm_tag_expr, filter_to_expr, id_list_predicate,
     id_range_predicate, rel_kind_filter, rel_kind_filter_values,
 };
@@ -61,7 +61,7 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
     if !np.emit_select {
         return vec![];
     }
-    super::super::shared::requested_columns(&np.columns)
+    crate::passes::shared::requested_columns(&np.columns)
         .into_iter()
         .map(|col| SelectExpr::new(Expr::col(alias, &col), format!("{alias}_{col}")))
         .collect()

@@ -8,8 +8,8 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::super::plan::HydrationNodePlan;
-use super::super::shared::dedup_subquery;
+use crate::passes::plan::HydrationNodePlan;
+use crate::passes::shared::dedup_subquery;
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 

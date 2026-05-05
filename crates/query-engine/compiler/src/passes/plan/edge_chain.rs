@@ -9,8 +9,8 @@ use ontology::constants::*;
 
 use crate::input::*;
 
-use super::super::shared::{requested_columns, resolve_edge_table};
 use super::{Plan, PlanBody};
+use crate::passes::shared::{requested_columns, resolve_edge_table};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -452,7 +452,7 @@ fn determine_hydration(node_plan: &NodePlan, input: &Input) -> HydrationStrategy
         return HydrationStrategy::Join;
     }
 
-    let has_non_denorm_filters = super::super::shared::has_non_denorm_filters(
+    let has_non_denorm_filters = crate::passes::shared::has_non_denorm_filters(
         node_plan.entity.as_deref().unwrap_or(""),
         &node_plan.filters,
         &input.compiler.denormalized_columns,
