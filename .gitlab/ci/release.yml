@@ -62,12 +62,16 @@ orbit-build-linux-arm64:
     PLATFORM: darwin
     # Pull a prebuilt libduckdb instead of compiling it; matches local dev defaults.
     DUCKDB_DOWNLOAD_LIB: "1"
-    MISE_DISABLE_TOOLS: lefthook
+    RUST_VERSION: "1.95.0"
   before_script:
-    - brew install mise
-    - export PATH="$HOME/.local/share/mise/shims:$PATH"
-    - mise trust
-    - mise install
+    # macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the
+    # project mise.toml is bypassed here because the runner's system-wide mise
+    # config drags in heavy unrelated tools (ruby/maven/dotnet/...) that fail
+    # to install and aren't needed to compile the orbit binary.
+    - command -v rustup || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path)
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup toolchain install "$RUST_VERSION" --profile minimal
+    - rustup default "$RUST_VERSION"
     - rustup target add aarch64-apple-darwin x86_64-apple-darwin
   script:
     - ./scripts/build-orbit.sh
