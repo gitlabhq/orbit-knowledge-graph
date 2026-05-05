@@ -6,8 +6,8 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
-use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
 use tokio::sync::Semaphore;
@@ -304,6 +304,7 @@ impl Pipeline {
             })?;
 
         let mut total_transform_duration = Duration::ZERO;
+        let mut write_futures = FuturesUnordered::new();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -326,36 +327,47 @@ impl Pipeline {
                 continue;
             }
 
+            let destination_table = transform.destination_table.clone();
             let writer = destination
-                .new_batch_writer(&transform.destination_table)
+                .new_batch_writer(&destination_table)
                 .await
                 .map_err(|err| {
                     HandlerError::Processing(format!(
-                        "failed to create writer for {}: {err}",
-                        transform.destination_table
+                        "failed to create writer for {destination_table}: {err}"
                     ))
                 })?;
 
-            let write_start = Instant::now();
-            writer.write_batch(&result_batches).await.map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to write to {}: {err}",
-                    transform.destination_table
-                ))
-            })?;
-            let write_elapsed = write_start.elapsed();
+            write_futures.push(async move {
+                let write_start = Instant::now();
+                writer.write_batch(&result_batches).await.map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to write to {destination_table}: {err}"
+                    ))
+                })?;
+                let write_elapsed = write_start.elapsed();
 
-            info!(
-                table = %transform.destination_table,
-                rows = row_count,
-                transform_ms = transform_elapsed.as_millis() as u64,
-                write_ms = write_elapsed.as_millis() as u64,
-                "transform written"
-            );
+                info!(
+                    table = %destination_table,
+                    rows = row_count,
+                    transform_ms = transform_elapsed.as_millis() as u64,
+                    write_ms = write_elapsed.as_millis() as u64,
+                    "transform written"
+                );
+
+                Ok::<(), HandlerError>(())
+            });
+
+            while let Some(Some(result)) = write_futures.next().now_or_never() {
+                result?;
+            }
         }
 
         self.metrics
             .record_transform_duration(total_transform_duration.as_secs_f64());
+
+        while let Some(result) = write_futures.next().await {
+            result?;
+        }
 
         Ok(())
     }

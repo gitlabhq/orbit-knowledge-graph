@@ -103,7 +103,7 @@ impl ScheduleConfiguration {
 // ── Handler config types ─────────────────────────────────────────────
 
 fn default_datalake_batch_size() -> u64 {
-    1_000_000
+    500_000
 }
 
 fn default_halving_initial_block_size() -> u64 {
