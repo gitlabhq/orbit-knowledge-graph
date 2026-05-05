@@ -12,7 +12,7 @@ use crate::input::Input;
 use crate::passes::codegen::CompiledQueryContext;
 use crate::passes::enforce::ResultContext;
 use crate::passes::hydrate::HydrationPlan;
-use crate::passes::v2::plan::QueryPlan;
+use crate::passes::plan::QueryPlan;
 use crate::passes::*;
 use crate::pipeline::{Pipeline, PipelineEnv, PipelineState};
 use crate::types::SecurityContext;
