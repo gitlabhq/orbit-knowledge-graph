@@ -276,6 +276,15 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest', [], ['state:opened']),
     ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest', [], ['state:merged']);
 
+-- MR -> IN_PROJECT edges (match project_id FK on gl_merge_request).
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+    ('1/100/1000/', 2000, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], []),
+    ('1/100/1000/', 2001, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], []),
+    ('1/101/1001/', 2002, 'MergeRequest', 'IN_PROJECT', 1001, 'Project', ['state:merged'], []),
+    ('1/102/1004/', 2003, 'MergeRequest', 'IN_PROJECT', 1004, 'Project', ['state:closed'], []),
+    ('1/100/1000/', 2004, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], []),
+    ('1/100/1000/', 2005, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], []);
+
 -- Organization 2: cross-org isolation test data.
 -- User 1 (alice) exists in both orgs — her User row is global (gl_user has
 -- no traversal_path), but her edges and the resources below are in org 2.
@@ -292,4 +301,5 @@ INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branc
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
     ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group', ['state:active'], []),
     ('2/900/9000/', 900, 'Group', 'CONTAINS', 9000, 'Project', [], []),
-    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest', [], ['state:opened']);
+    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest', [], ['state:opened']),
+    ('2/900/9000/', 9100, 'MergeRequest', 'IN_PROJECT', 9000, 'Project', ['state:opened'], []);

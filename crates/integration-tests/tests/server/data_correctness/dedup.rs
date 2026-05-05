@@ -132,9 +132,10 @@ pub(super) async fn aggregation_dedup_counts_unique_entities(ctx: &TestContext) 
     resp.skip_requirement(Requirement::Filter {
         field: "state".into(),
     });
-    // Duplicate MR 9100 should be counted once (opened MRs excluded by state filter).
+    // Duplicate MR 9100 should be counted once. Seed MRs 2004 and 2005 are
+    // also merged in project 1000, so the total is 3.
     resp.assert_node("Project", 1000, |n| {
-        n.prop_str("name") == Some("Public Project") && n.prop_i64("mr_count") == Some(1)
+        n.prop_str("name") == Some("Public Project") && n.prop_i64("mr_count") == Some(3)
     });
 }
 
@@ -396,13 +397,15 @@ pub(super) async fn traversal_deleted_node_visible_via_edge(ctx: &TestContext) {
     )
     .await;
 
-    // The MR node's id_range generates a _nf_mr CTE that joins the node
-    // table with dedup, filtering out deleted MR 9500. Only the alive MR
-    // 9501's edge survives the IN subquery filter.
-    resp.assert_node_count(2);
+    // The dedup scan picks the latest version for each MR id.
+    // MR 9500's latest is _deleted=true, so it's filtered out.
+    // MR 9501 (alive) + seed MR 2003 (also in project 1004) both appear.
+    resp.assert_node_count(3);
     resp.assert_node_ids("Project", &[1004]);
+    resp.assert_node_ids("MergeRequest", &[2003, 9501]);
     resp.assert_edge_exists("MergeRequest", 9501, "Project", 1004, "IN_PROJECT");
-    resp.assert_edge_count("IN_PROJECT", 1);
+    resp.assert_edge_exists("MergeRequest", 2003, "Project", 1004, "IN_PROJECT");
+    resp.assert_edge_count("IN_PROJECT", 2);
 }
 
 /// Neighbors dedup: duplicate user rows should not produce duplicate edges.

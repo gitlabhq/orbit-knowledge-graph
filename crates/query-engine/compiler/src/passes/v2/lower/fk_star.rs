@@ -76,7 +76,10 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
         // Target hydration — use pre-resolved fk_needs_join.
         if target_np.fk_needs_join {
             let (new_from, ns, nw) =
-                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, true)?;
+                // Don't add traversal_path equality to FK JOINs: entities
+                // at different depths have different TP prefixes (e.g.
+                // WorkItem at '1/100/' vs Project at '1/100/1000/').
+                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, false)?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);

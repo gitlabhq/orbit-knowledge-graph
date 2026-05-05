@@ -465,7 +465,14 @@ fn build_frontier_arm(
     let last = format!("e{depth}");
 
     let mut from = edge_table_scan(opts.edge_tables, "e1");
-    let mut first_type_cond = type_cond_for("e1", opts.first_hop_filter);
+    // Use specific first-hop filter if provided, otherwise fall back to
+    // the general rel_type_filter so e1 isn't left unfiltered.
+    let effective_first = if opts.first_hop_filter.is_some() {
+        opts.first_hop_filter
+    } else {
+        opts.rel_type_filter
+    };
+    let mut first_type_cond = type_cond_for("e1", effective_first);
     for i in 2..=depth {
         let prev = format!("e{}", i - 1);
         let curr = format!("e{i}");
