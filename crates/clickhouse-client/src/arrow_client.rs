@@ -413,13 +413,17 @@ impl DrainableWriter {
     }
 
     fn take(&self) -> Vec<u8> {
-        std::mem::take(&mut *self.0.lock().unwrap())
+        let mut guard = self.0.lock().unwrap_or_else(|e| e.into_inner());
+        std::mem::take(&mut *guard)
     }
 }
 
 impl std::io::Write for DrainableWriter {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
-        self.0.lock().unwrap().extend_from_slice(buf);
+        self.0
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .extend_from_slice(buf);
         Ok(buf.len())
     }
 
