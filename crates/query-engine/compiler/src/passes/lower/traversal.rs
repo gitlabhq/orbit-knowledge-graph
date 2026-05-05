@@ -4,10 +4,10 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::{Plan, Strategy};
-use super::super::shared::edge_select_columns;
-use super::super::shared::edge_select_columns_with_prefix;
 use crate::constants::*;
+use crate::passes::plan::{Plan, Strategy};
+use crate::passes::shared::edge_select_columns;
+use crate::passes::shared::edge_select_columns_with_prefix;
 
 pub fn emit_traversal(plan: &Plan) -> Result<Node> {
     if matches!(plan.strategy, Strategy::SingleNode) {

@@ -4,8 +4,8 @@ use crate::ast::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::Plan;
-use super::super::shared::requested_columns;
+use crate::passes::plan::Plan;
+use crate::passes::shared::requested_columns;
 
 pub fn emit_aggregation(
     plan: &Plan,

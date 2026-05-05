@@ -28,9 +28,9 @@ pub fn plan_pathfinding(input: &Input) -> Result<Plan> {
     let edge = EdgeTableConfig::from_input(&input.compiler, &path.rel_types);
 
     let forward_first_hop_filter =
-        super::super::shared::rel_kind_filter_values(&path.forward_first_hop_rel_types);
+        crate::passes::shared::rel_kind_filter_values(&path.forward_first_hop_rel_types);
     let backward_first_hop_filter =
-        super::super::shared::rel_kind_filter_values(&path.backward_first_hop_rel_types);
+        crate::passes::shared::rel_kind_filter_values(&path.backward_first_hop_rel_types);
 
     let max_depth = path.max_depth;
     let forward_depth = max_depth / 2 + max_depth % 2;

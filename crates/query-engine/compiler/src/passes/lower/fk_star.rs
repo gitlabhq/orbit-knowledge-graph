@@ -7,13 +7,13 @@ use crate::ast::*;
 use crate::constants::*;
 use crate::error::{QueryError, Result};
 
-use super::super::plan::*;
-use super::super::shared::{deleted_false, id_list_predicate};
 use super::EmitOutput;
 use super::helpers::{
     build_dedup_subquery, collect_dedup_columns, emit_filter_subquery, emit_node_join,
     node_select_columns,
 };
+use crate::passes::plan::*;
+use crate::passes::shared::{deleted_false, id_list_predicate};
 
 pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput> {
     let center_np = plan.nodes.get(center_alias).ok_or_else(|| {

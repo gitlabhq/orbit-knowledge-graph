@@ -7,13 +7,13 @@ use ontology::constants::*;
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::super::plan::*;
-use super::super::shared::filter_to_expr;
 use super::EmitOutput;
 use super::helpers::{
     build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
     emit_node_ids_on_edge, emit_node_join_with_narrowing, push_edge_predicates,
 };
+use crate::passes::plan::*;
+use crate::passes::shared::filter_to_expr;
 
 pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut where_parts = Vec::new();
