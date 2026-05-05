@@ -50,7 +50,11 @@ impl BatchWriter for ClickHouseBatchWriter {
 
         let start = std::time::Instant::now();
 
-        if let Err(error) = self.client.insert_arrow(&self.table, batches).await {
+        if let Err(error) = self
+            .client
+            .insert_arrow_streaming(&self.table, batches)
+            .await
+        {
             self.metrics.record_write_error(&self.table);
             return Err(error.into());
         }
