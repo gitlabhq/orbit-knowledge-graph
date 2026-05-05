@@ -1387,17 +1387,24 @@ impl FamilyPipeline {
         let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
+        // Pick the primary context deterministically: sort by Language
+        // Debug repr so the result doesn't depend on HashMap iteration.
+        let primary_lang = *member_ctxs
+            .keys()
+            .min_by_key(|l| format!("{l:?}"))
+            .expect("family has no members");
+        let primary_ctx = &member_ctxs[&primary_lang];
+        let primary_rules = primary_ctx.rules.clone();
+
         // All family members must share the same FQN separator -- the
         // graph can only have one. Reject mismatches at construction
         // rather than silently producing broken FQNs.
-        let primary_ctx = member_ctxs.values().next().expect("family has no members");
-        let primary_rules = primary_ctx.rules.clone();
         let expected_sep = primary_rules.fqn_separator;
-        for lctx in member_ctxs.values() {
+        for (lang, lctx) in member_ctxs {
             assert_eq!(
                 lctx.rules.fqn_separator, expected_sep,
                 "FamilyPipeline: all members must share the same fqn_separator, \
-                 got {:?} vs {:?}",
+                 {lang} has {:?} but {primary_lang} has {:?}",
                 lctx.rules.fqn_separator, expected_sep
             );
         }
