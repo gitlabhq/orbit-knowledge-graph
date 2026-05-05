@@ -72,7 +72,7 @@ pub const DESTINATION_WRITE_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.etl.destination.write.duration",
     "Time to write a batch to ClickHouse.",
     Some("s"),
-    &[labels::TABLE],
+    &[],
     LATENCY,
     DOMAIN,
 );

@@ -1,3 +1,54 @@
+## [0.48.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.47.0...v0.48.0) (2026-05-05)
+
+### Features
+
+* **compiler:** edge-first query lowering ([4b95801](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4b95801bd2f9d8200f90e1032a4ac5aa80a749df)) by Michael Usachenko
+
+### Performance
+
+* **indexer:** reuse ClickHouse client across writes ([bca46b2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/bca46b2d92f6577dd1e0cb24813dd5760aafe4e8)) by Jean-Gabriel Doyon
+
+### Other
+
+* **orbit-skill:** add missing query patterns and troubleshooting recipes ([8301e9b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8301e9bbd7ded2dc865590f353636becb33cfab3)) by Jean-Gabriel Doyon
+* **query:** add no-alias aggregation tests to catch default alias regressions ([761ebb8](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/761ebb8cc0874981bbe882fcdcfdadf803918dfd)) by Michael Usachenko
+
+## [0.47.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.46.0...v0.47.0) (2026-05-05)
+
+### Features
+
+* **analytics:** add missing query event context fields ([a4b4ae3](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a4b4ae31eb4fb46f1d7e6d6ccfd906c9df3e12cb)) by Bohdan Parkhomchuk
+* **indexer:** log per-batch timing breakdown in SDLC pipeline ([0cf401d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0cf401deaf3764f38e79a287768500298c240417)) by Jean-Gabriel Doyon
+* **ontology:** persist FK columns on node tables for query optimization ([a4457de](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a4457dea93723bf11898462b2d10a54b1ee6de08)) by Michael Usachenko
+
+### Fixes
+
+* **e2e:** pin gitlab-workhorse digest ([458da78](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/458da78bc6bf70e2cca775cd8bc1fe55186c0484)) by Bohdan Parkhomchuk
+* **ontology:** align Project ability with source-code entities ([8881d91](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8881d91fb432dc5434a1c768059d993f73025828)) by Michael Angelo Rivera
+
+### Other
+
+* bump schema version to 37 and regenerate DDL ([6e2d610](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6e2d610b440577b13c1f0c8441f6ba269dfbbc53)) by Jean-Gabriel Doyon
+* **e2e:** bump gitlab pins ([3516955](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/35169557416c7003ba18ed2fef63397ecd3d6c8b)) by Bohdan Parkhomchuk
+* **e2e:** skip rebuild if image exists for SHA ([85f8250](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/85f8250855c9d081b6288dc9759f9d52c7179856)) by Bohdan Parkhomchuk
+
+## [0.46.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.45.0...v0.46.0) (2026-05-04)
+
+### Features
+
+* **code-graph:** store start_char and end_char for definitions and imports ([f2e5e1f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/f2e5e1f536bdd8cadc83a00e3465328a1b2035ff)) by Kai Armstrong
+* **indexer:** propagate envelope ID as correlation_id in engine spans ([3cbaf60](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3cbaf605934707e28873a4eece0d0de6b723e1e6)) by Jean-Gabriel Doyon
+
+### Fixes
+
+* **e2e:** clean orphaned cluster-scoped helm resources ([9c09e3a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/9c09e3a3731f6ebd37be7fb19b8f3d14b991d749)) by Bohdan Parkhomchuk
+* **observability:** reduce metric cardinality to stay within Mimir limits ([5625bed](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/5625bed82aa3321c0fb3288d1916c2084530b492)) by Jean-Gabriel Doyon
+* **ontology:** enable allow_part_offset_column_in_projections for LWP tables ([e0cf94a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/e0cf94a47275322321c6c5745e5155f68fef39ff)) by Michael Usachenko
+
+### Other
+
+* **deps:** update all ra_ap crates to 0.0.331 ([23ad5e2](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/23ad5e25c32ca3c6617d0ba07d97afebd0811a40)) by Jean-Gabriel Doyon
+
 ## [0.45.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.44.0...v0.45.0) (2026-05-04)
 
 ### Features

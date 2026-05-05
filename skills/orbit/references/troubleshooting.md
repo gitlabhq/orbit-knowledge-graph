@@ -49,6 +49,16 @@ glab auth status
 glab auth login    # if expired
 ```
 
+## `glab api` does not support `--jq`
+
+`glab api` has no built-in `--jq` flag.
+
+**Fix:** pipe to `jq` instead:
+
+```bash
+glab api "projects/my-org%2Fmy-project" | jq '.id'
+```
+
 ## `HTTP 429: Too Many Requests`
 
 **Cause:** Rate limit (`orbit_query`) exceeded.

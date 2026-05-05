@@ -194,6 +194,7 @@ mod tests {
             max_hops: 1,
             direction: crate::input::Direction::Outgoing,
             filters: std::collections::HashMap::new(),
+            fk_column: None,
         }
     }
 

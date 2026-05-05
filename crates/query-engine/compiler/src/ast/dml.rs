@@ -160,6 +160,12 @@ impl SelectExpr {
         }
     }
 
+    /// `alias.col AS col` — select a column aliased as its own name.
+    pub fn col(alias: impl Into<String>, col: impl Into<String>) -> Self {
+        let col = col.into();
+        Self::new(Expr::col(alias, &col), col)
+    }
+
     pub fn star() -> Self {
         Self {
             expr: Expr::Star,
@@ -173,6 +179,16 @@ impl SelectExpr {
 pub struct OrderExpr {
     pub expr: Expr,
     pub desc: bool,
+}
+
+impl OrderExpr {
+    pub fn asc(expr: Expr) -> Self {
+        Self { expr, desc: false }
+    }
+
+    pub fn desc(expr: Expr) -> Self {
+        Self { expr, desc: true }
+    }
 }
 
 /// Named Common Table Expression (CTE) for WITH clauses.

@@ -6,6 +6,8 @@ use crate::billing::{BillingObserver, BillingTracker};
 use crate::proto::ExecuteQueryMessage;
 use clickhouse_client::ArrowClickHouseClient;
 use gkg_server_config::{AnalyticsConfig, ProfilingConfig};
+use indexer::schema::version::SCHEMA_VERSION;
+use labkit_events::orbit::ToolName;
 use nats_client::NatsClient;
 use ontology::Ontology;
 use query_engine::shared::content::ColumnResolverRegistry;
@@ -90,6 +92,8 @@ impl QueryPipelineService {
                 self.analytics_tracker.clone(),
                 Arc::clone(&self.analytics_config),
                 claims.clone(),
+                ToolName::QueryGraph,
+                SCHEMA_VERSION.to_string(),
             )),
         ]);
 

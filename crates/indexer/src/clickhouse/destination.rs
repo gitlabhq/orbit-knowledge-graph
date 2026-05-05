@@ -9,7 +9,7 @@ use crate::destination::{BatchWriter, Destination, DestinationError};
 use crate::metrics::EngineMetrics;
 
 pub struct ClickHouseDestination {
-    configuration: ClickHouseConfiguration,
+    client: ArrowClickHouseClient,
     metrics: Arc<EngineMetrics>,
 }
 
@@ -21,14 +21,8 @@ impl ClickHouseDestination {
         configuration
             .validate()
             .map_err(|e| DestinationError::InvalidConfiguration(e.to_string()))?;
-        Ok(Self {
-            configuration,
-            metrics,
-        })
-    }
-
-    fn create_client(&self) -> ArrowClickHouseClient {
-        self.configuration.build_client()
+        let client = configuration.build_client();
+        Ok(Self { client, metrics })
     }
 }
 
@@ -38,10 +32,8 @@ impl Destination for ClickHouseDestination {
         &self,
         table: &str,
     ) -> Result<Box<dyn BatchWriter>, DestinationError> {
-        let client = self.create_client();
-
         Ok(Box::new(ClickHouseBatchWriter::new(
-            client,
+            self.client.clone(),
             table.to_string(),
             self.metrics.clone(),
         )))

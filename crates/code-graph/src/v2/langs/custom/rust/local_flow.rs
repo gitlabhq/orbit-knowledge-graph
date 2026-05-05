@@ -794,10 +794,10 @@ impl<'arena, 'db> LocalFlowState<'arena, 'db> {
     }
 }
 
-pub(super) fn build_local_flow_index(
+pub(super) fn build_local_flow_index<'db>(
     source_file: &ast::SourceFile,
-    sema: &Semantics<'_, RootDatabase>,
-    db: &RootDatabase,
+    sema: &Semantics<'db, RootDatabase>,
+    db: &'db RootDatabase,
     paths_by_file_id: &HashMap<FileId, String>,
 ) -> LocalFlowIndex {
     let mut index = LocalFlowIndex::new();

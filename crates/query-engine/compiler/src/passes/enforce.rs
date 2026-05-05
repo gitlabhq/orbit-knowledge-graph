@@ -126,7 +126,11 @@ impl ResultContext {
     }
 }
 
-pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
+pub fn enforce_return(
+    node: &mut Node,
+    input: &Input,
+    node_edge_col: &HashMap<String, (String, String)>,
+) -> Result<ResultContext> {
     let mut ctx = ResultContext::new().with_query_type(input.query_type);
     ctx.entity_auth = input.entity_auth.clone();
 
@@ -143,7 +147,9 @@ pub fn enforce_return(node: &mut Node, input: &Input) -> Result<ResultContext> {
     };
 
     match node {
-        Node::Query(q) => enforce_return_columns(q, input, &selectable_nodes, &mut ctx)?,
+        Node::Query(q) => {
+            enforce_return_columns(q, input, &selectable_nodes, &mut ctx, node_edge_col)?
+        }
         Node::Insert(_) => return Ok(ctx),
     }
 
@@ -200,18 +206,13 @@ fn enforce_return_columns(
     input: &Input,
     selectable_nodes: &HashSet<&str>,
     ctx: &mut ResultContext,
+    node_edge_col: &HashMap<String, (String, String)>,
 ) -> Result<()> {
     let select_len_before = q.select.len();
-    // Neighbors emit _gkg_* columns directly in the lowerer (per UNION arm)
-    // because the center edge column differs per direction.
-    // Search-shaped traversal (1 node, 0 rels) uses table-centric columns
-    // like search, not edge-centric. The lowerer produces a flat table scan
-    // without populating node_edge_col.
     let globally_edge_centric = matches!(
         input.query_type,
         QueryType::Traversal | QueryType::Neighbors
     ) && !input.is_search();
-    let node_edge_col = &input.compiler.node_edge_col;
 
     for node in &input.nodes {
         let Some(entity) = &node.entity else { continue };
@@ -249,26 +250,38 @@ fn enforce_return_columns(
                     node.id
                 ))
             })?;
-            let edge_id_expr = Expr::col(edge_alias, edge_col.as_str());
+            // For FK-elided nodes, the edge_alias (e.g. "mr") may not exist
+            // in FROM because the node was absorbed into a filter. If the
+            // node is pinned with a single ID, emit the literal value.
+            let edge_id_expr =
+                if !alias_exists_in_from(&q.from, edge_alias) && node.node_ids.len() == 1 {
+                    Expr::lit(node.node_ids[0])
+                } else {
+                    Expr::col(edge_alias, edge_col.as_str())
+                };
 
             if needs_separate_pk {
                 // JOIN node table for the auth column (e.g. merge_request_id).
+                // Skip if the alias already exists in FROM (the lowerer
+                // hydrates nodes inline with dedup subqueries).
                 let table = node.table.as_ref().ok_or_else(|| {
                     QueryError::Enforcement(format!(
                         "traversal node '{}' has non-default redaction_id_column '{}' but no resolved table",
                         node.id, node.redaction_id_column
                     ))
                 })?;
-                let join_cond = Expr::eq(
-                    Expr::col(edge_alias, edge_col.as_str()),
-                    Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
-                );
-                q.from = TableRef::join(
-                    JoinType::Inner,
-                    std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
-                    TableRef::scan(table, &node.id),
-                    join_cond,
-                );
+                if !alias_exists_in_from(&q.from, &node.id) {
+                    let join_cond = Expr::eq(
+                        Expr::col(edge_alias, edge_col.as_str()),
+                        Expr::col(&node.id, DEFAULT_PRIMARY_KEY),
+                    );
+                    q.from = TableRef::join(
+                        JoinType::Inner,
+                        std::mem::replace(&mut q.from, TableRef::scan("_placeholder", "_")),
+                        TableRef::scan(table, &node.id),
+                        join_cond,
+                    );
+                }
 
                 let has_pk = q.select.iter().any(|s| s.alias.as_ref() == Some(&pk_col));
                 if !has_pk {
@@ -277,22 +290,26 @@ fn enforce_return_columns(
                         alias: Some(pk_col),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, edge_id_expr.clone());
 
                 let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
+                let id_expr = Expr::col(&node.id, &node.redaction_id_column);
                 if !has_id {
                     q.select.push(SelectExpr {
-                        expr: Expr::col(&node.id, &node.redaction_id_column),
+                        expr: id_expr.clone(),
                         alias: Some(id_col.clone()),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, id_expr);
             } else {
                 let has_id = q.select.iter().any(|s| s.alias.as_ref() == Some(&id_col));
                 if !has_id {
                     q.select.push(SelectExpr {
-                        expr: edge_id_expr,
+                        expr: edge_id_expr.clone(),
                         alias: Some(id_col.clone()),
                     });
                 }
+                ensure_in_group_by(q, input.query_type, edge_id_expr);
             }
 
             let has_type = q.select.iter().any(|s| s.alias.as_ref() == Some(&type_col));
@@ -373,6 +390,17 @@ fn enforce_return_columns(
     }
 
     Ok(())
+}
+
+fn alias_exists_in_from(from: &TableRef, target: &str) -> bool {
+    match from {
+        TableRef::Scan { alias, .. }
+        | TableRef::Subquery { alias, .. }
+        | TableRef::Union { alias, .. } => alias == target,
+        TableRef::Join { left, right, .. } => {
+            alias_exists_in_from(left, target) || alias_exists_in_from(right, target)
+        }
+    }
 }
 
 #[cfg(test)]
@@ -469,7 +497,7 @@ mod tests {
         let input = test_input_two_nodes();
         let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -518,7 +546,7 @@ mod tests {
         let input = test_input_two_nodes();
         let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -546,7 +574,7 @@ mod tests {
         let input = test_input();
         let mut node = Node::Query(Box::new(query));
 
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -586,7 +614,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -607,7 +635,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         assert_eq!(ctx.len(), 2);
 
@@ -663,7 +691,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -741,7 +769,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -802,7 +830,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -866,7 +894,7 @@ mod tests {
             ..Input::default()
         };
 
-        let ctx = enforce_return(&mut node, &input).unwrap();
+        let ctx = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -970,7 +998,7 @@ mod tests {
             ..Default::default()
         }));
 
-        let ctx = enforce_return(&mut query, &input).unwrap();
+        let ctx = enforce_return(&mut query, &input, &input.compiler.node_edge_col).unwrap();
 
         // Path finding queries use _gkg_path column for redaction data.
         // No additional _gkg_* columns are added by enforce_return.
@@ -1003,7 +1031,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -1075,7 +1103,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -1161,7 +1189,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -1235,7 +1263,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        enforce_return(&mut node, &input).unwrap();
+        enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap();
 
         let Node::Query(q) = node else {
             panic!("expected Query")
@@ -1283,7 +1311,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        let err = enforce_return(&mut node, &input).unwrap_err();
+        let err = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap_err();
         assert!(
             err.to_string().contains("no edge mapping"),
             "expected edge mapping error, got: {err}"
@@ -1314,7 +1342,7 @@ mod tests {
         };
 
         let mut node = Node::Query(Box::new(query));
-        let err = enforce_return(&mut node, &input).unwrap_err();
+        let err = enforce_return(&mut node, &input, &input.compiler.node_edge_col).unwrap_err();
         assert!(
             err.to_string().contains("no resolved table"),
             "expected missing table error, got: {err}"

@@ -93,6 +93,9 @@ async fn data_correctness() {
         aggregation::aggregation_empty_security_context_rejects_at_compile,
         aggregation::aggregation_no_group_by_with_filtered_other_node,
         aggregation::aggregation_no_group_by_preserves_relationship_kind,
+        // aggregation: default alias (no user-supplied alias)
+        aggregation::aggregation_no_alias_defaults_to_function_name,
+        aggregation::aggregation_no_alias_sum_defaults_to_function_name,
         // path finding
         path_finding::path_finding_returns_valid_complete_paths,
         path_finding::path_finding_filtered_start_endpoint_reaches_project,
@@ -201,6 +204,8 @@ async fn data_correctness() {
         security::aggregation_user_disconnected_scoped_node_rejects_at_compile,
         security::aggregation_user_reachable_via_path_compiles,
         // security: per-entity role scoping on aggregation target nodes
+        security::traversal_vulnerability_reporter_no_filters_sees_nothing,
+        security::traversal_vulnerability_security_manager_no_filters_sees_data,
         security::aggregation_vulnerability_reporter_only_sees_zero_counts,
         security::aggregation_vulnerability_mixed_roles_only_surfaces_developer_paths,
         security::aggregation_vulnerability_security_manager_meets_the_required_floor,

@@ -11,7 +11,7 @@ use futures::stream::FuturesUnordered;
 use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
 use tokio::sync::Semaphore;
-use tracing::{debug, info, warn};
+use tracing::{Instrument, debug, info, info_span, warn};
 
 use crate::clickhouse::TIMESTAMP_FORMAT;
 use crate::destination::Destination;
@@ -64,12 +64,26 @@ impl Pipeline {
         let semaphore = Semaphore::new(max_concurrent_entities.max(1));
         let mut futures = FuturesUnordered::new();
 
+        let traversal_path = context
+            .base_conditions
+            .get("traversal_path")
+            .cloned()
+            .unwrap_or_else(|| "global".to_string());
+
         for plan in plans {
-            futures.push(async {
-                let _permit = semaphore.acquire().await.expect("semaphore is not closed");
-                let result = self.run_plan(plan, context, destination, progress).await;
-                (&plan.name, result)
-            });
+            let span = info_span!(
+                "sdlc_pipeline",
+                pipeline = %plan.name,
+                traversal_path = %traversal_path,
+            );
+            futures.push(
+                async {
+                    let _permit = semaphore.acquire().await.expect("semaphore is not closed");
+                    let result = self.run_plan(plan, context, destination, progress).await;
+                    (&plan.name, result)
+                }
+                .instrument(span),
+            );
         }
 
         let mut errors = Vec::new();
@@ -108,18 +122,17 @@ impl Pipeline {
         extract_query = extract_query.resume_from(&checkpoint);
 
         if !extract_query.is_first_page() {
-            info!(
-                pipeline = %plan.name,
-                "resuming from saved cursor"
-            );
+            info!("resuming from saved cursor");
         }
 
         let session = SessionContext::new();
 
         loop {
+            let extract_start = Instant::now();
             let batches = self
                 .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
                 .await?;
+            let extract_elapsed = extract_start.elapsed();
 
             if batches.is_empty() {
                 break;
@@ -128,6 +141,12 @@ impl Pipeline {
             let rows_in_batch: u64 = batches.iter().map(|b| b.num_rows() as u64).sum();
             total_rows += rows_in_batch;
             self.metrics.record_batch_rows(&plan.name, rows_in_batch);
+
+            info!(
+                rows = rows_in_batch,
+                extract_ms = extract_elapsed.as_millis() as u64,
+                "batch extracted"
+            );
 
             self.transform_and_write(
                 &session,
@@ -176,19 +195,16 @@ impl Pipeline {
         let elapsed = started_at.elapsed();
         self.metrics
             .record_pipeline_completion(&plan.name, elapsed.as_secs_f64());
-        self.metrics
-            .record_watermark_lag(&plan.name, &context.watermark);
+        self.metrics.record_watermark_lag(&context.watermark);
 
         if total_rows > 0 {
             info!(
-                pipeline = %plan.name,
                 total_rows,
                 elapsed_ms = elapsed.as_millis() as u64,
                 "pipeline completed"
             );
         } else {
             debug!(
-                pipeline = %plan.name,
                 elapsed_ms = elapsed.as_millis() as u64,
                 "pipeline completed with no data"
             );
@@ -272,7 +288,6 @@ impl Pipeline {
     ) -> Result<(), HandlerError> {
         let schema = batches[0].schema();
 
-        // Deregister previous batch if present, then register the new one.
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
         let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
             HandlerError::Processing(format!(
@@ -288,7 +303,7 @@ impl Pipeline {
                 ))
             })?;
 
-        let mut transform_duration = Duration::ZERO;
+        let mut total_transform_duration = Duration::ZERO;
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -301,7 +316,8 @@ impl Pipeline {
                         transform.destination_table
                     ))
                 })?;
-            transform_duration += transform_start.elapsed();
+            let transform_elapsed = transform_start.elapsed();
+            total_transform_duration += transform_elapsed;
 
             prepare_batches(&mut result_batches, &transform.dict_encode_columns);
 
@@ -320,16 +336,26 @@ impl Pipeline {
                     ))
                 })?;
 
+            let write_start = Instant::now();
             writer.write_batch(&result_batches).await.map_err(|err| {
                 HandlerError::Processing(format!(
                     "failed to write to {}: {err}",
                     transform.destination_table
                 ))
             })?;
+            let write_elapsed = write_start.elapsed();
+
+            info!(
+                table = %transform.destination_table,
+                rows = row_count,
+                transform_ms = transform_elapsed.as_millis() as u64,
+                write_ms = write_elapsed.as_millis() as u64,
+                "transform written"
+            );
         }
 
         self.metrics
-            .record_transform_duration(pipeline_name, transform_duration.as_secs_f64());
+            .record_transform_duration(total_transform_duration.as_secs_f64());
 
         Ok(())
     }

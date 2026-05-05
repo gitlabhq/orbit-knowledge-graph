@@ -111,8 +111,7 @@ impl Handler for NamespaceDeletionHandler {
                 );
                 failed_tables.push(outcome.table.as_str());
             } else {
-                self.metrics
-                    .record_table_deleted(&outcome.table, outcome.duration_seconds);
+                self.metrics.record_table_deleted(outcome.duration_seconds);
                 info!(
                     namespace_id = payload.namespace_id,
                     table = %outcome.table,

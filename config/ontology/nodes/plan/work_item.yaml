@@ -110,6 +110,36 @@ properties:
     nullable: true
     description: "Timestamp when the work item was closed."
 
+  project_id:
+    type: int64
+    source: project_id
+    nullable: true
+    description: "Project this work item belongs to, if project-scoped. Null for group-level work items. Stored on the node row so the compiler can filter by project without scanning the edge table."
+
+  author_id:
+    type: int64
+    source: author_id
+    nullable: true
+    description: "User who created the work item."
+
+  milestone_id:
+    type: int64
+    source: milestone_id
+    nullable: true
+    description: "Milestone this work item is associated with."
+
+  namespace_id:
+    type: int64
+    source: namespace_id
+    nullable: false
+    description: "Namespace (group) this work item belongs to."
+
+  closed_by_id:
+    type: int64
+    source: closed_by_id
+    nullable: true
+    description: "User who closed the work item."
+
   traversal_path:
     type: string
     source: traversal_path
@@ -146,6 +176,7 @@ etl:
 storage:
   primary_key: [traversal_path, id]
   settings:
+    allow_part_offset_column_in_projections: "1"
     add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
@@ -162,6 +193,11 @@ storage:
     - {name: created_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: updated_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
     - {name: closed_at, type: "Nullable(DateTime64(6, 'UTC'))", codec: ["Delta(8)", "ZSTD(1)"]}
+    - {name: project_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: author_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: milestone_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: namespace_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: closed_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
   indexes:
     - {name: idx_state, column: state, type: "set(10)", granularity: 2}
@@ -174,4 +210,9 @@ storage:
     - {name: idx_description_ngram, column: description, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_author_id, order_by: [author_id]}
+    - {type: lightweight, name: by_milestone_id, order_by: [milestone_id]}
+    - {type: lightweight, name: by_namespace_id, order_by: [namespace_id]}
+    - {type: lightweight, name: by_closed_by_id, order_by: [closed_by_id]}
     - {type: aggregate, name: tp_count, select: [traversal_path, "uniq(id)"], group_by: [traversal_path]}

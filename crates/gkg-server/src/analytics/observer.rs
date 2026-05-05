@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::gkg::GkgEvent;
+use labkit_events::orbit::ToolName;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
@@ -16,6 +17,8 @@ pub(crate) struct AnalyticsObserver {
     tracker: Option<Arc<dyn AnalyticsTracker>>,
     config: Arc<AnalyticsConfig>,
     claims: Claims,
+    tool_name: ToolName,
+    schema_version: String,
     errored: Cell<bool>,
 }
 
@@ -24,11 +27,15 @@ impl AnalyticsObserver {
         tracker: Option<Arc<dyn AnalyticsTracker>>,
         config: Arc<AnalyticsConfig>,
         claims: Claims,
+        tool_name: ToolName,
+        schema_version: String,
     ) -> Self {
         Self {
             tracker,
             config,
             claims,
+            tool_name,
+            schema_version,
             errored: Cell::new(false),
         }
     }
@@ -53,10 +60,10 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(tracker) = self.tracker.as_ref() else {
             return;
         };
-        let Some(common) = build_common(&self.config, &self.claims) else {
+        let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
             return;
         };
-        let Some(query) = build_query(&self.claims) else {
+        let Some(query) = build_query(&self.claims, self.tool_name) else {
             return;
         };
         tracker.track(GkgEvent::query_executed(common, query));
@@ -107,6 +114,8 @@ mod tests {
             Some(tracker.clone()),
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
+            ToolName::QueryGraph,
+            "33".to_string(),
         );
         obs.finish(10, 0);
         assert_eq!(tracker.count(), 1);
@@ -119,6 +128,8 @@ mod tests {
             Some(tracker.clone()),
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
+            ToolName::QueryGraph,
+            "33".to_string(),
         );
         obs.record_error(&PipelineError::Execution("x".into()));
         obs.finish(0, 0);
@@ -127,7 +138,13 @@ mod tests {
 
     #[test]
     fn skips_when_tracker_absent() {
-        let obs = AnalyticsObserver::new(None, Arc::new(AnalyticsConfig::default()), test_claims());
+        let obs = AnalyticsObserver::new(
+            None,
+            Arc::new(AnalyticsConfig::default()),
+            test_claims(),
+            ToolName::QueryGraph,
+            "33".to_string(),
+        );
         obs.finish(1, 0);
     }
 }
