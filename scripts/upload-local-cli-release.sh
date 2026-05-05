@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Upload orbit binary tarballs (and matching .sha256 files) to the project's
-# Generic Package Registry, then attach them as asset links on the GitLab
-# Release that semantic-release created on `main` for $CI_COMMIT_TAG.
+# Upload local CLI binary tarballs (and matching .sha256 files) to the
+# project's Generic Package Registry, then attach them as asset links on the
+# GitLab Release that semantic-release created on `main` for $CI_COMMIT_TAG.
 #
 # Required env (provided by GitLab CI on tag pipelines):
 #   CI_COMMIT_TAG, CI_API_V4_URL, CI_PROJECT_ID, CI_JOB_TOKEN
