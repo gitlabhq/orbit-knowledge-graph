@@ -627,3 +627,55 @@ pub(super) async fn aggregation_empty_security_context_rejects_at_compile(ctx: &
         "error should mention traversal_path filter, got: {err}"
     );
 }
+
+// ── Default alias (no user-supplied alias) ──────────────────────────────────
+//
+// When the query omits `alias`, the column `name` in the formatted response
+// MUST equal the function name ("count", "sum", etc.). Regression guard for
+// the v2 compiler bug where the default was "agg_result".
+
+pub(super) async fn aggregation_no_alias_defaults_to_function_name(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "mr", "entity": "MergeRequest"}
+            ],
+            "relationships": [{"type": "AUTHORED", "from": "u", "to": "mr"}],
+            "aggregations": [{"function": "count", "target": "mr", "group_by": "u"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("User", 1, |n| {
+        n.prop_str("username") == Some("alice") && n.prop_i64("count") == Some(2)
+    });
+    resp.assert_node("User", 2, |n| n.prop_i64("count") == Some(1));
+    resp.assert_node("User", 3, |n| n.prop_i64("count") == Some(1));
+}
+
+pub(super) async fn aggregation_no_alias_sum_defaults_to_function_name(ctx: &TestContext) {
+    let resp = run_query(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "sum", "target": "u", "property": "id", "group_by": "g"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    resp.assert_node("Group", 100, |n| {
+        n.prop_str("name") == Some("Public Group") && n.prop_i64("sum") == Some(1 + 2 + 6)
+    });
+}

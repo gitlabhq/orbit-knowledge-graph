@@ -2440,6 +2440,143 @@ async fn pagination_with_redaction(ctx: &TestContext) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Default alias (no user-supplied alias)
+//
+// When the query omits `alias`, the column `name` in the response MUST equal
+// the function name (e.g. "count", "sum", "avg"). Regression guard for the
+// v2 compiler bug where the default was "agg_result" instead.
+// ─────────────────────────────────────────────────────────────────────────────
+
+async fn no_alias_grouped_count_uses_function_name(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}, "columns": ["username"]},
+                {"id": "g", "entity": "Group"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "g", "group_by": "u"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(
+        columns[0]["name"], "count",
+        "default alias must be the function name, not 'agg_result'"
+    );
+    assert_eq!(columns[0]["function"], "count");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let alice = find_node(nodes, "User", 1);
+    assert!(
+        alice.get("count").is_some(),
+        "aggregate value must appear under key 'count' on entity node"
+    );
+    assert_eq!(alice["count"].as_i64().unwrap(), 2);
+}
+
+async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
+            "aggregations": [{"function": "count", "target": "u"}],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 1);
+    assert_eq!(
+        columns[0]["name"], "count",
+        "ungrouped default alias must be function name"
+    );
+    assert_eq!(columns[0]["function"], "count");
+    assert_eq!(columns[0]["value"].as_i64().unwrap(), 5);
+}
+
+async fn no_alias_multi_agg_each_uses_own_function_name(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [
+                {"function": "count", "target": "u", "group_by": "g"},
+                {"function": "min", "target": "u", "property": "id", "group_by": "g"},
+                {"function": "max", "target": "u", "property": "id", "group_by": "g"}
+            ],
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(columns.len(), 3);
+    assert_eq!(columns[0]["name"], "count");
+    assert_eq!(columns[1]["name"], "min");
+    assert_eq!(columns[2]["name"], "max");
+
+    let nodes = value["nodes"].as_array().unwrap();
+    let g100 = find_node(nodes, "Group", 100);
+    assert!(g100.get("count").is_some(), "count key must exist on node");
+    assert!(g100.get("min").is_some(), "min key must exist on node");
+    assert!(g100.get("max").is_some(), "max key must exist on node");
+}
+
+async fn no_alias_aggregation_with_sort(ctx: &TestContext) {
+    let value = run_pipeline(
+        ctx,
+        r#"{
+            "query_type": "aggregation",
+            "nodes": [
+                {"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}, "columns": ["name"]},
+                {"id": "u", "entity": "User"}
+            ],
+            "relationships": [{"type": "MEMBER_OF", "from": "u", "to": "g"}],
+            "aggregations": [{"function": "count", "target": "u", "group_by": "g"}],
+            "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+            "limit": 10
+        }"#,
+        &allow_all(),
+    )
+    .await;
+
+    let columns = value["columns"].as_array().unwrap();
+    assert_eq!(
+        columns[0]["name"], "count",
+        "sorted aggregation default alias must be function name"
+    );
+
+    let nodes = value["nodes"].as_array().unwrap();
+    assert!(!nodes.is_empty());
+    assert!(
+        nodes.iter().all(|n| n.get("count").is_some()),
+        "all nodes must carry 'count' key"
+    );
+
+    // Verify descending order by count value.
+    let counts: Vec<i64> = nodes.iter().filter_map(|n| n["count"].as_i64()).collect();
+    for w in counts.windows(2) {
+        assert!(w[0] >= w[1], "expected descending order: {counts:?}");
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Test runner
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -2490,6 +2627,11 @@ async fn graph_formatter_e2e() {
         ungrouped_multiple_functions_emits_aggregates,
         grouped_aggregation_uses_entity_nodes,
         ungrouped_count_with_redaction,
+        // Default alias (no user-supplied alias)
+        no_alias_grouped_count_uses_function_name,
+        no_alias_ungrouped_count_uses_function_name,
+        no_alias_multi_agg_each_uses_own_function_name,
+        no_alias_aggregation_with_sort,
         // Path finding — type variations
         path_finding_exact_path,
         path_finding_all_shortest,
