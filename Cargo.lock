@@ -465,6 +465,7 @@ dependencies = [
  "arrow-select 58.1.0",
  "flatbuffers",
  "lz4_flex 0.13.0",
+ "zstd",
 ]
 
 [[package]]
@@ -14473,6 +14474,7 @@ dependencies = [
  "clap",
  "clickhouse",
  "clickhouse-client",
+ "datafusion 53.1.0",
  "futures",
  "gkg-observability",
  "gkg-server-config",

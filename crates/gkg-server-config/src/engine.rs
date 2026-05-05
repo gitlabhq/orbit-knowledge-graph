@@ -103,7 +103,11 @@ impl ScheduleConfiguration {
 // ── Handler config types ─────────────────────────────────────────────
 
 fn default_datalake_batch_size() -> u64 {
-    1_000_000
+    500_000
+}
+
+fn default_max_concurrent_writes() -> usize {
+    3
 }
 
 fn default_halving_initial_block_size() -> u64 {
@@ -154,6 +158,9 @@ pub struct GlobalHandlerConfig {
 
     #[serde(default)]
     pub batch_size_overrides: HashMap<String, u64>,
+
+    #[serde(default = "default_max_concurrent_writes")]
+    pub max_concurrent_writes: usize,
 }
 
 impl Default for GlobalHandlerConfig {
@@ -162,6 +169,7 @@ impl Default for GlobalHandlerConfig {
             engine: HandlerConfiguration::default(),
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
+            max_concurrent_writes: default_max_concurrent_writes(),
         }
     }
 }
@@ -185,6 +193,9 @@ pub struct NamespaceHandlerConfig {
     /// to run concurrently within a single namespace indexing pass.
     #[serde(default = "default_max_concurrent_entities")]
     pub max_concurrent_entities: usize,
+
+    #[serde(default = "default_max_concurrent_writes")]
+    pub max_concurrent_writes: usize,
 }
 
 impl Default for NamespaceHandlerConfig {
@@ -194,6 +205,7 @@ impl Default for NamespaceHandlerConfig {
             datalake_batch_size: default_datalake_batch_size(),
             batch_size_overrides: HashMap::new(),
             max_concurrent_entities: default_max_concurrent_entities(),
+            max_concurrent_writes: default_max_concurrent_writes(),
         }
     }
 }

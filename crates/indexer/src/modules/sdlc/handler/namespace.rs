@@ -88,6 +88,7 @@ impl Handler for NamespaceHandler {
                 context.destination.as_ref(),
                 &context.progress,
                 self.config.max_concurrent_entities,
+                self.config.max_concurrent_writes,
             )
             .await;
 

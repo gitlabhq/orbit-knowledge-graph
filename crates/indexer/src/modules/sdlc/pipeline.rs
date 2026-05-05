@@ -6,8 +6,8 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
-use futures::StreamExt;
 use futures::stream::FuturesUnordered;
+use futures::{FutureExt, StreamExt};
 use gkg_utils::arrow::prepare_batches;
 use serde_json::Value;
 use tokio::sync::Semaphore;
@@ -60,6 +60,7 @@ impl Pipeline {
         destination: &dyn Destination,
         progress: &ProgressNotifier,
         max_concurrent_entities: usize,
+        max_concurrent_writes: usize,
     ) -> Result<(), HandlerError> {
         let semaphore = Semaphore::new(max_concurrent_entities.max(1));
         let mut futures = FuturesUnordered::new();
@@ -79,7 +80,9 @@ impl Pipeline {
             futures.push(
                 async {
                     let _permit = semaphore.acquire().await.expect("semaphore is not closed");
-                    let result = self.run_plan(plan, context, destination, progress).await;
+                    let result = self
+                        .run_plan(plan, context, destination, progress, max_concurrent_writes)
+                        .await;
                     (&plan.name, result)
                 }
                 .instrument(span),
@@ -110,6 +113,7 @@ impl Pipeline {
         context: &PipelineContext,
         destination: &dyn Destination,
         progress: &ProgressNotifier,
+        max_concurrent_writes: usize,
     ) -> Result<(), HandlerError> {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
@@ -154,6 +158,7 @@ impl Pipeline {
                 &batches,
                 &plan.transforms,
                 destination,
+                max_concurrent_writes,
             )
             .await?;
 
@@ -285,6 +290,7 @@ impl Pipeline {
         batches: &[RecordBatch],
         transforms: &[Transformation],
         destination: &dyn Destination,
+        max_concurrent_writes: usize,
     ) -> Result<(), HandlerError> {
         let schema = batches[0].schema();
 
@@ -304,6 +310,8 @@ impl Pipeline {
             })?;
 
         let mut total_transform_duration = Duration::ZERO;
+        let write_semaphore = Arc::new(Semaphore::new(max_concurrent_writes.max(1)));
+        let mut write_futures = FuturesUnordered::new();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -326,36 +334,51 @@ impl Pipeline {
                 continue;
             }
 
+            let destination_table = transform.destination_table.clone();
             let writer = destination
-                .new_batch_writer(&transform.destination_table)
+                .new_batch_writer(&destination_table)
                 .await
                 .map_err(|err| {
                     HandlerError::Processing(format!(
-                        "failed to create writer for {}: {err}",
-                        transform.destination_table
+                        "failed to create writer for {destination_table}: {err}"
                     ))
                 })?;
 
-            let write_start = Instant::now();
-            writer.write_batch(&result_batches).await.map_err(|err| {
-                HandlerError::Processing(format!(
-                    "failed to write to {}: {err}",
-                    transform.destination_table
-                ))
-            })?;
-            let write_elapsed = write_start.elapsed();
+            let sem = write_semaphore.clone();
+            write_futures.push(async move {
+                let _permit = sem.acquire().await.expect("semaphore is not closed");
 
-            info!(
-                table = %transform.destination_table,
-                rows = row_count,
-                transform_ms = transform_elapsed.as_millis() as u64,
-                write_ms = write_elapsed.as_millis() as u64,
-                "transform written"
-            );
+                let write_start = Instant::now();
+                writer.write_batch(&result_batches).await.map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to write to {destination_table}: {err}"
+                    ))
+                })?;
+                let write_elapsed = write_start.elapsed();
+
+                info!(
+                    table = %destination_table,
+                    rows = row_count,
+                    transform_ms = transform_elapsed.as_millis() as u64,
+                    write_ms = write_elapsed.as_millis() as u64,
+                    "transform written"
+                );
+
+                Ok::<(), HandlerError>(())
+            });
+
+            // Drain completed writes to free Arrow memory early
+            while let Some(Some(result)) = write_futures.next().now_or_never() {
+                result?;
+            }
         }
 
         self.metrics
             .record_transform_duration(total_transform_duration.as_secs_f64());
+
+        while let Some(result) = write_futures.next().await {
+            result?;
+        }
 
         Ok(())
     }
@@ -613,6 +636,7 @@ mod tests {
                 &destination,
                 &ProgressNotifier::noop(),
                 3,
+                3,
             )
             .await;
         assert!(result.is_ok());
@@ -642,6 +666,7 @@ mod tests {
                 &destination,
                 &ProgressNotifier::noop(),
                 3,
+                3,
             )
             .await;
 
@@ -668,6 +693,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
                 3,
             )
             .await;
@@ -748,6 +774,7 @@ mod tests {
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
                 3,
+                3,
             )
             .await;
 
@@ -788,6 +815,7 @@ mod tests {
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
                 3,
+                3,
             )
             .await;
         assert!(result.is_ok(), "should recover after halving: {result:?}");
@@ -827,6 +855,7 @@ mod tests {
                 &MockDestination::new(),
                 &ProgressNotifier::noop(),
                 3,
+                3,
             )
             .await;
 
@@ -861,6 +890,7 @@ mod tests {
                 &test_context(),
                 &destination,
                 &ProgressNotifier::noop(),
+                3,
                 3,
             )
             .await;

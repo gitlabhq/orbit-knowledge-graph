@@ -70,8 +70,9 @@
           "global-handler": {
             "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 1000000,
+            "datalake_batch_size": 500000,
             "max_attempts": null,
+            "max_concurrent_writes": 3,
             "retry_interval_secs": null
           },
           "namespace-deletion": {
@@ -82,9 +83,10 @@
           "namespace-handler": {
             "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 1000000,
+            "datalake_batch_size": 500000,
             "max_attempts": null,
             "max_concurrent_entities": 3,
+            "max_concurrent_writes": 3,
             "retry_interval_secs": null
           }
         },
@@ -514,8 +516,9 @@
             "global-handler": {
               "batch_size_overrides": {},
               "concurrency_group": null,
-              "datalake_batch_size": 1000000,
+              "datalake_batch_size": 500000,
               "max_attempts": null,
+              "max_concurrent_writes": 3,
               "retry_interval_secs": null
             },
             "namespace-deletion": {
@@ -526,9 +529,10 @@
             "namespace-handler": {
               "batch_size_overrides": {},
               "concurrency_group": null,
-              "datalake_batch_size": 1000000,
+              "datalake_batch_size": 500000,
               "max_attempts": null,
               "max_concurrent_entities": 3,
+              "max_concurrent_writes": 3,
               "retry_interval_secs": null
             }
           }
@@ -620,7 +624,7 @@
         "datalake_batch_size": {
           "type": "integer",
           "format": "uint64",
-          "default": 1000000,
+          "default": 500000,
           "minimum": 0
         },
         "max_attempts": {
@@ -631,6 +635,12 @@
           ],
           "format": "uint32",
           "default": null,
+          "minimum": 0
+        },
+        "max_concurrent_writes": {
+          "type": "integer",
+          "format": "uint",
+          "default": 3,
           "minimum": 0
         },
         "retry_interval_secs": {
@@ -729,8 +739,9 @@
           "default": {
             "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 1000000,
+            "datalake_batch_size": 500000,
             "max_attempts": null,
+            "max_concurrent_writes": 3,
             "retry_interval_secs": null
           }
         },
@@ -747,9 +758,10 @@
           "default": {
             "batch_size_overrides": {},
             "concurrency_group": null,
-            "datalake_batch_size": 1000000,
+            "datalake_batch_size": 500000,
             "max_attempts": null,
             "max_concurrent_entities": 3,
+            "max_concurrent_writes": 3,
             "retry_interval_secs": null
           }
         }
@@ -964,7 +976,7 @@
         "datalake_batch_size": {
           "type": "integer",
           "format": "uint64",
-          "default": 1000000,
+          "default": 500000,
           "minimum": 0
         },
         "max_attempts": {
@@ -979,6 +991,12 @@
         },
         "max_concurrent_entities": {
           "description": "Maximum number of entity pipelines (e.g. MergeRequest, Pipeline, Job)\nto run concurrently within a single namespace indexing pass.",
+          "type": "integer",
+          "format": "uint",
+          "default": 3,
+          "minimum": 0
+        },
+        "max_concurrent_writes": {
           "type": "integer",
           "format": "uint",
           "default": 3,

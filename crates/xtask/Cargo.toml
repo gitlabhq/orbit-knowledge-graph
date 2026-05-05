@@ -37,5 +37,6 @@ ontology = { path = "../ontology" }
 schemars = { workspace = true }
 clickhouse = { workspace = true }
 clickhouse-client = { path = "../clickhouse-client" }
+datafusion = { workspace = true }
 gkg-utils = { path = "../utils" }
 query-engine = { path = "../query-engine" }

@@ -75,6 +75,7 @@ impl Handler for GlobalHandler {
                 context.destination.as_ref(),
                 &context.progress,
                 self.plans.len(),
+                self.config.max_concurrent_writes,
             )
             .await;
 

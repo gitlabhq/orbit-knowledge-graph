@@ -1,6 +1,7 @@
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 
+mod bench;
 mod dashboards;
 mod metrics_catalog;
 mod schema;
@@ -49,6 +50,66 @@ enum Command {
         /// return a non-zero exit if they differ.
         #[arg(long)]
         check: bool,
+    },
+    /// Benchmark the indexer write pipeline against ClickHouse.
+    Bench {
+        #[command(subcommand)]
+        command: BenchCommand,
+    },
+}
+
+#[derive(Subcommand)]
+enum BenchCommand {
+    /// Benchmark extract → transform → write for the Job pipeline.
+    WritePipeline {
+        /// ClickHouse HTTP URL.
+        #[arg(long, default_value = "http://localhost:8123")]
+        clickhouse_url: String,
+        /// ClickHouse database.
+        #[arg(long, default_value = "default")]
+        database: String,
+        /// ClickHouse username.
+        #[arg(long, default_value = "default")]
+        username: String,
+        /// ClickHouse password.
+        #[arg(long)]
+        password: Option<String>,
+        /// Total rows to seed in siphon_p_ci_builds.
+        #[arg(long, default_value = "100000000")]
+        total_rows: u64,
+        /// Rows per extraction batch.
+        #[arg(long, default_value = "500000")]
+        batch_size: u64,
+        /// Max concurrent ClickHouse writes per batch.
+        #[arg(long, default_value = "3")]
+        max_concurrent_writes: usize,
+        /// Rows per seed INSERT batch.
+        #[arg(long, default_value = "1000000")]
+        seed_batch_size: u64,
+        /// Lock file to skip re-seeding.
+        #[arg(long, default_value = ".bench-seeded.lock")]
+        lock_file: std::path::PathBuf,
+        /// Stop after N batches (for fast iteration).
+        #[arg(long)]
+        max_batches: Option<u64>,
+        /// Use ClickHouse async_insert for writes.
+        #[arg(long)]
+        async_insert: bool,
+        /// Merge all edge transform outputs into a single write.
+        #[arg(long)]
+        coalesce_edges: bool,
+        /// Split each write into sub-batches of this many rows.
+        #[arg(long)]
+        write_chunk_size: Option<usize>,
+        /// Overlap extract(N+1) with write(N) for each batch.
+        #[arg(long)]
+        pipeline: bool,
+        /// Use OFFSET-based pagination instead of cursor-based.
+        #[arg(long)]
+        use_offset: bool,
+        /// Use ZSTD compression for Arrow IPC instead of LZ4.
+        #[arg(long)]
+        zstd: bool,
     },
 }
 
@@ -142,5 +203,45 @@ async fn main() -> Result<()> {
         Command::Schema { output } => schema::run(output),
         Command::MetricsCatalog { output, check } => metrics_catalog::run(output, check),
         Command::Dashboards { dir, check } => dashboards::run(dir, check),
+        Command::Bench { command } => match command {
+            BenchCommand::WritePipeline {
+                clickhouse_url,
+                database,
+                username,
+                password,
+                total_rows,
+                batch_size,
+                max_concurrent_writes,
+                seed_batch_size,
+                lock_file,
+                max_batches,
+                async_insert,
+                coalesce_edges,
+                write_chunk_size,
+                pipeline,
+                use_offset,
+                zstd,
+            } => {
+                bench::write_pipeline::run(&bench::write_pipeline::BenchConfig {
+                    clickhouse_url,
+                    database,
+                    username,
+                    password,
+                    total_rows,
+                    batch_size,
+                    max_concurrent_writes,
+                    seed_batch_size,
+                    lock_file,
+                    max_batches,
+                    async_insert,
+                    coalesce_edges,
+                    write_chunk_size,
+                    pipeline,
+                    use_offset,
+                    zstd,
+                })
+                .await
+            }
+        },
     }
 }

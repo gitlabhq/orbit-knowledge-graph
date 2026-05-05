@@ -222,6 +222,10 @@ done
 """
 description = "Run v2 pipeline against all downloaded benchmark repos"
 
+[tasks."bench:write-pipeline"]
+run = "cargo run -p xtask -- bench write-pipeline {{arg(name=\"flags\", var=true)}}"
+description = "Benchmark the indexer write pipeline (extract → transform → write) against ClickHouse"
+
 [tasks."bench:list-repos"]
 run = "gitlab-xtasks benchmark list-repos --config code-indexing-benchmark.yaml"
 description = "List benchmark repositories"

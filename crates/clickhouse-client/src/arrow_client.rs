@@ -1,4 +1,5 @@
 use std::io::Cursor;
+use std::sync::{Arc, Mutex};
 
 use arrow::record_batch::RecordBatch;
 use arrow_ipc::reader::StreamReader;
@@ -117,6 +118,74 @@ impl ArrowClickHouseClient {
             .map_err(ClickHouseError::Insert)?;
         insert.end().await.map_err(ClickHouseError::Insert)?;
 
+        Ok(())
+    }
+
+    /// Like `insert_arrow`, but streams each RecordBatch as a separate HTTP
+    /// chunk instead of buffering the full IPC payload in memory.
+    pub async fn insert_arrow_streaming(
+        &self,
+        table: &str,
+        batches: &[RecordBatch],
+    ) -> Result<(), ClickHouseError> {
+        self.insert_arrow_streaming_with(table, batches, arrow_ipc::CompressionType::LZ4_FRAME)
+            .await
+    }
+
+    pub async fn insert_arrow_streaming_with(
+        &self,
+        table: &str,
+        batches: &[RecordBatch],
+        compression: arrow_ipc::CompressionType,
+    ) -> Result<(), ClickHouseError> {
+        if batches.is_empty() {
+            return Ok(());
+        }
+
+        let schema = batches[0].schema();
+        let options =
+            arrow_ipc::writer::IpcWriteOptions::try_new(8, false, arrow_ipc::MetadataVersion::V5)
+                .map_err(ClickHouseError::ArrowEncode)?
+                .try_with_compression(Some(compression))
+                .map_err(ClickHouseError::ArrowEncode)?;
+
+        let drain = DrainableWriter::new();
+        let mut writer = StreamWriter::try_new_with_options(drain.clone(), &schema, options)
+            .map_err(ClickHouseError::ArrowEncode)?;
+
+        let sql = format!("INSERT INTO {table} FORMAT ArrowStream");
+        let mut insert = self.client.insert_formatted_with(&sql);
+
+        // Schema message written during StreamWriter construction
+        let schema_bytes = drain.take();
+        if !schema_bytes.is_empty() {
+            insert
+                .send(Bytes::from(schema_bytes))
+                .await
+                .map_err(ClickHouseError::Insert)?;
+        }
+
+        for (batch_index, batch) in batches.iter().enumerate() {
+            if batch.schema() != schema {
+                warn!(table, batch_index, "RecordBatch schema mismatch");
+            }
+            writer.write(batch).map_err(ClickHouseError::ArrowEncode)?;
+            insert
+                .send(Bytes::from(drain.take()))
+                .await
+                .map_err(ClickHouseError::Insert)?;
+        }
+
+        writer.finish().map_err(ClickHouseError::ArrowEncode)?;
+        let footer = drain.take();
+        if !footer.is_empty() {
+            insert
+                .send(Bytes::from(footer))
+                .await
+                .map_err(ClickHouseError::Insert)?;
+        }
+
+        insert.end().await.map_err(ClickHouseError::Insert)?;
         Ok(())
     }
 
@@ -357,5 +426,32 @@ impl ArrowQuery {
         });
 
         Ok(ReceiverStream::new(rx).boxed())
+    }
+}
+
+/// Write target for `StreamWriter` that allows draining the accumulated bytes
+/// between IPC message writes. Uses `Arc<Mutex<_>>` so the buffer remains
+/// accessible while `StreamWriter` owns the writer.
+#[derive(Clone)]
+struct DrainableWriter(Arc<Mutex<Vec<u8>>>);
+
+impl DrainableWriter {
+    fn new() -> Self {
+        Self(Arc::new(Mutex::new(Vec::new())))
+    }
+
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *self.0.lock().unwrap())
+    }
+}
+
+impl std::io::Write for DrainableWriter {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.0.lock().unwrap().extend_from_slice(buf);
+        Ok(buf.len())
+    }
+
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
     }
 }

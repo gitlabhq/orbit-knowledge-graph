@@ -13,7 +13,7 @@ circuit-breaker = { workspace = true }
 gkg-server-config = { path = "../gkg-server-config" }
 gkg-utils = { path = "../utils" }
 arrow = { workspace = true }
-arrow-ipc = { workspace = true, features = ["lz4"] }
+arrow-ipc = { workspace = true, features = ["lz4", "zstd"] }
 bytes = { workspace = true }
 clickhouse = { workspace = true }
 futures = { workspace = true }
