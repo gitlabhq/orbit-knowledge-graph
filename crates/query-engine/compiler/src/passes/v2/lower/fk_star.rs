@@ -48,6 +48,17 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
     let mut selects = node_select_columns(center_alias, center_np);
     let mut ctes = Vec::new();
 
+    // Elevated-access center node: emit a FilterOnly CTE so SecurityPass
+    // can inject the stricter role-gated startsWith filter.
+    if center_np.needs_elevated_filter {
+        where_parts.extend(emit_filter_subquery(
+            center_np,
+            center_alias,
+            DEFAULT_PRIMARY_KEY,
+            &mut ctes,
+        )?);
+    }
+
     // Each hop: target node connected via FK column.
     for hop in &plan.hops {
         let fk = hop

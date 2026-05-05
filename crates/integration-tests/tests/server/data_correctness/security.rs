@@ -985,7 +985,7 @@ pub(super) async fn traversal_vulnerability_reporter_no_filters_sees_nothing(ctx
     // edge scan finds IN_PROJECT edges for project 1000, the Vulnerability
     // FilterOnly CTE restricts to paths where the user has Security Manager
     // access. Reporter is below that floor, so the CTE returns zero IDs.
-    resp.assert_node_absent("Vulnerability", 8000);
+    resp.assert_node_count(0);
 }
 
 /// Same traversal, but with Security Manager access — should see the vulnerability.
