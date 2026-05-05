@@ -2486,8 +2486,8 @@ async fn no_alias_ungrouped_count_uses_function_name(ctx: &TestContext) {
         ctx,
         r#"{
             "query_type": "aggregation",
-            "nodes": [{"id": "u", "entity": "User", "id_range": {"start": 1, "end": 10000}}],
-            "aggregations": [{"function": "count", "target": "u"}],
+            "nodes": [{"id": "g", "entity": "Group", "id_range": {"start": 1, "end": 10000}}],
+            "aggregations": [{"function": "count", "target": "g"}],
             "limit": 10
         }"#,
         &allow_all(),
