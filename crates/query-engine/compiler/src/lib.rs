@@ -74,22 +74,18 @@ pub use pipelines::{
 };
 
 // Re-export key types from pass modules.
-pub use passes::check::check_ast;
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
     clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,
     ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::generate_graph_tables,
     ddl::generate_graph_tables_with_prefix, ddl::generate_local_tables,
 };
-pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext, enforce_return};
+pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{
     DynamicEntityColumns, HydrationPlan, HydrationTemplate, VirtualColumnRequest,
     generate_hydration_plan,
 };
-pub use passes::lower::lower;
 pub use passes::normalize::{build_entity_auth, normalize};
-pub use passes::security::apply_security_context;
-pub use passes::validate::Validator;
 pub use types::{AccessLevel, DEFAULT_PATH_ACCESS_LEVEL, SecurityContext, TraversalPath};
 
 use metrics::CountErr;
