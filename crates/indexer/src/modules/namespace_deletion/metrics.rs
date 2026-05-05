@@ -18,11 +18,8 @@ impl DeletionMetrics {
         }
     }
 
-    pub(super) fn record_table_deleted(&self, table: &str, duration: f64) {
-        self.table_deletion_duration.record(
-            duration,
-            &[KeyValue::new(deletion::labels::TABLE, table.to_owned())],
-        );
+    pub(super) fn record_table_deleted(&self, duration: f64) {
+        self.table_deletion_duration.record(duration, &[]);
     }
 
     pub(super) fn record_table_error(&self, table: &str) {

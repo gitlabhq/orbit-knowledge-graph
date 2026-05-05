@@ -975,8 +975,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 {{table}}",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
             },
             {
@@ -984,8 +984,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 {{table}}",
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
                "refId": "B"
             },
             {
@@ -993,8 +993,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 {{table}}",
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_etl_destination_write_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
                "refId": "C"
             }
          ],
@@ -1044,8 +1044,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (table) (rate(gkg_etl_destination_write_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{table}}",
+               "expr": "sum(rate(gkg_etl_destination_write_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
             }
          ],
@@ -2999,8 +2999,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 {{entity}}",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
             },
             {
@@ -3008,8 +3008,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 {{entity}}",
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
                "refId": "B"
             },
             {
@@ -3017,8 +3017,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 {{entity}}",
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
                "refId": "C"
             }
          ],
@@ -3068,8 +3068,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_datalake_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{entity}}",
+               "expr": "sum(rate(gkg_indexer_sdlc_datalake_query_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
             }
          ],
@@ -3461,8 +3461,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 {{entity}}",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
             },
             {
@@ -3470,8 +3470,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 {{entity}}",
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
                "refId": "B"
             },
             {
@@ -3479,8 +3479,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 {{entity}}",
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_sdlc_transform_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
                "refId": "C"
             }
          ],
@@ -3530,8 +3530,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (entity) (rate(gkg_indexer_sdlc_transform_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{entity}}",
+               "expr": "sum(rate(gkg_indexer_sdlc_transform_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
             }
          ],
@@ -3581,8 +3581,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (entity) (gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
-               "legendFormat": "{{entity}}",
+               "expr": "sum(gkg_indexer_sdlc_watermark_lag_seconds{container=\"gkg-indexer\", cluster=~\"$cluster\"})",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],
@@ -3645,8 +3645,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.5, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p50 {{table}}",
+               "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p50 overall",
                "refId": "A"
             },
             {
@@ -3654,8 +3654,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.95, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p95 {{table}}",
+               "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p95 overall",
                "refId": "B"
             },
             {
@@ -3663,8 +3663,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "histogram_quantile(0.99, sum by (le, table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
-               "legendFormat": "p99 {{table}}",
+               "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+               "legendFormat": "p99 overall",
                "refId": "C"
             }
          ],
@@ -3714,8 +3714,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (table) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{table}}",
+               "expr": "sum(rate(gkg_indexer_namespace_deletion_table_duration_seconds_count{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "count",
                "refId": "A"
             }
          ],

@@ -3,7 +3,7 @@
 //! All pipeline registration lives here. Adding a new language or custom
 //! pipeline: add one line to the `register_v2_pipelines!` invocation below.
 
-use crate::v2::config::Language;
+use crate::v2::config::{Language, LanguageFamily};
 
 use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
@@ -18,7 +18,8 @@ use crate::v2::langs::generic::ruby::{RubyDsl, RubyRules};
 use std::sync::Arc;
 
 use crate::v2::pipeline::{
-    BatchTx, FileInput, GenericPipeline, LanguagePipeline, PipelineContext, PipelineError,
+    BatchTx, FamilyFileInput, FileInput, GenericPipeline, LanguageContext, LanguagePipeline,
+    PipelineContext, PipelineError,
 };
 
 // ── Macro ───────────────────────────────────────────────────────
@@ -40,7 +41,7 @@ macro_rules! register_v2_pipelines {
     (@munch [$($langs:tt)*] [$($tags:tt)*] $v:ident => $p:tt , $($rest:tt)*) => {
         register_v2_pipelines!(@munch [$($langs)* [$v => $p]] [$($tags)*] $($rest)*);
     };
-    // Emit dispatch_language (called by Pipeline::run).
+    // Emit dispatch_language, lang_ctx_for, dispatch_by_tag.
     (@emit_lang $( [$variant:ident => [$($pipeline:tt)*]] )* ) => {
         pub fn dispatch_language(
             language: Language,
@@ -53,6 +54,21 @@ macro_rules! register_v2_pipelines {
                 $(Language::$variant => <$($pipeline)*>::process_files(files, ctx, btx),)*
                 _ => return None,
             })
+        }
+
+        /// Build a [`LanguageContext`] for the given language at runtime.
+        /// Auto-generated from the pipeline registration table.
+        /// Returns `None` for custom pipelines (JS, Rust) that don't
+        /// implement `lang_ctx`.
+        pub fn lang_ctx_for(
+            language: Language,
+            ctx: &Arc<PipelineContext>,
+        ) -> Option<Arc<LanguageContext>> {
+            #[allow(unreachable_patterns)]
+            match language {
+                $(Language::$variant => <$($pipeline)*>::lang_ctx(ctx),)*
+                _ => None,
+            }
         }
     };
     // Emit dispatch_by_tag (called by YAML test harness).
@@ -89,6 +105,92 @@ register_v2_pipelines! {
     Ruby    => [GenericPipeline<RubyDsl, RubyRules>],
     Rust    => [RustPipeline],
     Tag("js") => [JsPipeline],
+}
+
+// ── Family dispatch ─────────────────────────────────────────────
+
+/// Dispatch a language family to the appropriate pipeline(s).
+///
+/// For single-language families and families where all members use
+/// custom pipelines, groups files by language and delegates to
+/// [`dispatch_language`]. For multi-language generic-pipeline
+/// families, runs a shared [`FamilyPipeline`] so all members share
+/// a single `CodeGraph` and can resolve symbols across languages.
+pub fn dispatch_family(
+    _family: LanguageFamily,
+    files: &[FamilyFileInput],
+    ctx: &Arc<PipelineContext>,
+    btx: &BatchTx<'_>,
+) -> Option<Result<(), Vec<PipelineError>>> {
+    // Collect the distinct languages present in this batch.
+    let mut languages: rustc_hash::FxHashSet<Language> = rustc_hash::FxHashSet::default();
+    for f in files {
+        languages.insert(f.language);
+    }
+
+    // If there's only one language, delegate to the per-language pipeline
+    // directly -- avoids building the family machinery for the common case.
+    if languages.len() == 1 {
+        let lang = *languages.iter().next().unwrap();
+        let paths: Vec<FileInput> = files.iter().map(|f| f.path.clone()).collect();
+        return dispatch_language(lang, &paths, ctx, btx);
+    }
+
+    // Multiple languages: try to build LanguageContexts for each.
+    // If any member doesn't support it (custom pipeline), fall back
+    // to running each language's pipeline separately.
+    let mut member_ctxs: rustc_hash::FxHashMap<Language, Arc<LanguageContext>> =
+        rustc_hash::FxHashMap::default();
+    let mut has_custom = false;
+    for &lang in &languages {
+        match lang_ctx_for(lang, ctx) {
+            Some(lctx) => {
+                member_ctxs.insert(lang, lctx);
+            }
+            None => {
+                has_custom = true;
+            }
+        }
+    }
+
+    if has_custom {
+        // Fall back: run each language's pipeline over its files separately.
+        let mut by_lang: rustc_hash::FxHashMap<Language, Vec<FileInput>> =
+            rustc_hash::FxHashMap::default();
+        for f in files {
+            by_lang.entry(f.language).or_default().push(f.path.clone());
+        }
+        let mut all_errors: Vec<PipelineError> = Vec::new();
+        let mut any_matched = false;
+        for (lang, paths) in &by_lang {
+            match dispatch_language(*lang, paths, ctx, btx) {
+                Some(Ok(())) => any_matched = true,
+                Some(Err(errs)) => {
+                    any_matched = true;
+                    all_errors.extend(errs);
+                }
+                None => {
+                    tracing::warn!(%lang, "no pipeline registered for language");
+                }
+            }
+        }
+        return if !any_matched {
+            None
+        } else if all_errors.is_empty() {
+            Some(Ok(()))
+        } else {
+            Some(Err(all_errors))
+        };
+    }
+
+    // All members are generic-pipeline languages: run FamilyPipeline
+    // with a shared CodeGraph.
+    Some(crate::v2::pipeline::FamilyPipeline::run(
+        files,
+        &member_ctxs,
+        ctx,
+        btx,
+    ))
 }
 
 #[cfg(test)]

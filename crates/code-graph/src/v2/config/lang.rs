@@ -2,6 +2,36 @@ use serde::{Deserialize, Serialize};
 use strum::{AsRefStr, Display, EnumIter, EnumString};
 use treesitter_visit::{LanguageExt, SupportLang};
 
+/// Groups of languages that can resolve symbols across each other's
+/// files. Languages in the same family share a single `CodeGraph`
+/// during pipeline processing, so cross-language imports (e.g. C++
+/// `#include`-ing a C header) resolve naturally.
+///
+/// Languages not in a multi-language family get their own
+/// single-language family via `Standalone`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub enum LanguageFamily {
+    /// C and C++ share an include-based resolution graph. The C++
+    /// tree-sitter grammar is a superset of C, so `.h` headers
+    /// parsed with the C grammar coexist cleanly with `.cpp` files.
+    CFamily,
+    /// Java and Kotlin compile to the same bytecode and share
+    /// package-based FQN resolution. Fully bidirectional.
+    Jvm,
+    /// Standalone language: gets its own isolated CodeGraph.
+    Standalone(Language),
+}
+
+impl std::fmt::Display for LanguageFamily {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::CFamily => write!(f, "c_family"),
+            Self::Jvm => write!(f, "jvm"),
+            Self::Standalone(lang) => write!(f, "{lang}"),
+        }
+    }
+}
+
 // Declares the Language enum and all per-variant property methods from
 // a single declarative table.
 macro_rules! define_languages {
@@ -46,6 +76,19 @@ macro_rules! define_languages {
             pub const fn to_support_lang(&self) -> Option<SupportLang> {
                 match self {
                     $(Self::$variant => define_languages!(@support_lang $($sl)?),)+
+                }
+            }
+
+            /// Returns the [`LanguageFamily`] this language belongs to.
+            /// Languages in the same family share a `CodeGraph` during
+            /// pipeline processing and can resolve symbols across each other.
+            pub const fn family(&self) -> LanguageFamily {
+                match self {
+                    Self::C => LanguageFamily::CFamily,
+                    // NOTE: Cpp is not on main yet (arrives in the C++ MR).
+                    // When it lands, add: Self::Cpp => LanguageFamily::CFamily,
+                    Self::Java | Self::Kotlin => LanguageFamily::Jvm,
+                    _ => LanguageFamily::Standalone(*self),
                 }
             }
 

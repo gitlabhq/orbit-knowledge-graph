@@ -1,0 +1,135 @@
+name: "JVM: cross-language Java/Kotlin resolution"
+
+fixtures:
+  - path: com/example/model/User.java
+    content: |
+      package com.example.model;
+
+      public class User {
+          private String name;
+          public User(String name) { this.name = name; }
+          public static User create(String name) { return new User(name); }
+          public String greet() { return "Hello " + name; }
+      }
+
+  - path: com/example/model/Role.java
+    content: |
+      package com.example.model;
+
+      public enum Role {
+          ADMIN, EDITOR, VIEWER;
+      }
+
+  - path: com/example/util/Strings.kt
+    content: |
+      package com.example.util
+
+      fun capitalize(input: String): String {
+          return input.uppercase()
+      }
+
+      fun isEmpty(input: String): Boolean {
+          return input.isEmpty()
+      }
+
+  - path: com/example/service/UserService.kt
+    content: |
+      package com.example.service
+
+      import com.example.model.User
+      import com.example.util.capitalize
+
+      class UserService {
+          fun createUser(name: String): User {
+              val cleaned = capitalize(name)
+              return User.create(cleaned)
+          }
+      }
+
+  - path: com/example/App.java
+    content: |
+      package com.example;
+
+      import com.example.service.UserService;
+      import com.example.util.StringsKt;
+
+      public class App {
+          public void run() {
+              UserService svc = new UserService();
+              StringsKt.capitalize("hello");
+              StringsKt.isEmpty("test");
+          }
+      }
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # KOTLIN CALLING JAVA (cross-language)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Kotlin UserService calls Java User.create (static method via import)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'createUser'
+        AND callee.name = 'create'
+        AND callee.file_path = 'com/example/model/User.java'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/model/User.java", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # KOTLIN CALLING KOTLIN (within family)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Kotlin UserService calls Kotlin capitalize"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.name = 'createUser'
+        AND callee.name = 'capitalize'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "com/example/service/UserService.kt", tgt: "com/example/util/Strings.kt", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # JAVA CALLING JAVA (within family)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Java User.create calls Java User (same file)"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'com.example.model.User.create'
+        AND callee.fqn STARTS WITH 'com.example.model.User'
+        AND e.edge_kind = 'Calls'
+      RETURN callee.fqn AS callee
+    assert:
+      - { row_count: 2 }
+      - { row: { callee: "com.example.model.User.User" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # ALL FILES AND DEFINITIONS DISCOVERED
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "All 5 files discovered"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 5 }
+      - { unique: path }
+
+  - name: "Java and Kotlin definitions coexist in same graph"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn IN [
+          'com.example.model.User',
+          'com.example.model.Role',
+          'com.example.service.UserService'
+        ]
+      RETURN d.fqn AS fqn, d.file_path AS path
+    assert:
+      - { row_count: 3 }
+      - { unique: fqn }
+      - { row: { fqn: "com.example.model.User", path: "com/example/model/User.java" } }
+      - { row: { fqn: "com.example.model.Role", path: "com/example/model/Role.java" } }
+      - { row: { fqn: "com.example.service.UserService", path: "com/example/service/UserService.kt" } }

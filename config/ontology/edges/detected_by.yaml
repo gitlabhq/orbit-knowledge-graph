@@ -5,6 +5,7 @@ description: Finding was detected by a vulnerability scanner
 variants:
   - from_node: { type: Finding, id: id }
     to_node: { type: VulnerabilityScanner, id: id }
+    fk_column: scanner_id
     description: "Finding detected by vulnerability scanner."
 
   - from_node: { type: VulnerabilityOccurrence, id: id }

@@ -14,22 +14,27 @@ gitlab:
   # to the current master. Pinning the chart alone is not enough because
   # every CNG image defaults to :master (a moving tag); the `images.*.digest`
   # entries force specific digests so every pod pulls identical rails code.
-  chart: "9.11.2-2486308846"
+  chart: "9.11.2-2499719586"
   # Git ref of `gitlab-org/gitlab` used to fetch SSOT siphon table definitions
   # (`db/siphon/tables/*.yml`) when running `scripts/sync-cdc-tables.sh`.
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
-  ref: "6d8b3a24810f4befe845cfc87f1a9ba6b588085f"
-  # Per-component digest pins. Only Rails-bearing images need pinning because
-  # the schema-version init check lives in their code. Consumed by
-  # values/gitlab.yaml.gotmpl which renders them as "master@<digest>" tags.
+  ref: "ea9e759508a771e651df399e56691050c248c622"
+  # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
+  # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
+  # avoids version skew between webservice (Rails) and its workhorse sidecar:
+  # the orbit-query payload contract changed shape on master, so an unpinned
+  # `:master` workhorse can deserialize the pinned webservice's payload into
+  # an empty Authorization header and silently 502.
   images:
     webservice:
-      digest: "sha256:c861c6eff3afd779e6733fd0c3591f9f5cfe57f518963571a6a011a2f796e093"
+      digest: "sha256:6a4ce9e20922c42c9f88ca90a65cbbfe95f510a5a3c003dc63d390a3254dc6f1"
+    workhorse:
+      digest: "sha256:997e621e04d2ca8508400c38db5e83cccbc931393de01f96a483c6d584e9feab"
     sidekiq:
-      digest: "sha256:11e78eb92ea123d798865431bf73cc2691c4f305725b71958066190fe808a595"
+      digest: "sha256:34d6a32f02ed51159ecc5893298f96998a6e36c7cdf8cf3f08bbb7617feb26d4"
     toolbox:
-      digest: "sha256:72da7ebc1b6978b43134b4c0b2cbfcb905c628e7260ac90ace7b9fc10868a561"
+      digest: "sha256:5ff38e51d82df49f35a9f1b977dd683ca65e08b28a3a5cce5acb3108a6f49baa"
 gkg:
   chart: "0.22.0"
   image:

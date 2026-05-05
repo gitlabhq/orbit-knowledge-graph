@@ -118,6 +118,7 @@ impl Context {
         let select_items: Vec<_> = q
             .select
             .iter()
+            .filter(|sel| !is_dedup_column(&sel.expr))
             .map(|sel| {
                 let expr = self.emit_expr(&sel.expr);
                 match &sel.alias {
@@ -137,7 +138,10 @@ impl Context {
         parts.push(format!("FROM {from}"));
 
         if let Some(w) = &q.where_clause {
-            parts.push(format!("WHERE {}", self.emit_expr(w)));
+            let stripped = strip_deleted_predicates(w);
+            if let Some(w) = stripped {
+                parts.push(format!("WHERE {}", self.emit_expr(&w)));
+            }
         }
 
         if !q.group_by.is_empty() {
@@ -153,15 +157,18 @@ impl Context {
             parts.push(format!("UNION ALL {}", self.emit_query_body(union_q)?));
         }
 
-        if !q.order_by.is_empty() {
-            let orders: Vec<_> = q
-                .order_by
-                .iter()
-                .map(|o| {
-                    let dir = if o.desc { "DESC" } else { "ASC" };
-                    format!("{} {dir}", self.emit_expr(&o.expr))
-                })
-                .collect();
+        // Filter out _version ORDER BY (ClickHouse dedup artifact — DuckDB
+        // has no _version column and no LIMIT 1 BY).
+        let orders: Vec<_> = q
+            .order_by
+            .iter()
+            .filter(|o| !matches!(&o.expr, Expr::Column { column, .. } if column == "_version"))
+            .map(|o| {
+                let dir = if o.desc { "DESC" } else { "ASC" };
+                format!("{} {dir}", self.emit_expr(&o.expr))
+            })
+            .collect();
+        if !orders.is_empty() {
             parts.push(format!("ORDER BY {}", orders.join(", ")));
         }
 
@@ -345,6 +352,38 @@ impl Context {
                 Ok(format!("({inner_sql}) AS {alias}"))
             }
         }
+    }
+}
+
+/// True if the expression is a reference to `_version` or `_deleted`.
+fn is_dedup_column(expr: &Expr) -> bool {
+    matches!(expr, Expr::Column { column, .. } if column == "_version" || column == "_deleted")
+}
+
+/// Strip `_deleted = false` predicates from a WHERE clause.
+/// Returns None if the entire clause was just a deleted check.
+fn strip_deleted_predicates(expr: &Expr) -> Option<Expr> {
+    match expr {
+        // _deleted = false → remove
+        Expr::BinaryOp {
+            op: Op::Eq, left, ..
+        } if is_dedup_column(left) => None,
+        // (A AND B) → strip deleted from both sides
+        Expr::BinaryOp {
+            op: Op::And,
+            left,
+            right,
+        } => {
+            let l = strip_deleted_predicates(left);
+            let r = strip_deleted_predicates(right);
+            match (l, r) {
+                (Some(l), Some(r)) => Some(Expr::and(l, r)),
+                (Some(l), None) => Some(l),
+                (None, Some(r)) => Some(r),
+                (None, None) => None,
+            }
+        }
+        other => Some(other.clone()),
     }
 }
 

@@ -14,7 +14,11 @@ style:
 redaction:
   resource_type: project
   id_column: id
-  ability: read_project
+  # Temporary: aligned with source-code entities so Project + code traversals
+  # don't emit two (resource_type=project, ability=...) redaction entries that
+  # Rails then 400s on as duplicate. Revert to read_project after the
+  # response-side discriminator fix lands. See #570.
+  ability: read_code
 
 properties:
   id:

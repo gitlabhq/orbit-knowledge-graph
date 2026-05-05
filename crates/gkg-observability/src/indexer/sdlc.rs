@@ -50,7 +50,7 @@ pub const DATALAKE_QUERY_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.datalake.query.duration",
     "Duration of ClickHouse datalake extraction queries.",
     Some("s"),
-    &[labels::ENTITY],
+    &[],
     LATENCY,
     DOMAIN,
 );
@@ -69,7 +69,7 @@ pub const TRANSFORM_DURATION: MetricSpec = MetricSpec::histogram_f64(
     "gkg.indexer.sdlc.transform.duration",
     "Duration of DataFusion SQL transform per batch.",
     Some("s"),
-    &[labels::ENTITY],
+    &[],
     LATENCY,
     DOMAIN,
 );
@@ -78,7 +78,7 @@ pub const WATERMARK_LAG: MetricSpec = MetricSpec::gauge(
     "gkg.indexer.sdlc.watermark.lag",
     "Seconds between the current watermark and wall-clock time (data freshness).",
     Some("s"),
-    &[labels::ENTITY],
+    &[],
     DOMAIN,
 );
 

@@ -118,6 +118,14 @@ fn panic_payload_message(payload: &Box<dyn Any + Send>) -> String {
 /// Input to a language pipeline: file path (source read on demand).
 pub type FileInput = String;
 
+/// A file paired with the specific [`Language`] that should parse it.
+/// Used when a language family groups multiple languages into one
+/// pipeline invocation (e.g. C and C++ in `CFamily`).
+pub struct FamilyFileInput {
+    pub language: Language,
+    pub path: FileInput,
+}
+
 /// Immutable context shared across the entire pipeline run.
 /// Bundles config, tracer, root path, and cancellation — everything
 /// that doesn't change per-language or per-file.
@@ -373,6 +381,13 @@ pub trait LanguagePipeline {
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>>;
+
+    /// Build a [`LanguageContext`] for this pipeline at runtime.
+    /// Returns `Some` for generic DSL pipelines, `None` for custom
+    /// pipelines that can't participate in a [`FamilyPipeline`].
+    fn lang_ctx(_ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
+        None
+    }
 }
 
 #[derive(Clone)]
@@ -528,17 +543,20 @@ impl Pipeline {
         let root_str = root.to_string_lossy().to_string();
         config.emit_file_inventory_graph = true;
 
-        // 1. Normalize the repository inventory, then group parseable files by language.
+        // 1. Normalize the repository inventory, then group parseable files
+        //    by language family. Files keep their specific Language for
+        //    parser selection; the family determines which files share a
+        //    CodeGraph for cross-language resolution.
         let pb_discover = spinner("Preparing file inventory...");
         let file_inventory = canonical_file_inventory(file_inventory.iter().cloned());
-        let (files_by_language, parsed_file_languages) =
+        let (files_by_family, parsed_file_languages) =
             group_parseable_inventory(root, &file_inventory, &config);
         let total_files = file_inventory.len();
         let total_bytes: u64 = file_inventory.iter().map(|entry| entry.size).sum();
-        let parsable_files: usize = files_by_language.values().map(|f| f.len()).sum();
-        let lang_summary: Vec<String> = files_by_language
+        let parsable_files: usize = files_by_family.values().map(|f| f.len()).sum();
+        let lang_summary: Vec<String> = files_by_family
             .iter()
-            .map(|(l, f)| format!("{l}: {}", f.len()))
+            .map(|(fam, f)| format!("{fam}: {}", f.len()))
             .collect();
         pb_discover.finish_with_message(format!(
             "Found {total_files} files, {parsable_files} parseable ({})",
@@ -595,7 +613,7 @@ impl Pipeline {
         }
 
         std::thread::scope(|s| {
-            for (language, files) in &files_by_language {
+            for (family, files) in &files_by_family {
                 // Block until a slot opens
                 sem_rx.recv().unwrap();
 
@@ -652,7 +670,7 @@ impl Pipeline {
                         Err(e) => {
                             all_errors.lock().unwrap().push(
                                 crate::v2::error::CodeGraphError::ThreadPoolCreation {
-                                    language: language.to_string(),
+                                    language: family.to_string(),
                                     source: e,
                                 }
                                 .into(),
@@ -676,15 +694,15 @@ impl Pipeline {
                     };
 
                     tracing::info!(
-                        %language,
+                        family = %family,
                         file_count,
                         threads = pool.current_num_threads(),
-                        "processing language"
+                        "processing language family"
                     );
 
                     let result = pool.install(|| {
                         std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-                            crate::v2::registry::dispatch_language(*language, files, ctx, &btx)
+                            crate::v2::registry::dispatch_family(*family, files, ctx, &btx)
                         }))
                     });
 
@@ -699,7 +717,7 @@ impl Pipeline {
                         let err = match payload.downcast::<crate::v2::error::CodeGraphError>() {
                             Ok(typed) => *typed,
                             Err(payload) => crate::v2::error::CodeGraphError::Internal {
-                                context: format!("language_panic:{language}"),
+                                context: format!("language_panic:{family}"),
                                 message: format!(
                                     "language worker panicked: {}",
                                     panic_payload_message(&payload)
@@ -710,15 +728,15 @@ impl Pipeline {
                     }) {
                         Some(Ok(())) => {
                             tracing::info!(
-                                %language,
+                                family = %family,
                                 elapsed_ms = t_lang.elapsed().as_millis() as u64,
-                                "language done"
+                                "language family done"
                             );
                             files_parsed.fetch_add(file_count, Ordering::Relaxed);
                         }
                         Some(Err(errors)) => {
                             tracing::warn!(
-                                %language,
+                                family = %family,
                                 error_count = errors.len(),
                                 "language processing failed"
                             );
@@ -739,14 +757,14 @@ impl Pipeline {
                         }
                         None => {
                             tracing::debug!(
-                                %language,
+                                family = %family,
                                 file_count,
-                                "language not supported, skipping"
+                                "language family not supported, skipping"
                             );
                             files_skipped.fetch_add(file_count, Ordering::Relaxed);
                         }
                     }
-                    // Release permit — next language can start
+                    // Release permit — next family can start
                     sem_tx.send(()).ok();
                     // tx dropped here — writer thread exits
                 });
@@ -790,7 +808,14 @@ impl Pipeline {
         inventory: &[FileInventoryEntry],
         config: &PipelineConfig,
     ) -> FxHashMap<Language, Vec<FileInput>> {
-        group_parseable_inventory(root, inventory, config).0
+        let (by_family, _) = group_parseable_inventory(root, inventory, config);
+        let mut by_lang: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+        for (_fam, files) in by_family {
+            for f in files {
+                by_lang.entry(f.language).or_default().push(f.path);
+            }
+        }
+        by_lang
     }
 
     fn build_file_inventory_graph(
@@ -814,10 +839,11 @@ fn group_parseable_inventory(
     inventory: &[FileInventoryEntry],
     config: &PipelineConfig,
 ) -> (
-    FxHashMap<Language, Vec<FileInput>>,
+    FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>>,
     FxHashMap<String, Language>,
 ) {
-    let mut groups: FxHashMap<Language, Vec<FileInput>> = FxHashMap::default();
+    let mut groups: FxHashMap<crate::v2::config::LanguageFamily, Vec<FamilyFileInput>> =
+        FxHashMap::default();
     let mut parsed_file_languages = FxHashMap::default();
     let mut accepted_files = 0usize;
 
@@ -841,7 +867,13 @@ fn group_parseable_inventory(
 
         accepted_files += 1;
         parsed_file_languages.insert(entry.path.clone(), lang);
-        groups.entry(lang).or_default().push(entry.path.clone());
+        groups
+            .entry(lang.family())
+            .or_default()
+            .push(FamilyFileInput {
+                language: lang,
+                path: entry.path.clone(),
+            });
     }
 
     (groups, parsed_file_languages)
@@ -896,48 +928,103 @@ where
     P: crate::v2::dsl::types::DslLanguage + 'static,
     R: crate::v2::linker::HasRules + Send + Sync,
 {
+    fn lang_ctx(ctx: &Arc<PipelineContext>) -> Option<Arc<LanguageContext>> {
+        Some(Arc::new(LanguageContext {
+            pipeline: ctx.clone(),
+            spec: P::spec(),
+            rules: Arc::new(R::rules()),
+        }))
+    }
+
     fn process_files(
         files: &[FileInput],
         ctx: &Arc<PipelineContext>,
         btx: &BatchTx<'_>,
     ) -> Result<(), Vec<PipelineError>> {
-        let lang_ctx = Arc::new(LanguageContext {
-            pipeline: ctx.clone(),
-            spec: P::spec(),
-            rules: Arc::new(R::rules()),
-        });
         let language = P::language();
+        let lctx = Self::lang_ctx(ctx).expect("GenericPipeline must provide lang_ctx");
+        let mut member_ctxs = rustc_hash::FxHashMap::default();
+        member_ctxs.insert(language, lctx);
+
+        let family_files: Vec<FamilyFileInput> = files
+            .iter()
+            .map(|path| FamilyFileInput {
+                language,
+                path: path.clone(),
+            })
+            .collect();
+
+        FamilyPipeline::run(&family_files, &member_ctxs, ctx, btx)
+    }
+}
+
+// ── FamilyPipeline ──────────────────────────────────────────────
+
+/// Pipeline for language families with multiple member languages.
+///
+/// Parses each file with its language-specific `LanguageSpec`, but
+/// feeds all definitions into a single shared `CodeGraph`. Resolution
+/// (Phase 2/3) uses per-file `LanguageContext` so each file resolves
+/// with its own rules while seeing the unified symbol table.
+pub struct FamilyPipeline;
+
+impl FamilyPipeline {
+    pub fn run(
+        files: &[FamilyFileInput],
+        member_ctxs: &rustc_hash::FxHashMap<Language, Arc<LanguageContext>>,
+        ctx: &Arc<PipelineContext>,
+        btx: &BatchTx<'_>,
+    ) -> Result<(), Vec<PipelineError>> {
         let file_count = files.len();
-        let root_path = lang_ctx.root_path();
-        let tracer = lang_ctx.tracer();
-        let spec = &lang_ctx.spec;
-        let rules = &lang_ctx.rules;
+        let root_path = ctx.root_path.clone();
+        let tracer = &ctx.tracer;
         let t0 = std::time::Instant::now();
 
-        // Spawn sentinel watchdog if per_file_timeout is configured.
-        // Language rules take precedence; global config is the fallback.
-        // Falls back to no timeout if the thread can't be spawned.
-        let per_file_timeout = rules
-            .settings
-            .per_file_timeout
-            .or(ctx.config.per_file_timeout);
+        // Pick the primary context deterministically: sort by Language
+        // Debug repr so the result doesn't depend on HashMap iteration.
+        let primary_lang = *member_ctxs
+            .keys()
+            .min_by_key(|l| format!("{l:?}"))
+            .expect("family has no members");
+        let primary_ctx = &member_ctxs[&primary_lang];
+        let primary_rules = primary_ctx.rules.clone();
+
+        // All family members must share the same FQN separator -- the
+        // graph can only have one. Reject mismatches at construction
+        // rather than silently producing broken FQNs.
+        let expected_sep = primary_rules.fqn_separator;
+        for (lang, lctx) in member_ctxs {
+            assert_eq!(
+                lctx.rules.fqn_separator, expected_sep,
+                "FamilyPipeline: all members must share the same fqn_separator, \
+                 {lang} has {:?} but {primary_lang} has {:?}",
+                lctx.rules.fqn_separator, expected_sep
+            );
+        }
+
+        // Sentinel: use the shortest per_file_timeout across members.
+        let per_file_timeout = member_ctxs
+            .values()
+            .filter_map(|lc| {
+                lc.rules
+                    .settings
+                    .per_file_timeout
+                    .or(ctx.config.per_file_timeout)
+            })
+            .min();
         let sentinel = per_file_timeout.and_then(crate::v2::sentinel::spawn_sentinel);
 
-        // ── Phase 1: parallel full walk, sequential graph build ──
+        // ── Phase 1a: parallel parse with per-file spec ─────────
         let pb = progress_bar(file_count as u64, "parse + graph");
-        let all_errors: Vec<PipelineError> = Vec::new();
+
+        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
+        use crate::v2::error::{FaultedFile, FileFault};
 
         struct FileInfo {
             file_node: petgraph::graph::NodeIndex,
             def_nodes: Vec<petgraph::graph::NodeIndex>,
             import_nodes: Vec<petgraph::graph::NodeIndex>,
         }
-
-        // Phase 1a: full AST walk in parallel (no locks, no graph).
-        // Extracts defs, imports, AND refs+SSA in a single pass.
-        // Source bytes are read and dropped per-file — no bulk storage.
-        use crate::v2::dsl::engine::{CollectedRef, ParseFullResult};
-        use crate::v2::error::{FaultedFile, FileFault};
 
         enum ParseOutcome {
             Ok(ParsedFile),
@@ -946,6 +1033,7 @@ where
 
         struct ParsedFile {
             path_idx: usize,
+            language: Language,
             result: ParseFullResult,
             ext: String,
             file_size: u64,
@@ -954,48 +1042,49 @@ where
         let parse_outcomes: Vec<Option<ParseOutcome>> = files
             .par_iter()
             .enumerate()
-            .map(|(idx, path)| {
+            .map(|(idx, f)| {
                 if ctx.is_cancelled() {
                     pb.inc(1);
                     return None;
                 }
-                let abs_path = format!("{root_path}/{path}");
+                let lctx = &member_ctxs[&f.language];
+                let abs_path = format!("{root_path}/{}", f.path);
                 let source = match std::fs::read(&abs_path) {
                     Ok(s) => s,
                     Err(e) => {
-                        tracing::debug!(path, error = %e, "failed to read file");
+                        tracing::debug!(path = f.path, error = %e, "failed to read file");
                         pb.inc(1);
                         return Some(ParseOutcome::Err(FaultedFile {
-                            path: path.to_string(),
+                            path: f.path.to_string(),
                             kind: FileFault::FileRead,
                             detail: e.to_string(),
                         }));
                     }
                 };
 
-                let result = match spec.parse_full_collect(&source, path, language, tracer) {
+                let result = match lctx
+                    .spec
+                    .parse_full_collect(&source, &f.path, f.language, tracer)
+                {
                     Ok(r) => r,
                     Err(e) => {
-                        tracing::debug!(path, error = %e, "failed to parse file");
+                        tracing::debug!(path = f.path, error = %e, "failed to parse file");
                         pb.inc(1);
-                        // Exhaustive match on the typed `ParseFullError`
-                        // — adding a new variant breaks the build until
-                        // it gets a `FileFault` mapping here.
                         let (kind, detail) = match e {
                             crate::v2::dsl::engine::ParseFullError::InvalidUtf8(err) => {
                                 (FileFault::InvalidUtf8, err.to_string())
                             }
                         };
                         return Some(ParseOutcome::Err(FaultedFile {
-                            path: path.to_string(),
+                            path: f.path.to_string(),
                             kind,
                             detail,
                         }));
                     }
                 };
-                // source bytes dropped here — single-walk, no re-read needed
 
-                let ext = path
+                let ext = f
+                    .path
                     .rsplit_once('.')
                     .map(|(_, e)| e)
                     .unwrap_or("")
@@ -1004,6 +1093,7 @@ where
                 pb.inc(1);
                 Some(ParseOutcome::Ok(ParsedFile {
                     path_idx: idx,
+                    language: f.language,
                     result,
                     ext,
                     file_size,
@@ -1030,16 +1120,16 @@ where
             faults.extend(parsed_faults);
         }
 
-        // Phase 1b: add defs/imports to graph sequentially. Keep refs alive.
+        // ── Phase 1b: add all defs to one shared CodeGraph ──────
         struct FileWithRefs {
             info: FileInfo,
+            language: Language,
             refs: Vec<CollectedRef>,
             inferred_returns: Vec<(u32, String)>,
             unresolved_aliases: Vec<(usize, String)>,
         }
 
-        let mut graph =
-            CodeGraph::new_with_root(root_path.to_string()).with_rules(lang_ctx.rules.clone());
+        let mut graph = CodeGraph::new_with_root(root_path.to_string()).with_rules(primary_rules);
         if ctx.config.emit_file_inventory_graph {
             graph.mark_parsed_only();
         }
@@ -1049,14 +1139,14 @@ where
             (0..file_count).map(|_| None).collect();
 
         for parsed_file in parsed.into_iter().flatten() {
-            let path = &files[parsed_file.path_idx];
+            let path = &files[parsed_file.path_idx].path;
             total_defs += parsed_file.result.definitions.len();
             total_imports += parsed_file.result.imports.len();
 
             let (file_node, def_nodes, import_nodes) = graph.add_file(
                 path,
                 &parsed_file.ext,
-                language,
+                parsed_file.language,
                 parsed_file.file_size,
                 &parsed_file.result.definitions,
                 &parsed_file.result.imports,
@@ -1068,6 +1158,7 @@ where
                     def_nodes,
                     import_nodes,
                 },
+                language: parsed_file.language,
                 refs: parsed_file.result.refs,
                 inferred_returns: parsed_file.result.inferred_returns,
                 unresolved_aliases: parsed_file.result.unresolved_aliases,
@@ -1079,17 +1170,10 @@ where
             t0.elapsed()
         ));
 
-        if !all_errors.is_empty() && files_with_refs.iter().all(|r| r.is_none()) {
-            return Err(all_errors);
-        }
-
         graph.finalize(tracer);
         graph.drop_construction_indexes();
 
-        // ── Phase 1c: patch unresolved SSA aliases via graph ────
-        // Pass 1.5 equivalent: resolve alias targets that couldn't be
-        // resolved without the cross-file graph, then update reaching
-        // values on the affected CollectedRefs.
+        // ── Phase 1c: patch unresolved SSA aliases ──────────────
         for fwr in files_with_refs.iter_mut().flatten() {
             if fwr.unresolved_aliases.is_empty() {
                 continue;
@@ -1107,7 +1191,7 @@ where
             }
         }
 
-        // ── Phase 2: resolve-only (no I/O, no parsing) ──────────
+        // ── Phase 2: resolve refs with per-file lang_ctx ────────
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -1115,15 +1199,14 @@ where
         type Phase2Result = (
             Vec<EdgeTriple>,
             Vec<(u32, String)>,
-            Option<FileInfo>,
+            Option<(FileInfo, Language)>,
             Vec<FailedChain>,
-            bool, // true if file was killed by sentinel timeout
+            bool,
         );
 
         let resolve_results: Vec<Phase2Result> = files_with_refs
             .into_par_iter()
-            .zip(files.par_iter())
-            .map(|(fwr_opt, path)| -> Phase2Result {
+            .map(|fwr_opt| -> Phase2Result {
                 if ctx.is_cancelled() {
                     pb2.inc(1);
                     return Default::default();
@@ -1133,21 +1216,24 @@ where
                     return Default::default();
                 };
 
-                let guard = sentinel.as_ref().map(|(handle, _)| handle.file_start(path));
+                let lctx = &member_ctxs[&fwr.language];
+                let guard = sentinel
+                    .as_ref()
+                    .map(|(handle, _)| handle.file_start("family"));
                 let mut resolver = crate::v2::linker::FileResolver::new(
                     &graph,
                     fwr.info.file_node,
                     &fwr.info.def_nodes,
                     &fwr.info.import_nodes,
-                    &lang_ctx,
+                    lctx,
                     guard,
                 );
                 resolver.set_inferred_returns(&fwr.inferred_returns);
 
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
-
                 let mut killed = false;
+
                 for r in &fwr.refs {
                     let before = edges.len();
                     if resolver
@@ -1161,7 +1247,7 @@ where
                         .is_err()
                     {
                         killed = true;
-                        break; // file killed by sentinel
+                        break;
                     }
                     let import_edges = resolver.drain_import_edges();
                     if edges.len() == before && r.chain.as_ref().is_some_and(|c| c.len() >= 2) {
@@ -1183,7 +1269,7 @@ where
                 (
                     edges,
                     fwr.inferred_returns,
-                    Some(fwr.info),
+                    Some((fwr.info, fwr.language)),
                     failed_chains,
                     killed,
                 )
@@ -1196,12 +1282,12 @@ where
             t2.elapsed()
         ));
 
-        // Insert Phase 2 edges and collect inferred returns + failed chains
+        // Insert Phase 2 edges and collect failed chains
         let mut all_inferred: Vec<InferredReturns> = Vec::new();
-        let mut all_failed: Vec<(FileInfo, Vec<FailedChain>)> = Vec::new();
+        let mut all_failed: Vec<(FileInfo, Language, Vec<FailedChain>)> = Vec::new();
 
         for (edges, inferred, info_opt, failed_chains, killed) in resolve_results {
-            if killed && let Some(ref info) = info_opt {
+            if killed && let Some((ref info, _)) = info_opt {
                 let path = match &graph.graph[info.file_node] {
                     crate::v2::linker::graph::GraphNode::File(f) => f.path.as_str(),
                     _ => "unknown",
@@ -1215,17 +1301,17 @@ where
             for (src, tgt, edge) in edges {
                 add_edge_if_missing(&mut graph, src, tgt, edge);
             }
-            if let Some(info) = info_opt {
+            if let Some((info, lang)) = info_opt {
                 if !inferred.is_empty() {
                     all_inferred.push((info.def_nodes.clone(), inferred));
                 }
                 if !failed_chains.is_empty() {
-                    all_failed.push((info, failed_chains));
+                    all_failed.push((info, lang, failed_chains));
                 }
             }
         }
 
-        // ── Phase 3: write inferred return types to graph, re-resolve failed chains
+        // ── Phase 3: re-resolve failed chains ───────────────────
         if !all_inferred.is_empty() {
             for (def_nodes, inferred) in &all_inferred {
                 for (def_idx, rt) in inferred {
@@ -1245,7 +1331,8 @@ where
         if !all_failed.is_empty() {
             let phase3_results: Vec<_> = all_failed
                 .par_iter()
-                .map(|(info, failed_chains)| {
+                .map(|(info, lang, failed_chains)| {
+                    let lctx = &member_ctxs[lang];
                     let guard = sentinel
                         .as_ref()
                         .map(|(handle, _)| handle.file_start("phase3"));
@@ -1254,7 +1341,7 @@ where
                         info.file_node,
                         &info.def_nodes,
                         &info.import_nodes,
-                        &lang_ctx,
+                        lctx,
                         guard,
                     );
                     let mut edges = Vec::new();
@@ -1270,7 +1357,7 @@ where
                             )
                             .is_err()
                         {
-                            break; // file killed by sentinel
+                            break;
                         }
                         let import_edges = resolver.drain_import_edges();
                         if edges.len() == before {
@@ -1298,11 +1385,9 @@ where
             }
         }
 
-        // Free resolution-only indexes before conversion.
         graph.indexes.definition_ranges.clear();
         graph.indexes.definition_ranges.shrink_to_fit();
 
-        // Shut down sentinel
         if let Some((handle, join)) = sentinel {
             handle.shutdown();
             let _ = join.join();
@@ -1315,12 +1400,10 @@ where
             defs = graph.defs.len(),
             imports = graph.imports.len(),
             strings = graph.strings.len(),
-            "pipeline complete"
+            "family pipeline complete"
         );
 
-        // ── Stream graph to writer thread, then drop it ─────────
         btx.send_graph(graph);
-
         Ok(())
     }
 }

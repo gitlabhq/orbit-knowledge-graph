@@ -150,15 +150,15 @@ INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) V
     (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/'),
     (1010, 'Deep Project', 'public-group/deep-a/deep-project', 'public', '1/100/200/1010/');
 
-INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, merged_at, traversal_path) VALUES
-    (2000, 1, 'Add feature A', 'opened',  'feature-a',  'main', NULL,                          '1/100/1000/'),
-    (2001, 2, 'Fix bug B',     'opened',  'fix-b',      'main', NULL,                          '1/100/1000/'),
-    (2002, 3, 'Refactor C',    'merged',  'refactor-c', 'main', toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC'), '1/101/1001/'),
-    (2003, 4, 'Update D',      'closed',  'update-d',   'main', NULL,                          '1/102/1004/'),
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, merged_at, project_id, traversal_path) VALUES
+    (2000, 1, 'Add feature A', 'opened',  'feature-a',  'main', NULL,                          1000, '1/100/1000/'),
+    (2001, 2, 'Fix bug B',     'opened',  'fix-b',      'main', NULL,                          1000, '1/100/1000/'),
+    (2002, 3, 'Refactor C',    'merged',  'refactor-c', 'main', toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC'), 1001, '1/101/1001/'),
+    (2003, 4, 'Update D',      'closed',  'update-d',   'main', NULL,                          1004, '1/102/1004/'),
     -- Two extra merged MRs let the data-correctness test pin a specific
     -- result for `merged_at >= 2024-06-01` (2004 + 2005, deterministic order).
-    (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), '1/100/1000/'),
-    (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), '1/100/1000/');
+    (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), 1000, '1/100/1000/'),
+    (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), 1000, '1/100/1000/');
 
 INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, traversal_path) VALUES
     (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', '1/100/1000/'),
@@ -185,10 +185,10 @@ INSERT INTO gl_label (id, title, color, traversal_path) VALUES
 -- security pass filters them exactly like any other namespaced entity.
 -- read_vulnerability is granted at Security Manager+, which is why Vulnerability's
 -- ontology declares `required_role: security_manager`.
-INSERT INTO gl_vulnerability (id, title, state, severity, report_type, resolved_on_default_branch, present_on_default_branch, traversal_path) VALUES
-    (8000, 'SQLi in login', 'detected', 'critical', 'sast', false, true, '1/100/1000/'),
-    (8001, 'XSS in comments', 'detected', 'high', 'sast', false, true, '1/101/1001/'),
-    (8002, 'Exposed secret in CI', 'detected', 'critical', 'secret_detection', false, true, '1/102/1004/');
+INSERT INTO gl_vulnerability (id, title, state, severity, report_type, resolved_on_default_branch, present_on_default_branch, project_id, traversal_path) VALUES
+    (8000, 'SQLi in login', 'detected', 'critical', 'sast', false, true, 1000, '1/100/1000/'),
+    (8001, 'XSS in comments', 'detected', 'high', 'sast', false, true, 1001, '1/101/1001/'),
+    (8002, 'Exposed secret in CI', 'detected', 'critical', 'secret_detection', false, true, 1004, '1/102/1004/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
     ('1/100/1000/', 8000, 'Vulnerability', 'IN_PROJECT', 1000, 'Project', ['severity:critical', 'state:detected'], []),
@@ -197,36 +197,36 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
 
 INSERT INTO gl_definition (
     id, traversal_path, project_id, branch, commit_sha, file_path, fqn, name,
-    definition_type, start_line, end_line, start_byte, end_byte
+    definition_type, start_line, end_line, start_byte, end_byte, start_char, end_char
 ) VALUES
-    (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
-    (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300),
-    (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550),
-    (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200),
-    (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550);
+    (12000, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
+    (12001, '1/100/1000/', 1000, 'main', 'abc123', 'crates/compiler/src/lib.rs', 'compiler::helper', 'helper', 'Function', 22, 30, 220, 300, 4, 10),
+    (12002, '1/100/1000/', 1000, 'main', 'abc123', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13),
+    (12100, '1/101/1001/', 1001, 'main', 'def456', 'crates/compiler/src/lib.rs', 'compiler::compile', 'compile', 'Function', 10, 20, 100, 200, 4, 11),
+    (12102, '1/101/1001/', 1001, 'main', 'def456', 'crates/orbit/src/main.rs', 'orbit::run_query', 'run_query', 'Function', 40, 55, 400, 550, 4, 13);
 
 INSERT INTO gl_code_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind) VALUES
     ('1/100/1000/', 12000, 'Definition', 'CALLS', 12001, 'Definition'),
     ('1/100/1000/', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
     ('1/101/1001/', 12001, 'Definition', 'CALLS', 12102, 'Definition');
 
-INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, traversal_path) VALUES
-    (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, '1/100/'),
-    (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', '1/100/'),
-    (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, '1/101/'),
-    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, '1/102/'),
-    (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, '1/100/200/1010/');
+INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, project_id, traversal_path) VALUES
+    (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, 1000, '1/100/'),
+    (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', 1000, '1/100/'),
+    (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, 0, '1/101/'),
+    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, 0, '1/102/'),
+    (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, 1010, '1/100/200/1010/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group', [], []),
-    ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group', [], []),
-    ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group', [], []),
-    ('1/100/', 6, 'User', 'MEMBER_OF', 100, 'Group', [], []),
-    ('1/101/', 6, 'User', 'MEMBER_OF', 101, 'Group', [], []),
+    ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', ['state:active'], []),
+    ('1/102/', 1, 'User', 'MEMBER_OF', 102, 'Group', ['state:active'], []),
+    ('1/100/', 2, 'User', 'MEMBER_OF', 100, 'Group', ['state:active'], []),
+    ('1/101/', 3, 'User', 'MEMBER_OF', 101, 'Group', ['state:active'], []),
+    ('1/101/', 4, 'User', 'MEMBER_OF', 101, 'Group', ['state:active', 'user_type:project_bot'], []),
+    ('1/102/', 4, 'User', 'MEMBER_OF', 102, 'Group', ['state:active', 'user_type:project_bot'], []),
+    ('1/101/', 5, 'User', 'MEMBER_OF', 101, 'Group', ['state:blocked', 'user_type:service_account'], []),
+    ('1/100/', 6, 'User', 'MEMBER_OF', 100, 'Group', ['state:active'], []),
+    ('1/101/', 6, 'User', 'MEMBER_OF', 101, 'Group', ['state:active'], []),
     ('1/100/200/', 100, 'Group', 'CONTAINS', 200, 'Group', [], []),
     ('1/100/200/300/', 200, 'Group', 'CONTAINS', 300, 'Group', [], []),
     ('1/100/1000/', 100, 'Group', 'CONTAINS', 1000, 'Project', [], []),
@@ -276,6 +276,15 @@ INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, 
     ('1/100/1000/', 3, 'User', 'APPROVED', 2000, 'MergeRequest', [], ['state:opened']),
     ('1/101/1001/', 1, 'User', 'APPROVED', 2002, 'MergeRequest', [], ['state:merged']);
 
+-- MR -> IN_PROJECT edges (match project_id FK on gl_merge_request).
+INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
+    ('1/100/1000/', 2000, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], []),
+    ('1/100/1000/', 2001, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:opened'], []),
+    ('1/101/1001/', 2002, 'MergeRequest', 'IN_PROJECT', 1001, 'Project', ['state:merged'], []),
+    ('1/102/1004/', 2003, 'MergeRequest', 'IN_PROJECT', 1004, 'Project', ['state:closed'], []),
+    ('1/100/1000/', 2004, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], []),
+    ('1/100/1000/', 2005, 'MergeRequest', 'IN_PROJECT', 1000, 'Project', ['state:merged'], []);
+
 -- Organization 2: cross-org isolation test data.
 -- User 1 (alice) exists in both orgs — her User row is global (gl_user has
 -- no traversal_path), but her edges and the resources below are in org 2.
@@ -286,10 +295,11 @@ INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VAL
 INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) VALUES
     (9000, 'Org2 Project', 'org2-root/org2-project', 'public', '2/900/9000/');
 
-INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, traversal_path) VALUES
-    (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', '2/900/9000/');
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, project_id, traversal_path) VALUES
+    (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', 9000, '2/900/9000/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
-    ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group', [], []),
+    ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group', ['state:active'], []),
     ('2/900/9000/', 900, 'Group', 'CONTAINS', 9000, 'Project', [], []),
-    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest', [], ['state:opened']);
+    ('2/900/9000/', 1, 'User', 'AUTHORED', 9100, 'MergeRequest', [], ['state:opened']),
+    ('2/900/9000/', 9100, 'MergeRequest', 'IN_PROJECT', 9000, 'Project', ['state:opened'], []);

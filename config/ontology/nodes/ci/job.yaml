@@ -220,6 +220,30 @@ properties:
       0: stage
       1: dag
 
+  project_id:
+    type: int64
+    source: project_id
+    nullable: false
+    description: "Project this job belongs to. Stored on the node row so the compiler can filter by project without scanning the edge table."
+
+  user_id:
+    type: int64
+    source: user_id
+    nullable: true
+    description: "User who triggered the job."
+
+  upstream_pipeline_id:
+    type: int64
+    source: upstream_pipeline_id
+    nullable: true
+    description: "Upstream pipeline that triggered this bridge job."
+
+  stage_id:
+    type: int64
+    source: stage_id
+    nullable: true
+    description: "Stage this job belongs to within the pipeline."
+
   pipeline_id:
     type: int64
     source: commit_id
@@ -301,6 +325,10 @@ storage:
     - {name: timeout_source, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
     - {name: exit_code, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: scheduling_type, type: "LowCardinality(String)", default: "''", codec: ["LZ4"]}
+    - {name: project_id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
+    - {name: user_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: upstream_pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
+    - {name: stage_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: pipeline_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: auto_canceled_by_id, type: "Nullable(Int64)", codec: ["Delta(8)", "LZ4"]}
     - {name: traversal_path, type: "String", default: "'0/'", codec: ["ZSTD(1)"]}
@@ -315,6 +343,10 @@ storage:
     - {name: idx_ref_ngram, column: ref, type: "ngrambf_v1(3, 512, 2, 0)", granularity: 1}
   projections:
     - {type: reorder, name: by_id, order_by: [id]}
+    - {type: lightweight, name: by_project_id, order_by: [project_id]}
+    - {type: lightweight, name: by_user_id, order_by: [user_id]}
+    - {type: lightweight, name: by_upstream_pipeline_id, order_by: [upstream_pipeline_id]}
+    - {type: lightweight, name: by_stage_id, order_by: [stage_id]}
     - {type: lightweight, name: by_pipeline_id, order_by: [pipeline_id]}
     - {type: lightweight, name: by_runner_id, order_by: [runner_id]}
     - {type: lightweight, name: by_auto_canceled_by_id, order_by: [auto_canceled_by_id]}

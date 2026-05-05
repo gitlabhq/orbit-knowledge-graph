@@ -236,6 +236,12 @@ yaml_test!(
 yaml_test!(kotlin_v1_enum_methods, "kotlin/v1_enum_methods.yaml");
 yaml_test!(kotlin_v1_extensions, "kotlin/v1_extensions.yaml");
 
+// JVM (cross-language)
+yaml_test!(
+    jvm_cross_language_resolution,
+    "jvm/cross_language_resolution.yaml"
+);
+
 // C
 yaml_test!(c_resolution, "c/resolution.yaml");
 yaml_test!(c_hardcore, "c/hardcore.yaml");
