@@ -8,9 +8,12 @@
 # values/gitlab.yaml.gotmpl renders the digests as "master@<digest>" tags at
 # helmfile sync time.
 #
-# Pins only the Rails-bearing CNG images (webservice, sidekiq, toolbox).
-# The schema-version race lives in those images' dependency init check;
-# other images (workhorse, shell, gitaly) don't touch schema_migrations.
+# Pins webservice, workhorse, sidekiq, toolbox — the four images that carry
+# either Rails code (schema-version race lives in their dependency init
+# check) or the workhorse sidecar that pairs with webservice. Workhorse is
+# pinned because the Rails<->workhorse orbit-query payload contract changes
+# shape on master; an unpinned :master workhorse against a pinned webservice
+# silently drops the Authorization header and 502s every query.
 #
 # Usage:
 #   e2e/scripts/bump-gitlab-pins.sh
@@ -81,11 +84,13 @@ resolve() {
 
 log "Resolving CNG image :master digests"
 WEBSERVICE=$(resolve gitlab-webservice-ee)
+WORKHORSE=$(resolve gitlab-workhorse-ee)
 SIDEKIQ=$(resolve gitlab-sidekiq-ee)
 TOOLBOX=$(resolve gitlab-toolbox-ee)
 
 yq -i "
   .gitlab.images.webservice.digest = \"$WEBSERVICE\" |
+  .gitlab.images.workhorse.digest  = \"$WORKHORSE\"  |
   .gitlab.images.sidekiq.digest    = \"$SIDEKIQ\" |
   .gitlab.images.toolbox.digest    = \"$TOOLBOX\"
 " "$VERSIONS"

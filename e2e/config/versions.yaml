@@ -20,12 +20,17 @@ gitlab:
   # Pinned to a master commit so siphon's view of the schema matches the
   # pinned CNG images.
   ref: "6d8b3a24810f4befe845cfc87f1a9ba6b588085f"
-  # Per-component digest pins. Only Rails-bearing images need pinning because
-  # the schema-version init check lives in their code. Consumed by
-  # values/gitlab.yaml.gotmpl which renders them as "master@<digest>" tags.
+  # Per-component digest pins. Consumed by values/gitlab.yaml.gotmpl which
+  # renders them as "master@<digest>" tags. Pinning every Rails-adjacent image
+  # avoids version skew between webservice (Rails) and its workhorse sidecar:
+  # the orbit-query payload contract changed shape on master, so an unpinned
+  # `:master` workhorse can deserialize the pinned webservice's payload into
+  # an empty Authorization header and silently 502.
   images:
     webservice:
       digest: "sha256:c861c6eff3afd779e6733fd0c3591f9f5cfe57f518963571a6a011a2f796e093"
+    workhorse:
+      digest: "sha256:26e0215b0fa1c3b3d0714dcc4db334634b1a138dc0b71a9c6336c5e20b3024be"
     sidekiq:
       digest: "sha256:11e78eb92ea123d798865431bf73cc2691c4f305725b71958066190fe808a595"
     toolbox:
