@@ -162,6 +162,13 @@ gitlab:
         memory: 6Gi
     workerProcesses: 2
     workhorse:
+      # Pin the workhorse sidecar to the same CNG build as webservice so the
+      # orbit-query payload contract (Rails -> workhorse senddata) stays in
+      # sync. An unpinned `:master` here deserializes the pinned webservice's
+      # payload into an empty Authorization header and 502s every query.
+      # Schema note: webservice uses nested `image.tag`, but the workhorse
+      # block uses flat `tag` (chart template `coalesce .workhorse.tag …`).
+      tag: "master@{{ $v.gitlab.images.workhorse.digest }}"
       resources:
         requests:
           cpu: 100m

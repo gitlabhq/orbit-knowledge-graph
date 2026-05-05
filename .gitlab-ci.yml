@@ -1010,10 +1010,15 @@ e2e:
         # MR: build a debug image inline for faster iteration.
         export E2E_GKG_IMAGE="${CI_REGISTRY_IMAGE}/gkg-e2e"
         export E2E_GKG_TAG="${CI_COMMIT_SHORT_SHA}"
-        cargo build -p gkg-server --locked
-        cp target/debug/gkg-server .
-        docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
-        docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+        # Skip rebuild on job retry if image for this SHA already exists.
+        if docker manifest inspect "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" >/dev/null 2>&1; then
+          echo "Reusing existing image ${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+        else
+          cargo build -p gkg-server --locked
+          cp target/debug/gkg-server .
+          docker build -t "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}" -f e2e/Dockerfile.e2e .
+          docker push "${E2E_GKG_IMAGE}:${E2E_GKG_TAG}"
+        fi
       fi
     - bash e2e/scripts/setup.sh
     - bash e2e/scripts/test.sh
