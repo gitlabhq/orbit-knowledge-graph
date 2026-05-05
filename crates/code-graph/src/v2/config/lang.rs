@@ -15,6 +15,9 @@ pub enum LanguageFamily {
     /// tree-sitter grammar is a superset of C, so `.h` headers
     /// parsed with the C grammar coexist cleanly with `.cpp` files.
     CFamily,
+    /// Java and Kotlin compile to the same bytecode and share
+    /// package-based FQN resolution. Fully bidirectional.
+    Jvm,
     /// Standalone language: gets its own isolated CodeGraph.
     Standalone(Language),
 }
@@ -23,6 +26,7 @@ impl std::fmt::Display for LanguageFamily {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::CFamily => write!(f, "c_family"),
+            Self::Jvm => write!(f, "jvm"),
             Self::Standalone(lang) => write!(f, "{lang}"),
         }
     }
@@ -83,6 +87,7 @@ macro_rules! define_languages {
                     Self::C => LanguageFamily::CFamily,
                     // NOTE: Cpp is not on main yet (arrives in the C++ MR).
                     // When it lands, add: Self::Cpp => LanguageFamily::CFamily,
+                    Self::Java | Self::Kotlin => LanguageFamily::Jvm,
                     _ => LanguageFamily::Standalone(*self),
                 }
             }
