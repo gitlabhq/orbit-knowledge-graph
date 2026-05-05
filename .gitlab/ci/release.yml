@@ -1,23 +1,13 @@
-# Build and publish the `orbit` local CLI for tag releases.
+# Build and publish the `orbit` local CLI on tag releases.
 #
 # "Local CLI" distinguishes this binary (the user-facing `orbit` command for
 # code indexing on a developer machine) from the gkg-server image we ship
 # elsewhere in this pipeline.
 #
-# Build jobs run on tag pipelines (`vX.Y.Z`) and — temporarily, while we shake
-# the new pipeline out — on every MR pipeline so we can verify each toolchain
-# from a feature branch.
-# The publish job runs only on tag pipelines on the canonical project.
+# Both build and publish run only on tag pipelines (`vX.Y.Z`) on the canonical
+# project.
 
-.local-cli-release-build-rules:
-  rules:
-    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
-      when: never
-    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
-    # TODO: drop the MR rule once tag pipelines are confirmed to publish correctly.
-    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
-
-.local-cli-release-publish-rules:
+.local-cli-release-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
@@ -27,7 +17,7 @@
   extends:
     - .job-template
     - .sccache-template
-    - .local-cli-release-build-rules
+    - .local-cli-release-rules
   stage: build
   needs: []
   variables:
@@ -56,7 +46,7 @@ local-cli-build-linux-arm64:
 
 .local-cli-build-darwin:
   extends:
-    - .local-cli-release-build-rules
+    - .local-cli-release-rules
   stage: build
   image: macos-15-xcode-16
   tags:
@@ -96,7 +86,7 @@ local-cli-build-darwin-arm64:
 
 local-cli-publish:
   extends:
-    - .local-cli-release-publish-rules
+    - .local-cli-release-rules
   stage: publish
   image: ${DEP_PROXY}alpine:latest
   tags:
