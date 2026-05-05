@@ -43,17 +43,25 @@ async fn indexes_repository() {
     let deps = CodeIndexingDeps::new(&mock, &clickhouse);
     let handler = deps.code_indexing_task_handler();
     let context = handler_context(&clickhouse);
-    let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, "/test");
+    let traversal_path = "1/1/";
+    let envelope = code_indexing_task_envelope(project_id, commit_sha, 1, traversal_path);
 
     let result = handler.handle(context, envelope).await;
     assert!(result.is_ok(), "handler failed: {:?}", result);
 
     assert_code_indexed(&clickhouse, project_id).await;
-    assert_branch_indexed(&clickhouse, project_id, "main", "/test").await;
+    assert_branch_indexed(&clickhouse, project_id, "main", traversal_path).await;
 
     // Nested files should not have direct Branch --CONTAINS--> File edges
-    assert_edge_count_for_traversal_path(&clickhouse, "CONTAINS", "Branch", "File", "/test", 0)
-        .await;
+    assert_edge_count_for_traversal_path(
+        &clickhouse,
+        "CONTAINS",
+        "Branch",
+        "File",
+        traversal_path,
+        0,
+    )
+    .await;
 }
 
 #[tokio::test]
@@ -955,8 +963,28 @@ async fn assert_branch_indexed(
     assert_edge_count_for_traversal_path(
         clickhouse,
         "CONTAINS",
+        "Project",
+        "Branch",
+        expected_traversal_path,
+        1,
+    )
+    .await;
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "CONTAINS",
         "Branch",
         "Directory",
+        expected_traversal_path,
+        1,
+    )
+    .await;
+
+    assert_edge_count_for_traversal_path(
+        clickhouse,
+        "ON_BRANCH",
+        "File",
+        "Branch",
         expected_traversal_path,
         1,
     )

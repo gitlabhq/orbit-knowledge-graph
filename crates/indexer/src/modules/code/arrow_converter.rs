@@ -414,6 +414,16 @@ fn convert_repository_edges(
         denormalized_column_names: &denorm_cols,
     });
 
+    edge_rows.push(IndexerEdgeRow {
+        env,
+        source_id: env.project_id,
+        target_id: branch_id,
+        edge_kind: "CONTAINS",
+        source_node_kind: "Project",
+        target_node_kind: "Branch",
+        denormalized_column_names: &denorm_cols,
+    });
+
     edge_rows.extend(branch_contains_directory_rows(
         graph,
         ids,
@@ -422,6 +432,13 @@ fn convert_repository_edges(
         &denorm_cols,
     ));
     edge_rows.extend(branch_contains_file_rows(
+        graph,
+        ids,
+        env,
+        branch_id,
+        &denorm_cols,
+    ));
+    edge_rows.extend(repository_on_branch_rows(
         graph,
         ids,
         env,
@@ -535,6 +552,37 @@ fn branch_contains_file_rows<'a>(
             denormalized_column_names: denorm_cols,
         })
         .collect()
+}
+
+fn repository_on_branch_rows<'a>(
+    graph: &'a code_graph::v2::linker::CodeGraph,
+    ids: &'a [i64],
+    env: &'a IndexerEnvelope,
+    branch_id: i64,
+    denorm_cols: &'a [String],
+) -> Vec<IndexerEdgeRow<'a>> {
+    let mut rows = Vec::new();
+
+    rows.extend(graph.directories().map(|(idx, _)| IndexerEdgeRow {
+        env,
+        source_id: ids[idx.index()],
+        target_id: branch_id,
+        edge_kind: "ON_BRANCH",
+        source_node_kind: "Directory",
+        target_node_kind: "Branch",
+        denormalized_column_names: denorm_cols,
+    }));
+    rows.extend(graph.files().map(|(idx, _)| IndexerEdgeRow {
+        env,
+        source_id: ids[idx.index()],
+        target_id: branch_id,
+        edge_kind: "ON_BRANCH",
+        source_node_kind: "File",
+        target_node_kind: "Branch",
+        denormalized_column_names: denorm_cols,
+    }));
+
+    rows
 }
 
 fn graph_edge_rows<'a>(

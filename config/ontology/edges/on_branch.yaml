@@ -5,21 +5,9 @@ table: gl_code_edge
 
 variants:
   - from_node: { type: Directory, id: id }
-    to_node: { type: Branch, id: name }
-    fk_column: branch
+    to_node: { type: Branch, id: id }
     description: "Directory exists on branch."
 
   - from_node: { type: File, id: id }
-    to_node: { type: Branch, id: name }
-    fk_column: branch
+    to_node: { type: Branch, id: id }
     description: "File exists on branch."
-
-  - from_node: { type: Definition, id: id }
-    to_node: { type: Branch, id: name }
-    fk_column: branch
-    description: "Definition exists on branch."
-
-  - from_node: { type: ImportedSymbol, id: id }
-    to_node: { type: Branch, id: name }
-    fk_column: branch
-    description: "Imported symbol exists on branch."
