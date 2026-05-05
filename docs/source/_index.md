@@ -35,13 +35,13 @@ Explore the graph in the GitLab UI or query it with GitLab Duo or
 other MCP-enabled AI tools to bring full workspace context into your
 agentic AI sessions.
 
-You can use Orbit to get answers to questions like:
+Common use cases:
 
-- Based on past reviews and file ownership, who should review this change?
-- Which MRs introduced vulnerabilities in these projects?
-- Which projects depend on this module or library?
-- What work items are assigned to this user in these projects?
-- Which projects do most pipeline failures come from?
+- **Blast radius analysis** - "What would break across our microservices if I change this function?"
+- **Onboarding acceleration** - "Help me understand how this codebase is structured and who owns what."
+- **Multi-repo dependency mapping** - "Which projects import this shared library, and are any of them vulnerable?"
+- **Pipeline intelligence** - "Which files are most correlated with CI failures across all our projects?"
+- **Vulnerability tracing** - "Which merge requests introduced unresolved critical vulnerabilities in the last 30 days?"
 
 <!--- To get started with Orbit ... --->
 
@@ -106,17 +106,17 @@ result to ClickHouse.
 
 ### Supported languages
 
-Orbit supports code indexing for the following languages:
-
-- Ruby
-- Java
-- Kotlin
-- Python
-- TypeScript
-- JavaScript
-- Rust
-- C#
-- Go
+| Language | Cross-file references |
+|---|---|
+| Ruby | Yes |
+| Java | Yes |
+| Kotlin | Yes |
+| Python | Yes |
+| TypeScript | Yes |
+| JavaScript | Yes |
+| Rust | Yes |
+| C# | Yes |
+| Go | Yes |
 
 ## Feedback
 

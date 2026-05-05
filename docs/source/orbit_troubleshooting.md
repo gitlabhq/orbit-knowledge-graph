@@ -26,9 +26,20 @@ To resolve this issue:
 
 This issue occurs when indexing for the group or project is in progress or is temporarily backlogged.
 
+Initial indexing typically completes within a few minutes. Large repositories with many files may take longer.
+
+To check indexing status, use the REST API:
+
+```shell
+curl --header "PRIVATE-TOKEN: <your_access_token>" \
+  "https://gitlab.com/api/v4/orbit/status"
+```
+
+The response includes a `status` field. When indexing is complete, the status is `healthy`.
+
 To resolve this issue:
 
-- Wait for indexing to complete.
+- Wait for indexing to complete, then retry your query.
 
 ### User does not have permission to view the data
 
@@ -47,6 +58,34 @@ To resolve this issue:
 
 1. Confirm the code exists on the default branch. In most projects, the default branch is `main` or `master`.
 1. If the code exists only on a feature branch, merge or cherry-pick it into the default branch.
+
+## Query returns no results
+
+If a query runs without error but returns no nodes, check the following:
+
+- The group or project you're querying is indexed. See [Data missing from knowledge graph](#data-missing-from-knowledge-graph).
+- Your filters are not too restrictive. Try removing filters to confirm data exists.
+- You are using the correct entity name and field names. Use `get_graph_schema` with `expand_nodes` to confirm available properties.
+- Your user account has permission to see the data in GitLab.
+
+## Query compile error
+
+If the API returns a `compile_error`, the query body is invalid.
+
+Common causes:
+
+- `query_type` is missing or misspelled. Valid values: `traversal`, `aggregation`, `path_finding`, `neighbors`.
+- A filter uses an unsupported operator. See [filter operators](queries/query_language.md) for the full list.
+- `node_ids` or a filter is required but missing. Traversal and aggregation queries must have at least one filter or `node_ids` on a node.
+- An entity name or field name is wrong. Use `get_graph_schema` to confirm the correct names.
+
+## Authentication error
+
+If the API returns a `401` or `403` error when querying directly:
+
+- Confirm your access token is valid: `glab auth status`.
+- Confirm your token has the `read_api` scope (minimum required).
+- Confirm Orbit is turned on for the group you are querying.
 
 ## `Error: 403 incorrect_scope`
 

@@ -7,7 +7,7 @@ title: Configure Orbit
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
@@ -67,14 +67,7 @@ To view the knowledge graph:
 
 ## Orbit with GitLab Duo
 
-By default, the GitLab Duo Agent Platform uses the knowledge graph as
-a data source to respond to improve results.
-
-You can use Orbit with:
-
-- GitLab Duo Agentic Chat
-- Foundational agents
-- Foundational flows
+When Orbit is turned on, GitLab Duo Agentic Chat automatically uses the knowledge graph as a data source to improve results. No additional setup is required.
 
 ## Connect to the Orbit MCP server
 

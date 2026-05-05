@@ -70,7 +70,12 @@ Duo can now answer questions that span your entire group. For example:
 
 Connect Claude Code, Codex, or any other MCP-compatible agent to Orbit using the GitLab CLI.
 
-To connect to the MCP server:
+Orbit supports two query paths:
+
+- **Remote** (available now): query the Orbit API on GitLab.com via MCP or the REST API.
+- **Local** (coming soon): run queries against a local context graph on your machine without a network call.
+
+To connect to the remote MCP server:
 
 - From the command line, run the setup command:
 
@@ -78,7 +83,8 @@ To connect to the MCP server:
   glab orbit setup
   ```
 
-  This command detects your agents, installs the Orbit skills, and configures MCP automatically.
+  This command detects your agent, installs the Orbit skill files, and configures MCP automatically.
+  Skill files teach your agent how to construct queries, use the schema, and handle common errors.
 
   To preview the results of the command without applying any changes, run:
 

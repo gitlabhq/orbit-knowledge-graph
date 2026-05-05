@@ -3,12 +3,12 @@ stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
 description: Understand the node types and relationships that make up the knowledge graph.
-title: Knowledge graph schema
+title: Orbit schema
 ---
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
@@ -98,6 +98,115 @@ The `source_code` domain covers the structure of your repository.
 | `File` | A file in the repository. |
 | `Definition` | A code definition such as a class, function, method, or module. |
 | `ImportedSymbol` | An imported symbol or module reference in a source file. |
+
+## View node properties
+
+Each node type has properties you can filter and return in queries.
+To see the full list of properties for a node, call `get_graph_schema` with the node name:
+
+```json
+{
+  "jsonrpc": "2.0",
+  "method": "tools/call",
+  "id": "1",
+  "params": {
+    "name": "get_graph_schema",
+    "arguments": {
+      "expand_nodes": ["MergeRequest"]
+    }
+  }
+}
+```
+
+Or use the REST API:
+
+```shell
+curl --header "PRIVATE-TOKEN: <your_access_token>" \
+  "https://gitlab.com/api/v4/orbit/schema?expand=MergeRequest"
+```
+
+## Example queries
+
+### Find who should review a change
+
+Identify reviewers based on past reviews and file ownership in a project:
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "u",
+    "entity": "User"
+  },
+  "edges": [
+    {
+      "relationship": "REVIEWER",
+      "direction": "outgoing",
+      "node": {
+        "id": "mr",
+        "entity": "MergeRequest",
+        "filters": {
+          "project_full_path": { "op": "eq", "value": "my-group/my-project" }
+        }
+      }
+    }
+  ]
+}
+```
+
+### Find what depends on a service
+
+Traverse `IMPORTS` and `CALLS` edges to map blast radius across a group:
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "def",
+    "entity": "Definition",
+    "filters": {
+      "name": { "op": "eq", "value": "PaymentsClient" }
+    }
+  },
+  "edges": [
+    {
+      "relationship": "CALLS",
+      "direction": "incoming",
+      "node": {
+        "id": "caller",
+        "entity": "Definition",
+        "columns": ["name", "file_path"]
+      }
+    }
+  ]
+}
+```
+
+### Find vulnerabilities introduced by a merge request
+
+```json
+{
+  "query_type": "traversal",
+  "node": {
+    "id": "mr",
+    "entity": "MergeRequest",
+    "filters": {
+      "iid": { "op": "eq", "value": 1234 }
+    }
+  },
+  "edges": [
+    {
+      "relationship": "FIXES",
+      "direction": "outgoing",
+      "node": {
+        "id": "v",
+        "entity": "Vulnerability",
+        "columns": ["title", "severity", "state"]
+      }
+    }
+  ]
+}
+```
 
 ## Relationships
 

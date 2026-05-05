@@ -8,7 +8,7 @@ title: Queries
 
 {{< details >}}
 
-- Tier: Ultimate
+- Tier: Premium, Ultimate
 - Offering: GitLab.com
 - Status: Experiment
 
