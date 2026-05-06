@@ -250,6 +250,11 @@ yaml_test!(
     "c/imported_symbol_fallback_matrix.yaml"
 );
 
+// C++ (and C/C++ cross-language)
+yaml_test!(cpp_resolution, "cpp/resolution.yaml");
+yaml_test!(cpp_cross_language, "cpp/cross_language.yaml");
+yaml_test!(cpp_hardcore, "cpp/hardcore.yaml");
+
 // C#
 yaml_test!(csharp_resolution, "csharp/resolution.yaml");
 yaml_test!(

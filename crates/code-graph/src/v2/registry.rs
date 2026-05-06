@@ -8,6 +8,7 @@ use crate::v2::config::{Language, LanguageFamily};
 use crate::v2::langs::custom::js::JsPipeline;
 use crate::v2::langs::custom::rust::RustPipeline;
 use crate::v2::langs::generic::c::{CDsl, CRules};
+use crate::v2::langs::generic::cpp::{CppDsl, CppRules};
 use crate::v2::langs::generic::csharp::{CSharpDsl, CSharpRules};
 use crate::v2::langs::generic::go::{GoDsl, GoRules};
 use crate::v2::langs::generic::java::{JavaDsl, JavaRules};
@@ -93,6 +94,7 @@ macro_rules! register_v2_pipelines {
 
 register_v2_pipelines! {
     C       => [GenericPipeline<CDsl, CRules>],
+    Cpp     => [GenericPipeline<CppDsl, CppRules>],
     JavaScript => [JsPipeline],
     TypeScript => [JsPipeline],
     Python  => [GenericPipeline<PythonDsl, PythonRules>],

@@ -849,7 +849,7 @@ pub struct LanguageSpec {
     pub(crate) package_node: Option<(&'static str, Extract)>,
     /// Use the filename (without extension) as the root scope for all
     /// top-level definitions. For languages without namespaces/modules
-    /// (C, header files) where the file IS the scope.
+    /// (C, C++, header files) where the file IS the scope.
     pub(crate) file_scope: bool,
     pub(crate) hooks: LanguageHooks,
     pub ssa_config: SsaConfig,
