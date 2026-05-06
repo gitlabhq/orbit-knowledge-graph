@@ -56,8 +56,8 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
-| Graph DDL (ClickHouse) | `config/graph.sql` |
-| Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql` or `config/ontology/` changes) |
+| Graph DDL (ClickHouse) | `config/graph.sql` (CREATE TABLE) + `config/graph_projections.sql` (post-backfill ALTER ADD/MATERIALIZE) |
+| Schema version file | `config/SCHEMA_VERSION` (bump when `graph.sql`, `graph_projections.sql`, or `config/ontology/` changes) |
 | RAW output format version | `config/RAW_OUTPUT_FORMAT_VERSION` (semver, bump when `graph.rs` or `query_response.json` changes) |
 | Graph DDL (local DuckDB) | Generated at runtime from ontology via `generate_local_tables()` + `duckdb_ddl` |
 | Datalake DDL (ClickHouse) | `fixtures/siphon.sql` |

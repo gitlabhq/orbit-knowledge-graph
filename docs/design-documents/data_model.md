@@ -14,13 +14,17 @@ The data model follows a [Property Graph](https://neo4j.com/blog/knowledge-graph
 
 The Knowledge Graph data is stored in ClickHouse graph tables that are separate from the raw replicated data lake tables.
 
-- The implemented graph schema is defined in `config/graph.sql`.
+- The implemented graph schema is split across `config/graph.sql` (`CREATE TABLE`) and
+  `config/graph_projections.sql` (post-backfill `ALTER TABLE … ADD PROJECTION` /
+  `MATERIALIZE PROJECTION`). Both files are generated from the ontology by
+  `mise schema:generate:ddl`. See [`schema_management.md`](schema_management.md) for the
+  rationale behind the two-file split.
 - The implemented ontology metadata and ETL mappings are defined under `config/ontology/`.
 - In deployed environments, operators can place the graph tables in a dedicated ClickHouse database or instance. The repository supports either a separate graph database or co-location within a broader ClickHouse deployment, depending on operational requirements.
 
 ## Concepts to Know
 
-- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/` and the same ClickHouse graph schema in `config/graph.sql`. Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`); each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
+- **Unified ontology and shared graph primitives**: Both the Code Graph and the SDLC Graph use the same ontology-driven entity and relationship model defined in `config/ontology/` and the same ClickHouse graph schema in `config/graph.sql` (with projections in `config/graph_projections.sql`). Edges are stored in ontology-configured edge tables (defaulting to `gl_edge`); each edge YAML can set a `table:` field to route specific relationship types to dedicated tables. This allows linking between the two graphs (e.g., a `Project` node from the SDLC graph can be linked to a `Branch`, `File`, or `Definition` from the Code Graph).
 - **Entity as Node**: Every entity in the GitLab ecosystem (e.g., Project, Issue, File, Function Definition) is represented as a node.
 - **Interaction as Edge**: Relationships between these entities (e.g., a User `COMMENTS_ON` an Issue, a `File` `CONTAINS` a `Definition`) are represented as directed edges.
 

@@ -12,6 +12,11 @@ pub const LATENCY: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.5, 5.0, 10.0];
 /// exceed 10 s: project indexing, repository fetch, full pipeline runs.
 pub const LATENCY_SLOW: &[f64] = &[0.5, 1.0, 5.0, 10.0, 30.0, 60.0, 300.0];
 
+/// Very-coarse buckets (1 s to 1 h). For operations that can take many
+/// minutes — schema migrations, full-table mutations like
+/// `MATERIALIZE PROJECTION` on multi-million-row tables.
+pub const LATENCY_VERY_SLOW: &[f64] = &[1.0, 10.0, 30.0, 60.0, 300.0, 600.0, 1800.0, 3600.0];
+
 /// Tighter latency buckets for Gitaly, content resolution, and other
 /// sub-second RPC paths.
 pub const LATENCY_FAST: &[f64] = &[0.1, 0.25, 0.5, 1.0, 2.5, 5.0];

@@ -11,6 +11,7 @@
 
 pub mod clickhouse;
 pub mod duckdb;
+pub mod post_backfill;
 
 use std::collections::BTreeMap;
 

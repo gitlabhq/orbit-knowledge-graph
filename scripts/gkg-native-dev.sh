@@ -322,9 +322,13 @@ EOF
 apply_schema() {
   clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --query "CREATE DATABASE IF NOT EXISTS \`$GKG_GRAPH__DATABASE\`"
 
-  python3 - <<'PY' | while IFS= read -r stmt; do
+  # Apply CREATE TABLE first, then the post-backfill projections — same
+  # order the runtime migration uses (create → backfill → materialize).
+  for sql_file in config/graph.sql config/graph_projections.sql; do
+    python3 - "$sql_file" <<'PY' | while IFS= read -r stmt; do
+import sys
 from pathlib import Path
-sql = Path("config/graph.sql").read_text()
+sql = Path(sys.argv[1]).read_text()
 parts = []
 for line in sql.splitlines():
     stripped = line.split("--", 1)[0].strip()
@@ -336,7 +340,8 @@ for stmt in joined.split(";"):
     if stmt:
         print(stmt + ";")
 PY
-    clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GKG_GRAPH__DATABASE" --query "$stmt"
+      clickhouse client --host 127.0.0.1 --port "$GDK_CLICKHOUSE_TCP_PORT" --database "$GKG_GRAPH__DATABASE" --query "$stmt"
+    done
   done
 }
 

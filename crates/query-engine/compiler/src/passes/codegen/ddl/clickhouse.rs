@@ -165,7 +165,12 @@ pub fn emit_create_table(table: &CreateTable) -> String {
     parts.join("\n")
 }
 
-fn emit_projection(proj: &ProjectionDef) -> String {
+/// Emits the body of a `PROJECTION` clause as it appears inside a
+/// `CREATE TABLE` body, including the leading four-space indentation and the
+/// `PROJECTION ` keyword. The post-backfill `ALTER TABLE … ADD PROJECTION`
+/// path consumes the same string with the indentation/keyword stripped — see
+/// `passes::codegen::ddl::post_backfill::generate_post_backfill_statements`.
+pub fn emit_projection(proj: &ProjectionDef) -> String {
     match proj {
         ProjectionDef::Reorder { name, order_by } => {
             assert!(

@@ -76,9 +76,17 @@ pub use pipelines::{
 // Re-export key types from pass modules.
 pub use passes::codegen::{
     CompiledQueryContext, ParamValue, ParameterizedQuery, SqlDialect,
-    clickhouse::emit_simple_query, codegen, ddl::clickhouse::emit_create_table,
-    ddl::duckdb::emit_create_table as emit_duckdb_create_table, ddl::generate_graph_tables,
-    ddl::generate_graph_tables_with_prefix, ddl::generate_local_tables,
+    clickhouse::emit_simple_query,
+    codegen,
+    ddl::clickhouse::{emit_create_table, emit_projection},
+    ddl::duckdb::emit_create_table as emit_duckdb_create_table,
+    ddl::generate_graph_tables,
+    ddl::generate_graph_tables_with_prefix,
+    ddl::generate_local_tables,
+    ddl::post_backfill::{
+        PostBackfillKind, PostBackfillStatement, generate_post_backfill_statements,
+        strip_projections_for_create,
+    },
 };
 pub use passes::enforce::{EdgeMeta, RedactionNode, ResultContext};
 pub use passes::hydrate::{

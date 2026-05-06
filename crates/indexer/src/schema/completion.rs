@@ -17,7 +17,9 @@ use arrow::datatypes::UInt64Type;
 use async_trait::async_trait;
 use gkg_server_config::{MigrationCompletionConfig, ScheduleConfiguration, SchemaConfig};
 use gkg_utils::arrow::ArrowUtils;
-use query_engine::compiler::generate_graph_tables;
+use query_engine::compiler::{
+    PostBackfillKind, generate_graph_tables, generate_post_backfill_statements,
+};
 use tracing::{info, warn};
 
 use super::metrics::CompletionMetrics;
@@ -231,6 +233,18 @@ impl MigrationCompletionChecker {
                     .map_err(|e| TaskError::new(format!("mark v{} retired: {e}", entry.version)))?;
             }
         }
+
+        // Materialize the projections we deferred at table-create time
+        // (`schema::migration::create_prefixed_tables` strips them so the
+        // backfill INSERTs aren't penalized). After this returns, the
+        // migrating-version tables have the same projection set the inline
+        // DDL would have produced — query plans on the promoted version
+        // see projections immediately, with no merge-cycle warm-up.
+        info!(
+            version = migrating_version,
+            "backfill complete — applying deferred projections before promotion"
+        );
+        self.apply_deferred_projections(migrating_version).await?;
 
         info!(
             version = migrating_version,
@@ -526,6 +540,128 @@ impl MigrationCompletionChecker {
                 }
             }
         }
+
+        Ok(())
+    }
+
+    /// Adds and materializes every projection declared by the ontology onto
+    /// the migrating version's tables.
+    ///
+    /// The plan comes from the shared
+    /// [`generate_post_backfill_statements`] generator, so the SQL executed
+    /// here is the same SQL emitted by `orbit debug ddl-projections` into
+    /// `config/graph_projections.sql`. That coupling is intentional: a
+    /// reviewer reading the file knows exactly what the indexer will run.
+    ///
+    /// Idempotency comes from the SQL itself: `ADD PROJECTION IF NOT EXISTS`
+    /// is a no-op when the projection definition is already present, and
+    /// `MATERIALIZE PROJECTION IF EXISTS` issues a mutation that finishes
+    /// quickly when there is nothing to backfill. So a completion-tick
+    /// crash mid-phase is safe — the next tick re-runs from scratch and
+    /// converges.
+    ///
+    /// `MATERIALIZE PROJECTION` runs synchronously via
+    /// `mutations_sync = 2`. The completion task tolerates long ticks
+    /// (it runs on a cron schedule and holds the migration KV lock). For
+    /// very large tables this can dominate the completion-task duration —
+    /// the per-statement timing logs and the
+    /// `gkg_schema_projection_apply_duration_seconds` histogram are the
+    /// load-bearing observability for diagnosing latency.
+    async fn apply_deferred_projections(&self, version: u32) -> Result<(), TaskError> {
+        let prefix = table_prefix(version);
+        let plan = generate_post_backfill_statements(&self.ontology, &prefix);
+
+        if plan.is_empty() {
+            info!(
+                version,
+                "no deferred projections in ontology — skipping post-backfill phase"
+            );
+            return Ok(());
+        }
+
+        let phase_started = std::time::Instant::now();
+        let total_statements = plan.len();
+        let total_projections = plan
+            .iter()
+            .filter(|s| s.kind == PostBackfillKind::AddProjection)
+            .count();
+        let total_tables = plan
+            .iter()
+            .filter(|s| s.kind == PostBackfillKind::ModifyDeduplicateSetting)
+            .count();
+
+        info!(
+            version,
+            total_tables, total_projections, total_statements, "starting deferred-projection phase"
+        );
+
+        for stmt in plan {
+            let kind_label = stmt.kind.as_label();
+            let stmt_started = std::time::Instant::now();
+
+            info!(
+                version,
+                table = %stmt.table,
+                projection = stmt.projection.as_deref().unwrap_or("-"),
+                kind = kind_label,
+                "executing deferred-projection statement"
+            );
+
+            let result = self.graph.execute(&stmt.sql).await;
+            let elapsed = stmt_started.elapsed();
+
+            match result {
+                Ok(()) => {
+                    info!(
+                        version,
+                        table = %stmt.table,
+                        projection = stmt.projection.as_deref().unwrap_or("-"),
+                        kind = kind_label,
+                        elapsed_ms = elapsed.as_millis() as u64,
+                        elapsed_secs = elapsed.as_secs_f64(),
+                        "deferred-projection statement succeeded"
+                    );
+                    self.metrics.record_projection_apply(
+                        &stmt.table,
+                        kind_label,
+                        "success",
+                        elapsed,
+                    );
+                }
+                Err(e) => {
+                    self.metrics.record_projection_apply(
+                        &stmt.table,
+                        kind_label,
+                        "failure",
+                        elapsed,
+                    );
+                    warn!(
+                        version,
+                        table = %stmt.table,
+                        projection = stmt.projection.as_deref().unwrap_or("-"),
+                        kind = kind_label,
+                        elapsed_ms = elapsed.as_millis() as u64,
+                        error = %e,
+                        "deferred-projection statement failed"
+                    );
+                    return Err(TaskError::new(format!(
+                        "{kind_label} on {} ({}): {e}",
+                        stmt.table,
+                        stmt.projection.as_deref().unwrap_or("-")
+                    )));
+                }
+            }
+        }
+
+        let total_elapsed = phase_started.elapsed();
+        info!(
+            version,
+            total_tables,
+            total_projections,
+            elapsed_ms = total_elapsed.as_millis() as u64,
+            elapsed_secs = total_elapsed.as_secs_f64(),
+            "deferred-projection phase complete"
+        );
 
         Ok(())
     }

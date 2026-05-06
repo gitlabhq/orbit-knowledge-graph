@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Verify config/graph.sql and config/graph_local.sql match the ontology
-# and have the correct SCHEMA_VERSION in their headers.
+# Verify config/graph.sql, config/graph_projections.sql, and
+# config/graph_local.sql match the ontology and have the correct
+# SCHEMA_VERSION in their headers.
 set -euo pipefail
 
 ORBIT="${1:-cargo run --bin orbit --}"
@@ -37,6 +38,7 @@ check_file() {
 }
 
 check_file "$ORBIT debug ddl" "config/graph.sql"
+check_file "$ORBIT debug ddl-projections" "config/graph_projections.sql"
 check_file "$ORBIT debug ddl-local" "config/graph_local.sql"
 
 exit $FAILED

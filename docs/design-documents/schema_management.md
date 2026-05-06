@@ -9,10 +9,22 @@ table-prefix-aware migration orchestrator.
 ## Schema Definition
 
 The schema is defined by node and relationship types in the ontology (`config/ontology/`) and
-materialized as ClickHouse DDL in `config/graph.sql`. The graph DDL creates property graph tables
-(one per node type, e.g. `gl_user`, `gl_project`) in the graph ClickHouse database. Ontology
-storage metadata also owns table-level MergeTree settings, such as indexes, projections, primary
-keys, and explicit `SETTINGS` entries that need to be emitted into the generated DDL.
+materialized as ClickHouse DDL in two checked-in files:
+
+- `config/graph.sql` — `CREATE TABLE` statements for every node, edge, and auxiliary table.
+- `config/graph_projections.sql` — the post-backfill `ALTER TABLE … ADD PROJECTION …` and
+  `ALTER TABLE … MATERIALIZE PROJECTION … SETTINGS mutations_sync = 2` plan.
+
+Both files are generated from the same ontology by `mise schema:generate:ddl` (which calls
+`orbit debug ddl` and `orbit debug ddl-projections`) and CI freshness-checks both. The split
+mirrors the runtime: tables are created without projections so the migrating-version backfill
+isn't slowed down by per-INSERT projection-merge cost; projections are added and materialized
+once, after backfill completes, in a single mutation per projection. See
+[Deferred-projection phase](#deferred-projection-phase) below.
+
+Ontology storage metadata also owns table-level MergeTree settings, such as indexes,
+projections, primary keys, and explicit `SETTINGS` entries that need to be emitted into the
+generated DDL.
 
 ## Schema Version Tracking
 
@@ -263,8 +275,41 @@ data correctness validation is deferred to staging E2E tests.
 When completion is detected:
 
 1. All previously `active` versions are marked `retired`.
-2. The `migrating` version is marked `active`.
-3. The `gkg_schema_migration_completed_total` counter is incremented.
+2. The [deferred-projection phase](#deferred-projection-phase) runs, materializing every
+   projection declared by the ontology onto the migrating-version tables.
+3. The `migrating` version is marked `active`.
+4. The `gkg_schema_migration_completed_total` counter is incremented.
+
+If step 2 fails, the version stays `migrating` and the completion task retries on its next
+tick. The SQL is built with `ADD PROJECTION IF NOT EXISTS` and `MATERIALIZE PROJECTION IF
+EXISTS`, so retries are idempotent without any per-tick lookup.
+
+### Deferred-projection phase
+
+`ReplacingMergeTree` rebuilds projections during merges
+(`deduplicate_merge_projection_mode = 'rebuild'`). For multi-million-row backfills with
+multiple projections per table, projection maintenance dominates the write path. The migration
+flow defers projection creation:
+
+1. `schema::migration::create_prefixed_tables` strips projections (and the
+   `deduplicate_merge_projection_mode` setting) before issuing `CREATE TABLE`.
+2. The backfill writes to projection-free tables.
+3. Once `is_migration_complete` returns true, `schema::completion::apply_deferred_projections`
+   issues the post-backfill plan returned by
+   `query_engine::compiler::generate_post_backfill_statements`. For each table:
+   - `ALTER TABLE … MODIFY SETTING deduplicate_merge_projection_mode = 'rebuild'`
+   - For each projection: `ALTER TABLE … ADD PROJECTION IF NOT EXISTS …` followed by
+     `ALTER TABLE … MATERIALIZE PROJECTION IF EXISTS … SETTINGS mutations_sync = 2`.
+
+The same generator powers `orbit debug ddl-projections`, which writes
+`config/graph_projections.sql`. The file under review is exactly the SQL the runtime issues at
+promotion time.
+
+`mutations_sync = 2` blocks until the mutation finishes across replicas, so the completion
+task tick can run for many minutes when materializing large tables. The completion task is
+already a long-tick scheduled task and tolerates this; the per-statement timing logs and
+the `gkg.schema.projection_apply.duration` histogram (bucketed up to 1 hour) are the
+load-bearing observability for diagnosing slow materializations.
 
 Webserver behavior on promotion is automatic: pods built for the new version flip to `Ready`
 on the next poll, and pods built for an older version detect `active > embedded` and exit via
@@ -319,8 +364,17 @@ schedule:
 |--------|------|--------|-------------|
 | `gkg_schema_migration_completed_total` | counter | — | Successful migration completions |
 | `gkg_schema_cleanup_total` | counter | `version`, `result` | Table cleanup operations per version (`success` or `failure`) |
+| `gkg_schema_projection_apply_total` | counter | `table`, `kind`, `result` | Per-statement outcomes of the deferred-projection phase. `kind` is one of `modify_setting`, `add_projection`, `materialize_projection` |
+| `gkg_schema_projection_apply_duration_seconds` | histogram | `table`, `kind` | Wall-clock duration of each deferred-projection statement (buckets up to 1 hour for very large materializations) |
 
 Table drop operations are logged at `info` level with the version and table name.
+
+Deferred-projection statements emit structured logs at `info` level both before execution
+(`executing deferred-projection statement`) and after success
+(`deferred-projection statement succeeded`) with `version`, `table`, `projection`, `kind`,
+`elapsed_ms`, and `elapsed_secs` fields, plus a phase-level `deferred-projection phase
+complete` log line summarizing the total elapsed time and statement count. Failures log at
+`warn` with the same fields plus `error`.
 
 ---
 

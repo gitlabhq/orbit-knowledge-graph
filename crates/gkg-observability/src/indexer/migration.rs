@@ -4,7 +4,7 @@
 //! the OTel names were hand-shaped in Prometheus style. The OTel names here
 //! drop the `_total` suffix so the exporter can append it exactly once.
 
-use crate::MetricSpec;
+use crate::{MetricSpec, buckets};
 
 pub mod labels {
     pub const PHASE: &str = "phase";
@@ -13,6 +13,13 @@ pub mod labels {
     /// Used on the `indexed_units` / `eligible_units` gauges to distinguish
     /// the SDLC promotion gate from the code backfill telemetry.
     pub const SCOPE: &str = "scope";
+    /// Used on the deferred-projection telemetry to identify which
+    /// migrating-version table a statement targeted.
+    pub const TABLE: &str = "table";
+    /// Used on the deferred-projection telemetry to distinguish the
+    /// `modify_setting`, `add_projection`, and `materialize_projection`
+    /// kinds — see [`compiler::PostBackfillKind`].
+    pub const KIND: &str = "kind";
 }
 
 const DOMAIN: &str = "indexer.migration";
@@ -79,6 +86,34 @@ pub const MIGRATING_AGE: MetricSpec = MetricSpec::gauge(
     DOMAIN,
 );
 
+/// Per-statement outcome counter for the deferred-projection phase that runs
+/// after a migrating version's backfill completes. The `kind` label
+/// distinguishes the `modify_setting` / `add_projection` /
+/// `materialize_projection` statements emitted by
+/// [`compiler::generate_post_backfill_statements`].
+pub const PROJECTION_APPLY: MetricSpec = MetricSpec::counter(
+    "gkg.schema.projection_apply",
+    "Deferred-projection statement outcomes (modify/add/materialize) \
+     during the post-backfill phase, labelled by table, kind, and result.",
+    None,
+    &[labels::TABLE, labels::KIND, labels::RESULT],
+    DOMAIN,
+);
+
+/// Wall-clock duration of each deferred-projection statement. The
+/// `materialize_projection` kind is the load-bearing one for diagnosing
+/// post-backfill latency; `modify_setting` and `add_projection` should be
+/// near-instant and serve as a control to detect ClickHouse-side issues.
+pub const PROJECTION_APPLY_DURATION: MetricSpec = MetricSpec::histogram_f64(
+    "gkg.schema.projection_apply.duration",
+    "Wall-clock duration of each deferred-projection statement \
+     (modify_setting, add_projection, materialize_projection).",
+    Some("s"),
+    &[labels::TABLE, labels::KIND],
+    buckets::LATENCY_VERY_SLOW,
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &PHASE,
     &COMPLETED,
@@ -86,4 +121,6 @@ pub const CATALOG: &[&MetricSpec] = &[
     &INDEXED_UNITS,
     &ELIGIBLE_UNITS,
     &MIGRATING_AGE,
+    &PROJECTION_APPLY,
+    &PROJECTION_APPLY_DURATION,
 ];

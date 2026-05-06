@@ -22,7 +22,9 @@
 use std::sync::Arc;
 use std::time::Duration;
 
-use query_engine::compiler::{emit_create_table, generate_graph_tables_with_prefix};
+use query_engine::compiler::{
+    emit_create_table, generate_graph_tables_with_prefix, strip_projections_for_create,
+};
 use thiserror::Error;
 use tracing::{info, warn};
 
@@ -219,10 +221,18 @@ async fn create_prefixed_tables(
     metrics: &MigrationMetrics,
 ) -> Result<(), MigrationError> {
     let new_prefix = table_prefix(*SCHEMA_VERSION);
-    let tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
+    let mut tables = generate_graph_tables_with_prefix(ontology, &new_prefix);
+
+    // Defer projections to the post-backfill phase
+    // (`schema::completion::apply_deferred_projections`). Backfill on
+    // `ReplacingMergeTree` rebuilds projections on every merge, so creating
+    // them inline turns the bulk INSERTs into a projection-maintenance
+    // hot path. The projection set is regenerated from the same ontology
+    // after promotion, so there is nothing to remember here.
+    strip_projections_for_create(&mut tables);
 
     for table in &tables {
-        info!(table = %table.name, "creating table");
+        info!(table = %table.name, "creating table (projections deferred)");
         graph
             .execute(&emit_create_table(table))
             .await

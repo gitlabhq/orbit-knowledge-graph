@@ -6,7 +6,7 @@
 //! builds instruments against the running `MeterProvider`.
 
 use opentelemetry::KeyValue;
-use opentelemetry::metrics::{Counter, Gauge};
+use opentelemetry::metrics::{Counter, Gauge, Histogram};
 
 use gkg_observability::indexer::migration;
 
@@ -58,6 +58,8 @@ pub struct CompletionMetrics {
     pub(crate) indexed_units: Gauge<f64>,
     pub(crate) eligible_units: Gauge<f64>,
     pub(crate) migrating_age: Gauge<f64>,
+    pub(crate) projection_apply: Counter<u64>,
+    pub(crate) projection_apply_duration: Histogram<f64>,
 }
 
 impl CompletionMetrics {
@@ -69,6 +71,9 @@ impl CompletionMetrics {
             indexed_units: migration::INDEXED_UNITS.build_gauge_f64(&meter),
             eligible_units: migration::ELIGIBLE_UNITS.build_gauge_f64(&meter),
             migrating_age: migration::MIGRATING_AGE.build_gauge_f64(&meter),
+            projection_apply: migration::PROJECTION_APPLY.build_counter_u64(&meter),
+            projection_apply_duration: migration::PROJECTION_APPLY_DURATION
+                .build_histogram_f64(&meter),
         }
     }
 
@@ -109,6 +114,33 @@ impl CompletionMetrics {
 
     pub(crate) fn record_migrating_age(&self, age_seconds: u64) {
         self.migrating_age.record(age_seconds as f64, &[]);
+    }
+
+    /// Records a single deferred-projection statement outcome and duration.
+    /// `kind` is the stable label from `PostBackfillKind::as_label()`.
+    pub(crate) fn record_projection_apply(
+        &self,
+        table: &str,
+        kind: &'static str,
+        result: &'static str,
+        elapsed: std::time::Duration,
+    ) {
+        let table = table.to_string();
+        self.projection_apply.add(
+            1,
+            &[
+                KeyValue::new(migration::labels::TABLE, table.clone()),
+                KeyValue::new(migration::labels::KIND, kind),
+                KeyValue::new(migration::labels::RESULT, result),
+            ],
+        );
+        self.projection_apply_duration.record(
+            elapsed.as_secs_f64(),
+            &[
+                KeyValue::new(migration::labels::TABLE, table),
+                KeyValue::new(migration::labels::KIND, kind),
+            ],
+        );
     }
 }
 
