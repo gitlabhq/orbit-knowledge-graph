@@ -3,8 +3,10 @@ description: User who closed a work item
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: WorkItem, id: id }
+    fk_column: closed_by_id
     description: "User closed a work item."
 
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
+    fk_column: closed_by_id
     description: "User closed a merge request."

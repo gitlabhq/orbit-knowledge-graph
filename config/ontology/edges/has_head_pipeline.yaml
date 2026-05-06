@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: head_pipeline_id
     description: "Merge request has head pipeline."

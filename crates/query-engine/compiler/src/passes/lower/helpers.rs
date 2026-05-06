@@ -97,25 +97,6 @@ pub(super) fn emit_node_join_with_narrowing(
 
 /// JOIN a node's dedup subquery into the FROM tree.
 ///
-/// `use_traversal_path_join`: true for FK paths (node-to-node), false for
-/// edge paths (edge.traversal_path has different semantics than node's).
-pub(super) fn emit_node_join(
-    from: TableRef,
-    np: &NodePlan,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
-) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    emit_node_join_inner(
-        from,
-        np,
-        edge_alias,
-        edge_col,
-        use_traversal_path_join,
-        None,
-    )
-}
-
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -344,7 +325,9 @@ pub(super) fn emit_filter_narrowing(
         };
         let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
         let should_narrow = match np.hydration {
-            HydrationStrategy::FilterOnly => true,
+            // FilterOnly nodes get their CTE + IN predicate from
+            // emit_filter_subquery in the second loop.
+            HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
             HydrationStrategy::Skip => false,
         };
@@ -352,7 +335,10 @@ pub(super) fn emit_filter_narrowing(
             continue;
         }
         let cte_name = format!("_filter_{node_alias}");
-        // Join nodes need their CTE created here; FilterOnly gets theirs later.
+        // Create the CTE once per node for selective Join nodes.
+        // FilterOnly CTEs are created by emit_filter_subquery in the
+        // second loop (it uses dedup_subquery which handles the full
+        // filter/node_ids/id_range logic correctly).
         if np.hydration == HydrationStrategy::Join && narrowed.insert(node_alias.clone()) {
             let table = np.table.as_deref().unwrap_or("");
             let dedup = build_dedup_subquery(

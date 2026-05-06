@@ -87,3 +87,13 @@ variants:
     to_node: { type: Project, id: id }
     fk_column: project_id
     description: "Merge request diff file belongs to project."
+
+  - from_node: { type: VulnerabilityScanner, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    description: "Vulnerability scanner belongs to project."
+
+  - from_node: { type: VulnerabilityOccurrence, id: id }
+    to_node: { type: Project, id: id }
+    fk_column: project_id
+    description: "Vulnerability occurrence belongs to project."

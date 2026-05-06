@@ -98,8 +98,17 @@ pub struct ParamValue {
 
 impl ParamValue {
     /// Render as a ClickHouse SQL literal for debugging/observability.
+    /// DateTime types are wrapped in toDateTime64() for direct SQL use.
     pub fn render_literal(&self) -> String {
-        render_value(&self.value)
+        match (&self.ch_type, &self.value) {
+            (ChType::DateTime64, Value::String(s)) => {
+                // Strip trailing 'Z' — toDateTime64 with explicit timezone
+                // doesn't accept the Z suffix.
+                let s = s.strip_suffix('Z').unwrap_or(s);
+                format!("toDateTime64('{}', 6, 'UTC')", s.replace('\'', "''"))
+            }
+            _ => render_value(&self.value),
+        }
     }
 
     /// Render as a ClickHouse HTTP query parameter value.

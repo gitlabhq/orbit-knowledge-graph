@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Job, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: upstream_pipeline_id
     description: "Job runs in a child pipeline whose parent is the upstream pipeline."

@@ -6,12 +6,15 @@ table: gl_ci_edge
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: user_id
     description: "User triggered pipeline."
 
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Pipeline, id: id }
+    fk_column: merge_request_id
     description: "Merge request triggered pipeline."
 
   - from_node: { type: User, id: id }
     to_node: { type: Job, id: id }
+    fk_column: user_id
     description: "User triggered job."

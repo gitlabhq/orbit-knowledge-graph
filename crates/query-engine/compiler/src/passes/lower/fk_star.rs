@@ -9,8 +9,8 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    build_dedup_subquery, collect_dedup_columns, emit_filter_subquery, emit_node_join,
-    node_select_columns,
+    NarrowSource, build_dedup_subquery, collect_dedup_columns, emit_filter_subquery,
+    emit_node_join_with_narrowing, node_select_columns,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::{deleted_false, id_list_predicate};
@@ -86,11 +86,54 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
 
         // Target hydration — use pre-resolved fk_needs_join.
         if target_np.fk_needs_join {
-            let (new_from, ns, nw) =
-                // Don't add traversal_path equality to FK JOINs: entities
-                // at different depths have different TP prefixes (e.g.
-                // WorkItem at '1/100/' vs Project at '1/100/1000/').
-                emit_node_join(from, target_np, &fk_alias, &fk.fk_column, false)?;
+            // Narrow the target's dedup scan to only IDs the center
+            // actually references via its FK column. Without this, the
+            // target scans the full org (e.g., all Jobs) just to join
+            // on the handful of FK values from the center.
+            let narrow = if target_np.filters.is_empty()
+                && target_np.node_ids.is_empty()
+                && target_np.id_range.is_none()
+            {
+                // Build a lightweight CTE that projects the FK column
+                // from a dedup of the center table. This is the same
+                // scan the center does but only selects the FK column.
+                let narrow_name = format!("_narrow_{}", fk.target_node);
+                let narrow_dedup = build_dedup_subquery(
+                    center_alias,
+                    center_table,
+                    vec![
+                        SelectExpr::col(center_alias, &fk.fk_column),
+                        SelectExpr::col(center_alias, DELETED_COLUMN),
+                    ],
+                    center_np,
+                );
+                ctes.push(Cte::new(
+                    &narrow_name,
+                    Query {
+                        select: vec![SelectExpr::new(
+                            Expr::col(center_alias, &fk.fk_column),
+                            DEFAULT_PRIMARY_KEY,
+                        )],
+                        from: TableRef::subquery(narrow_dedup, center_alias),
+                        where_clause: Some(deleted_false(center_alias)),
+                        ..Default::default()
+                    },
+                ));
+                Some(NarrowSource::Cte(narrow_name))
+            } else {
+                None
+            };
+            // Don't add traversal_path equality to FK JOINs: entities
+            // at different depths have different TP prefixes (e.g.
+            // WorkItem at '1/100/' vs Project at '1/100/1000/').
+            let (new_from, ns, nw) = emit_node_join_with_narrowing(
+                from,
+                target_np,
+                &fk_alias,
+                &fk.fk_column,
+                false,
+                narrow,
+            )?;
             from = new_from;
             selects.extend(ns);
             where_parts.extend(nw);

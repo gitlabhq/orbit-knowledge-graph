@@ -126,7 +126,9 @@ fn full_pipeline() {
     let result = compile(json, &embedded_ontology(), &test_ctx()).unwrap();
     let sql = ParsedSql::from_query(&result.base);
 
-    assert!(sql.has_table("gl_edge"));
+    // AUTHORED is FK-elided via author_id — no edge table scan.
+    assert!(sql.has_table("gl_note"));
+    assert!(sql.has_table("gl_user"));
     assert_eq!(sql.limit_value(), Some(25));
 }
 
