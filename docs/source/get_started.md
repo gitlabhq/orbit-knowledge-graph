@@ -2,11 +2,11 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Enable Orbit for a group and run your first query. Covers both the remote indexer (GitLab.com) and the local indexer developer preview.
+description: Enable Orbit for a group and run your first query. Covers both Orbit Remote (GitLab.com) and Orbit Local (developer preview).
 title: Get started with Orbit
 ---
 
-## Remote indexer
+## Orbit Remote
 
 {{< details >}}
 
@@ -16,7 +16,7 @@ title: Get started with Orbit
 
 {{< /details >}}
 
-The remote indexer runs on GitLab-hosted infrastructure and is the primary path for
+Orbit Remote runs on GitLab-hosted infrastructure and is the primary path for
 GitLab.com Premium and Ultimate customers.
 
 ### Prerequisites
@@ -91,7 +91,7 @@ curl --request POST \
 
 See [REST API reference](access/api.md) for full documentation.
 
-## Local indexer
+## Orbit Local
 
 {{< details >}}
 
@@ -102,10 +102,10 @@ See [REST API reference](access/api.md) for full documentation.
 {{< /details >}}
 
 > [!note]
-> The local indexer is an early developer preview. It must be built from source and has
+> Orbit Local is an early developer preview. It must be built from source and has
 > no UI, no MCP integration, and no daemon process yet.
 
-The local indexer lets you build and query an Orbit knowledge graph on your own machine
+Orbit Local lets you build and query an Orbit knowledge graph on your own machine
 using DuckDB as the storage backend. It is the path for Community Edition users and teams
 that cannot use the GitLab-hosted service.
 
@@ -130,7 +130,7 @@ The compiled binary is placed in `target/release/orbit`.
 
 ### Step 2: Index a repository
 
-Point the indexer at a local repository:
+Point Orbit Local at a repository:
 
 ```shell
 ./target/release/orbit index --path /path/to/your/repo
@@ -152,13 +152,13 @@ Orbit parses the repository and writes a DuckDB graph file to `~/.orbit/graph.db
 }'
 ```
 
-### What the local indexer supports
+### What Orbit Local supports
 
 - Code indexing: definitions, imports, cross-file references
 - All [supported languages](indexing.md#supported-languages)
 - Local DuckDB query execution
 
-The local indexer does not index SDLC data (merge requests, pipelines, work items).
+Orbit Local does not index SDLC data (merge requests, pipelines, work items).
 SDLC indexing requires a connected GitLab instance.
 
 ## What to try next
