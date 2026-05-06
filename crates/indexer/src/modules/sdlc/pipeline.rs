@@ -609,17 +609,23 @@ mod tests {
 
     struct RecordingCheckpointStore {
         state: Mutex<Option<Checkpoint>>,
+        progress_history: Mutex<Vec<Checkpoint>>,
     }
 
     impl RecordingCheckpointStore {
         fn new() -> Self {
             Self {
                 state: Mutex::new(None),
+                progress_history: Mutex::new(Vec::new()),
             }
         }
 
         fn current_state(&self) -> Option<Checkpoint> {
             self.state.lock().unwrap().clone()
+        }
+
+        fn progress_history(&self) -> Vec<Checkpoint> {
+            self.progress_history.lock().unwrap().clone()
         }
     }
 
@@ -634,6 +640,10 @@ mod tests {
             _key: &str,
             checkpoint: &Checkpoint,
         ) -> Result<(), CheckpointError> {
+            self.progress_history
+                .lock()
+                .unwrap()
+                .push(checkpoint.clone());
             *self.state.lock().unwrap() = Some(checkpoint.clone());
             Ok(())
         }
@@ -701,6 +711,19 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+
+        let history = store.progress_history();
+        assert_eq!(history.len(), 2, "should checkpoint after each batch");
+        assert_eq!(
+            history[0].cursor_values.as_deref(),
+            Some(vec!["10".to_string()].as_slice()),
+            "first checkpoint should record cursor from batch 1 (last id=10)"
+        );
+        assert_eq!(
+            history[1].cursor_values.as_deref(),
+            Some(vec!["5".to_string()].as_slice()),
+            "second checkpoint should record cursor from batch 2 (last id=5)"
+        );
 
         let final_state = store.current_state().unwrap();
         assert!(final_state.cursor_values.is_none(), "should be completed");
@@ -900,6 +923,7 @@ mod tests {
                 watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
                 cursor_values: Some(vec!["5".to_string()]),
             })),
+            progress_history: Mutex::new(Vec::new()),
         });
 
         let pipeline = Pipeline::new(
