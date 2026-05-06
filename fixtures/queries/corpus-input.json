@@ -233,11 +233,7 @@
       "type": "shortest",
       "from": "start",
       "to": "end",
-      "max_depth": 3,
-      "rel_types": [
-        "AUTHORED",
-        "IN_PROJECT"
-      ]
+      "max_depth": 3
     },
     "limit": 10
   },
