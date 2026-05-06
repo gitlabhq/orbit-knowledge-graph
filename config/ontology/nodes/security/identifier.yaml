@@ -86,6 +86,7 @@ etl:
 storage:
   primary_key: [traversal_path, id]
   settings:
+    add_minmax_index_for_temporal_columns: "1"
     allow_part_offset_column_in_projections: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
