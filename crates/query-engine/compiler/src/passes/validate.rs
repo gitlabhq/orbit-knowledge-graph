@@ -778,8 +778,10 @@ impl<'a> Validator<'a> {
         // Without rel_types each of those seeds fans out through every edge
         // type across all physical tables — O(500 × |E|^depth). Require
         // rel_types so the frontier only traverses relevant relationships.
-        // Pinned endpoints (node_ids) have a known, small anchor set where
-        // the hop-frontier optimizer bounds intermediate work adequately.
+        // Pinned endpoints (node_ids) are allowed without rel_types for
+        // exploratory "how are these connected?" queries, though these can
+        // be expensive on large orgs (the output includes edge_kinds so
+        // callers can interpret the discovered paths).
         if path.rel_types.is_empty() {
             let both_pinned = [&path.from, &path.to].iter().all(|endpoint| {
                 input
@@ -1917,7 +1919,7 @@ mod tests {
             }"#,
             "requires rel_types",
         );
-        // Missing rel_types with both endpoints pinned: OK
+        // Missing rel_types with both endpoints pinned: OK (exploratory)
         assert_ok(
             r#"{
                 "query_type": "path_finding",

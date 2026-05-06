@@ -72,10 +72,27 @@ pub struct PathFindingBody {
 pub struct EdgeTableConfig {
     pub tables: Vec<String>,
     pub rel_type_filter: Option<Vec<String>>,
+    /// Valid source entity kinds for the rel_types (union across all types).
+    /// Empty when rel_types is unset. Used by pathfinding to add kind
+    /// predicates on intermediate hops for granule pruning.
+    pub source_kinds: Vec<String>,
+    /// Valid target entity kinds for the rel_types.
+    pub target_kinds: Vec<String>,
 }
 
 impl EdgeTableConfig {
     pub fn from_input(metadata: &CompilerMetadata, rel_types: &[String]) -> Self {
+        use std::collections::BTreeSet;
+        let mut source_kinds = BTreeSet::new();
+        let mut target_kinds = BTreeSet::new();
+        for rt in rel_types {
+            if let Some(kinds) = metadata.edge_source_kinds.get(rt) {
+                source_kinds.extend(kinds.iter().cloned());
+            }
+            if let Some(kinds) = metadata.edge_target_kinds.get(rt) {
+                target_kinds.extend(kinds.iter().cloned());
+            }
+        }
         Self {
             tables: metadata.resolve_edge_tables(rel_types),
             rel_type_filter: if rel_types.is_empty() {
@@ -83,6 +100,8 @@ impl EdgeTableConfig {
             } else {
                 Some(rel_types.to_vec())
             },
+            source_kinds: source_kinds.into_iter().collect(),
+            target_kinds: target_kinds.into_iter().collect(),
         }
     }
 }

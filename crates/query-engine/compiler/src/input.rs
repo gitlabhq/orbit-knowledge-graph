@@ -185,6 +185,11 @@ pub struct CompilerMetadata {
     /// Physical table columns from the ontology. Used by lowering to emit
     /// internal predicates only when a table is known to carry that column.
     pub table_columns: HashMap<String, HashSet<String>>,
+    /// Maps relationship kind → valid source entity kinds. Used by
+    /// pathfinding to add intermediate kind filters on frontier hops.
+    pub edge_source_kinds: HashMap<String, Vec<String>>,
+    /// Maps relationship kind → valid target entity kinds.
+    pub edge_target_kinds: HashMap<String, Vec<String>>,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -200,6 +205,8 @@ impl Default for CompilerMetadata {
             lowerer_nf_ctes: HashSet::new(),
             text_indexes: HashMap::new(),
             table_columns: HashMap::new(),
+            edge_source_kinds: HashMap::new(),
+            edge_target_kinds: HashMap::new(),
         }
     }
 }

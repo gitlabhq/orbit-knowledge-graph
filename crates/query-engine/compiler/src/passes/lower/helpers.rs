@@ -71,13 +71,19 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
+/// Narrowing source for a node's dedup scan: a `_narrow_*` CTE referenced
+/// from inside the dedup subquery's WHERE clause.
+pub(super) enum NarrowSource {
+    Cte(String),
+}
+
 pub(super) fn emit_node_join_with_narrowing(
     from: TableRef,
     np: &NodePlan,
     edge_alias: &str,
     edge_col: &str,
     use_traversal_path_join: bool,
-    narrow_cte: Option<&str>,
+    narrow: Option<NarrowSource>,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     emit_node_join_inner(
         from,
@@ -85,7 +91,7 @@ pub(super) fn emit_node_join_with_narrowing(
         edge_alias,
         edge_col,
         use_traversal_path_join,
-        narrow_cte,
+        narrow,
     )
 }
 
@@ -116,7 +122,7 @@ fn emit_node_join_inner(
     edge_alias: &str,
     edge_col: &str,
     use_traversal_path_join: bool,
-    narrow_cte: Option<&str>,
+    narrow: Option<NarrowSource>,
 ) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
     let table = np
         .table
@@ -127,11 +133,11 @@ fn emit_node_join_inner(
     let dedup_cols = collect_dedup_columns(alias, np);
     let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols, np);
 
-    // IN-narrowing: restrict the dedup scan to IDs from the narrow CTE.
-    if let Some(cte_name) = narrow_cte {
+    // IN-narrowing: restrict the dedup scan to IDs from a _narrow_* CTE.
+    if let Some(NarrowSource::Cte(cte_name)) = narrow {
         let in_pred = Expr::InSubquery {
             expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-            cte_name: cte_name.to_string(),
+            cte_name,
             column: DEFAULT_PRIMARY_KEY.to_string(),
         };
         dedup_query.where_clause = match dedup_query.where_clause {

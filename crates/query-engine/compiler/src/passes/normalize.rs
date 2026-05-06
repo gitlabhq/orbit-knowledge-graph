@@ -79,6 +79,16 @@ pub fn normalize(mut input: Input, ontology: &Ontology) -> Result<Input> {
             )
         })
         .collect();
+    for name in ontology.edge_names() {
+        input
+            .compiler
+            .edge_source_kinds
+            .insert(name.to_string(), ontology.get_edge_source_types(name));
+        input
+            .compiler
+            .edge_target_kinds
+            .insert(name.to_string(), ontology.get_edge_all_target_types(name));
+    }
     input.compiler.table_columns.clear();
     for node in ontology.nodes() {
         input.compiler.table_columns.insert(
