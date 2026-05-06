@@ -21,7 +21,7 @@ use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{ExtractQuery, PipelinePlan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
 
@@ -152,20 +152,12 @@ impl Pipeline {
                 "batch extracted"
             );
 
-            let write_futures = self
-                .transform(
-                    &session,
-                    &plan.name,
-                    &batches,
-                    &plan.transforms,
-                    destination,
-                )
-                .await?;
-
             extract_query = extract_query.advance(batches.last().unwrap())?;
             let has_more = rows_in_batch >= plan.extract_query.batch_size();
 
-            drop(batches);
+            let write_futures = self
+                .transform(&session, &plan.name, batches, &plan.transforms, destination)
+                .await?;
 
             if has_more {
                 let next_sql = extract_query.to_sql();
@@ -175,32 +167,18 @@ impl Pipeline {
                 );
                 write_result?;
                 let (next_batches, next_elapsed) = extract_result?;
+
+                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                    .await?;
+
                 batches = next_batches;
                 extract_elapsed = next_elapsed;
             } else {
                 self.drain_writes(write_futures).await?;
-                batches = vec![];
-            }
 
-            self.checkpoint_store
-                .save_progress(
-                    &position_key,
-                    &Checkpoint {
-                        watermark: context.watermark,
-                        cursor_values: Some(extract_query.cursor_values().to_vec()),
-                    },
-                )
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to save cursor for {}: {err}",
-                        plan.name
-                    ))
-                })?;
+                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                    .await?;
 
-            progress.notify_in_progress().await;
-
-            if !has_more {
                 break;
             }
         }
@@ -316,14 +294,14 @@ impl Pipeline {
         &self,
         session: &SessionContext,
         pipeline_name: &str,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
         transforms: &[Transformation],
         destination: &dyn Destination,
     ) -> Result<WriteFutures, HandlerError> {
         let schema = batches[0].schema();
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
-        let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
+        let mem_table = MemTable::try_new(schema, vec![batches]).map_err(|err| {
             HandlerError::Processing(format!(
                 "failed to create mem table for {pipeline_name}: {err}"
             ))
@@ -411,6 +389,29 @@ impl Pipeline {
         while let Some(result) = futures.next().await {
             result?;
         }
+        Ok(())
+    }
+
+    async fn save_batch_progress(
+        &self,
+        position_key: &str,
+        context: &PipelineContext,
+        extract_query: &ExtractQuery,
+        progress: &ProgressNotifier,
+    ) -> Result<(), HandlerError> {
+        self.checkpoint_store
+            .save_progress(
+                position_key,
+                &Checkpoint {
+                    watermark: context.watermark,
+                    cursor_values: Some(extract_query.cursor_values().to_vec()),
+                },
+            )
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
+            })?;
+        progress.notify_in_progress().await;
         Ok(())
     }
 
