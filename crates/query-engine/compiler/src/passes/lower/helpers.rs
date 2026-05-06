@@ -325,9 +325,10 @@ pub(super) fn emit_filter_narrowing(
         };
         let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
         let should_narrow = match np.hydration {
-            HydrationStrategy::FilterOnly => true,
+            // FilterOnly nodes get their CTE + IN predicate from
+            // emit_filter_subquery in the second loop.
+            HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
-            // Skip nodes have no table scan to narrow.
             HydrationStrategy::Skip => false,
         };
         if !should_narrow {
