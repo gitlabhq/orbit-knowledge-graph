@@ -48,7 +48,7 @@ pub(crate) struct ImportResolver<'a> {
     pub import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
-    pub include_index: &'a super::graph::IncludeIndex,
+    pub include_index: Option<&'a super::graph::IncludeIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -290,7 +290,9 @@ impl<'a> ImportResolver<'a> {
     fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
         const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
 
-        let idx = &self.include_index;
+        let Some(idx) = self.include_index else {
+            return Vec::new();
+        };
 
         let self_path = self.graph.graph[self.file_node].path().to_string();
         let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();

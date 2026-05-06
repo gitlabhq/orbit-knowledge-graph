@@ -364,16 +364,20 @@ impl<'a> ResolveCtx<'a> {
 
     /// Build a temporary `ImportResolver` from this context's state.
     fn import_resolver(&mut self) -> ImportResolver<'_> {
-        let inc_idx = self
-            .include_index
-            .get_or_insert_with(|| super::graph::IncludeIndex::build(self.graph));
+        let needs_include_index = self
+            .rules
+            .import_strategies
+            .contains(&super::rules::ImportStrategy::IncludeGraph);
+        if needs_include_index && self.include_index.is_none() {
+            self.include_index = Some(super::graph::IncludeIndex::build(self.graph));
+        }
         ImportResolver {
             graph: self.graph,
             file_node: self.file_node,
             import_map: &self.import_map,
             scratch: &mut self.scratch,
             settings: self.settings,
-            include_index: inc_idx,
+            include_index: self.include_index.as_ref(),
         }
     }
 
