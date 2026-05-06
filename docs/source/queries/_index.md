@@ -76,10 +76,10 @@ Merge request diff content has a few different shapes:
 The `content` column is for source code nodes. For merge request diff text, use
 `diff` or `patch`, depending on the entity.
 
-## Example: fetch the latest diff snapshot and changed files
+## Example: fetch diff snapshots and changed files
 
-Use `HAS_LATEST_DIFF` to move from a merge request to its latest diff snapshot,
-then `HAS_FILE` to fetch the files in that snapshot.
+Use `HAS_DIFF` to move from a merge request to its diff snapshots, then
+`HAS_FILE` to fetch the files in those snapshots.
 
 ```json
 {
@@ -103,7 +103,7 @@ then `HAS_FILE` to fetch the files in that snapshot.
     }
   ],
   "relationships": [
-    {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "snapshot"},
+    {"type": "HAS_DIFF", "from": "mr", "to": "snapshot"},
     {"type": "HAS_FILE", "from": "snapshot", "to": "file"}
   ],
   "limit": 20

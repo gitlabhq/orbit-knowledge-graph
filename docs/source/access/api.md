@@ -46,13 +46,19 @@ API calls consume **GitLab Credits** from your subscription. Each call to
 
 Execute a graph query using the Orbit query DSL.
 
+The request body contains:
+
+- `query`: The Orbit query object.
+- `format`: Optional response format. Use `raw` for structured JSON, or `llm`
+  for compact text optimized for AI agents. Default: `llm`.
+
 **Request:**
 
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
-  --data '<query_json>' \
+  --data '{"query": <query_json>, "format": "raw"}' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
@@ -65,19 +71,27 @@ curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
   --data '{
-    "query_type": "aggregation",
-    "nodes": [
-      {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
-      {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
-    ],
-    "relationships": [
-      {"type": "HAS_PIPELINE", "from": "p", "to": "pl"}
-    ],
-    "aggregations": [
-      {"function": "count", "target": "pl", "group_by": "p", "alias": "failed_pipelines"}
-    ],
-    "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
-    "limit": 10
+    "query": {
+      "query_type": "aggregation",
+      "nodes": [
+        {"id": "pl", "entity": "Pipeline", "filters": {"status": "failed"}},
+        {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+      ],
+      "relationships": [
+        {"type": "IN_PROJECT", "from": "pl", "to": "p"}
+      ],
+      "aggregations": [
+        {
+          "function": "count",
+          "target": "pl",
+          "group_by": "p",
+          "alias": "failed_pipelines"
+        }
+      ],
+      "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+      "limit": 10
+    },
+    "format": "raw"
   }' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
@@ -86,20 +100,30 @@ curl --request POST \
 
 ```json
 {
-  "data": [
-    {
-      "p": {"name": "payments-api", "full_path": "my-org/payments-api"},
-      "failed_pipelines": "47"
-    },
-    {
-      "p": {"name": "auth-service", "full_path": "my-org/auth-service"},
-      "failed_pipelines": "31"
-    }
-  ],
-  "meta": {
-    "total": 10,
-    "cursor": null
-  }
+  "result": {
+    "format_version": "1.2.0",
+    "query_type": "aggregation",
+    "nodes": [
+      {
+        "type": "Project",
+        "id": "1",
+        "name": "payments-api",
+        "full_path": "my-org/payments-api",
+        "failed_pipelines": 47
+      }
+    ],
+    "edges": [],
+    "columns": [
+      {
+        "name": "failed_pipelines",
+        "function": "count",
+        "target": "pl"
+      }
+    ]
+  },
+  "query_type": "aggregation",
+  "raw_query_strings": null,
+  "row_count": 1
 }
 ```
 
