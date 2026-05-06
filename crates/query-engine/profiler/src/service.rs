@@ -95,8 +95,8 @@ impl PipelineStage for ProfilerExecutor {
         for (key, param) in &compiled.base.params {
             query = ArrowClickHouseClient::bind_param(query, key, &param.value, &param.ch_type);
         }
-        let batches = query
-            .fetch_arrow()
+        let (batches, summary) = query
+            .fetch_arrow_with_summary()
             .await
             .map_err(|e| PipelineError::Execution(e.to_string()))
             .inspect_err(|e| obs.record_error(e))?;
@@ -105,15 +105,22 @@ impl PipelineStage for ProfilerExecutor {
         obs.executed(elapsed, batches.len());
         let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
+        let summary = summary.ok_or_else(|| {
+            PipelineError::Execution("missing X-ClickHouse-Summary header".into())
+        })?;
+
         let mut execution = QueryExecution {
             label: "base".into(),
             rendered_sql,
             query_id: String::new(),
             elapsed_ms: elapsed.as_secs_f64() * 1000.0,
             stats: QueryExecutionStats {
-                result_rows,
-                elapsed_ns: elapsed.as_nanos() as u64,
-                ..Default::default()
+                read_rows: summary.read_rows().unwrap_or(0),
+                read_bytes: summary.read_bytes().unwrap_or(0),
+                result_rows: summary.result_rows().unwrap_or(result_rows),
+                result_bytes: summary.result_bytes().unwrap_or(0),
+                elapsed_ns: summary.elapsed_ns().unwrap_or(elapsed.as_nanos() as u64),
+                memory_usage: summary.memory_usage().map(|v| v as i64).unwrap_or(0),
             },
             explain_plan: None,
             explain_pipeline: None,
