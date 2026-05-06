@@ -90,13 +90,13 @@ You can also pass raw JSON queries directly if you want precise control over res
 
 ```json
 {
-  "query_type": "traversal",
+  "query_type": "aggregation",
   "nodes": [
     {"id": "p", "entity": "Project", "columns": ["name", "full_path"]},
     {"id": "mr", "entity": "MergeRequest", "filters": {"state": "opened"}}
   ],
   "relationships": [
-    {"type": "HAS_MERGE_REQUEST", "from": "p", "to": "mr"}
+    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
   "aggregations": [
     {"function": "count", "target": "mr", "group_by": "p", "alias": "open_mrs"}

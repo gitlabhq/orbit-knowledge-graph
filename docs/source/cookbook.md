@@ -28,16 +28,14 @@ Replace `payments-service` with the module or library you want to trace.
 ```json
 {
   "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "sym",
-      "entity": "ImportedSymbol",
-      "columns": ["file_path", "import_path", "identifier_name"],
-      "filters": {
-        "import_path": {"op": "contains", "value": "payments-service"}
-      }
+  "node": {
+    "id": "sym",
+    "entity": "ImportedSymbol",
+    "columns": ["file_path", "import_path", "identifier_name"],
+    "filters": {
+      "import_path": {"op": "contains", "value": "payments-service"}
     }
-  ],
+  },
   "limit": 100
 }
 ```
@@ -77,10 +75,12 @@ Replace `payments-service` with the module or library you want to trace.
       "entity": "File",
       "filters": {"path": {"op": "contains", "value": "shared-auth-lib"}}
     },
+    {"id": "b", "entity": "Branch", "columns": ["name", "is_default"]},
     {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
   ],
   "relationships": [
-    {"type": "CONTAINS", "from": "p", "to": "f"}
+    {"type": "ON_BRANCH", "from": "f", "to": "b"},
+    {"type": "CONTAINS", "from": "p", "to": "b"}
   ],
   "limit": 100
 }
@@ -102,13 +102,19 @@ Answer: "Help me understand this codebase."
       "filters": {"full_path": "my-org/my-project"}
     },
     {
+      "id": "b",
+      "entity": "Branch",
+      "filters": {"is_default": true}
+    },
+    {
       "id": "d",
       "entity": "Directory",
       "columns": ["path", "name"]
     }
   ],
   "relationships": [
-    {"type": "CONTAINS", "from": "p", "to": "d"}
+    {"type": "CONTAINS", "from": "p", "to": "b"},
+    {"type": "CONTAINS", "from": "b", "to": "d"}
   ],
   "limit": 50
 }
@@ -134,7 +140,7 @@ Answer: "Help me understand this codebase."
   ],
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "HAS_MERGE_REQUEST", "from": "p", "to": "mr"}
+    {"type": "IN_PROJECT", "from": "mr", "to": "p"}
   ],
   "aggregations": [
     {"function": "count", "target": "mr", "group_by": "u", "alias": "merged_mrs"}
@@ -152,6 +158,7 @@ Answer: "Help me understand this codebase."
   "nodes": [
     {"id": "u", "entity": "User", "columns": ["username", "name"]},
     {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
+    {"id": "diff", "entity": "MergeRequestDiff", "columns": ["id", "state"]},
     {
       "id": "diff_file",
       "entity": "MergeRequestDiffFile",
@@ -162,7 +169,8 @@ Answer: "Help me understand this codebase."
   ],
   "relationships": [
     {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "HAS_DIFF", "from": "mr", "to": "diff_file"}
+    {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
+    {"type": "HAS_FILE", "from": "diff", "to": "diff_file"}
   ],
   "limit": 25
 }
@@ -172,20 +180,27 @@ Answer: "Help me understand this codebase."
 
 Answer: "How are our services connected?"
 
-### Map cross-project import relationships
+### Map imported definitions
 
 ```json
 {
   "query_type": "aggregation",
   "nodes": [
-    {"id": "sym", "entity": "ImportedSymbol", "columns": ["import_path"]},
-    {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
+    {
+      "id": "sym",
+      "entity": "ImportedSymbol",
+      "columns": ["import_path"],
+      "filters": {
+        "import_path": {"op": "contains", "value": "payments"}
+      }
+    },
+    {"id": "def", "entity": "Definition", "columns": ["name", "fqn", "file_path"]}
   ],
   "relationships": [
-    {"type": "DEFINED_IN", "from": "sym", "to": "p"}
+    {"type": "IMPORTS", "from": "sym", "to": "def"}
   ],
   "aggregations": [
-    {"function": "count", "target": "sym", "group_by": "p", "alias": "import_count"}
+    {"function": "count", "target": "sym", "group_by": "def", "alias": "import_count"}
   ],
   "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
   "limit": 20
@@ -213,7 +228,8 @@ Answer: "How are our services connected?"
     "type": "shortest",
     "from": "start",
     "to": "end",
-    "max_depth": 4
+    "max_depth": 3,
+    "rel_types": ["CONTAINS", "IN_PROJECT", "IMPORTS", "CALLS"]
   },
   "options": {"dynamic_columns": "*"}
 }
@@ -233,7 +249,7 @@ Answer: "Where are our CI/CD problems?"
     {"id": "p", "entity": "Project", "columns": ["name", "full_path"]}
   ],
   "relationships": [
-    {"type": "HAS_PIPELINE", "from": "p", "to": "pl"}
+    {"type": "IN_PROJECT", "from": "pl", "to": "p"}
   ],
   "aggregations": [
     {"function": "count", "target": "pl", "group_by": "p", "alias": "failed_count"}
@@ -243,28 +259,17 @@ Answer: "Where are our CI/CD problems?"
 }
 ```
 
-### Find the most common job failure reasons
+### Find failed jobs and their failure reasons
 
 ```json
 {
-  "query_type": "aggregation",
-  "nodes": [
-    {
-      "id": "j",
-      "entity": "Job",
-      "columns": ["failure_reason"],
-      "filters": {"status": "failed"}
-    }
-  ],
-  "aggregations": [
-    {
-      "function": "count",
-      "target": "j",
-      "group_by": "j.failure_reason",
-      "alias": "occurrences"
-    }
-  ],
-  "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
+  "query_type": "traversal",
+  "node": {
+    "id": "j",
+    "entity": "Job",
+    "columns": ["name", "status", "failure_reason"],
+    "filters": {"status": "failed"}
+  },
   "limit": 10
 }
 ```
@@ -298,26 +303,27 @@ Answer: "Where are our security risks, and how did they get there?"
 }
 ```
 
-### Find which pipelines introduced new vulnerabilities
+### Find pipelines that detected a known finding
+
+Use a finding ID from a vulnerability query, then trace it to the pipelines where
+Orbit indexed that finding.
 
 ```json
 {
   "query_type": "traversal",
   "nodes": [
     {
-      "id": "v",
-      "entity": "Vulnerability",
-      "columns": ["title", "severity"],
-      "filters": {"state": "detected"}
+      "id": "finding",
+      "entity": "Finding",
+      "node_ids": [12345],
+      "columns": ["uuid", "name", "severity"]
     },
-    {"id": "scan", "entity": "SecurityScan", "columns": ["scan_type", "status"]},
-    {"id": "pl", "entity": "Pipeline", "columns": ["id", "ref", "sha"]}
+    {"id": "pl", "entity": "Pipeline", "columns": ["id", "ref", "sha", "status"]}
   ],
   "relationships": [
-    {"type": "HAS_FINDING", "from": "scan", "to": "v"},
-    {"type": "HAS_SECURITY_SCAN", "from": "pl", "to": "scan"}
+    {"type": "DETECTED_IN", "from": "finding", "to": "pl"}
   ],
-  "limit": 25
+  "limit": 10
 }
 ```
 

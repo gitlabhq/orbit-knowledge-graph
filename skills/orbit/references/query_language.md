@@ -197,7 +197,7 @@ Fetch one merge request with its full diff:
 }
 ```
 
-Fetch per-file diff content from the latest diff snapshot:
+Fetch per-file diff content from diff snapshots:
 
 ```json
 {
@@ -221,7 +221,7 @@ Fetch per-file diff content from the latest diff snapshot:
     }
   ],
   "relationships": [
-    {"type": "HAS_LATEST_DIFF", "from": "mr", "to": "snapshot"},
+    {"type": "HAS_DIFF", "from": "mr", "to": "snapshot"},
     {"type": "HAS_FILE", "from": "snapshot", "to": "file"}
   ],
   "limit": 20
@@ -363,7 +363,7 @@ node must be bounded by `node_ids`, filters, or a narrow `id_range`.
   "neighbors": {
     "node": "mr",
     "direction": "both",
-    "rel_types": ["AUTHORED", "IN_PROJECT", "HAS_LATEST_DIFF"]
+    "rel_types": ["AUTHORED", "IN_PROJECT", "HAS_DIFF"]
   },
   "options": {
     "dynamic_columns": "default"
