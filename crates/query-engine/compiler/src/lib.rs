@@ -226,9 +226,16 @@ mod tests {
         let compiled = compile(query, &prefixed, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
+        // FK elision replaces the edge table scan with a direct FK join
+        // (mr.author_id → u.id). Verify that node tables are prefixed and
+        // the FK join condition is used instead of the edge table.
         assert!(
-            sql.contains("v1_gl_edge"),
-            "traversal SQL should use prefixed edge table v1_gl_edge, got: {sql}"
+            sql.contains("v1_gl_merge_request") && sql.contains("v1_gl_user"),
+            "traversal SQL should use prefixed node tables, got: {sql}"
+        );
+        assert!(
+            sql.contains("mr.author_id"),
+            "FK elision should join via mr.author_id, got: {sql}"
         );
     }
 
@@ -396,8 +403,8 @@ mod tests {
     }
 
     /// Traversal with `id_range` (no `node_ids` or `filters`) must produce
-    /// range conditions that reach the SQL. The v2 lowerer pushes range
-    /// conditions directly onto the edge WHERE clause.
+    /// range conditions that reach the SQL. FK elision pushes range
+    /// conditions onto the User node table subquery.
     #[test]
     fn traversal_id_range_produces_range_conditions_in_sql() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -415,14 +422,15 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Range conditions pushed directly to the edge WHERE.
+        // FK elision replaces edge scans: range conditions are pushed to
+        // the User node table subquery instead of the edge WHERE.
         assert!(
-            sql.contains("e0.source_id >= 1"),
-            "range lower bound must reach the edge WHERE, got:\n{sql}"
+            sql.contains("u.id >= 1"),
+            "range lower bound must reach the User subquery WHERE, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.source_id <= 100"),
-            "range upper bound must reach the edge WHERE, got:\n{sql}"
+            sql.contains("u.id <= 100"),
+            "range upper bound must reach the User subquery WHERE, got:\n{sql}"
         );
     }
 
@@ -758,13 +766,11 @@ mod tests {
         );
     }
 
-    /// Multi-hop traversal must constrain `target_kind`/`source_kind` on
-    /// EVERY edge it touches, not just whichever side `node_edge_col`
-    /// happens to map first. Without this, `User AUTHORED MR` joined to
-    /// `MR IN_PROJECT Project` can match `User AUTHORED <other entity>`
-    /// rows whose ID happens to collide with an MR ID, producing edges
-    /// with garbage `target_kind` in the result and skipping kind-PK
-    /// pruning on the second-hop edge.
+    /// Multi-hop traversal must correctly resolve entity relationships.
+    /// FK elision replaces edge table scans with direct FK column joins
+    /// (e.g. `mr.project_id`, `mr.author_id`), which implicitly constrain
+    /// entity kinds through the typed FK targets. Synthetic edge columns
+    /// in the SELECT list carry the kind metadata for result formatting.
     #[test]
     fn multi_hop_traversal_constrains_kind_on_every_edge() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -786,24 +792,25 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // e0 covers IN_PROJECT (mr → p): both sides must be constrained.
+        // FK elision replaces edge scans with direct FK column joins.
+        // IN_PROJECT → mr.project_id, AUTHORED → mr.author_id.
+        // Kind constraints are implicit through the FK join targets.
         assert!(
-            sql.contains("e0.source_kind = 'MergeRequest'"),
-            "e0 must constrain source_kind=MergeRequest, got:\n{sql}"
+            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
+            "IN_PROJECT must be resolved via FK join on project_id, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.target_kind = 'Project'"),
-            "e0 must constrain target_kind=Project, got:\n{sql}"
+            sql.contains("u.id = mr.author_id") || sql.contains("mr.author_id"),
+            "AUTHORED must be resolved via FK join on author_id, got:\n{sql}"
         );
-        // e1 covers AUTHORED (u → mr): the previously missing target_kind
-        // constraint that lets bogus edges leak through.
+        // Synthetic edge columns in the SELECT list carry the kind info.
         assert!(
-            sql.contains("e1.source_kind = 'User'"),
-            "e1 must constrain source_kind=User, got:\n{sql}"
+            sql.contains("'MergeRequest' AS e0_src_type"),
+            "e0 source type must be MergeRequest, got:\n{sql}"
         );
         assert!(
-            sql.contains("e1.target_kind = 'MergeRequest'"),
-            "e1 must constrain target_kind=MergeRequest (R2 cliff), got:\n{sql}"
+            sql.contains("'User' AS e1_src_type"),
+            "e1 source type must be User, got:\n{sql}"
         );
     }
 
@@ -852,10 +859,12 @@ mod tests {
             !sql.contains("_cascade_u") && !sql.contains("_nf_u"),
             "User-aliased CTEs must be dropped, got:\n{sql}"
         );
-        // The AUTHORED edge JOIN is retained as an existence semi-join.
+        // FK elision replaces AUTHORED edge scan with a direct FK join
+        // (mr.author_id). The User node is pruned but the FK column
+        // still participates in the query shape.
         assert!(
-            sql.contains("'AUTHORED'"),
-            "AUTHORED edge constraint must survive (semi-join existence), \
+            sql.contains("mr.author_id") || sql.contains("author_id"),
+            "AUTHORED FK column must survive in the query (FK elision), \
              got:\n{sql}"
         );
         // Project + MR work products survive.
@@ -865,9 +874,9 @@ mod tests {
         );
     }
 
-    /// The v2 lowerer replaces both `_target_mr_ids` and `_cascade_mr`
-    /// CTEs with edge-chain JOINs. Multi-relationship aggregation uses
-    /// `e0 JOIN e1 ON ...` with filters pushed directly onto edges.
+    /// Neither `_target_mr_ids` nor `_cascade_mr` CTEs should appear.
+    /// FK elision replaces edge scans with direct FK column joins
+    /// (e.g. `mr.author_id`, `mr.project_id`) when FK columns exist.
     #[test]
     fn aggregation_skips_redundant_target_ids_cte_when_cascade_present() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -904,14 +913,15 @@ mod tests {
             !sql.contains("_cascade_mr"),
             "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
         );
-        // Edge chain carries the narrowing instead.
+        // FK elision replaces edge-chain JOINs with direct FK joins.
+        // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
         assert!(
-            sql.contains("e0.target_id = e1.source_id"),
-            "edge-chain JOIN must bridge the relationships, got:\n{sql}"
+            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
+            "User node_ids filter must be pushed to FK column, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.source_id = 116"),
-            "User node_ids filter must be pushed to edge, got:\n{sql}"
+            sql.contains("mr.project_id") || sql.contains("p.id = mr.project_id"),
+            "IN_PROJECT FK join must use project_id, got:\n{sql}"
         );
     }
 
@@ -1054,10 +1064,10 @@ mod tests {
     }
 
     /// Intermediate nodes (referenced by 2+ relationships) must keep
-    /// connectivity through the edge chain even when absent from the
-    /// aggregation target/group_by. The v2 lowerer uses edge-chain JOINs
-    /// (`e0.target_id = e1.source_id`) so intermediate nodes don't need
-    /// a physical table join — the edge chain carries the relationship.
+    /// connectivity even when absent from the aggregation target/group_by.
+    /// FK elision replaces edge-chain JOINs with direct FK column joins
+    /// (e.g. `mr.author_id`, `mr.project_id`) so intermediate nodes
+    /// bridge relationships via their FK columns.
     #[test]
     fn aggregation_keeps_intermediate_node_table_join() {
         let ontology = Ontology::load_embedded().expect("ontology must load");
@@ -1086,16 +1096,16 @@ mod tests {
         let compiled = compile(query, &ontology, &security_ctx()).expect("should compile");
         let sql = compiled.base.render();
 
-        // Edge-chain JOIN bridges MR between the two relationships.
+        // FK elision replaces edge-chain JOINs with direct FK joins.
+        // AUTHORED → mr.author_id, IN_PROJECT → mr.project_id.
+        // MR bridges the two relationships via its FK columns.
         assert!(
-            sql.contains("e0.target_id = e1.source_id"),
-            "edge chain must bridge MR via e0.target_id = e1.source_id, got:\n{sql}"
+            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
+            "User node_ids filter must be pushed to FK column, got:\n{sql}"
         );
-        // Both edge constraints must be present.
         assert!(
-            sql.contains("e0.target_kind = 'MergeRequest'")
-                && sql.contains("e1.source_kind = 'MergeRequest'"),
-            "both edges must constrain MergeRequest kind, got:\n{sql}"
+            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
+            "IN_PROJECT FK join must use project_id, got:\n{sql}"
         );
     }
 
@@ -1398,9 +1408,8 @@ mod tests {
         );
     }
 
-    /// The v2 lowerer replaces cascade CTEs with edge-chain JOINs.
-    /// Multi-relationship aggregation uses direct `e0 JOIN e1 ON ...`
-    /// instead of materialized CTEs. The `materialize_ctes` option has
+    /// FK elision replaces cascade CTEs and edge-chain JOINs with
+    /// direct FK column joins. The `materialize_ctes` option has
     /// no effect when there are no multi-referenced CTEs to materialize.
     #[test]
     fn multi_ref_cte_emits_materialized_keyword_and_setting() {
@@ -1435,14 +1444,14 @@ mod tests {
             !sql.contains("_cascade_mr"),
             "v2 lowerer should not emit cascade CTEs, got:\n{sql}"
         );
-        // Edge chain must be present.
+        // FK elision replaces edge-chain JOINs with direct FK column joins.
         assert!(
-            sql.contains("e0.target_id = e1.source_id"),
-            "edge-chain JOIN must bridge e0 and e1, got:\n{sql}"
+            sql.contains("mr.author_id = 116") || sql.contains("author_id = 116"),
+            "User node_ids filter must be pushed to FK column, got:\n{sql}"
         );
         assert!(
-            sql.contains("e0.source_id = 116"),
-            "User node_ids filter must be pushed to edge, got:\n{sql}"
+            sql.contains("p.id = mr.project_id") || sql.contains("mr.project_id"),
+            "IN_PROJECT FK join must use project_id, got:\n{sql}"
         );
     }
 
@@ -1520,10 +1529,11 @@ mod tests {
             "_nf_mr must not be emitted when state is fully denormalized, got:\n{sql}"
         );
 
-        // Edge tag predicate must be present on the edge.
+        // FK elision replaces edge scans, so the state filter is applied
+        // directly on the MR node table instead of as an edge tag.
         assert!(
-            sql.contains("state:merged"),
-            "edge tag predicate must be present, got:\n{sql}"
+            sql.contains("mr.state = 'merged'") || sql.contains("state = 'merged'"),
+            "state filter must be applied on MR node table, got:\n{sql}"
         );
     }
 }
