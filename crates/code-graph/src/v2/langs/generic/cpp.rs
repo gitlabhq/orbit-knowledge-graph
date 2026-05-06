@@ -71,19 +71,22 @@ impl DslLanguage for CppDsl {
 
     fn refs() -> Vec<ReferenceRule> {
         vec![
-            // Direct function call: foo()
+            // Qualified call: Ns::func() or Class::static_method()
+            // Must be before direct call — both match call_expression,
+            // but qualified needs field("function").field("name") to
+            // extract just the bare name, not "Ns::func".
             reference("call_expression")
-                .name_from(field("function"))
-                .when(!has_descendant("field_expression")),
+                .name_from(field("function").field("name"))
+                .when(has_descendant("qualified_identifier")),
             // Member call: obj.method() or obj->method()
             reference("call_expression")
                 .name_from(field("function").field("field"))
                 .when(has_descendant("field_expression"))
                 .receiver_via(field("function").field("argument")),
-            // Qualified call: Ns::func() or Class::static_method()
+            // Direct function call: foo()
             reference("call_expression")
-                .name_from(field("function").field("name"))
-                .when(has_descendant("qualified_identifier")),
+                .name_from(field("function"))
+                .when(!has_descendant("field_expression")),
         ]
     }
 
@@ -256,6 +259,24 @@ mod tests {
         assert!(names.contains(&"RED"), "should find RED");
         assert!(names.contains(&"GREEN"), "should find GREEN");
         assert!(names.contains(&"BLUE"), "should find BLUE");
+    }
+
+    #[test]
+    fn qualified_call_ref() {
+        let result = CppDsl::spec()
+            .parse_full_collect(
+                b"namespace ns { void target() {} }\nvoid f() { ns::target(); }\n",
+                "test.cpp",
+                Language::Cpp,
+                &Tracer::new(false),
+            )
+            .unwrap();
+        let ref_names: Vec<&str> = result.refs.iter().map(|r| r.name.as_str()).collect();
+        eprintln!("refs: {ref_names:?}");
+        assert!(
+            ref_names.contains(&"target"),
+            "should extract 'target' from ns::target(), got: {ref_names:?}"
+        );
     }
 
     #[test]

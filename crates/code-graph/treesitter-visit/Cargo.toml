@@ -25,8 +25,13 @@ tree-sitter-rust = { version = "0.24.0", optional = true }
 tree-sitter-typescript = { version = "0.23.2", optional = true }
 tree-sitter-cpp = { version = "0.23.4", optional = true }
 
+[[bin]]
+name = "ast"
+required-features = ["cli"]
+
 [features]
 default = []
+cli = ["builtin-parser"]
 builtin-parser = [
   "tree-sitter-c",
   "tree-sitter-c-sharp",

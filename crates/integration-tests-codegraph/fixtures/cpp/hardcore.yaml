@@ -143,6 +143,59 @@ fixtures:
           }
       }
 
+  - path: extra/unions.hpp
+    content: |
+      #ifndef UNIONS_HPP
+      #define UNIONS_HPP
+      namespace extra {
+          union Variant {
+              int i;
+              float f;
+              char c;
+          };
+          int read_int(Variant v);
+      }
+      #endif
+
+  - path: extra/unions.cpp
+    content: |
+      #include "unions.hpp"
+      namespace extra {
+          int read_int(Variant v) { return v.i; }
+      }
+
+  - path: extra/loops.cpp
+    content: |
+      namespace extra {
+          int sum_array(int arr[], int n) {
+              int total = 0;
+              for (int i = 0; i < n; i++) {
+                  total = total + arr[i];
+              }
+              return total;
+          }
+          int sum_range() {
+              int nums[] = {1, 2, 3};
+              int total = 0;
+              for (int x : nums) {
+                  total = total + x;
+              }
+              return total;
+          }
+      }
+
+  - path: extra/tmpl_usage.cpp
+    content: |
+      #include "../templates.hpp"
+      namespace extra {
+          void use_templates() {
+              tmpl::Container<int> c;
+              int a = 1;
+              int b = 2;
+              tmpl::swap(a, b);
+          }
+      }
+
 tests:
   # ══════════════════════════════════════════════════════════════
   # EXACT TOTAL COUNTS
@@ -153,7 +206,7 @@ tests:
       MATCH (f:File)
       RETURN f.path AS path
     assert:
-      - { row_count: 10 }
+      - { row_count: 14 }
       - { unique: path }
 
   - name: "Class definitions — exact count"
@@ -371,3 +424,70 @@ tests:
       - { unique: fqn }
       - { row: { fqn: "app::copy_file" } }
       - { row: { fqn: "app::main" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # UNION DEFINITIONS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Union Variant exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'unions::extra::Variant'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "unions::extra::Variant", type: Union } }
+
+  - name: "Union function read_int exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'unions::extra::read_int'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "unions::extra::read_int", type: Function } }
+
+  # ══════════════════════════════════════════════════════════════
+  # FOR-RANGE LOOPS
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "For-range loop function exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'loops::extra::sum_range'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "loops::extra::sum_range", type: Function } }
+
+  - name: "Traditional for-loop function exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'loops::extra::sum_array'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "loops::extra::sum_array", type: Function } }
+
+  # ══════════════════════════════════════════════════════════════
+  # TEMPLATE USAGE (cross-file)
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Template usage function exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'tmpl_usage::extra::use_templates'
+      RETURN d.fqn AS fqn, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "tmpl_usage::extra::use_templates", type: Function } }
+
+  - name: "Template usage calls tmpl::swap via include"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'tmpl_usage::extra::use_templates'
+        AND callee.fqn = 'templates::tmpl::swap'
+      RETURN caller.fqn AS caller, callee.fqn AS callee, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { caller: "tmpl_usage::extra::use_templates", callee: "templates::tmpl::swap", kind: Calls } }
