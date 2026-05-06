@@ -9,8 +9,9 @@ use crate::error::{QueryError, Result};
 
 use super::EmitOutput;
 use super::helpers::{
-    build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing, emit_filter_subquery,
-    emit_node_ids_on_edge, emit_node_join_with_narrowing, push_edge_predicates,
+    NarrowSource, build_multi_hop_union, emit_denorm_tags, emit_filter_narrowing,
+    emit_filter_subquery, emit_node_ids_on_edge, emit_node_join_with_narrowing,
+    push_edge_predicates,
 };
 use crate::passes::plan::*;
 use crate::passes::shared::filter_to_expr;
@@ -122,15 +123,11 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             };
             match np.hydration {
                 HydrationStrategy::Join => {
-                    // Use pre-resolved narrowing decision from plan().
-                    // IMPORTANT NOTE: Only emit _narrow_* when NO _filter_* CTEs exist yet —
-                    // otherwise the _narrow_ CTE's edge predicates would
-                    // reference _filter_* via IN, creating a correlated
-                    // subquery that ClickHouse rejects for parameterized queries.
-                    let narrow_cte = if np.use_narrowing
-                        && !ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
-                    {
-                        let narrow_name = format!("_narrow_{}", np.alias);
+                    // Build a narrow subquery when the planner marked this
+                    // node for narrowing. When other _filter_* CTEs exist,
+                    // inline the subquery to avoid ClickHouse's correlated
+                    // subquery rejection in parameterized mode.
+                    let narrow_source = if np.use_narrowing {
                         let narrow_query = Query {
                             select: vec![SelectExpr::new(
                                 Expr::col(edge_alias, edge_col),
@@ -151,8 +148,18 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             },
                             ..Default::default()
                         };
-                        ctes.push(Cte::new(&narrow_name, narrow_query));
-                        Some(narrow_name)
+                        let has_filter = ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
+                            || plan.nodes.values().any(|np| {
+                                np.hydration == HydrationStrategy::FilterOnly
+                                    || np.needs_elevated_filter
+                            });
+                        if has_filter {
+                            Some(NarrowSource::Inline(Box::new(narrow_query)))
+                        } else {
+                            let narrow_name = format!("_narrow_{}", np.alias);
+                            ctes.push(Cte::new(&narrow_name, narrow_query));
+                            Some(NarrowSource::Cte(narrow_name))
+                        }
                     } else {
                         None
                     };
@@ -163,7 +170,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                         edge_alias,
                         edge_col,
                         false,
-                        narrow_cte.as_deref(),
+                        narrow_source,
                     )?;
                     from = new_from;
                     selects.extend(ns);

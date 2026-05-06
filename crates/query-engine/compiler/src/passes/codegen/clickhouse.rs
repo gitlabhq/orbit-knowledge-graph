@@ -254,6 +254,13 @@ impl Context {
                 let e = self.emit_expr(expr);
                 format!("{e} IN (SELECT {column} FROM {cte_name})")
             }
+            Expr::InSelect { expr, query } => {
+                let e = self.emit_expr(expr);
+                let q = self
+                    .emit_query(query)
+                    .expect("inline narrow subquery must not fail");
+                format!("{e} IN ({q})")
+            }
             Expr::Star => "*".to_string(),
         }
     }

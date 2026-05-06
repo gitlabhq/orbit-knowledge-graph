@@ -50,6 +50,11 @@ pub enum Expr {
         cte_name: String,
         column: String,
     },
+    /// Inline subquery IN check → `expr IN (SELECT ...)`
+    /// Like InSubquery but embeds the query directly instead of referencing
+    /// a CTE. Used for narrowing when CTE references would trigger
+    /// ClickHouse's correlated subquery rejection in parameterized mode.
+    InSelect { expr: Box<Expr>, query: Box<Query> },
     /// Wildcard → `*`
     Star,
 }
@@ -502,15 +507,18 @@ impl Expr {
             }
             Expr::Lambda { body, .. } => body.collect_aliases(out),
             Expr::UnaryOp { expr, .. } => expr.collect_aliases(out),
-            Expr::InSubquery { expr, .. } => expr.collect_aliases(out),
+            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
+                expr.collect_aliases(out)
+            }
             Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
         }
     }
 
-    /// Returns true if this expression tree contains an `InSubquery` node.
+    /// Returns true if this expression tree contains an `InSubquery` or
+    /// `InSelect` node.
     pub fn contains_in_subquery(&self) -> bool {
         match self {
-            Expr::InSubquery { .. } => true,
+            Expr::InSubquery { .. } | Expr::InSelect { .. } => true,
             Expr::BinaryOp { left, right, .. } => {
                 left.contains_in_subquery() || right.contains_in_subquery()
             }
@@ -544,7 +552,9 @@ impl Expr {
             }
             Expr::Lambda { body, .. } => body.collect_columns(out),
             Expr::UnaryOp { expr, .. } => expr.collect_columns(out),
-            Expr::InSubquery { expr, .. } => expr.collect_columns(out),
+            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
+                expr.collect_columns(out)
+            }
             Expr::Identifier(_) | Expr::Literal(_) | Expr::Param { .. } | Expr::Star => {}
         }
     }
@@ -561,7 +571,9 @@ impl Expr {
                 left.references_only(alias) && right.references_only(alias)
             }
             Expr::UnaryOp { expr, .. } => expr.references_only(alias),
-            Expr::InSubquery { expr, .. } => expr.references_only(alias),
+            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
+                expr.references_only(alias)
+            }
         }
     }
 }

@@ -24,6 +24,8 @@ use std::sync::OnceLock;
 
 use regex::Regex;
 
+use serde_json::Value;
+
 use crate::ast::{ChType, Expr, Node, Query, TableRef};
 use crate::constants::{GL_TABLE_PREFIX, TRAVERSAL_PATH_COLUMN, skip_security_filter_tables};
 use crate::error::Result;
@@ -99,7 +101,7 @@ fn apply_to_query(q: &mut Query, ctx: &SecurityContext, ontology: &Ontology) -> 
 
 fn build_path_filter(alias: &str, paths: &[&str]) -> Expr {
     match paths.len() {
-        0 => Expr::param(ChType::Bool, false),
+        0 => Expr::Literal(Value::Bool(false)),
         1 => starts_with_expr(alias, paths[0]),
         _ => {
             let collapsed = PathTrie::from_paths(paths).to_minimal_prefixes();
@@ -383,15 +385,10 @@ mod tests {
     #[test]
     fn empty_paths_produces_false_literal() {
         let expr = build_path_filter("v", &[]);
-        // Bool(false) guarantees zero rows for this alias without breaking the
-        // overall query structure.
-        assert!(matches!(
-            expr,
-            Expr::Param {
-                data_type: ChType::Bool,
-                ..
-            }
-        ));
+        // Literal false guarantees zero rows for this alias. Using a literal
+        // (not a parameterized Bool) lets ClickHouse constant-fold it at plan
+        // time, avoiding full edge scans on denied entities.
+        assert!(matches!(expr, Expr::Literal(Value::Bool(false))));
     }
 
     // ── Per-entity role scoping ─────────────────
@@ -468,7 +465,9 @@ mod tests {
                 collect_starts_with_paths(right, alias, paths);
             }
             Expr::UnaryOp { expr, .. } => collect_starts_with_paths(expr, alias, paths),
-            Expr::InSubquery { expr, .. } => collect_starts_with_paths(expr, alias, paths),
+            Expr::InSubquery { expr, .. } | Expr::InSelect { expr, .. } => {
+                collect_starts_with_paths(expr, alias, paths)
+            }
             Expr::Lambda { body, .. } => collect_starts_with_paths(body, alias, paths),
             Expr::Identifier(_)
             | Expr::Column { .. }
