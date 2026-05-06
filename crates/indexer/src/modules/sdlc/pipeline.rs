@@ -6,6 +6,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
+use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use gkg_utils::arrow::prepare_batches;
@@ -20,9 +21,12 @@ use crate::nats::ProgressNotifier;
 
 use super::datalake::DatalakeQuery;
 use super::metrics::SdlcMetrics;
-use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
+use super::plan::{ExtractQuery, PipelinePlan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
+
+type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
+
 const MAX_RETRIES: u32 = 3;
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -127,13 +131,13 @@ impl Pipeline {
 
         let session = SessionContext::new();
 
-        loop {
-            let extract_start = Instant::now();
-            let batches = self
-                .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
-                .await?;
-            let extract_elapsed = extract_start.elapsed();
+        let extract_start = Instant::now();
+        let mut batches = self
+            .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
+            .await?;
+        let mut extract_elapsed = extract_start.elapsed();
 
+        loop {
             if batches.is_empty() {
                 break;
             }
@@ -148,36 +152,33 @@ impl Pipeline {
                 "batch extracted"
             );
 
-            self.transform_and_write(
-                &session,
-                &plan.name,
-                &batches,
-                &plan.transforms,
-                destination,
-            )
-            .await?;
-
             extract_query = extract_query.advance(batches.last().unwrap())?;
+            let has_more = rows_in_batch >= plan.extract_query.batch_size();
 
-            self.checkpoint_store
-                .save_progress(
-                    &position_key,
-                    &Checkpoint {
-                        watermark: context.watermark,
-                        cursor_values: Some(extract_query.cursor_values().to_vec()),
-                    },
-                )
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to save cursor for {}: {err}",
-                        plan.name
-                    ))
-                })?;
+            let write_futures = self
+                .transform(&session, &plan.name, batches, &plan.transforms, destination)
+                .await?;
 
-            progress.notify_in_progress().await;
+            if has_more {
+                let next_sql = extract_query.to_sql();
+                let (write_result, extract_result) = tokio::join!(
+                    self.drain_writes(write_futures),
+                    self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
+                );
+                write_result?;
+                let (next_batches, next_elapsed) = extract_result?;
 
-            if rows_in_batch < plan.extract_query.batch_size() {
+                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                    .await?;
+
+                batches = next_batches;
+                extract_elapsed = next_elapsed;
+            } else {
+                self.drain_writes(write_futures).await?;
+
+                self.save_batch_progress(&position_key, context, &extract_query, progress)
+                    .await?;
+
                 break;
             }
         }
@@ -278,18 +279,29 @@ impl Pipeline {
         Err(last_error.unwrap())
     }
 
-    async fn transform_and_write(
+    async fn timed_extract_batch(
+        &self,
+        pipeline_name: &str,
+        sql: &str,
+        params: Value,
+    ) -> Result<(Vec<RecordBatch>, Duration), HandlerError> {
+        let start = Instant::now();
+        let batches = self.extract_batch(pipeline_name, sql, params).await?;
+        Ok((batches, start.elapsed()))
+    }
+
+    async fn transform(
         &self,
         session: &SessionContext,
         pipeline_name: &str,
-        batches: &[RecordBatch],
+        batches: Vec<RecordBatch>,
         transforms: &[Transformation],
         destination: &dyn Destination,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<WriteFutures, HandlerError> {
         let schema = batches[0].schema();
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
-        let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
+        let mem_table = MemTable::try_new(schema, vec![batches]).map_err(|err| {
             HandlerError::Processing(format!(
                 "failed to create mem table for {pipeline_name}: {err}"
             ))
@@ -304,7 +316,7 @@ impl Pipeline {
             })?;
 
         let mut total_transform_duration = Duration::ZERO;
-        let mut write_futures = FuturesUnordered::new();
+        let mut write_futures: WriteFutures = FuturesUnordered::new();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -337,25 +349,28 @@ impl Pipeline {
                     ))
                 })?;
 
-            write_futures.push(async move {
-                let write_start = Instant::now();
-                writer.write_batch(&result_batches).await.map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to write to {destination_table}: {err}"
-                    ))
-                })?;
-                let write_elapsed = write_start.elapsed();
+            write_futures.push(
+                async move {
+                    let write_start = Instant::now();
+                    writer.write_batch(&result_batches).await.map_err(|err| {
+                        HandlerError::Processing(format!(
+                            "failed to write to {destination_table}: {err}"
+                        ))
+                    })?;
+                    let write_elapsed = write_start.elapsed();
 
-                info!(
-                    table = %destination_table,
-                    rows = row_count,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
-                    "transform written"
-                );
+                    info!(
+                        table = %destination_table,
+                        rows = row_count,
+                        transform_ms = transform_elapsed.as_millis() as u64,
+                        write_ms = write_elapsed.as_millis() as u64,
+                        "transform written"
+                    );
 
-                Ok::<(), HandlerError>(())
-            });
+                    Ok(())
+                }
+                .boxed(),
+            );
 
             while let Some(Some(result)) = write_futures.next().now_or_never() {
                 result?;
@@ -365,10 +380,38 @@ impl Pipeline {
         self.metrics
             .record_transform_duration(total_transform_duration.as_secs_f64());
 
-        while let Some(result) = write_futures.next().await {
+        let _ = session.deregister_table(SOURCE_DATA_TABLE);
+
+        Ok(write_futures)
+    }
+
+    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
+        while let Some(result) = futures.next().await {
             result?;
         }
+        Ok(())
+    }
 
+    async fn save_batch_progress(
+        &self,
+        position_key: &str,
+        context: &PipelineContext,
+        extract_query: &ExtractQuery,
+        progress: &ProgressNotifier,
+    ) -> Result<(), HandlerError> {
+        self.checkpoint_store
+            .save_progress(
+                position_key,
+                &Checkpoint {
+                    watermark: context.watermark,
+                    cursor_values: Some(extract_query.cursor_values().to_vec()),
+                },
+            )
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!("failed to save cursor for {position_key}: {err}"))
+            })?;
+        progress.notify_in_progress().await;
         Ok(())
     }
 
@@ -566,17 +609,23 @@ mod tests {
 
     struct RecordingCheckpointStore {
         state: Mutex<Option<Checkpoint>>,
+        progress_history: Mutex<Vec<Checkpoint>>,
     }
 
     impl RecordingCheckpointStore {
         fn new() -> Self {
             Self {
                 state: Mutex::new(None),
+                progress_history: Mutex::new(Vec::new()),
             }
         }
 
         fn current_state(&self) -> Option<Checkpoint> {
             self.state.lock().unwrap().clone()
+        }
+
+        fn progress_history(&self) -> Vec<Checkpoint> {
+            self.progress_history.lock().unwrap().clone()
         }
     }
 
@@ -591,6 +640,10 @@ mod tests {
             _key: &str,
             checkpoint: &Checkpoint,
         ) -> Result<(), CheckpointError> {
+            self.progress_history
+                .lock()
+                .unwrap()
+                .push(checkpoint.clone());
             *self.state.lock().unwrap() = Some(checkpoint.clone());
             Ok(())
         }
@@ -658,6 +711,19 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+
+        let history = store.progress_history();
+        assert_eq!(history.len(), 2, "should checkpoint after each batch");
+        assert_eq!(
+            history[0].cursor_values.as_deref(),
+            Some(vec!["10".to_string()].as_slice()),
+            "first checkpoint should record cursor from batch 1 (last id=10)"
+        );
+        assert_eq!(
+            history[1].cursor_values.as_deref(),
+            Some(vec!["5".to_string()].as_slice()),
+            "second checkpoint should record cursor from batch 2 (last id=5)"
+        );
 
         let final_state = store.current_state().unwrap();
         assert!(final_state.cursor_values.is_none(), "should be completed");
@@ -857,6 +923,7 @@ mod tests {
                 watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
                 cursor_values: Some(vec!["5".to_string()]),
             })),
+            progress_history: Mutex::new(Vec::new()),
         });
 
         let pipeline = Pipeline::new(
