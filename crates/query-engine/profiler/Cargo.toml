@@ -30,3 +30,4 @@ tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 rustls = { workspace = true }
 uuid = { workspace = true }
+regex = { workspace = true }

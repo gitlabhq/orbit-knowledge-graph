@@ -80,7 +80,7 @@ struct Cli {
     #[arg(long)]
     settings: Vec<String>,
 
-    /// Filter multi-query files by name substring (e.g. --filter aggregation)
+    /// Filter multi-query files by regex pattern (e.g. --filter "Q14|E2|D2")
     #[arg(long)]
     filter: Option<String>,
 
@@ -264,10 +264,11 @@ async fn main() -> Result<()> {
         })?;
 
         let entries: Vec<_> = match &cli.filter {
-            Some(f) => queries
-                .iter()
-                .filter(|(k, _)| k.contains(f.as_str()))
-                .collect(),
+            Some(f) => {
+                let re =
+                    regex::Regex::new(f).with_context(|| format!("invalid filter regex: {f}"))?;
+                queries.iter().filter(|(k, _)| re.is_match(k)).collect()
+            }
             None => queries.iter().collect(),
         };
 

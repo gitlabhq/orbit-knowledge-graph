@@ -9808,6 +9808,7 @@ dependencies = [
  "gkg-utils",
  "ontology",
  "pipeline",
+ "regex",
  "rustls",
  "serde",
  "serde_json",
