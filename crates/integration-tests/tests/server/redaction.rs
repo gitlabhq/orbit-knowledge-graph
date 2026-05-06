@@ -2426,10 +2426,10 @@ async fn column_selection_aggregation_only_group_by_node_has_mandatory_columns(c
 
     // Insert some additional data for aggregation
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path) VALUES
-         (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
-         (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
-         (10003, 3, 'MR 3', 'open', '1/100/1000/')",
+        "INSERT INTO {} (id, iid, title, state, author_id, traversal_path) VALUES
+         (10001, 1, 'MR 1', 'merged', 1, '1/100/1000/'),
+         (10002, 2, 'MR 2', 'merged', 1, '1/100/1000/'),
+         (10003, 3, 'MR 3', 'open', 2, '1/100/1000/')",
         table_merge_requests()
     ))
     .await;
@@ -2526,10 +2526,10 @@ async fn column_selection_aggregation_with_wildcard_columns(ctx: &TestContext) {
 
     // Insert MRs for aggregation
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path) VALUES
-         (10001, 1, 'MR 1', 'merged', '1/100/1000/'),
-         (10002, 2, 'MR 2', 'merged', '1/100/1000/'),
-         (10003, 3, 'MR 3', 'open', '1/100/1000/')",
+        "INSERT INTO {} (id, iid, title, state, author_id, traversal_path) VALUES
+         (10001, 1, 'MR 1', 'merged', 1, '1/100/1000/'),
+         (10002, 2, 'MR 2', 'merged', 1, '1/100/1000/'),
+         (10003, 3, 'MR 3', 'open', 2, '1/100/1000/')",
         table_merge_requests()
     ))
     .await;
