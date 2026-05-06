@@ -5,4 +5,5 @@ description: User who dismissed a vulnerability
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Vulnerability, id: id }
+    fk_column: dismissed_by_id
     description: "User dismissed vulnerability."

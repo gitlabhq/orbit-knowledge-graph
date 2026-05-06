@@ -5,4 +5,5 @@ description: Merge request's source project (differs from target project for for
 variants:
   - from_node: { type: MergeRequest, id: id }
     to_node: { type: Project, id: id }
+    fk_column: source_project_id
     description: "Merge request originates from source project."

@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: Environment, id: id }
     to_node: { type: MergeRequest, id: id }
+    fk_column: merge_request_id
     description: "Environment was first created by a merge request pipeline."

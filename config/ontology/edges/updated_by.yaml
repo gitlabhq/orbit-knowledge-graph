@@ -5,4 +5,5 @@ description: User who most recently updated an entity (non-content changes)
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: MergeRequest, id: id }
+    fk_column: updated_by_id
     description: "User last updated merge request."

@@ -9,7 +9,8 @@ variants:
 
   - from_node: { type: VulnerabilityOccurrence, id: id }
     to_node: { type: VulnerabilityIdentifier, id: id }
-    description: "Vulnerability occurrence has identifier."
+    fk_column: primary_identifier_id
+    description: "Vulnerability occurrence has primary identifier."
 
 etl:
   - scope: namespaced

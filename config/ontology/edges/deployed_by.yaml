@@ -6,4 +6,5 @@ table: gl_ci_edge
 variants:
   - from_node: { type: User, id: id }
     to_node: { type: Deployment, id: id }
+    fk_column: user_id
     description: "User triggered deployment."
