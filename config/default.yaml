@@ -35,6 +35,8 @@ graph:
   database: default
   username: default
   # password: ""
+  query_settings:
+    optimize_on_insert: "0"
 
 # gitlab:
 #   base_url: "http://localhost:3000"
