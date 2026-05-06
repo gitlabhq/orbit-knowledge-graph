@@ -174,8 +174,7 @@ async fn run_raw_sql(
     let elapsed = start.elapsed();
     let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
 
-    let summary =
-        summary.ok_or_else(|| anyhow::anyhow!("missing X-ClickHouse-Summary header"))?;
+    let summary = summary.ok_or_else(|| anyhow::anyhow!("missing X-ClickHouse-Summary header"))?;
 
     let mut result = serde_json::json!({
         "sql": sql,
