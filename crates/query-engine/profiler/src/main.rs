@@ -87,6 +87,11 @@ struct Cli {
     /// Write output to a file instead of stdout
     #[arg(short = 'o', long)]
     output: Option<PathBuf>,
+
+    /// Send raw SQL directly to ClickHouse (skip DSL compilation).
+    /// Supports @filepath for SQL files.
+    #[arg(long)]
+    raw_sql: bool,
 }
 
 #[derive(Clone, clap::ValueEnum)]
@@ -151,6 +156,57 @@ fn emit_output(
     }
 
     Ok(())
+}
+
+async fn run_raw_sql(
+    client: &ArrowClickHouseClient,
+    sql: &str,
+    cli: &Cli,
+    config: &ProfilingConfig,
+) -> Result<()> {
+    let start = std::time::Instant::now();
+    let (batches, summary) = client
+        .query(sql)
+        .fetch_arrow_with_summary()
+        .await
+        .map_err(|e| anyhow::anyhow!("query failed: {e}"))?;
+
+    let elapsed = start.elapsed();
+    let result_rows = batches.iter().map(|b| b.num_rows()).sum::<usize>() as u64;
+
+    let summary =
+        summary.ok_or_else(|| anyhow::anyhow!("missing X-ClickHouse-Summary header"))?;
+
+    let mut result = serde_json::json!({
+        "sql": sql,
+        "elapsed_ms": elapsed.as_secs_f64() * 1000.0,
+        "stats": {
+            "read_rows": summary.read_rows().unwrap_or(0),
+            "read_bytes": summary.read_bytes().unwrap_or(0),
+            "result_rows": summary.result_rows().unwrap_or(result_rows),
+            "memory_usage": summary.memory_usage().unwrap_or(0),
+            "elapsed_ns": summary.elapsed_ns().unwrap_or(elapsed.as_nanos() as u64),
+        }
+    });
+
+    if config.explain {
+        result["explain_plan"] = match client.explain_plan(sql).await {
+            Ok(plan) => serde_json::Value::String(plan),
+            Err(e) => {
+                eprintln!("EXPLAIN PLAN failed: {e}");
+                serde_json::Value::Null
+            }
+        };
+        result["explain_pipeline"] = match client.explain_pipeline(sql).await {
+            Ok(pipeline) => serde_json::Value::String(pipeline),
+            Err(e) => {
+                eprintln!("EXPLAIN PIPELINE failed: {e}");
+                serde_json::Value::Null
+            }
+        };
+    }
+
+    emit_output(&cli.format, &result, cli.output.as_ref())
 }
 
 fn embedded_schema_version() -> u32 {
@@ -220,6 +276,10 @@ async fn main() -> Result<()> {
         processors: cli.processors,
         instance_health: cli.health,
     };
+
+    if cli.raw_sql {
+        return run_raw_sql(&client, &query_json, &cli, &profiling_config).await;
+    }
 
     let parsed: serde_json::Value =
         serde_json::from_str(&query_json).context("failed to parse query JSON")?;
