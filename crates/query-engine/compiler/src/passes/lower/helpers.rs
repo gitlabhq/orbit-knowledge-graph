@@ -97,25 +97,6 @@ pub(super) fn emit_node_join_with_narrowing(
 
 /// JOIN a node's dedup subquery into the FROM tree.
 ///
-/// `use_traversal_path_join`: true for FK paths (node-to-node), false for
-/// edge paths (edge.traversal_path has different semantics than node's).
-pub(super) fn emit_node_join(
-    from: TableRef,
-    np: &NodePlan,
-    edge_alias: &str,
-    edge_col: &str,
-    use_traversal_path_join: bool,
-) -> Result<(TableRef, Vec<SelectExpr>, Vec<Expr>)> {
-    emit_node_join_inner(
-        from,
-        np,
-        edge_alias,
-        edge_col,
-        use_traversal_path_join,
-        None,
-    )
-}
-
 fn emit_node_join_inner(
     from: TableRef,
     np: &NodePlan,
@@ -344,7 +325,10 @@ pub(super) fn emit_filter_narrowing(
         };
         let selective = !np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some();
         let should_narrow = match np.hydration {
-            HydrationStrategy::FilterOnly => true,
+            // FilterOnly nodes get their CTE + IN predicate from
+            // emit_filter_subquery in the second loop — skip here to
+            // avoid duplicate IN predicates (each inlines the CTE).
+            HydrationStrategy::FilterOnly => false,
             HydrationStrategy::Join => selective,
             HydrationStrategy::Skip => false,
         };
