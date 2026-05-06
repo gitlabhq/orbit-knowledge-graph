@@ -271,8 +271,8 @@ pub(super) async fn traversal_dedup_returns_single_edge(ctx: &TestContext) {
     ))
     .await;
     ctx.execute(&format!(
-        "INSERT INTO {} (id, iid, title, state, traversal_path, _version, _deleted) VALUES
-         (9101, 98, 'MR by dup author', 'opened', '1/100/1000/', '2024-06-01 00:00:00', false)",
+        "INSERT INTO {} (id, iid, title, state, author_id, traversal_path, _version, _deleted) VALUES
+         (9101, 98, 'MR by dup author', 'opened', 9003, '1/100/1000/', '2024-06-01 00:00:00', false)",
         t("gl_merge_request")
     ))
     .await;

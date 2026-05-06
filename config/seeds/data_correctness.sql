@@ -150,21 +150,21 @@ INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) V
     (1004, 'Shared Project', 'internal-group/shared-project', 'public', '1/102/1004/'),
     (1010, 'Deep Project', 'public-group/deep-a/deep-project', 'public', '1/100/200/1010/');
 
-INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, merged_at, project_id, traversal_path) VALUES
-    (2000, 1, 'Add feature A', 'opened',  'feature-a',  'main', NULL,                          1000, '1/100/1000/'),
-    (2001, 2, 'Fix bug B',     'opened',  'fix-b',      'main', NULL,                          1000, '1/100/1000/'),
-    (2002, 3, 'Refactor C',    'merged',  'refactor-c', 'main', toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC'), 1001, '1/101/1001/'),
-    (2003, 4, 'Update D',      'closed',  'update-d',   'main', NULL,                          1004, '1/102/1004/'),
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, merged_at, project_id, author_id, traversal_path) VALUES
+    (2000, 1, 'Add feature A', 'opened',  'feature-a',  'main', NULL,                          1000, 1, '1/100/1000/'),
+    (2001, 2, 'Fix bug B',     'opened',  'fix-b',      'main', NULL,                          1000, 1, '1/100/1000/'),
+    (2002, 3, 'Refactor C',    'merged',  'refactor-c', 'main', toDateTime64('2024-03-15 12:00:00.000000', 6, 'UTC'), 1001, 2, '1/101/1001/'),
+    (2003, 4, 'Update D',      'closed',  'update-d',   'main', NULL,                          1004, 3, '1/102/1004/'),
     -- Two extra merged MRs let the data-correctness test pin a specific
     -- result for `merged_at >= 2024-06-01` (2004 + 2005, deterministic order).
-    (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), 1000, '1/100/1000/'),
-    (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), 1000, '1/100/1000/');
+    (2004, 5, 'Ship feature E','merged',  'ship-e',     'main', toDateTime64('2024-06-10 09:00:00.000000', 6, 'UTC'), 1000, NULL, '1/100/1000/'),
+    (2005, 6, 'Ship feature F','merged',  'ship-f',     'main', toDateTime64('2024-08-20 09:00:00.000000', 6, 'UTC'), 1000, NULL, '1/100/1000/');
 
-INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, traversal_path) VALUES
-    (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', '1/100/1000/'),
-    (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', '1/100/1000/'),
-    (3002, repeat('x', 10000), 'MergeRequest', 2000, false, false, NULL, '1/100/1000/'),
-    (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, '1/100/1000/');
+INSERT INTO gl_note (id, note, noteable_type, noteable_id, confidential, internal, created_at, author_id, traversal_path) VALUES
+    (3000, 'Normal note on feature A', 'MergeRequest', 2000, false, false, '2024-01-15 10:30:00', 1, '1/100/1000/'),
+    (3001, 'Confidential feedback on bug B', 'MergeRequest', 2001, true, false, '2024-02-20 14:45:00', NULL, '1/100/1000/'),
+    (3002, repeat('x', 10000), 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/'),
+    (3003, 'Robert''); DROP TABLE gl_note;--', 'MergeRequest', 2000, false, false, NULL, NULL, '1/100/1000/');
 
 INSERT INTO gl_merge_request_diff (id, merge_request_id, state, traversal_path) VALUES
     (5000, 2000, 'collected', '1/100/1000/'),
@@ -210,12 +210,12 @@ INSERT INTO gl_code_edge (traversal_path, source_id, source_kind, relationship_k
     ('1/100/1000/', 12001, 'Definition', 'CALLS', 12002, 'Definition'),
     ('1/101/1001/', 12001, 'Definition', 'CALLS', 12102, 'Definition');
 
-INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, project_id, traversal_path) VALUES
-    (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, 1000, '1/100/'),
-    (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', 1000, '1/100/'),
-    (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, 0, '1/101/'),
-    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, 0, '1/102/'),
-    (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, 1010, '1/100/200/1010/');
+INSERT INTO gl_work_item (id, iid, title, state, work_item_type, confidential, weight, created_at, updated_at, closed_at, project_id, author_id, namespace_id, milestone_id, closed_by_id, traversal_path) VALUES
+    (4000, 1, 'Implement login page', 'opened', 'issue', false, 3, '2024-03-01 09:00:00', '2024-03-10 14:00:00', NULL, 1000, 1, 100, 6000, NULL, '1/100/'),
+    (4001, 2, 'Fix auth bug', 'closed', 'incident', true, 8, '2024-03-05 11:30:00', '2024-03-15 16:00:00', '2024-03-15 16:00:00', 1000, 2, 100, 6000, 2, '1/100/'),
+    (4002, 3, 'Write unit tests', 'opened', 'task', false, NULL, '2024-04-01 08:00:00', '2024-04-01 08:00:00', NULL, 0, 1, 101, NULL, NULL, '1/101/'),
+    (4003, 4, 'Q1 Objective', 'opened', 'epic', false, 13, '2024-01-02 10:00:00', '2024-03-30 12:00:00', NULL, 0, 3, 102, NULL, NULL, '1/102/'),
+    (4010, 5, 'Deep WI', 'opened', 'issue', false, 5, '2024-04-15 09:00:00', '2024-04-15 09:00:00', NULL, 1010, 7, 0, NULL, NULL, '1/100/200/1010/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
     ('1/100/', 1, 'User', 'MEMBER_OF', 100, 'Group', ['state:active'], []),
@@ -295,8 +295,8 @@ INSERT INTO gl_group (id, name, full_path, visibility_level, traversal_path) VAL
 INSERT INTO gl_project (id, name, full_path, visibility_level, traversal_path) VALUES
     (9000, 'Org2 Project', 'org2-root/org2-project', 'public', '2/900/9000/');
 
-INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, project_id, traversal_path) VALUES
-    (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', 9000, '2/900/9000/');
+INSERT INTO gl_merge_request (id, iid, title, state, source_branch, target_branch, project_id, author_id, traversal_path) VALUES
+    (9100, 1, 'Org2 MR', 'opened', 'org2-feature', 'main', 9000, 1, '2/900/9000/');
 
 INSERT INTO gl_edge (traversal_path, source_id, source_kind, relationship_kind, target_id, target_kind, source_tags, target_tags) VALUES
     ('2/900/', 1, 'User', 'MEMBER_OF', 900, 'Group', ['state:active'], []),
