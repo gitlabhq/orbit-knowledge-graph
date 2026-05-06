@@ -43,6 +43,7 @@ workflow:
 include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
+  - local: .gitlab/ci/release-local.yml
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
   - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
@@ -432,7 +433,7 @@ cli-integration-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo build -p orbit
+    - cargo build -p orbit-local
     - cargo nextest run --profile ci --test cli --no-fail-fast
     - sccache --show-stats || true
 
@@ -481,7 +482,7 @@ integration-test:
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - crates/cli/**/*
+        - crates/orbit-local/**/*
         - crates/code-graph/**/*
         - crates/ontology/**/*
         - crates/duckdb-client/**/*

@@ -8,10 +8,9 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use compiler::passes::validate::Validator;
 use compiler::pipelines;
-use compiler::{
-    Pipeline, PipelineObserver, QueryError, QueryState, SealJson, SecureEnv, Validator,
-};
+use compiler::{Pipeline, PipelineObserver, QueryError, QueryState, SealJson, SecureEnv};
 use ontology::Ontology;
 
 use super::setup::{embedded_ontology, test_ctx, test_ontology};

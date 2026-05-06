@@ -3,9 +3,9 @@
 use crate::ast::*;
 use crate::error::{QueryError, Result};
 
-use super::super::plan::*;
 use super::EmitOutput;
 use super::helpers::{build_dedup_subquery, node_select_columns};
+use crate::passes::plan::*;
 
 pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
     let (_, np) = plan
@@ -30,7 +30,7 @@ pub(super) fn emit_single_node(plan: &Plan) -> Result<EmitOutput> {
     };
 
     // Only _deleted=false in the outer WHERE — user filters are inside the dedup.
-    let where_parts = vec![super::super::shared::deleted_false(alias)];
+    let where_parts = vec![crate::passes::shared::deleted_false(alias)];
     let select = node_select_columns(alias, np);
 
     Ok(EmitOutput {

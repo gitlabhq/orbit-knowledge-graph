@@ -18,6 +18,7 @@ users:
     password: "e2e-gitlab-ch-password"
 
 persistence:
+  enabled: true
   size: 20Gi
 
 resources:

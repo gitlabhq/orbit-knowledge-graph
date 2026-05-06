@@ -114,11 +114,41 @@ Enable Knowledge Graph Once
     END
 
 Create Project
+    [Documentation]    Create a project under ${namespace_id}, then immediately touch it to
+    ...                work around a Siphon CDC race in the ClickHouse MV
+    ...                `project_namespace_traversal_paths_mv`. Rails creates the project's
+    ...                project_namespace and the project itself in one PG transaction;
+    ...                Siphon ships both rows in one batch and the consumer applies the
+    ...                two siphon_* INSERTs concurrently. The MV fires on the projects
+    ...                INSERT with an INNER JOIN against namespace_traversal_paths that is
+    ...                still empty for the new namespace, so the project's traversal_path
+    ...                row is never written and the SDLC Project pipeline filters it out
+    ...                forever. Touching the project after a brief delay generates a
+    ...                second WAL event so the MV re-fires with namespace_traversal_paths
+    ...                populated. Remove once the upstream MV is idempotent or paired with
+    ...                a reconciler. See gitlab-org/orbit/knowledge-graph/-/jobs/14221171727.
     [Arguments]    ${name}    ${namespace_id}
     ${headers}=    GitLab Auth Headers
     ${body}=    Create Dictionary    name=${name}    namespace_id=${namespace_id}    visibility=public
     ${resp}=    POST    ${GITLAB_URL}/api/v4/projects
     ...    headers=${headers}    json=${body}    expected_status=201
+    ${project}=    Set Variable    ${resp.json()}
+    Sleep    2s
+    Touch Project    ${project["id"]}
+    RETURN    ${project}
+
+Touch Project
+    [Documentation]    No-op PUT that forces a fresh WAL event for the projects row so
+    ...                Siphon re-replicates it and the ClickHouse MV chain re-fires. See
+    ...                Create Project for the race this works around. Side effect: this
+    ...                overwrites the project's `description` with a fixed marker — fine
+    ...                for e2e fixtures (which start with empty description), not safe to
+    ...                call on projects whose description matters.
+    [Arguments]    ${project_id}
+    ${headers}=    GitLab Auth Headers
+    ${body}=    Create Dictionary    description=indexed-nudge
+    ${resp}=    PUT    ${GITLAB_URL}/api/v4/projects/${project_id}
+    ...    headers=${headers}    json=${body}    expected_status=200
     RETURN    ${resp.json()}
 
 Create Issue

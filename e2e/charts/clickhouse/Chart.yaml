@@ -2,4 +2,4 @@ apiVersion: v2
 name: clickhouse
 description: Single-node ClickHouse for e2e testing
 type: application
-version: 0.5.0
+version: 0.5.1

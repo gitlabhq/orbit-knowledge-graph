@@ -7,10 +7,10 @@ use ontology::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::shared::has_non_denorm_filters;
 use super::{
     EdgeTableConfig, HydrationStrategy, NodePlan, Plan, PlanBody, Selectivity, Strategy, find_node,
 };
+use crate::passes::shared::has_non_denorm_filters;
 
 pub fn plan_neighbors(input: &Input) -> Result<Plan> {
     let config = input

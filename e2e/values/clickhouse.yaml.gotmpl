@@ -1,5 +1,9 @@
 password: {{ requiredEnv "E2E_CH_DEFAULT_PASS" | quote }}
 
+persistence:
+  enabled: false
+  size: 20Gi
+
 users:
   siphon:
     password: {{ requiredEnv "E2E_CH_SIPHON_PASS" | quote }}

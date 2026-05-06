@@ -80,7 +80,7 @@ expression = "LicenseRef-EE"
 license-files = []
 
 [[licenses.clarify]]
-name = "orbit"
+name = "orbit-local"
 expression = "LicenseRef-EE"
 license-files = []
 

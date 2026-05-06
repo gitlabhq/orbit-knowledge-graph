@@ -12,8 +12,8 @@ use crate::constants::*;
 use crate::error::Result;
 use crate::input::*;
 
-use super::super::plan::{EdgeTableConfig, Plan};
-use super::super::shared::{
+use crate::passes::plan::{EdgeTableConfig, Plan};
+use crate::passes::shared::{
     dedup_subquery, deleted_false, denorm_tag_expr, edge_table_scan, filter_to_expr,
     id_list_predicate, id_range_predicate, rel_kind_filter,
 };

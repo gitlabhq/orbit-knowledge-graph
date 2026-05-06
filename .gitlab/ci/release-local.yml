@@ -1,0 +1,102 @@
+# Build and publish the `orbit` local CLI on tag releases.
+#
+# "Local CLI" distinguishes this binary (the user-facing `orbit` command for
+# code indexing on a developer machine) from the gkg-server image we ship
+# elsewhere in this pipeline.
+#
+# Both build and publish run only on tag pipelines (`vX.Y.Z`) on the canonical
+# project.
+
+.local-cli-release-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+
+.local-cli-build-linux:
+  extends:
+    - .job-template
+    - .sccache-template
+    - .local-cli-release-rules
+  stage: build
+  needs: []
+  variables:
+    PLATFORM: linux
+  script:
+    - ./scripts/build-local-cli.sh
+    - sccache --show-stats || true
+  artifacts:
+    paths:
+      - orbit-local-linux-*.tar.gz
+    expire_in: 7 days
+
+local-cli-build-linux-amd64:
+  extends: .local-cli-build-linux
+  tags:
+    - saas-linux-large-amd64
+  variables:
+    ARCH: x86_64
+
+local-cli-build-linux-arm64:
+  extends: .local-cli-build-linux
+  tags:
+    - saas-linux-large-arm64
+  variables:
+    ARCH: aarch64
+
+.local-cli-build-darwin:
+  extends:
+    - .local-cli-release-rules
+  stage: build
+  image: macos-15-xcode-16
+  tags:
+    - saas-macos-large-m2pro
+  needs: []
+  variables:
+    PLATFORM: darwin
+    # Pull a prebuilt libduckdb instead of compiling it; matches local dev defaults.
+    DUCKDB_DOWNLOAD_LIB: "1"
+    RUST_VERSION: "1.95.0"
+  before_script:
+    # macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the
+    # project mise.toml is bypassed here because the runner's system-wide mise
+    # config drags in heavy unrelated tools (ruby/maven/dotnet/...) that fail
+    # to install and aren't needed to compile the orbit binary.
+    - command -v rustup || (curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain none --no-modify-path)
+    - export PATH="$HOME/.cargo/bin:$PATH"
+    - rustup toolchain install "$RUST_VERSION" --profile minimal
+    - rustup default "$RUST_VERSION"
+    - rustup target add aarch64-apple-darwin x86_64-apple-darwin
+  script:
+    - ./scripts/build-local-cli.sh
+  artifacts:
+    paths:
+      - orbit-local-darwin-*.tar.gz
+    expire_in: 7 days
+
+local-cli-build-darwin-amd64:
+  extends: .local-cli-build-darwin
+  variables:
+    ARCH: x86_64
+
+local-cli-build-darwin-arm64:
+  extends: .local-cli-build-darwin
+  variables:
+    ARCH: aarch64
+
+local-cli-publish:
+  extends:
+    - .local-cli-release-rules
+  stage: publish
+  image: ${DEP_PROXY}alpine:latest
+  tags:
+    - saas-linux-medium-amd64
+  needs:
+    - local-cli-build-linux-amd64
+    - local-cli-build-linux-arm64
+    - local-cli-build-darwin-amd64
+    - local-cli-build-darwin-arm64
+  before_script:
+    - apk add --no-cache bash curl coreutils
+  script:
+    - bash ./scripts/upload-local-cli-release.sh

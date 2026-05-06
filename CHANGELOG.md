@@ -1,3 +1,18 @@
+## [0.49.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.48.0...v0.49.0) (2026-05-05)
+
+### Features
+
+* **code-graph:** introduce cross-language symbol resolution via language families ([1aaffbe](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1aaffbe142da5e8c5f41f01887825de56c912d0d)) by Michael Usachenko
+
+### Performance
+
+* **indexer:** reduce batch size, add concurrent writes, interleave transforms ([6acfc44](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/6acfc446bd4f8c23004b88395c3b69778c622b54)) by Jean-Gabriel Doyon
+* **indexer:** stream Arrow IPC per-RecordBatch instead of buffering full payload ([da31ceb](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/da31ceb3a9f8582ae845a9f01dfd4984ff68c39f)) by Jean-Gabriel Doyon
+
+### Other
+
+* bump schema version to 38 ([3903af1](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/3903af174079ef27d0c6eb6260797f7af9244e29)) by Jean-Gabriel Doyon
+
 ## [0.48.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.47.0...v0.48.0) (2026-05-05)
 
 ### Features

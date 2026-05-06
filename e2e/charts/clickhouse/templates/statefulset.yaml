@@ -63,6 +63,12 @@ spec:
         - name: config
           configMap:
             name: {{ .Release.Name }}-config
+        {{- if not .Values.persistence.enabled }}
+        - name: data
+          emptyDir:
+            sizeLimit: {{ .Values.persistence.size }}
+        {{- end }}
+  {{- if .Values.persistence.enabled }}
   volumeClaimTemplates:
     - metadata:
         name: data
@@ -71,3 +77,4 @@ spec:
         resources:
           requests:
             storage: {{ .Values.persistence.size }}
+  {{- end }}
