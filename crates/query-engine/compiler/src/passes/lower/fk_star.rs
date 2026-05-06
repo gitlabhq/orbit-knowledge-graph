@@ -101,7 +101,10 @@ pub(super) fn emit_fk_star(plan: &Plan, center_alias: &str) -> Result<EmitOutput
                 let narrow_dedup = build_dedup_subquery(
                     center_alias,
                     center_table,
-                    vec![SelectExpr::col(center_alias, &fk.fk_column)],
+                    vec![
+                        SelectExpr::col(center_alias, &fk.fk_column),
+                        SelectExpr::col(center_alias, DELETED_COLUMN),
+                    ],
                     center_np,
                 );
                 ctes.push(Cte::new(
