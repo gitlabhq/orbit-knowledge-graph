@@ -6,6 +6,7 @@ use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
 use datafusion::prelude::*;
+use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
 use gkg_utils::arrow::prepare_batches;
@@ -23,6 +24,9 @@ use super::metrics::SdlcMetrics;
 use super::plan::{PipelinePlan, SOURCE_DATA_TABLE, Transformation};
 use crate::checkpoint::{Checkpoint, CheckpointStore};
 use gkg_server_config::DatalakeRetryConfig;
+
+type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
+
 const MAX_RETRIES: u32 = 3;
 
 pub(in crate::modules::sdlc) struct PipelineContext {
@@ -127,13 +131,13 @@ impl Pipeline {
 
         let session = SessionContext::new();
 
-        loop {
-            let extract_start = Instant::now();
-            let batches = self
-                .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
-                .await?;
-            let extract_elapsed = extract_start.elapsed();
+        let extract_start = Instant::now();
+        let mut batches = self
+            .extract_batch(&plan.name, &extract_query.to_sql(), params.clone())
+            .await?;
+        let mut extract_elapsed = extract_start.elapsed();
 
+        loop {
             if batches.is_empty() {
                 break;
             }
@@ -148,16 +152,35 @@ impl Pipeline {
                 "batch extracted"
             );
 
-            self.transform_and_write(
-                &session,
-                &plan.name,
-                &batches,
-                &plan.transforms,
-                destination,
-            )
-            .await?;
+            let write_futures = self
+                .transform(
+                    &session,
+                    &plan.name,
+                    &batches,
+                    &plan.transforms,
+                    destination,
+                )
+                .await?;
 
             extract_query = extract_query.advance(batches.last().unwrap())?;
+            let has_more = rows_in_batch >= plan.extract_query.batch_size();
+
+            drop(batches);
+
+            if has_more {
+                let next_sql = extract_query.to_sql();
+                let (write_result, extract_result) = tokio::join!(
+                    self.drain_writes(write_futures),
+                    self.timed_extract_batch(&plan.name, &next_sql, params.clone()),
+                );
+                write_result?;
+                let (next_batches, next_elapsed) = extract_result?;
+                batches = next_batches;
+                extract_elapsed = next_elapsed;
+            } else {
+                self.drain_writes(write_futures).await?;
+                batches = vec![];
+            }
 
             self.checkpoint_store
                 .save_progress(
@@ -177,7 +200,7 @@ impl Pipeline {
 
             progress.notify_in_progress().await;
 
-            if rows_in_batch < plan.extract_query.batch_size() {
+            if !has_more {
                 break;
             }
         }
@@ -278,14 +301,25 @@ impl Pipeline {
         Err(last_error.unwrap())
     }
 
-    async fn transform_and_write(
+    async fn timed_extract_batch(
+        &self,
+        pipeline_name: &str,
+        sql: &str,
+        params: Value,
+    ) -> Result<(Vec<RecordBatch>, Duration), HandlerError> {
+        let start = Instant::now();
+        let batches = self.extract_batch(pipeline_name, sql, params).await?;
+        Ok((batches, start.elapsed()))
+    }
+
+    async fn transform(
         &self,
         session: &SessionContext,
         pipeline_name: &str,
         batches: &[RecordBatch],
         transforms: &[Transformation],
         destination: &dyn Destination,
-    ) -> Result<(), HandlerError> {
+    ) -> Result<WriteFutures, HandlerError> {
         let schema = batches[0].schema();
 
         let _ = session.deregister_table(SOURCE_DATA_TABLE);
@@ -304,7 +338,7 @@ impl Pipeline {
             })?;
 
         let mut total_transform_duration = Duration::ZERO;
-        let mut write_futures = FuturesUnordered::new();
+        let mut write_futures: WriteFutures = FuturesUnordered::new();
 
         for transform in transforms {
             let transform_start = Instant::now();
@@ -337,25 +371,28 @@ impl Pipeline {
                     ))
                 })?;
 
-            write_futures.push(async move {
-                let write_start = Instant::now();
-                writer.write_batch(&result_batches).await.map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to write to {destination_table}: {err}"
-                    ))
-                })?;
-                let write_elapsed = write_start.elapsed();
+            write_futures.push(
+                async move {
+                    let write_start = Instant::now();
+                    writer.write_batch(&result_batches).await.map_err(|err| {
+                        HandlerError::Processing(format!(
+                            "failed to write to {destination_table}: {err}"
+                        ))
+                    })?;
+                    let write_elapsed = write_start.elapsed();
 
-                info!(
-                    table = %destination_table,
-                    rows = row_count,
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    write_ms = write_elapsed.as_millis() as u64,
-                    "transform written"
-                );
+                    info!(
+                        table = %destination_table,
+                        rows = row_count,
+                        transform_ms = transform_elapsed.as_millis() as u64,
+                        write_ms = write_elapsed.as_millis() as u64,
+                        "transform written"
+                    );
 
-                Ok::<(), HandlerError>(())
-            });
+                    Ok(())
+                }
+                .boxed(),
+            );
 
             while let Some(Some(result)) = write_futures.next().now_or_never() {
                 result?;
@@ -365,10 +402,15 @@ impl Pipeline {
         self.metrics
             .record_transform_duration(total_transform_duration.as_secs_f64());
 
-        while let Some(result) = write_futures.next().await {
+        let _ = session.deregister_table(SOURCE_DATA_TABLE);
+
+        Ok(write_futures)
+    }
+
+    async fn drain_writes(&self, mut futures: WriteFutures) -> Result<(), HandlerError> {
+        while let Some(result) = futures.next().await {
             result?;
         }
-
         Ok(())
     }
 
