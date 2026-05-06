@@ -1,3 +1,19 @@
+## [0.51.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.50.0...v0.51.0) (2026-05-06)
+
+### Features
+
+* **orbit-skill:** use glab orbit CLI subcommands ([a444049](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/a44404973f9ed1470ae98032efcdb0ecaaecaeba)) by Dmitry Gruzd
+
+### Performance
+
+* **ddl:** enable minmax indexes on all DateTime columns ([4ba724b](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/4ba724b63f77c5e8209ab3fe3a6526061448b8f3)) by Michael Usachenko
+* **indexer:** overlap extract and write in SDLC pipeline ([b77b019](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b77b01950454a285410cc8957ad6f54fa3e8ab82)) by Jean-Gabriel Doyon
+* **query:** fk narrowing + 31 missing FK column declarations ([b2aa00f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b2aa00f6d0902c217b72c98334799a1db801e79a)) by Michael Usachenko
+
+### Other
+
+* **ontology:** bump schema to 40 ([08e4100](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/08e4100b24a86e013dbc37983dec3f630c52d509)) by Jean-Gabriel Doyon
+
 ## [0.50.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.49.0...v0.50.0) (2026-05-06)
 
 ### Features
