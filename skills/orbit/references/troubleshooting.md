@@ -1,46 +1,41 @@
 # Orbit skill troubleshooting
 
-Common errors when using `glab api` against `/api/v4/orbit/*`, in rough order
-of frequency. See [`SKILL.md`](../SKILL.md) for prerequisites.
+Common errors when using `glab orbit remote`, organised by exit code. See
+[`SKILL.md`](../SKILL.md) for prerequisites.
 
-## `HTTP 415: The provided content-type '' is not supported.`
+## CLI exit codes
 
-**Cause:** `glab api --method POST` without an explicit `Content-Type` header.
+| Exit | HTTP | Meaning                                                      |
+|------|------|--------------------------------------------------------------|
+| `0`  | 2xx  | Success.                                                     |
+| `1`  | —    | Generic error (parse error, IO error, malformed body).       |
+| `2`  | 404  | Orbit endpoint unavailable (typically: feature flag is off). |
+| `3`  | 401  | Not authenticated.                                           |
+| `4`  | 403  | Access denied (no Knowledge Graph enabled namespaces).       |
+| `5`  | 429  | Rate limited.                                                |
 
-**Fix:** add the header, or use the bundled wrapper:
+`glab orbit remote query --format raw` is the easiest way to surface the full
+JSON error payload when the exit code alone is not enough.
 
-```bash
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q.json
-
-# or (adjust path to wherever the skill is installed):
-~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
-```
-
-## `{"error":"404 Not Found"}`
+## Exit `2` — feature flag is off, or wrong subcommand
 
 **Cause 1 — feature flag off.** Orbit is gated behind the `knowledge_graph`
-feature flag. If it's disabled for your user, every `/api/v4/orbit/*` endpoint
-returns 404 regardless of input.
+feature flag. If it is disabled for your user, every endpoint returns 404.
 
 **Fix:** contact an admin to enable `knowledge_graph` for your user.
 
-**Cause 2 — typo in the path.** The endpoint is `orbit/...`, not
-`orbit_mcp/...`, `knowledge_graph/...`, or `projects/<id>/orbit/...`.
-Orbit is top-level and user-scoped, not project-scoped.
+**Cause 2 — wrong CLI path.** Make sure you are on `glab` v1.94.0+:
 
-## `HTTP 403 No Knowledge Graph enabled namespaces available`
+```bash
+glab --version
+glab orbit remote --help
+```
 
-**Cause:** Your user has the feature flag enabled but belongs to no top-level
-group that has Orbit turned on.
+If `glab orbit` is not recognised, upgrade `glab`.
 
-**Fix:** an Owner of at least one top-level group you belong to must turn
-Orbit on via **Orbit > Configuration** in the GitLab UI.
+## Exit `3` — not authenticated
 
-## `HTTP 401` / `HTTP 403` on all endpoints
-
-**Cause:** Missing or expired `glab` authentication.
+**Cause:** Missing or expired `glab` auth.
 
 **Fix:**
 
@@ -49,50 +44,49 @@ glab auth status
 glab auth login    # if expired
 ```
 
-## `glab api` does not support `--jq`
+## Exit `4` — `No Knowledge Graph enabled namespaces available`
 
-`glab api` has no built-in `--jq` flag.
+**Cause:** Your user has the feature flag enabled but belongs to no top-level
+group that has Orbit turned on.
 
-**Fix:** pipe to `jq` instead:
+**Fix:** an Owner of at least one top-level group you belong to must turn
+Orbit on via **Orbit > Configuration** in the GitLab UI.
 
-```bash
-glab api "projects/my-org%2Fmy-project" | jq '.id'
-```
-
-## `HTTP 429: Too Many Requests`
+## Exit `5` — rate limited
 
 **Cause:** Rate limit (`orbit_query`) exceeded.
 
-**Fix:** inspect the `Retry-After` response header and back off. For
-agent-driven bulk work, reduce `limit`, add a short sleep between queries,
-or batch via aggregation.
+**Fix:** back off and reduce churn. For agent-driven bulk work, lower `limit`,
+add a short sleep between queries, or fold work into a single
+aggregation/traversal query.
 
-## Empty response body from `/orbit/query`
+## Exit `1` — generic error
 
-**Cause:** Usually normal — either the upstream gRPC returned no rows, or
-output is being piped elsewhere. The Orbit API uses Workhorse streaming:
-Rails returns a `Gitlab-Workhorse-Send-Data` header with an empty body, and
-Workhorse substitutes the streamed gRPC response before it reaches `glab`.
-You should see normal JSON output in your terminal.
+The most common causes:
 
-**Verify with a known-good probe:**
+- Malformed JSON request body (run `jq . /tmp/q.json` to validate).
+- Unreachable hostname (check `glab auth status`).
+- Network or TLS failure.
+
+Re-run with `--format raw` and inspect stderr for details.
+
+## Empty result body
+
+**Cause:** Usually the query returned no rows. Confirm with a known-good probe:
 
 ```bash
 cat > /tmp/q-min.json <<'JSON'
-{"query": {"query_type": "traversal", "node": {"id": "p", "entity": "Project"}, "limit": 1},
- "response_format": "raw"}
+{"query": {"query_type": "traversal", "node": {"id": "p", "entity": "Project"}, "limit": 1}}
 JSON
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q-min.json
+glab orbit remote query --format raw /tmp/q-min.json
 ```
 
 If this returns a result, the connection works and your other query likely
 has no matches.
 
-## `HTTP 400` with validation errors
+## Validation errors (HTTP 400, exit `1`)
 
-**Cause:** Query didn't match the DSL JSON Schema. Common causes:
+**Cause:** Query did not match the DSL JSON Schema. Common culprits:
 
 - Using `node` (singular) with `aggregation` / `path_finding`
   (they require `nodes`, plural).
@@ -107,17 +101,14 @@ has no matches.
 always current:
 
 ```bash
-glab api orbit/tools | jq '.[] | select(.name=="query_graph") | .description' -r
+glab orbit remote tools | jq '.[] | select(.name=="query_graph") | .description' -r
 ```
 
 The `description` field embeds the full JSON Schema (inside a `<toon>` block
 for compact transport — still parseable). Full field reference in
 [`query_language.md`](query_language.md).
 
-## `HTTP 503 Service Unavailable`
+## Service unavailable
 
-**Cause:** Upstream gRPC to the Orbit service failed. Usually transient.
-
-**Fix:** retry with exponential backoff. If persistent, call
-`glab api orbit/status` — if any component reports unhealthy, wait and
-escalate in the team Slack channel.
+If `glab orbit remote status` shows any component unhealthy, retry with
+exponential backoff. If persistent, escalate in the team Slack channel.

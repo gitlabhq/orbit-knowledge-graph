@@ -1,81 +1,39 @@
 ---
 name: orbit
-description: Query the GitLab Knowledge Graph (Orbit) via the /api/v4/orbit REST endpoints using `glab api`. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
-version: 0.4.0
+description: Query the GitLab Knowledge Graph (Orbit) via the typed `glab orbit remote` CLI subcommands. Use for code-structure questions (who calls this function, where is this symbol defined), cross-project dependency and blast-radius analysis, merge-request and contributor queries, and any question answerable by traversing GitLab's unified entity graph (projects, users, MRs, issues, pipelines, files, definitions, vulnerabilities).
+version: 0.5.0
 license: MIT
 metadata:
   audience: developers
-  keywords: orbit, knowledge-graph, gkg, graph, query, glab, api
+  keywords: orbit, knowledge-graph, gkg, graph, query, glab
   workflow: ai
 ---
 
 # Orbit (GitLab Knowledge Graph) skill
 
-Query the GitLab Knowledge Graph (product name **Orbit**) from the CLI using `glab api`.
-The API is **self-describing** — always call `orbit/schema` or `orbit/tools` first to discover the
-authoritative ontology and query DSL before writing queries.
+Query the GitLab Knowledge Graph (product name **Orbit**) via the typed
+`glab orbit remote` CLI subcommands (shipped in glab v1.94.0+).
 
-## Prerequisites
+**Do not use `glab api orbit/*`.** The typed CLI handles the
+`Content-Type` header, response framing, and exit codes for you.
 
-- `glab auth login` against an instance that has the `knowledge_graph` feature flag enabled
-  for your user. FF off → every `/api/v4/orbit/*` endpoint returns `404`.
-- The instance must have Orbit turned on for at least one top-level group you belong to.
-  Otherwise `orbit/query` returns `403 No Knowledge Graph enabled namespaces available`.
+## Discovery
 
-## Endpoints
-
-All endpoints live under `/api/v4/orbit/*` and are **user-scoped**, not project-scoped.
-Do **not** pass `-R owner/repo`.
-
-| Endpoint                    | Method | Purpose                                                  |
-|-----------------------------|--------|----------------------------------------------------------|
-| `orbit/status`              | GET    | Cluster health (always returns 200).                     |
-| `orbit/schema`              | GET    | Graph ontology: domains, nodes, edges.                   |
-| `orbit/schema?expand=A,B`   | GET    | Drill into nodes for properties and relationships.       |
-| `orbit/tools`               | GET    | MCP tool manifest with the full query DSL JSON Schema.   |
-| `orbit/query`               | POST   | Execute a query. **Requires `Content-Type` header.**     |
-
-## Discovery workflow (always start here)
+`glab orbit remote --help` and `glab orbit remote query --help` are the
+authoritative usage references. Pass entity names to `schema` to get scoped
+properties — calling `schema` without arguments returns the full ontology
+(~28 KB) and is rarely what you want:
 
 ```bash
-glab api orbit/status                                   # is the service up?
-glab api orbit/schema                                   # what entities and edges exist?
-glab api "orbit/schema?expand=MergeRequest,Project"     # properties of specific nodes
-glab api orbit/tools                                    # full DSL JSON Schema
+glab orbit remote schema MergeRequest Project   # scoped properties
+glab orbit remote tools                         # full DSL JSON Schema
 ```
-
-These calls are cheap and return the authoritative ontology + query-DSL schema. Prefer them over
-memorised structures — the ontology evolves. Budget ≤ 1 discovery call per new entity type in a session.
 
 ## Running a query
 
-POST to `orbit/query` requires an explicit `Content-Type`. Without it you get
-`HTTP 415: The provided content-type '' is not supported.`
-
-**Single-node traversal** — find nodes matching filters:
-
-```bash
-cat > /tmp/q.json <<'JSON'
-{
-  "query": {
-    "query_type": "traversal",
-    "node": {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"name": {"op": "eq", "value": "my-project"}}
-    },
-    "limit": 5
-  },
-  "response_format": "llm"
-}
-JSON
-
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q.json
-```
-
-**Multi-node traversal** — follow relationships between nodes (the most common query shape):
+Write the request body to a file and pass it to `glab orbit remote query`.
+Default output is `llm` (compact, agent-friendly); pass `--format raw` to
+pipe into `jq`. Endpoints are user-scoped — do **not** pass `-R owner/repo`.
 
 ```bash
 cat > /tmp/q.json <<'JSON'
@@ -83,94 +41,44 @@ cat > /tmp/q.json <<'JSON'
   "query": {
     "query_type": "traversal",
     "nodes": [
-      {"id": "u",  "entity": "User", "filters": {"username": {"op": "eq", "value": "alice"}}},
-      {"id": "mr", "entity": "MergeRequest", "columns": ["title", "state"]}
+      {"id": "p",  "entity": "Project",
+       "filters": {"id": {"op": "eq", "value": 278964}}},
+      {"id": "mr", "entity": "MergeRequest",
+       "columns": ["iid", "title", "state"]}
     ],
     "relationships": [
-      {"type": "AUTHORED", "from": "u", "to": "mr"}
+      {"type": "IN_PROJECT", "from": "mr", "to": "p"}
     ],
     "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
-    "limit": 10
-  },
-  "response_format": "llm"
+    "limit": 5
+  }
 }
 JSON
-
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q.json
+glab orbit remote query /tmp/q.json
 ```
 
-Multi-node `traversal` requires at least two entries in `nodes` and one in `relationships`.
-`filters` is an **object** keyed by property name — not an array:
-`{"state": "opened"}` (shorthand equality) or `{"iid": {"op": "eq", "value": 1216}}` (operator form).
+`filters` is an **object keyed by property name** — not an array. Use either
+shorthand equality (`{"state": "opened"}`) or the operator form
+(`{"iid": {"op": "eq", "value": 1216}}`). Operators: `eq`, `gt`, `lt`,
+`gte`, `lte`, `in`, `contains`, `starts_with`, `ends_with`, `is_null`,
+`is_not_null`.
 
-Or use the bundled wrapper, which injects the header automatically.
-Invoke it by its absolute path (or put the skill's `scripts/` dir on `PATH`) —
-the skill can be installed anywhere, so relative `scripts/orbit-query` only
-works from inside the skill directory:
+`query_type` dictates the top-level shape: `neighbors` and single-node
+`traversal` use `node` (singular); multi-node `traversal`, `aggregation`,
+and `path_finding` use `nodes` (array) plus `relationships`. `max_depth`
+and `max_hops` are capped at 3 server-side.
 
-```bash
-# Adjust path to wherever the skill is installed:
-~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
-# or via stdin:
-cat /tmp/q.json | ~/.config/opencode/skills/orbit/scripts/orbit-query
-```
-
-`response_format`:
-
-- `"llm"` — compact text optimised for LLM consumption (recommended for agent use).
-- `"raw"` — structured JSON suitable for `| jq`.
-
-## Where to find more
-
-These files are part of the skill itself and are always available alongside `SKILL.md`:
+## References
 
 | Topic | Location |
 |---|---|
-| Full query DSL reference | [`references/query_language.md`](references/query_language.md) |
-| Paste-ready `glab api` recipes per query type | [`references/recipes.md`](references/recipes.md) |
-| Common errors and fixes | [`references/troubleshooting.md`](references/troubleshooting.md) |
-| Query-body wrapper script | [`scripts/orbit-query`](scripts/orbit-query) |
+| Full DSL reference | [`references/query_language.md`](references/query_language.md) |
+| Paste-ready bodies per `query_type` | [`references/recipes.md`](references/recipes.md) |
+| CLI exit codes (1-5) and common errors | [`references/troubleshooting.md`](references/troubleshooting.md) |
 
-External links (require internet):
+## Contributing
 
-- [MCP tool definitions](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/queries/mcp_tools.md)
-- [Orbit product overview](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/docs/source/_index.md)
-- [Real query examples (`sdlc_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/sdlc_queries.yaml)
-- [Code-graph traversal examples (`code_graph_queries.yaml`)](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/blob/main/fixtures/queries/code_graph_queries.yaml) — `CALLS` and `EXTENDS` traversal patterns
-
-## Agent guidelines
-
-1. **Always discover before querying.** Call `orbit/schema` and/or `orbit/tools` first. Do not guess
-   node names, edge types, or property names — validate against the live ontology.
-2. **Use `"response_format": "llm"`** for compact agent-friendly output unless piping to `jq`.
-3. **Set `Content-Type: application/json` on POST.** Missing → 415.
-4. **No `-R owner/repo`.** Orbit endpoints are user-scoped at the API level.
-5. **Keep `limit` small while iterating** (5–10). Queries can fan out across many authorised namespaces.
-6. **`query_type` dictates the top-level key:** `neighbors` and single-node `traversal` → `node` (singular);
-   multi-node `traversal` / `aggregation` / `path_finding` → `nodes` (array).
-   `neighbors` also requires a `neighbors` object: `{"node": "<id>", "direction": "outgoing"|"incoming"|"both"}`.
-   Multi-node `traversal` requires `relationships`: `[{"type": "AUTHORED", "from": "<id>", "to": "<id>"}]`.
-   Do **not** use an `edges` key — relationships between nodes are specified via `relationships`.
-7. **Pagination uses `cursor: {offset, page_size}`**, not `page`/`per_page`.
-   `offset + page_size` must not exceed `limit`. `page_size` max 100.
-8. **`max_depth` and `max_hops` ceiling is 3.** Enforced server-side.
-9. **`path_finding` with `filters` or `id_range` endpoints requires `rel_types`.**
-   When an endpoint uses `filters` or `id_range`, specify `rel_types` in the `path` config to
-   constrain which relationship types the frontier traverses. When both endpoints use `node_ids`,
-   `rel_types` is optional.
-10. **Read-only.** All endpoints are idempotent queries — no data is modified.
-11. **Stay sequential.** Run queries one at a time — `orbit/query` is rate-limited
-    (see `HTTP 429` in troubleshooting). Prefer aggregation/traversal in one
-    query over N separate queries.
-
-## Contributing improvements
-
-If any guidance here is **inaccurate or outdated** (a flag name, an endpoint path, a DSL field),
-confirm with the user and open an MR to `gitlab-org/orbit/knowledge-graph` with a fix and a
-`version` bump in the frontmatter. Keep changes focused — one fix per MR.
-
-**`references/query_language.md` is synced from `docs/source/queries/query_language.md`.**
-Edit the upstream file, then run `mise run skill:sync:orbit` to propagate. A Lefthook pre-commit
-job (`orbit-skill-docs-sync`) will fail the commit if the two files drift.
+`references/query_language.md` is synced from
+`docs/source/queries/query_language.md`. Edit the upstream file, then run
+`mise run skill:sync:orbit`. The lefthook `orbit-skill-docs-sync` job fails
+the commit if the two files drift.

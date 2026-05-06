@@ -1,26 +1,21 @@
 # Orbit query recipes
 
-Paste-ready `glab api` invocations for each `query_type`. All use
-`response_format: "llm"` — switch to `"raw"` when piping into `jq`.
+Paste-ready request bodies for each `query_type`. All examples omit
+`response_format`; the CLI defaults to `llm` (compact, agent-friendly). Pass
+`--format raw` when piping into `jq`.
 
-Every recipe assumes `glab auth login` has succeeded and the `knowledge_graph`
-feature flag is on for your user. See [`SKILL.md`](../SKILL.md) for prerequisites.
+Every recipe assumes `glab auth login` has succeeded and the
+`knowledge_graph` feature flag is on for your user. See
+[`SKILL.md`](../SKILL.md) for prerequisites.
 
 The shell pattern is always:
 
 ```bash
-glab api --method POST orbit/query \
-  --header "Content-Type: application/json" \
-  --input /tmp/q.json
-```
-
-Or use the bundled wrapper (injects the header). Use the absolute path — the
-skill can be installed anywhere, so relative `scripts/orbit-query` only works
-from inside the skill directory:
-
-```bash
-# Adjust path to wherever the skill is installed:
-~/.config/opencode/skills/orbit/scripts/orbit-query /tmp/q.json
+glab orbit remote query /tmp/q.json
+# or:
+cat /tmp/q.json | glab orbit remote query -
+# or, for jq pipelines:
+glab orbit remote query --format raw /tmp/q.json | jq '.'
 ```
 
 For the full field reference see [`query_language.md`](query_language.md).
@@ -55,8 +50,7 @@ Requires both `iid` and `project_id` filters (IID is only unique within a projec
       {"type": "AUTHORED", "from": "author", "to": "mr"}
     ],
     "limit": 1
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -77,8 +71,7 @@ Find up to 5 projects whose `full_path` contains `gitlab-org/cli`:
       }
     },
     "limit": 5
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -99,8 +92,7 @@ one relationship:
       {"type": "AUTHORED", "from": "u", "to": "mr"}
     ],
     "limit": 10
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -122,8 +114,7 @@ and `direction` (`ASC` or `DESC`):
     ],
     "order_by": {"node": "mr", "property": "created_at", "direction": "DESC"},
     "limit": 10
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -142,8 +133,7 @@ Find the immediate outgoing neighbours of the `gitlab-org/cli` project:
     },
     "neighbors": {"node": "p", "direction": "outgoing"},
     "limit": 20
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -167,8 +157,7 @@ Count open merge requests per project, highest first:
     ],
     "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
     "limit": 10
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -185,8 +174,7 @@ Shortest path between two projects (`max_depth` ≤ 3, server-enforced):
       {"id": "to",   "entity": "Project", "filters": {"full_path": {"op": "eq", "value": "gitlab-org/gitlab"}}}
     ],
     "path": {"type": "shortest", "from": "from", "to": "to", "max_depth": 3}
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
@@ -217,8 +205,7 @@ Add a `cursor`. `offset + page_size` must not exceed `limit`. `page_size` max 10
     "node": {"id": "p", "entity": "Project"},
     "limit": 200,
     "cursor": {"offset": 0, "page_size": 50}
-  },
-  "response_format": "llm"
+  }
 }
 ```
 
