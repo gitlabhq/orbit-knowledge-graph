@@ -71,12 +71,10 @@ pub(super) fn node_select_columns(alias: &str, np: &NodePlan) -> Vec<SelectExpr>
 // Emit helpers: node hydration
 // ─────────────────────────────────────────────────────────────────────────────
 
-/// Narrowing source for a node's dedup scan: either a CTE reference or an
-/// inline subquery. Inline avoids ClickHouse's correlated subquery rejection
-/// when other CTEs (e.g. `_filter_*`) exist in the same query.
+/// Narrowing source for a node's dedup scan: a `_narrow_*` CTE referenced
+/// from inside the dedup subquery's WHERE clause.
 pub(super) enum NarrowSource {
     Cte(String),
-    Inline(Box<Query>),
 }
 
 pub(super) fn emit_node_join_with_narrowing(
@@ -135,18 +133,12 @@ fn emit_node_join_inner(
     let dedup_cols = collect_dedup_columns(alias, np);
     let mut dedup_query = build_dedup_subquery(alias, table, dedup_cols, np);
 
-    // IN-narrowing: restrict the dedup scan to IDs from a CTE or inline query.
-    if let Some(source) = narrow {
-        let in_pred = match source {
-            NarrowSource::Cte(cte_name) => Expr::InSubquery {
-                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-                cte_name,
-                column: DEFAULT_PRIMARY_KEY.to_string(),
-            },
-            NarrowSource::Inline(query) => Expr::InSelect {
-                expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
-                query,
-            },
+    // IN-narrowing: restrict the dedup scan to IDs from a _narrow_* CTE.
+    if let Some(NarrowSource::Cte(cte_name)) = narrow {
+        let in_pred = Expr::InSubquery {
+            expr: Box::new(Expr::col(alias, DEFAULT_PRIMARY_KEY)),
+            cte_name,
+            column: DEFAULT_PRIMARY_KEY.to_string(),
         };
         dedup_query.where_clause = match dedup_query.where_clause {
             Some(existing) => Some(Expr::and(existing, in_pred)),

@@ -123,24 +123,14 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             };
             match np.hydration {
                 HydrationStrategy::Join => {
-                    // Emit a _narrow_* CTE when the planner marked this node
-                    // for narrowing AND no _filter_* CTEs will exist.
-                    // ClickHouse 26.2 rejects any subquery (CTE ref or inline)
-                    // inside a JOIN subquery as "correlated" when other CTEs
-                    // exist, so we must suppress narrowing in that case.
-                    let has_filter = ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
-                        || plan.nodes.values().any(|np| {
-                            np.hydration == HydrationStrategy::FilterOnly
-                                || np.needs_elevated_filter
-                        });
-                    let narrow_source = if np.use_narrowing && !has_filter {
-                        let narrow_name = format!("_narrow_{}", np.alias);
+                    let narrow_source = if np.use_narrowing {
+                        let narrow_alias = format!("{edge_alias}n");
                         let narrow_query = Query {
                             select: vec![SelectExpr::new(
-                                Expr::col(edge_alias, edge_col),
+                                Expr::col(&narrow_alias, edge_col),
                                 DEFAULT_PRIMARY_KEY,
                             )],
-                            from: TableRef::scan(&hop.edge_table, format!("{edge_alias}n")),
+                            from: TableRef::scan(&hop.edge_table, &narrow_alias),
                             where_clause: {
                                 let mut nw = Vec::new();
                                 push_edge_predicates(
@@ -155,6 +145,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
                             },
                             ..Default::default()
                         };
+                        let narrow_name = format!("_narrow_{}", np.alias);
                         ctes.push(Cte::new(&narrow_name, narrow_query));
                         Some(NarrowSource::Cte(narrow_name))
                     } else {
