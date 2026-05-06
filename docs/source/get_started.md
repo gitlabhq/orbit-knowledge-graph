@@ -2,9 +2,11 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Enable Orbit for a group and run your first query in under five minutes.
+description: Enable Orbit for a group and run your first query. Covers both the remote indexer (GitLab.com) and the local indexer developer preview.
 title: Get started with Orbit
 ---
+
+## Remote indexer
 
 {{< details >}}
 
@@ -14,15 +16,17 @@ title: Get started with Orbit
 
 {{< /details >}}
 
-## Prerequisites
+The remote indexer runs on GitLab-hosted infrastructure and is the primary path for
+GitLab.com Premium and Ultimate customers.
+
+### Prerequisites
 
 - You must be an Owner of the top-level group you want to enable Orbit on.
 - Your group must be on GitLab.com on a Premium or Ultimate plan.
 
-Orbit indexes top-level groups only. Subgroups and projects inherit indexing from
-the top-level group automatically.
+Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 
-## Step 1: Enable Orbit
+### Step 1: Enable Orbit
 
 1. On the left sidebar, select **Search or go to** and find your top-level group.
 1. Select **Settings > General**.
@@ -33,45 +37,41 @@ the top-level group automatically.
 Orbit begins indexing your group immediately. Initial indexing takes a few minutes
 for small groups and up to 30 minutes for groups with thousands of projects.
 
-You can check indexing status at any time:
+Check indexing status at any time:
 
 ```shell
 curl --header "Authorization: Bearer <your_token>" \
   "https://gitlab.com/api/v4/orbit/status"
 ```
 
-The response includes the indexed domain count, indexing progress, and last updated timestamp.
+### Use Orbit
 
-## Step 2: Run your first query
+| Access method | Description |
+|---|---|
+| [Duo Agent Platform](access/duo.md) | Ask questions in natural language via the GitLab UI |
+| [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agentic tools |
+| [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
 
-Choose how you want to query Orbit:
+MCP and REST API queries consume GitLab Credits. Duo Agent Platform queries are zero-rated.
 
-### Option A: Duo Agent Platform (no setup required)
+### Step 2: Run your first query
+
+**Duo Agent Platform (no setup required):**
 
 If you have GitLab Duo Developer, the Orbit agent is available immediately.
 
 1. On the left sidebar, select **GitLab Duo**.
 1. Select **Orbit**.
-1. Ask a question in natural language:
-   - "What are the most active projects in my group?"
-   - "Who reviewed the most merge requests last month?"
-   - "Which pipelines are failing most often?"
+1. Ask a question: "What are the most active projects in my group?"
 
-Duo translates your question to a graph query and returns results. Queries through
-Duo are zero-rated and do not consume GitLab Credits.
+Duo queries are zero-rated and do not consume GitLab Credits.
 
-### Option B: MCP (Claude Code, Codex, or other MCP clients)
+**MCP (Claude Code, Codex, other agents):**
 
-See [Connect via MCP](access/mcp.md) for setup instructions.
+See [Use Orbit via MCP](access/mcp.md) for setup. Once configured you have two tools:
+`query_graph` and `get_graph_schema`.
 
-Once configured, you have two tools available: `query_graph` and `get_graph_schema`.
-
-Ask your AI agent: "Use Orbit to show me the 10 most recently updated projects
-in the `gitlab-org` group."
-
-### Option C: REST API
-
-Send a query directly to the API:
+**REST API:**
 
 ```shell
 curl --request POST \
@@ -90,6 +90,76 @@ curl --request POST \
 ```
 
 See [REST API reference](access/api.md) for full documentation.
+
+## Local indexer
+
+{{< details >}}
+
+- Tier: Free
+- Offering: All tiers, self-managed and GitLab.com
+- Status: Developer preview
+
+{{< /details >}}
+
+> [!note]
+> The local indexer is an early developer preview. It must be built from source and has
+> no UI, no MCP integration, and no daemon process yet.
+
+The local indexer lets you build and query an Orbit knowledge graph on your own machine
+using DuckDB as the storage backend. It is the path for Community Edition users and teams
+that cannot use the GitLab-hosted service.
+
+### Prerequisites
+
+- [Rust toolchain](https://rustup.rs/) (stable)
+- [`mise`](https://mise.jdx.dev/) for tool management
+- A local GitLab repository to index
+
+### Step 1: Build the CLI
+
+Clone the Orbit repository and build the CLI:
+
+```shell
+git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
+cd knowledge-graph
+mise install
+mise run build:cli
+```
+
+The compiled binary is placed in `target/release/orbit`.
+
+### Step 2: Index a repository
+
+Point the indexer at a local repository:
+
+```shell
+./target/release/orbit index --path /path/to/your/repo
+```
+
+Orbit parses the repository and writes a DuckDB graph file to `~/.orbit/graph.db` by default.
+
+### Step 3: Query the graph
+
+```shell
+./target/release/orbit query --query '{
+  "query_type": "traversal",
+  "node": {
+    "id": "f",
+    "entity": "File",
+    "columns": ["path", "language"]
+  },
+  "limit": 20
+}'
+```
+
+### What the local indexer supports
+
+- Code indexing: definitions, imports, cross-file references
+- All [supported languages](indexing.md#supported-languages)
+- Local DuckDB query execution
+
+The local indexer does not index SDLC data (merge requests, pipelines, work items).
+SDLC indexing requires a connected GitLab instance.
 
 ## What to try next
 

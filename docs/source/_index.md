@@ -38,13 +38,19 @@ Query the graph to answer questions your instance cannot answer directly:
 - Where are the open critical vulnerabilities, and which pipelines introduced them?
 - Which projects depend on this library?
 
-## Access Orbit
+## Indexer options
 
-| Access method | Best for | Cost |
+Orbit comes in two forms:
+
+| | Remote indexer | Local indexer |
 |---|---|---|
-| [Duo Agent Platform](access/duo.md) | Natural language in the GitLab UI | Included in Duo Developer |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other agentic tools | GitLab Credits |
-| [REST API](access/api.md) | Custom tooling, scripts, CI pipelines | GitLab Credits |
+| **Who it's for** | GitLab.com Premium and Ultimate | Community Edition and self-managed |
+| **Runs on** | GitLab-hosted infrastructure | Your own machine |
+| **Storage** | ClickHouse (managed) | DuckDB (local file) |
+| **Status** | Experiment | Developer preview |
+
+[Get started: remote indexer](get_started.md#remote-indexer) |
+[Get started: local indexer](get_started.md#local-indexer)
 
 ## How it works
 
