@@ -286,26 +286,44 @@ impl<'a> ImportResolver<'a> {
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
     /// reachable header, also search the paired source file (.h -> .c/.cpp).
-    /// Used for C/C++/Objective-C.
     fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
         const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
 
         let files: Vec<_> = self.graph.files().collect();
 
-        let includes_for = |file_path: &str| -> Vec<String> {
-            let mut paths = Vec::new();
-            for (_idx, fp, imp) in self.graph.imports_iter() {
-                if fp.as_ref() != file_path {
-                    continue;
-                }
-                let raw = self.graph.str(imp.path);
-                let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
+        // Pre-build include map and suffix index once instead of scanning
+        // all imports on every BFS step.
+        let mut include_map: rustc_hash::FxHashMap<&str, Vec<String>> =
+            rustc_hash::FxHashMap::default();
+        for (_idx, fp, imp) in self.graph.imports_iter() {
+            let raw = self.graph.str(imp.path);
+            let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
+            let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
+            include_map
+                .entry(fp.as_ref())
+                .or_default()
+                .push(normalized.to_string());
+        }
 
-                let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
-                paths.push(normalized.to_string());
+        // Build a suffix map: "math/vec.h" -> [file_idx, ...]
+        // so we can match includes without scanning all files each time.
+        let mut suffix_map: rustc_hash::FxHashMap<&str, Vec<petgraph::graph::NodeIndex>> =
+            rustc_hash::FxHashMap::default();
+        // Also map file_idx -> path for paired source lookups.
+        let mut path_by_idx: rustc_hash::FxHashMap<petgraph::graph::NodeIndex, &str> =
+            rustc_hash::FxHashMap::default();
+        for &(file_idx, file) in &files {
+            let path: &str = &file.path;
+            path_by_idx.insert(file_idx, path);
+            let mut start = 0;
+            loop {
+                suffix_map.entry(&path[start..]).or_default().push(file_idx);
+                match path[start..].find('/') {
+                    Some(pos) => start += pos + 1,
+                    None => break,
+                }
             }
-            paths
-        };
+        }
 
         // BFS: find all reachable files through transitive includes
         let self_path = self.graph.graph[self.file_node].path().to_string();
@@ -317,28 +335,30 @@ impl<'a> ImportResolver<'a> {
         let mut reachable_files: Vec<petgraph::graph::NodeIndex> = Vec::new();
 
         while let Some(current_path) = queue.pop_front() {
-            let inc_paths = includes_for(&current_path);
-            for inc in &inc_paths {
-                for &(file_idx, file) in &files {
-                    if !file.path.ends_with(inc.as_str()) {
-                        continue;
+            let empty = Vec::new();
+            let inc_paths = include_map.get(current_path.as_str()).unwrap_or(&empty);
+            for inc in inc_paths {
+                if let Some(matched_idxs) = suffix_map.get(inc.as_str()) {
+                    for &file_idx in matched_idxs {
+                        let path = path_by_idx[&file_idx];
+                        if visited_paths.insert(path.to_string()) {
+                            reachable_files.push(file_idx);
+                            queue.push_back(path.to_string());
+                        }
                     }
-                    if visited_paths.insert(file.path.clone()) {
-                        reachable_files.push(file_idx);
-                        queue.push_back(file.path.clone());
-                    }
-                    if let Some(stem) = inc
-                        .strip_suffix(".h")
-                        .or_else(|| inc.strip_suffix(".hpp"))
-                        .or_else(|| inc.strip_suffix(".hh"))
-                        .or_else(|| inc.strip_suffix(".hxx"))
-                    {
-                        for ext in SOURCE_EXTENSIONS {
-                            let paired = format!("{stem}{ext}");
-                            for &(src_idx, src_file) in &files {
-                                if src_file.path.ends_with(&paired)
-                                    && visited_paths.insert(src_file.path.clone())
-                                {
+                }
+                if let Some(stem) = inc
+                    .strip_suffix(".h")
+                    .or_else(|| inc.strip_suffix(".hpp"))
+                    .or_else(|| inc.strip_suffix(".hh"))
+                    .or_else(|| inc.strip_suffix(".hxx"))
+                {
+                    for ext in SOURCE_EXTENSIONS {
+                        let paired = format!("{stem}{ext}");
+                        if let Some(src_idxs) = suffix_map.get(paired.as_str()) {
+                            for &src_idx in src_idxs {
+                                let src_path = path_by_idx[&src_idx];
+                                if visited_paths.insert(src_path.to_string()) {
                                     reachable_files.push(src_idx);
                                 }
                             }
