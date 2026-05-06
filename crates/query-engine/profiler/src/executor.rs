@@ -11,8 +11,20 @@ pub async fn enrich_output(
     for exec in &mut output.execution_log {
         let rendered = &exec.rendered_sql;
         if config.explain {
-            exec.explain_plan = client.explain_plan(rendered).await.ok();
-            exec.explain_pipeline = client.explain_pipeline(rendered).await.ok();
+            exec.explain_plan = match client.explain_plan(rendered).await {
+                Ok(plan) => Some(plan),
+                Err(e) => {
+                    eprintln!("EXPLAIN PLAN failed: {e}");
+                    None
+                }
+            };
+            exec.explain_pipeline = match client.explain_pipeline(rendered).await {
+                Ok(pipeline) => Some(pipeline),
+                Err(e) => {
+                    eprintln!("EXPLAIN PIPELINE failed: {e}");
+                    None
+                }
+            };
         }
         if config.query_log
             && !exec.query_id.is_empty()
