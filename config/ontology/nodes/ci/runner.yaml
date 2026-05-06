@@ -106,6 +106,7 @@ etl:
 storage:
   primary_key: [id]
   settings:
+    add_minmax_index_for_temporal_columns: "1"
     auto_statistics_types: "'minmax, uniq, countmin'"
   columns:
     - {name: id, type: "Int64", codec: ["Delta(8)", "LZ4"]}
