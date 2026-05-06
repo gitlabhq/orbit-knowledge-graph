@@ -48,6 +48,7 @@ pub(crate) struct ImportResolver<'a> {
     pub import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
+    pub include_index: Option<&'a super::graph::IncludeIndex>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -285,62 +286,46 @@ impl<'a> ImportResolver<'a> {
     ///
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
-    /// reachable header, also search the paired source file (.h → .c).
-    /// Used for C/C++/Objective-C.
+    /// reachable header, also search the paired source file (.h -> .c/.cpp).
     fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
-        const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".m"];
+        const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
 
-        // Build a map of file_path → (file_idx, include_paths) for fast lookup
-        let files: Vec<_> = self.graph.files().collect();
-
-        // Collect include paths for a given file path
-        let includes_for = |file_path: &str| -> Vec<String> {
-            let mut paths = Vec::new();
-            for (_idx, fp, imp) in self.graph.imports_iter() {
-                if fp.as_ref() != file_path {
-                    continue;
-                }
-                let raw = self.graph.str(imp.path);
-                let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
-                // Normalize relative paths: strip leading ../ segments
-                let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
-                paths.push(normalized.to_string());
-            }
-            paths
+        let Some(idx) = self.include_index else {
+            return Vec::new();
         };
 
-        // BFS: find all reachable files through transitive includes
         let self_path = self.graph.graph[self.file_node].path().to_string();
-        let mut visited_paths: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        visited_paths.insert(self_path.clone());
-        let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+        let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        visited.insert(self_path.clone());
+        let mut queue = std::collections::VecDeque::new();
         queue.push_back(self_path);
+        let mut reachable = Vec::new();
+        let empty = Vec::new();
 
-        let mut reachable_files: Vec<petgraph::graph::NodeIndex> = Vec::new();
-
-        while let Some(current_path) = queue.pop_front() {
-            let inc_paths = includes_for(&current_path);
-            for inc in &inc_paths {
-                for &(file_idx, file) in &files {
-                    // Match the include path against file paths
-                    if !file.path.ends_with(inc.as_str()) {
-                        continue;
+        while let Some(current) = queue.pop_front() {
+            for inc in idx.include_map.get(&current).unwrap_or(&empty) {
+                if let Some(matched) = idx.suffix_map.get(inc.as_str()) {
+                    for &file_idx in matched {
+                        let path = &idx.path_by_idx[&file_idx];
+                        if visited.insert(path.clone()) {
+                            reachable.push(file_idx);
+                            queue.push_back(path.clone());
+                        }
                     }
-                    if visited_paths.insert(file.path.clone()) {
-                        reachable_files.push(file_idx);
-                        // Recurse into this header's includes
-                        queue.push_back(file.path.clone());
-                    }
-                    // Also try paired source file (.h → .c)
-                    if let Some(stem) = inc.strip_suffix(".h").or_else(|| inc.strip_suffix(".hpp"))
-                    {
-                        for ext in SOURCE_EXTENSIONS {
-                            let paired = format!("{stem}{ext}");
-                            for &(src_idx, src_file) in &files {
-                                if src_file.path.ends_with(&paired)
-                                    && visited_paths.insert(src_file.path.clone())
-                                {
-                                    reachable_files.push(src_idx);
+                }
+                if let Some(stem) = inc
+                    .strip_suffix(".h")
+                    .or_else(|| inc.strip_suffix(".hpp"))
+                    .or_else(|| inc.strip_suffix(".hh"))
+                    .or_else(|| inc.strip_suffix(".hxx"))
+                {
+                    for ext in SOURCE_EXTENSIONS {
+                        let paired = format!("{stem}{ext}");
+                        if let Some(src_idxs) = idx.suffix_map.get(&paired) {
+                            for &src_idx in src_idxs {
+                                let src_path = &idx.path_by_idx[&src_idx];
+                                if visited.insert(src_path.clone()) {
+                                    reachable.push(src_idx);
                                 }
                             }
                         }
@@ -349,19 +334,18 @@ impl<'a> ImportResolver<'a> {
             }
         }
 
-        // Search for bare name in all reachable files
         let mut results = Vec::new();
-        for &file_idx in &reachable_files {
+        for &file_idx in &reachable {
             let file_path = self.graph.graph[file_idx].path();
-            for &idx in self
+            for &def_idx in self
                 .graph
                 .indexes
                 .by_name
-                .lookup(name, |idx| self.graph.def_name(idx) == name)
+                .lookup(name, |i| self.graph.def_name(i) == name)
                 .iter()
-                .filter(|&&idx| self.graph.def_in_file(idx, file_path))
+                .filter(|&&i| self.graph.def_in_file(i, file_path))
             {
-                results.push(idx);
+                results.push(def_idx);
             }
         }
         results

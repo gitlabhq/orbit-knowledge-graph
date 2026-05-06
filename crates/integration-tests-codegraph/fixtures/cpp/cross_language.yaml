@@ -1,0 +1,166 @@
+name: "C/C++ cross-language resolution — .cpp calling through .h to .c definitions"
+
+fixtures:
+  - path: math/ops.h
+    content: |
+      #ifndef OPS_H
+      #define OPS_H
+      int add(int a, int b);
+      int multiply(int a, int b);
+      #endif
+
+  - path: math/ops.c
+    content: |
+      #include "ops.h"
+      int add(int a, int b) { return a + b; }
+      int multiply(int a, int b) { return a * b; }
+
+  - path: util/format.hh
+    content: |
+      #ifndef FORMAT_HH
+      #define FORMAT_HH
+      void log_result(int val);
+      #endif
+
+  - path: util/format.cc
+    content: |
+      #include "format.hh"
+      void log_result(int val) {}
+
+  - path: engine.cxx
+    content: |
+      #include "math/ops.h"
+      #include "util/format.hh"
+
+      namespace engine {
+          void compute() {
+              int sum = add(1, 2);
+              int prod = multiply(3, 4);
+              log_result(sum);
+              log_result(prod);
+          }
+      }
+
+  - path: alt/data.hxx
+    content: |
+      #ifndef DATA_HXX
+      #define DATA_HXX
+      struct Record { int id; int value; };
+      int record_sum(struct Record r);
+      #endif
+
+  - path: alt/data.cpp
+    content: |
+      #include "data.hxx"
+      int record_sum(struct Record r) { return r.id + r.value; }
+
+  - path: main.hpp
+    content: |
+      #ifndef MAIN_HPP
+      #define MAIN_HPP
+      void run();
+      #endif
+
+  - path: main.cpp
+    content: |
+      #include "main.hpp"
+      #include "math/ops.h"
+      #include "alt/data.hxx"
+
+      void run() {
+          int x = add(10, 20);
+          struct Record r;
+          int s = record_sum(r);
+      }
+
+tests:
+  # ══════════════════════════════════════════════════════════════
+  # FILE EXTENSION COVERAGE
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "All file extensions discovered (.h, .c, .hh, .cc, .cxx, .hxx, .hpp, .cpp)"
+    query: |
+      MATCH (f:File)
+      RETURN f.path AS path
+    assert:
+      - { row_count: 9 }
+      - { unique: path }
+      - { row: { path: "math/ops.h" } }
+      - { row: { path: "math/ops.c" } }
+      - { row: { path: "util/format.hh" } }
+      - { row: { path: "util/format.cc" } }
+      - { row: { path: "engine.cxx" } }
+      - { row: { path: "alt/data.hxx" } }
+      - { row: { path: "alt/data.cpp" } }
+      - { row: { path: "main.hpp" } }
+      - { row: { path: "main.cpp" } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-LANGUAGE: .cxx calling .c via .h
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "C++ engine.cxx calls C add() via ops.h -> ops.c"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'engine::engine::compute'
+        AND callee.fqn = 'ops::add'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "engine.cxx", tgt: "math/ops.c", kind: Calls } }
+
+  - name: "C++ engine.cxx calls C multiply() via ops.h -> ops.c"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'engine::engine::compute'
+        AND callee.fqn = 'ops::multiply'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "engine.cxx", tgt: "math/ops.c", kind: Calls } }
+
+  - name: "C++ engine.cxx calls C log_result() via format.hh -> format.cc"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'engine::engine::compute'
+        AND callee.fqn = 'format::log_result'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row: { src: "engine.cxx", tgt: "util/format.cc", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # CROSS-EXTENSION: .cpp calling through .hxx -> .cpp
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "main.cpp calls record_sum via data.hxx -> data.cpp"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::run'
+        AND callee.fqn = 'data::record_sum'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main.cpp", tgt: "alt/data.cpp", kind: Calls } }
+
+  - name: "main.cpp calls add via ops.h -> ops.c"
+    query: |
+      MATCH (caller:Definition)-[e:DefinitionToDefinition]->(callee:Definition)
+      WHERE caller.fqn = 'main::run'
+        AND callee.fqn = 'ops::add'
+      RETURN caller.file_path AS src, callee.file_path AS tgt, e.edge_kind AS kind
+    assert:
+      - { row_count: 1 }
+      - { row: { src: "main.cpp", tgt: "math/ops.c", kind: Calls } }
+
+  # ══════════════════════════════════════════════════════════════
+  # STRUCT FROM .hxx HEADER
+  # ══════════════════════════════════════════════════════════════
+
+  - name: "Struct defined in .hxx header exists"
+    query: |
+      MATCH (d:Definition)
+      WHERE d.fqn = 'data::Record'
+      RETURN d.fqn AS fqn, d.file_path AS path, d.definition_type AS type
+    assert:
+      - { row_count: 1 }
+      - { row: { fqn: "data::Record", path: "alt/data.hxx", type: Struct } }

@@ -84,9 +84,7 @@ macro_rules! define_languages {
             /// pipeline processing and can resolve symbols across each other.
             pub const fn family(&self) -> LanguageFamily {
                 match self {
-                    Self::C => LanguageFamily::CFamily,
-                    // NOTE: Cpp is not on main yet (arrives in the C++ MR).
-                    // When it lands, add: Self::Cpp => LanguageFamily::CFamily,
+                    Self::C | Self::Cpp => LanguageFamily::CFamily,
                     Self::Java | Self::Kotlin => LanguageFamily::Jvm,
                     _ => LanguageFamily::Standalone(*self),
                 }
@@ -114,6 +112,13 @@ define_languages! {
         exclude: [],
         separator: "::",
         names: ["c"],
+    },
+    Cpp => {
+        support_lang: Cpp,
+        extensions: ["cpp", "cc", "cxx", "hpp", "hh", "hxx"],
+        exclude: [],
+        separator: "::",
+        names: ["cpp", "c++"],
     },
     Ruby => {
         support_lang: Ruby,
