@@ -40,30 +40,6 @@ Replace `payments-service` with the module or library you want to trace.
 }
 ```
 
-### Find all callers of a function across the codebase
-
-```json
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "def",
-      "entity": "Definition",
-      "filters": {"name": "process_payment", "definition_type": "function"}
-    },
-    {
-      "id": "caller",
-      "entity": "Definition",
-      "columns": ["name", "file_path", "fqn"]
-    }
-  ],
-  "relationships": [
-    {"type": "CALLS", "from": "caller", "to": "def"}
-  ],
-  "limit": 50
-}
-```
-
 ### Find projects that depend on a shared library
 
 ```json
@@ -89,36 +65,6 @@ Replace `payments-service` with the module or library you want to trace.
 ## Onboarding and codebase exploration
 
 Answer: "Help me understand this codebase."
-
-### Map the top-level structure of a project
-
-```json
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "p",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/my-project"}
-    },
-    {
-      "id": "b",
-      "entity": "Branch",
-      "filters": {"is_default": true}
-    },
-    {
-      "id": "d",
-      "entity": "Directory",
-      "columns": ["path", "name"]
-    }
-  ],
-  "relationships": [
-    {"type": "CONTAINS", "from": "p", "to": "b"},
-    {"type": "CONTAINS", "from": "b", "to": "d"}
-  ],
-  "limit": 50
-}
-```
 
 ### Find the most active contributors to a project
 
@@ -150,32 +96,6 @@ Answer: "Help me understand this codebase."
 }
 ```
 
-### Find who owns a file based on recent review history
-
-```json
-{
-  "query_type": "traversal",
-  "nodes": [
-    {"id": "u", "entity": "User", "columns": ["username", "name"]},
-    {"id": "mr", "entity": "MergeRequest", "filters": {"state": "merged"}},
-    {"id": "diff", "entity": "MergeRequestDiff", "columns": ["id", "state"]},
-    {
-      "id": "diff_file",
-      "entity": "MergeRequestDiffFile",
-      "filters": {
-        "new_path": {"op": "contains", "value": "app/services/auth"}
-      }
-    }
-  ],
-  "relationships": [
-    {"type": "AUTHORED", "from": "u", "to": "mr"},
-    {"type": "HAS_DIFF", "from": "mr", "to": "diff"},
-    {"type": "HAS_FILE", "from": "diff", "to": "diff_file"}
-  ],
-  "limit": 25
-}
-```
-
 ## Dependency mapping
 
 Answer: "How are our services connected?"
@@ -204,34 +124,6 @@ Answer: "How are our services connected?"
   ],
   "aggregation_sort": {"agg_index": 0, "direction": "DESC"},
   "limit": 20
-}
-```
-
-### Find the shortest connection path between two projects
-
-```json
-{
-  "query_type": "path_finding",
-  "nodes": [
-    {
-      "id": "start",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/service-a"}
-    },
-    {
-      "id": "end",
-      "entity": "Project",
-      "filters": {"full_path": "my-org/service-b"}
-    }
-  ],
-  "path": {
-    "type": "shortest",
-    "from": "start",
-    "to": "end",
-    "max_depth": 3,
-    "rel_types": ["CONTAINS", "IN_PROJECT", "IMPORTS", "CALLS"]
-  },
-  "options": {"dynamic_columns": "*"}
 }
 ```
 
@@ -303,31 +195,7 @@ Answer: "Where are our security risks, and how did they get there?"
 }
 ```
 
-### Find pipelines that detected a known finding
-
-Use a finding ID from a vulnerability query, then trace it to the pipelines where
-Orbit indexed that finding.
-
-```json
-{
-  "query_type": "traversal",
-  "nodes": [
-    {
-      "id": "finding",
-      "entity": "Finding",
-      "node_ids": [12345],
-      "columns": ["uuid", "name", "severity"]
-    },
-    {"id": "pl", "entity": "Pipeline", "columns": ["id", "ref", "sha", "status"]}
-  ],
-  "relationships": [
-    {"type": "DETECTED_IN", "from": "finding", "to": "pl"}
-  ],
-  "limit": 10
-}
-```
-
-### Count vulnerabilities by project, sorted by severity
+### Count vulnerabilities by project
 
 ```json
 {
