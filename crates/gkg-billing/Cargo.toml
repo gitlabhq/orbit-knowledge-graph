@@ -2,7 +2,7 @@
 name = "gkg-billing"
 version.workspace = true
 edition = "2024"
-license = "MIT"
+license = "LicenseRef-EE"
 
 [lib]
 path = "src/lib.rs"
