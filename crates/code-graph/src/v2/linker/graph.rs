@@ -112,6 +112,56 @@ impl GraphOutput {
 ///
 /// All definition/import strings live in the owned [`StringPool`].
 /// Access strings via `self.str(id)`.
+/// Precomputed include-graph lookup tables for C/C++ resolution.
+/// Built once before Phase 2 resolve, shared across all file resolvers.
+#[derive(Default)]
+pub struct IncludeIndex {
+    /// file_path -> list of normalized include paths for that file
+    pub include_map: rustc_hash::FxHashMap<String, Vec<String>>,
+    /// suffix -> list of file NodeIndex values whose path ends with that suffix
+    pub suffix_map: rustc_hash::FxHashMap<String, Vec<NodeIndex>>,
+    /// file NodeIndex -> file path
+    pub path_by_idx: rustc_hash::FxHashMap<NodeIndex, String>,
+}
+
+impl IncludeIndex {
+    pub fn build(graph: &CodeGraph) -> Self {
+        let mut idx = Self::default();
+
+        for (_node_idx, fp, imp) in graph.imports_iter() {
+            let raw = graph.strings.get(imp.path);
+            let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
+            let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
+            idx.include_map
+                .entry(fp.as_ref().to_string())
+                .or_default()
+                .push(normalized.to_string());
+        }
+
+        for (file_idx, file) in graph.files() {
+            let path: &str = &file.path;
+            idx.path_by_idx.insert(file_idx, path.to_string());
+            let mut start = 0;
+            loop {
+                idx.suffix_map
+                    .entry(path[start..].to_string())
+                    .or_default()
+                    .push(file_idx);
+                match path[start..].find('/') {
+                    Some(pos) => start += pos + 1,
+                    None => break,
+                }
+            }
+        }
+
+        idx
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.include_map.is_empty()
+    }
+}
+
 pub struct CodeGraph {
     pub graph: DiGraph<GraphNode, GraphEdge>,
     pub defs: Vec<GraphDef>,

@@ -98,6 +98,7 @@ impl<'a> FileResolver<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
+            include_index: None,
         };
         Self {
             ctx,
@@ -314,6 +315,8 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
+    /// Built lazily on first `IncludeGraph` call, reused for the file.
+    include_index: Option<super::graph::IncludeIndex>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -344,6 +347,7 @@ impl<'a> ResolveCtx<'a> {
             import_cache: FxHashMap::default(),
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
+            include_index: None,
         }
     }
 
@@ -360,12 +364,16 @@ impl<'a> ResolveCtx<'a> {
 
     /// Build a temporary `ImportResolver` from this context's state.
     fn import_resolver(&mut self) -> ImportResolver<'_> {
+        let inc_idx = self
+            .include_index
+            .get_or_insert_with(|| super::graph::IncludeIndex::build(self.graph));
         ImportResolver {
             graph: self.graph,
             file_node: self.file_node,
             import_map: &self.import_map,
             scratch: &mut self.scratch,
             settings: self.settings,
+            include_index: inc_idx,
         }
     }
 

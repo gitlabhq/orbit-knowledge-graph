@@ -48,6 +48,7 @@ pub(crate) struct ImportResolver<'a> {
     pub import_map: &'a FxHashMap<String, Vec<NodeIndex>>,
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
+    pub include_index: &'a super::graph::IncludeIndex,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -289,61 +290,24 @@ impl<'a> ImportResolver<'a> {
     fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
         const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
 
-        let files: Vec<_> = self.graph.files().collect();
+        let idx = &self.include_index;
 
-        // Pre-build include map and suffix index once instead of scanning
-        // all imports on every BFS step.
-        let mut include_map: rustc_hash::FxHashMap<&str, Vec<String>> =
-            rustc_hash::FxHashMap::default();
-        for (_idx, fp, imp) in self.graph.imports_iter() {
-            let raw = self.graph.str(imp.path);
-            let cleaned = raw.trim_matches('"').trim_matches('<').trim_matches('>');
-            let normalized = cleaned.trim_start_matches("../").trim_start_matches("./");
-            include_map
-                .entry(fp.as_ref())
-                .or_default()
-                .push(normalized.to_string());
-        }
-
-        // Build a suffix map: "math/vec.h" -> [file_idx, ...]
-        // so we can match includes without scanning all files each time.
-        let mut suffix_map: rustc_hash::FxHashMap<&str, Vec<petgraph::graph::NodeIndex>> =
-            rustc_hash::FxHashMap::default();
-        // Also map file_idx -> path for paired source lookups.
-        let mut path_by_idx: rustc_hash::FxHashMap<petgraph::graph::NodeIndex, &str> =
-            rustc_hash::FxHashMap::default();
-        for &(file_idx, file) in &files {
-            let path: &str = &file.path;
-            path_by_idx.insert(file_idx, path);
-            let mut start = 0;
-            loop {
-                suffix_map.entry(&path[start..]).or_default().push(file_idx);
-                match path[start..].find('/') {
-                    Some(pos) => start += pos + 1,
-                    None => break,
-                }
-            }
-        }
-
-        // BFS: find all reachable files through transitive includes
         let self_path = self.graph.graph[self.file_node].path().to_string();
-        let mut visited_paths: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        visited_paths.insert(self_path.clone());
-        let mut queue: std::collections::VecDeque<String> = std::collections::VecDeque::new();
+        let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+        visited.insert(self_path.clone());
+        let mut queue = std::collections::VecDeque::new();
         queue.push_back(self_path);
+        let mut reachable = Vec::new();
+        let empty = Vec::new();
 
-        let mut reachable_files: Vec<petgraph::graph::NodeIndex> = Vec::new();
-
-        while let Some(current_path) = queue.pop_front() {
-            let empty = Vec::new();
-            let inc_paths = include_map.get(current_path.as_str()).unwrap_or(&empty);
-            for inc in inc_paths {
-                if let Some(matched_idxs) = suffix_map.get(inc.as_str()) {
-                    for &file_idx in matched_idxs {
-                        let path = path_by_idx[&file_idx];
-                        if visited_paths.insert(path.to_string()) {
-                            reachable_files.push(file_idx);
-                            queue.push_back(path.to_string());
+        while let Some(current) = queue.pop_front() {
+            for inc in idx.include_map.get(&current).unwrap_or(&empty) {
+                if let Some(matched) = idx.suffix_map.get(inc.as_str()) {
+                    for &file_idx in matched {
+                        let path = &idx.path_by_idx[&file_idx];
+                        if visited.insert(path.clone()) {
+                            reachable.push(file_idx);
+                            queue.push_back(path.clone());
                         }
                     }
                 }
@@ -355,11 +319,11 @@ impl<'a> ImportResolver<'a> {
                 {
                     for ext in SOURCE_EXTENSIONS {
                         let paired = format!("{stem}{ext}");
-                        if let Some(src_idxs) = suffix_map.get(paired.as_str()) {
+                        if let Some(src_idxs) = idx.suffix_map.get(&paired) {
                             for &src_idx in src_idxs {
-                                let src_path = path_by_idx[&src_idx];
-                                if visited_paths.insert(src_path.to_string()) {
-                                    reachable_files.push(src_idx);
+                                let src_path = &idx.path_by_idx[&src_idx];
+                                if visited.insert(src_path.clone()) {
+                                    reachable.push(src_idx);
                                 }
                             }
                         }
@@ -369,17 +333,17 @@ impl<'a> ImportResolver<'a> {
         }
 
         let mut results = Vec::new();
-        for &file_idx in &reachable_files {
+        for &file_idx in &reachable {
             let file_path = self.graph.graph[file_idx].path();
-            for &idx in self
+            for &def_idx in self
                 .graph
                 .indexes
                 .by_name
-                .lookup(name, |idx| self.graph.def_name(idx) == name)
+                .lookup(name, |i| self.graph.def_name(i) == name)
                 .iter()
-                .filter(|&&idx| self.graph.def_in_file(idx, file_path))
+                .filter(|&&i| self.graph.def_in_file(i, file_path))
             {
-                results.push(idx);
+                results.push(def_idx);
             }
         }
         results
