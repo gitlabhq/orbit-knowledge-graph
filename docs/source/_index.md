@@ -38,46 +38,68 @@ Query the graph to answer questions your instance cannot answer directly:
 - Where are the open critical vulnerabilities, and which pipelines introduced them?
 - Which projects depend on this library?
 
-## Indexer options
+*Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
 
-Orbit comes in two forms:
+## Orbit Remote
 
-| | Remote indexer | Local indexer |
-|---|---|---|
-| **Who it's for** | GitLab.com Premium and Ultimate | Community Edition and self-managed |
-| **Runs on** | GitLab-hosted infrastructure | Your own machine |
-| **Storage** | ClickHouse (managed) | DuckDB (local file) |
-| **Status** | Experiment | Developer preview |
+Orbit Remote runs as a managed service on GitLab infrastructure. Enable it on a top-level group
+and it automatically indexes your entire SDLC and code — groups, projects, users, merge requests,
+pipelines, vulnerabilities, and source code — into a managed ClickHouse graph.
 
-[Get started: remote indexer](get_started.md#remote-indexer) |
-[Get started: local indexer](get_started.md#local-indexer)
-
-## How it works
+- **For:** GitLab.com Premium and Ultimate
+- **Indexes:** Full SDLC + code graph
+- **Storage:** ClickHouse (managed, no setup required)
+- **Status:** Experiment
 
 ```mermaid
 flowchart LR
-    accTitle: Orbit architecture overview
-    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST, MCP, and Duo.
+    accTitle: Orbit Remote architecture
+    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and Duo Agent Platform.
 
-    subgraph GitLab
+    subgraph GitLab["GitLab instance"]
         SDLC[SDLC data]
         Code[Source code]
     end
 
     SDLC -- CDC --> DIP[Data Insights Platform]
     DIP --> CH[(ClickHouse)]
-    Code -- Rails API --> GKG[Orbit]
-    CH <--> GKG
+    Code -- Rails API --> Orbit[Orbit service]
+    CH <--> Orbit
 
-    GKG --> REST[REST API]
-    GKG --> MCP[MCP tools]
-    GKG --> DAP[Duo Agent Platform]
+    Orbit --> REST[REST API]
+    Orbit --> MCP[MCP tools]
+    Orbit --> DAP[Duo Agent Platform]
 ```
 
-Orbit runs as a separate service. It does not share resources with your GitLab instance
-and does not affect its performance.
+Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
 
-[How Orbit works in detail](how_orbit_works.md)
+[Get started with Orbit Remote](get_started.md#orbit-remote)
+
+## Orbit Local
+
+Orbit Local runs entirely on your machine. The `orbit` CLI parses a local repository,
+extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
+No GitLab instance or network connection required.
+
+- **For:** Any tier, self-managed, or offline use
+- **Indexes:** Code only — files, definitions, cross-file references
+- **Storage:** DuckDB (local file at `~/.orbit/graph.duckdb`)
+- **Status:** Developer preview
+
+```mermaid
+flowchart LR
+    accTitle: Orbit Local architecture
+    accDescr: The orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
+
+    Repo[Local repository] --> CLI["orbit CLI"]
+    CLI --> DB[("DuckDB\n~/.orbit/graph.db")]
+    DB --> Query[CLI query]
+```
+
+Orbit Local indexes code only. SDLC data — merge requests, pipelines, work items — requires
+Orbit Remote.
+
+[Get started with Orbit Local](get_started.md#orbit-local)
 
 ## What Orbit indexes
 
