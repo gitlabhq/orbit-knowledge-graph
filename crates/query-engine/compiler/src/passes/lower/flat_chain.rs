@@ -109,6 +109,19 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
     let mut selects = Vec::new();
     let mut hydrated: HashSet<String> = HashSet::new();
 
+    // Pre-check whether ANY node in the plan will produce a _filter_* CTE.
+    // If so, _narrow_* CTEs must be suppressed entirely — their edge
+    // predicates reference _filter_* CTEs via IN, creating correlated
+    // subqueries that ClickHouse rejects for parameterized queries.
+    // Checking the `ctes` vec at emit time is racy: a FilterOnly node on the
+    // same hop but processed later hasn't been emitted yet.
+    let has_filter_ctes = plan.nodes.values().any(|np| {
+        np.hydration == HydrationStrategy::FilterOnly
+            || (np.hydration == HydrationStrategy::Join
+                && (!np.filters.is_empty() || !np.node_ids.is_empty() || np.id_range.is_some()))
+            || np.needs_elevated_filter
+    });
+
     for (i, hop) in plan.hops.iter().enumerate() {
         let edge_alias = &edge_aliases[i];
         let (start_col, end_col) = hop.direction.edge_columns();
@@ -122,14 +135,7 @@ pub(super) fn emit_flat_chain(plan: &Plan) -> Result<EmitOutput> {
             };
             match np.hydration {
                 HydrationStrategy::Join => {
-                    // Use pre-resolved narrowing decision from plan().
-                    // IMPORTANT NOTE: Only emit _narrow_* when NO _filter_* CTEs exist yet —
-                    // otherwise the _narrow_ CTE's edge predicates would
-                    // reference _filter_* via IN, creating a correlated
-                    // subquery that ClickHouse rejects for parameterized queries.
-                    let narrow_cte = if np.use_narrowing
-                        && !ctes.iter().any(|c: &Cte| c.name.starts_with("_filter_"))
-                    {
+                    let narrow_cte = if np.use_narrowing && !has_filter_ctes {
                         let narrow_name = format!("_narrow_{}", np.alias);
                         let narrow_query = Query {
                             select: vec![SelectExpr::new(
