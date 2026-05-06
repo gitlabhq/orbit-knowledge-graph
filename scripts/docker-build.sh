@@ -24,6 +24,11 @@ if [ -n "$GKG_VERSION" ]; then
   BUILD_ARGS="--build-arg GKG_VERSION=$GKG_VERSION"
 fi
 
+SECRET_ARGS=""
+if [ -n "$SCCACHE_GCS_KEY" ] && [ -f "$SCCACHE_GCS_KEY" ]; then
+  SECRET_ARGS="--secret id=sccache_gcs_key,src=$SCCACHE_GCS_KEY"
+fi
+
 TAGS=""
 for tag in "$@"; do
   TAGS="$TAGS -t $tag"
@@ -43,5 +48,6 @@ docker buildx build \
   --label "com.gitlab/commit-sha=${CI_COMMIT_SHA}" \
   --provenance=true \
   $BUILD_ARGS \
+  $SECRET_ARGS \
   $TAGS \
   .
