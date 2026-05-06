@@ -433,7 +433,7 @@ cli-integration-test:
     - .mr-and-main-rules
   needs: []
   script:
-    - cargo build -p orbit
+    - cargo build -p orbit-local
     - cargo nextest run --profile ci --test cli --no-fail-fast
     - sccache --show-stats || true
 
@@ -482,7 +482,7 @@ integration-test:
       when: never
     - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
       changes:
-        - crates/cli/**/*
+        - crates/orbit-local/**/*
         - crates/code-graph/**/*
         - crates/ontology/**/*
         - crates/duckdb-client/**/*

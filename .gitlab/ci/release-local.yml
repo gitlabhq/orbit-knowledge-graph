@@ -27,7 +27,7 @@
     - sccache --show-stats || true
   artifacts:
     paths:
-      - orbit-linux-*.tar.gz
+      - orbit-local-linux-*.tar.gz
     expire_in: 7 days
 
 local-cli-build-linux-amd64:
@@ -71,7 +71,7 @@ local-cli-build-linux-arm64:
     - ./scripts/build-local-cli.sh
   artifacts:
     paths:
-      - orbit-darwin-*.tar.gz
+      - orbit-local-darwin-*.tar.gz
     expire_in: 7 days
 
 local-cli-build-darwin-amd64:

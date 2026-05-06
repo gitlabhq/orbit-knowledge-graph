@@ -115,7 +115,7 @@ run = "cargo nextest run -p integration-tests-codegraph --no-capture"
 description = "Run code-graph v2 validator tests — YAML Cypher suites (no Docker)"
 
 [tasks."test:cli"]
-run = "cargo build -p orbit && cargo nextest run --test cli --no-fail-fast"
+run = "cargo build -p orbit-local && cargo nextest run --test cli --no-fail-fast"
 description = "Run CLI integration tests — concurrency, worktrees (no Docker)"
 
 [tasks."test:integration"]

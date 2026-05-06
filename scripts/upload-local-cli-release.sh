@@ -14,12 +14,12 @@ set -euo pipefail
 : "${CI_JOB_TOKEN:?CI_JOB_TOKEN is required}"
 
 VERSION="${CI_COMMIT_TAG#v}"
-PACKAGE_NAME="orbit"
+PACKAGE_NAME="orbit-local"
 ARTIFACTS=(
-  "orbit-linux-x86_64.tar.gz"
-  "orbit-linux-aarch64.tar.gz"
-  "orbit-darwin-x86_64.tar.gz"
-  "orbit-darwin-aarch64.tar.gz"
+  "orbit-local-linux-x86_64.tar.gz"
+  "orbit-local-linux-aarch64.tar.gz"
+  "orbit-local-darwin-x86_64.tar.gz"
+  "orbit-local-darwin-aarch64.tar.gz"
 )
 
 for artifact in "${ARTIFACTS[@]}"; do

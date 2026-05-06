@@ -2,9 +2,12 @@
 set -euo pipefail
 
 # Build the `orbit` local CLI binary and package it as
-# orbit-<platform>-<arch>.tar.gz in the repository root. PLATFORM/ARCH default
-# to the host (linux/macOS amd64 or arm64). Supported triples:
-# {x86_64,aarch64}-unknown-linux-gnu and {x86_64,aarch64}-apple-darwin.
+# orbit-local-<platform>-<arch>.tar.gz in the repository root. The binary
+# inside the archive is `orbit`; the `orbit-local-` prefix on the archive
+# matches the orbit-local crate name and disambiguates from the gkg-server
+# image release. PLATFORM/ARCH default to the host (linux/macOS amd64 or
+# arm64). Supported triples: {x86_64,aarch64}-unknown-linux-gnu and
+# {x86_64,aarch64}-apple-darwin.
 
 PLATFORM="${PLATFORM:-$(uname -s)}"
 PLATFORM=$(echo "$PLATFORM" | tr '[:upper:]' '[:lower:]')
@@ -40,6 +43,6 @@ rustup target add "$TARGET"
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
 cargo build --release --locked --bin orbit --target "$TARGET"
 
-ARCHIVE="orbit-${PLATFORM}-${ARCH}.tar.gz"
+ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.tar.gz"
 tar -czvf "$ARCHIVE" -C "target/${TARGET}/release" orbit
 echo "created $ARCHIVE"
