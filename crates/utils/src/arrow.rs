@@ -673,6 +673,38 @@ fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
         .unwrap_or(ColumnValue::Null)
 }
 
+/// Sort RecordBatches by the given columns using Arrow's native lexsort.
+/// All batches must share the same schema.
+pub fn sort_record_batches(
+    batches: &[RecordBatch],
+    sort_columns: &[String],
+) -> Result<Vec<RecordBatch>, arrow::error::ArrowError> {
+    let schema = batches[0].schema();
+    let combined = compute::concat_batches(&schema, batches)?;
+
+    let sort_cols: Vec<compute::SortColumn> = sort_columns
+        .iter()
+        .map(|name| {
+            let idx = schema.index_of(name).expect("sort column not found");
+            compute::SortColumn {
+                values: Arc::clone(combined.column(idx)),
+                options: Some(compute::SortOptions::default()),
+            }
+        })
+        .collect();
+
+    let indices = compute::lexsort_to_indices(&sort_cols, None)?;
+
+    let sorted_columns: Vec<ArrayRef> = combined
+        .columns()
+        .iter()
+        .map(|col| compute::take(col, &indices, None))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let sorted = RecordBatch::try_new(schema, sorted_columns)?;
+    Ok(vec![sorted])
+}
+
 /// Split a flat list of RecordBatches into approximately `target_chunks`
 /// groups, balanced by row count. Preserves batch ordering.
 pub fn split_into_chunks(batches: Vec<RecordBatch>, target_chunks: usize) -> Vec<Vec<RecordBatch>> {
@@ -1371,5 +1403,43 @@ mod tests {
         let schema = batch.schema();
         let names: Vec<&str> = schema.fields().iter().map(|f| f.name().as_str()).collect();
         assert_eq!(names, vec!["c", "a", "b"]);
+    }
+
+    #[test]
+    fn sort_record_batches_orders_by_columns() {
+        let schema = Arc::new(Schema::new(vec![
+            Field::new("key", DataType::Int64, false),
+            Field::new("value", DataType::Utf8, false),
+        ]));
+
+        let batch1 = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![3, 1])),
+                Arc::new(StringArray::from(vec!["c", "a"])),
+            ],
+        )
+        .unwrap();
+        let batch2 = RecordBatch::try_new(
+            Arc::clone(&schema),
+            vec![
+                Arc::new(Int64Array::from(vec![2])),
+                Arc::new(StringArray::from(vec!["b"])),
+            ],
+        )
+        .unwrap();
+
+        let sorted = sort_record_batches(&[batch1, batch2], &["key".to_string()]).unwrap();
+        assert_eq!(sorted.len(), 1);
+        assert_eq!(sorted[0].num_rows(), 3);
+
+        let keys: Vec<i64> = sorted[0]
+            .column(0)
+            .as_any()
+            .downcast_ref::<Int64Array>()
+            .unwrap()
+            .values()
+            .to_vec();
+        assert_eq!(keys, vec![1, 2, 3]);
     }
 }
