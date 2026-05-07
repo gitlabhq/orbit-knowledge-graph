@@ -56,11 +56,11 @@ glab orbit setup
 # Pick "Remote" when prompted to point the MCP config at the GitLab instance.
 ```
 
-Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI, Duo CLI.
+Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
 
 | Flag | Purpose |
 |------|---------|
-| `--agent=<name>` | Override auto-detection (`claude-code`, `cursor`, `codex`, `opencode`, `gemini`, `duo-cli`). |
+| `--agent=<name>` | Override auto-detection (`claude-code`, `cursor`, `codex`, `opencode`, `gemini`). |
 | `--skill-only` | Install the skill files only; skip MCP config. |
 | `--mcp-only` | Write MCP config only; skip skill install. |
 | `--dry-run` | Print what would change without writing anything. |

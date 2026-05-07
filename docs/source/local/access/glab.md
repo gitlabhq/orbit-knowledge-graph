@@ -60,7 +60,7 @@ glab orbit setup
 # Pick "Local" when prompted to point the MCP config at your local graph.
 ```
 
-Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI, GitLab Duo CLI.
+Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
 
 | Flag | Purpose |
 |------|---------|
