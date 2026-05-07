@@ -79,6 +79,7 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
         query: lower_node_transform(&input.columns),
         destination_table: node_destination,
         dict_encode_columns: dict_columns,
+        sort_columns: vec![],
     }];
 
     for fk_edge in &input.edges {
@@ -98,16 +99,17 @@ fn lower_node_plan(input: NodePlan, batch_size: u64, ontology: &Ontology) -> Pip
 fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTableMetadata {
     let table = ontology.edge_table_for_relationship(relationship_kind);
 
-    let sort_key = ontology
+    let sort_column_names: Vec<String> = ontology
         .sort_key_for_table(table)
-        .map(|keys| {
-            keys.iter()
-                .map(|col| OrderExpr {
-                    expr: Expr::col("", col),
-                })
-                .collect()
-        })
+        .map(|keys| keys.to_vec())
         .unwrap_or_default();
+
+    let sort_key = sort_column_names
+        .iter()
+        .map(|col| OrderExpr {
+            expr: Expr::col("", col),
+        })
+        .collect();
 
     let dict_columns = ontology
         .edge_table_config(table)
@@ -124,12 +126,14 @@ fn edge_table_metadata(relationship_kind: &str, ontology: &Ontology) -> EdgeTabl
 
     EdgeTableMetadata {
         sort_key,
+        sort_column_names,
         dict_columns,
     }
 }
 
 struct EdgeTableMetadata {
     sort_key: Vec<OrderExpr>,
+    sort_column_names: Vec<String>,
     dict_columns: HashSet<String>,
 }
 
@@ -156,6 +160,7 @@ fn lower_fk_edge_transform(fk_edge: &FkEdgeTransform, ontology: &Ontology) -> Tr
         query: transform_query,
         destination_table: fk_edge.destination_table.clone(),
         dict_encode_columns: meta.dict_columns,
+        sort_columns: meta.sort_column_names,
     }
 }
 
@@ -238,6 +243,7 @@ fn lower_standalone_edge_plan(
             query: transform_query,
             destination_table,
             dict_encode_columns: meta.dict_columns,
+            sort_columns: meta.sort_column_names,
         }],
     }
 }

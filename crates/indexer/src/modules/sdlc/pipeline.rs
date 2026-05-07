@@ -1,4 +1,4 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
@@ -28,6 +28,7 @@ use gkg_server_config::DatalakeRetryConfig;
 type WriteFutures = FuturesUnordered<BoxFuture<'static, Result<(), HandlerError>>>;
 
 const MAX_RETRIES: u32 = 3;
+const WRITE_PARALLELISM: usize = 14;
 
 pub(in crate::modules::sdlc) struct PipelineContext {
     pub watermark: DateTime<Utc>,
@@ -315,65 +316,120 @@ impl Pipeline {
                 ))
             })?;
 
+        let mut groups: BTreeMap<&str, Vec<&Transformation>> = BTreeMap::new();
+        for transform in transforms {
+            groups
+                .entry(&transform.destination_table)
+                .or_default()
+                .push(transform);
+        }
+
         let mut total_transform_duration = Duration::ZERO;
         let mut write_futures: WriteFutures = FuturesUnordered::new();
 
-        for transform in transforms {
+        for (destination_table, group) in &groups {
             let transform_start = Instant::now();
-            let mut result_batches = self
-                .execute_transform(session, &transform.to_sql())
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to transform {pipeline_name} for {}: {err}",
-                        transform.destination_table
-                    ))
-                })?;
-            let transform_elapsed = transform_start.elapsed();
-            total_transform_duration += transform_elapsed;
 
-            prepare_batches(&mut result_batches, &transform.dict_encode_columns);
+            let mut all_batches = Vec::new();
+            let mut dict_columns = HashSet::new();
 
-            let row_count: usize = result_batches.iter().map(|b| b.num_rows()).sum();
+            for transform in group {
+                let result_batches = self
+                    .execute_transform(session, &transform.to_sql())
+                    .await
+                    .map_err(|err| {
+                        HandlerError::Processing(format!(
+                            "failed to transform {pipeline_name} for {}: {err}",
+                            transform.destination_table
+                        ))
+                    })?;
+                all_batches.extend(result_batches);
+                dict_columns.extend(transform.dict_encode_columns.iter().cloned());
+            }
+
+            let row_count: usize = all_batches.iter().map(|b| b.num_rows()).sum();
             if row_count == 0 {
                 continue;
             }
 
-            let destination_table = transform.destination_table.clone();
-            let writer = destination
-                .new_batch_writer(&destination_table)
-                .await
-                .map_err(|err| {
-                    HandlerError::Processing(format!(
-                        "failed to create writer for {destination_table}: {err}"
-                    ))
-                })?;
+            let sort_columns = &group[0].sort_columns;
+            let use_presorted_split = group.len() > 1 && !sort_columns.is_empty();
 
-            write_futures.push(
-                async move {
-                    let write_start = Instant::now();
-                    writer.write_batch(&result_batches).await.map_err(|err| {
+            let chunks: Vec<Vec<RecordBatch>> = if use_presorted_split {
+                let sorted_batches = self
+                    .sort_batches(
+                        session,
+                        pipeline_name,
+                        destination_table,
+                        &all_batches,
+                        sort_columns,
+                    )
+                    .await?;
+                drop(all_batches);
+
+                let mut prepared = sorted_batches;
+                prepare_batches(&mut prepared, &dict_columns);
+
+                split_into_chunks(prepared, WRITE_PARALLELISM)
+            } else {
+                prepare_batches(&mut all_batches, &dict_columns);
+                vec![all_batches]
+            };
+
+            let transform_elapsed = transform_start.elapsed();
+            total_transform_duration += transform_elapsed;
+
+            for chunk in chunks {
+                let chunk_rows: usize = chunk.iter().map(|b| b.num_rows()).sum();
+                if chunk_rows == 0 {
+                    continue;
+                }
+
+                let table_name = destination_table.to_string();
+                let writer = destination
+                    .new_batch_writer(&table_name)
+                    .await
+                    .map_err(|err| {
                         HandlerError::Processing(format!(
-                            "failed to write to {destination_table}: {err}"
+                            "failed to create writer for {table_name}: {err}"
                         ))
                     })?;
-                    let write_elapsed = write_start.elapsed();
 
-                    info!(
-                        table = %destination_table,
-                        rows = row_count,
-                        transform_ms = transform_elapsed.as_millis() as u64,
-                        write_ms = write_elapsed.as_millis() as u64,
-                        "transform written"
-                    );
+                write_futures.push(
+                    async move {
+                        let write_start = Instant::now();
+                        writer.write_batch(&chunk).await.map_err(|err| {
+                            HandlerError::Processing(format!(
+                                "failed to write to {table_name}: {err}"
+                            ))
+                        })?;
+                        let write_elapsed = write_start.elapsed();
 
-                    Ok(())
+                        info!(
+                            table = %table_name,
+                            rows = chunk_rows,
+                            write_ms = write_elapsed.as_millis() as u64,
+                            "chunk written"
+                        );
+
+                        Ok(())
+                    }
+                    .boxed(),
+                );
+
+                while let Some(Some(result)) = write_futures.next().now_or_never() {
+                    result?;
                 }
-                .boxed(),
-            );
+            }
 
-            while let Some(Some(result)) = write_futures.next().now_or_never() {
-                result?;
+            if use_presorted_split {
+                info!(
+                    table = %destination_table,
+                    rows = row_count,
+                    transforms = group.len(),
+                    transform_ms = transform_elapsed.as_millis() as u64,
+                    "presorted split write started"
+                );
             }
         }
 
@@ -413,6 +469,51 @@ impl Pipeline {
             })?;
         progress.notify_in_progress().await;
         Ok(())
+    }
+
+    async fn sort_batches(
+        &self,
+        session: &SessionContext,
+        pipeline_name: &str,
+        destination_table: &str,
+        batches: &[RecordBatch],
+        sort_columns: &[String],
+    ) -> Result<Vec<RecordBatch>, HandlerError> {
+        const SORT_TABLE: &str = "_presort_staging";
+
+        let schema = batches[0].schema();
+        let _ = session.deregister_table(SORT_TABLE);
+        let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
+            HandlerError::Processing(format!(
+                "failed to create sort staging table for {pipeline_name}/{destination_table}: {err}"
+            ))
+        })?;
+        session
+            .register_table(SORT_TABLE, Arc::new(mem_table))
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to register sort staging table for {pipeline_name}/{destination_table}: {err}"
+                ))
+            })?;
+
+        let order_clause = sort_columns
+            .iter()
+            .map(|c| format!("\"{c}\""))
+            .collect::<Vec<_>>()
+            .join(", ");
+        let sort_sql = format!("SELECT * FROM {SORT_TABLE} ORDER BY {order_clause}");
+
+        let sorted = self
+            .execute_transform(session, &sort_sql)
+            .await
+            .map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to sort batches for {pipeline_name}/{destination_table}: {err}"
+                ))
+            })?;
+
+        let _ = session.deregister_table(SORT_TABLE);
+        Ok(sorted)
     }
 
     async fn execute_transform(
@@ -464,6 +565,34 @@ impl Pipeline {
         }
         Value::Object(params)
     }
+}
+
+fn split_into_chunks(batches: Vec<RecordBatch>, target_chunks: usize) -> Vec<Vec<RecordBatch>> {
+    if batches.is_empty() || target_chunks <= 1 {
+        return vec![batches];
+    }
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    let rows_per_chunk = (total_rows / target_chunks).max(1);
+    let mut chunks: Vec<Vec<RecordBatch>> = Vec::with_capacity(target_chunks);
+    let mut current_chunk = Vec::new();
+    let mut current_rows = 0usize;
+
+    for batch in batches {
+        current_rows += batch.num_rows();
+        current_chunk.push(batch);
+
+        if current_rows >= rows_per_chunk && chunks.len() < target_chunks - 1 {
+            chunks.push(std::mem::take(&mut current_chunk));
+            current_rows = 0;
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    chunks
 }
 
 #[cfg(test)]
@@ -531,6 +660,7 @@ mod tests {
                 query: transform_query,
                 destination_table: format!("gl_{}", name.to_lowercase()),
                 dict_encode_columns: HashSet::new(),
+                sort_columns: vec![],
             }],
         }
     }
