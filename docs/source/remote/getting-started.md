@@ -61,7 +61,7 @@ Orbit Remote exposes the same graph through three surfaces. Pick the one that ma
 
 ### GitLab Duo Agent Platform (no setup required)
 
-Orbit is wired into the GitLab Duo Agent Platform. Duo Developer and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent - call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
+Orbit is itself a foundational agent in GitLab Duo Agent Platform. Pick **Orbit** from the agent picker to query your SDLC graph directly. Other DAP agents - GitLab Duo, Duo Developer, Planner, Security Analyst, Data Analyst, CI Expert - call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by graph traversal. No tool selection or configuration required.
 
 For example, file a work item asking to rename the `deploy_user` method. Duo Developer uses Orbit to identify every service that calls it, then drafts an MR that updates each one.
 
