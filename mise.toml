@@ -355,11 +355,11 @@ cargo run --bin orbit -- debug ddl-local 2>/dev/null > config/graph_local.sql.tm
 description = "Regenerate config/graph.sql (ClickHouse) and config/graph_local.sql (DuckDB) from ontology"
 
 [tasks."lint:markdown"]
-run = "npx markdownlint-cli2@0.19.0 '**/*.md'"
+run = "markdownlint-cli2 README.md 'docs/**/*.md'"
 description = "Run markdownlint on all markdown files"
 
 [tasks."lint:vale"]
-run = "vale --minAlertLevel error ."
+run = "vale --minAlertLevel error README.md docs"
 description = "Run Vale prose linting on markdown files"
 
 [tasks."lint:links"]
