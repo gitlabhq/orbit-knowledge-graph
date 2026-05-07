@@ -393,7 +393,7 @@ fn lower_edge_select(
     for col_name in &["source_tags", "target_tags"] {
         let expr = match tag_groups.remove(*col_name) {
             Some(tag_exprs) => format!("make_array({})", tag_exprs.join(", ")),
-            None => "make_array()".to_string(),
+            None => "arrow_cast(make_array(), 'List(Utf8)')".to_string(),
         };
         cols.push(SelectExpr::new(Expr::raw(expr), *col_name));
     }
@@ -826,9 +826,9 @@ mod tests {
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
-        assert!(sql.contains("id AS source_id"));
+        assert!(sql.contains("id AS source_id"), "sql: {sql}");
         assert!(sql.contains("'Group' AS source_kind"));
-        assert!(sql.contains("owner_id AS target_id"));
+        assert!(sql.contains("owner_id AS target_id"), "sql: {sql}");
         assert!(sql.contains("'User' AS target_kind"));
     }
 
@@ -850,9 +850,9 @@ mod tests {
         let transform = lower_fk_edge_transform(&fk_edge, &ontology);
         let sql = emit(&transform.query);
 
-        assert!(sql.contains("author_id AS source_id"));
+        assert!(sql.contains("author_id AS source_id"), "sql: {sql}");
         assert!(sql.contains("'User' AS source_kind"));
-        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains("id AS target_id"), "sql: {sql}");
         assert!(sql.contains("'Note' AS target_kind"));
     }
 
@@ -937,7 +937,7 @@ mod tests {
             "sql: {sql}"
         );
         assert!(sql.contains("'User' AS source_kind"));
-        assert!(sql.contains("id AS target_id"));
+        assert!(sql.contains("id AS target_id"), "sql: {sql}");
         assert!(sql.contains("'WorkItem' AS target_kind"));
     }
 

@@ -753,6 +753,21 @@ pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<Strin
         for (i, field) in schema.fields().iter().enumerate() {
             let col = batch.column(i);
 
+            // UInt64 -> Int64 (ClickHouse edge tables use Int64 for IDs)
+            if *field.data_type() == DataType::UInt64 {
+                new_fields.push(Field::new(
+                    field.name(),
+                    DataType::Int64,
+                    field.is_nullable(),
+                ));
+                new_columns.push(
+                    compute::cast(col, &DataType::Int64)
+                        .expect("UInt64 -> Int64 cast should not fail"),
+                );
+                changed = true;
+                continue;
+            }
+
             // StringView -> Utf8
             if *field.data_type() == DataType::Utf8View {
                 new_fields.push(Field::new(
@@ -1439,5 +1454,35 @@ mod tests {
             .values()
             .to_vec();
         assert_eq!(keys, vec![1, 2, 3]);
+    }
+
+    #[test]
+    fn sort_record_batches_rejects_divergent_schemas() {
+        let batch_a = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("key", DataType::Int64, false),
+                Field::new("value", DataType::Utf8, false),
+            ])),
+            vec![
+                Arc::new(Int64Array::from(vec![3, 1])),
+                Arc::new(StringArray::from(vec!["c", "a"])),
+            ],
+        )
+        .unwrap();
+
+        let batch_b = RecordBatch::try_new(
+            Arc::new(Schema::new(vec![
+                Field::new("key", DataType::UInt64, false),
+                Field::new("value", DataType::Utf8, false),
+            ])),
+            vec![
+                Arc::new(UInt64Array::from(vec![2])),
+                Arc::new(StringArray::from(vec!["b"])),
+            ],
+        )
+        .unwrap();
+
+        let result = sort_record_batches(&[batch_a, batch_b], &["key".to_string()]);
+        assert!(result.is_err());
     }
 }

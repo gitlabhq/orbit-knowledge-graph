@@ -355,17 +355,17 @@ impl Pipeline {
             let sort_columns = &group[0].sort_columns;
             let use_presorted_split = group.len() > 1 && !sort_columns.is_empty();
 
+            prepare_batches(&mut all_batches, &HashSet::new());
+
             let chunks: Vec<Vec<RecordBatch>> = if use_presorted_split {
                 let sorted = sort_record_batches(&all_batches, sort_columns).map_err(|err| {
                     HandlerError::Processing(format!(
                         "failed to sort batches for {pipeline_name}/{destination_table}: {err}"
                     ))
                 })?;
-                drop(all_batches);
 
                 let mut batches = vec![sorted];
                 prepare_batches(&mut batches, &dict_columns);
-
                 split_into_chunks(batches, WRITE_PARALLELISM)
             } else {
                 prepare_batches(&mut all_batches, &dict_columns);
