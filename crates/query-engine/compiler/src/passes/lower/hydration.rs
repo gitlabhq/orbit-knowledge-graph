@@ -94,19 +94,108 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
 
 /// Build a `startsWith` predicate from collected traversal paths.
 ///
-/// - 0 paths: `None` (no narrowing possible)
-/// - 1 path:  `startsWith(alias.traversal_path, 'tp')`
-/// - N paths: `(startsWith(..., 'tp1') OR startsWith(..., 'tp2') OR ...)`
+/// 1. **Leaf pruning:** drop any path that is a strict prefix of another
+///    in the set. Keeps the most specific (deepest) paths for maximum
+///    granule selectivity. Safe because `id IN (...)` is the correctness
+///    guarantee — TP is purely a scan optimizer.
+/// 2. **Single path:** `startsWith(alias.traversal_path, 'tp')`
+/// 3. **Multiple paths:** `startsWith(tp, LCP) AND arrayExists(p -> startsWith(tp, p), [tps])`
+///    Same structure as the security pass — the LCP lets ClickHouse prune
+///    at the primary key level, and arrayExists handles the remaining paths.
 fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
     if paths.is_empty() {
         return None;
     }
-    Expr::or_all(paths.iter().map(|tp| {
-        Some(Expr::func(
-            "startsWith",
-            vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(tp)],
-        ))
-    }))
+    let leaves = prune_to_leaves(paths);
+    match leaves.len() {
+        0 => None,
+        1 => Some(starts_with(alias, &leaves[0])),
+        _ => {
+            let lcp = lowest_common_prefix(&leaves);
+            let lcp_filter = starts_with(alias, &lcp);
+            let array_filter = array_exists_filter(alias, &leaves);
+            Some(Expr::and(lcp_filter, array_filter))
+        }
+    }
+}
+
+fn starts_with(alias: &str, path: &str) -> Expr {
+    Expr::func(
+        "startsWith",
+        vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
+    )
+}
+
+/// `arrayExists(p -> startsWith(alias.traversal_path, p), [paths])`
+fn array_exists_filter(alias: &str, paths: &[String]) -> Expr {
+    let lambda_param = "_gkg_tp";
+    Expr::func(
+        "arrayExists",
+        vec![
+            Expr::lambda(
+                lambda_param,
+                Expr::func(
+                    "startsWith",
+                    vec![
+                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
+                        Expr::ident(lambda_param),
+                    ],
+                ),
+            ),
+            Expr::param(
+                ChType::String.to_array(),
+                serde_json::Value::Array(
+                    paths
+                        .iter()
+                        .map(|p| serde_json::Value::String(p.clone()))
+                        .collect(),
+                ),
+            ),
+        ],
+    )
+}
+
+/// Drop any path that is a strict prefix of another path in the set.
+///
+/// Given sorted paths, a path is an "ancestor" if another (longer) path
+/// starts with it. Keeping only leaves maximizes primary-key selectivity
+/// in the hydration scan.
+fn prune_to_leaves(paths: &[String]) -> Vec<String> {
+    if paths.len() <= 1 {
+        return paths.to_vec();
+    }
+    let mut sorted: Vec<&str> = paths.iter().map(String::as_str).collect();
+    sorted.sort_unstable();
+    sorted.dedup();
+
+    let mut leaves = Vec::with_capacity(sorted.len());
+    for (i, path) in sorted.iter().enumerate() {
+        let is_prefix_of_next = sorted.get(i + 1).is_some_and(|next| next.starts_with(path));
+        if !is_prefix_of_next {
+            leaves.push((*path).to_string());
+        }
+    }
+    leaves
+}
+
+/// Longest common prefix across path segments.
+fn lowest_common_prefix(paths: &[String]) -> String {
+    if paths.is_empty() {
+        return String::new();
+    }
+    let segments: Vec<Vec<&str>> = paths
+        .iter()
+        .map(|p| p.trim_end_matches('/').split('/').collect())
+        .collect();
+    let first = &segments[0];
+    let common_len = (0..first.len())
+        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
+        .count();
+    if common_len == 0 {
+        String::new()
+    } else {
+        format!("{}/", first[..common_len].join("/"))
+    }
 }
 
 #[cfg(test)]
@@ -153,7 +242,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_tps_emit_or_disjunction() {
+    fn multiple_tps_emit_lcp_and_array_exists() {
         let node = emit_hydration(
             &[plan(
                 vec!["title"],
@@ -164,12 +253,16 @@ mod tests {
         )
         .unwrap();
         let sql = render(&node);
+        assert!(
+            sql.contains("arrayExists"),
+            "multi-TP should use arrayExists: {sql}"
+        );
+        // LCP startsWith + arrayExists inner startsWith = 2
         let count = sql.matches("startsWith").count();
         assert_eq!(
             count, 2,
-            "two TPs should produce two startsWith calls: {sql}"
+            "LCP + arrayExists should produce two startsWith: {sql}"
         );
-        assert!(sql.contains("OR"), "two TPs should use OR: {sql}");
     }
 
     #[test]
@@ -192,5 +285,36 @@ mod tests {
             starts_pos < in_pos,
             "TP filter should precede ID filter for primary key pruning: {sql}"
         );
+    }
+
+    #[test]
+    fn leaf_pruning_drops_broad_prefix() {
+        // 1/9970/ is a prefix of 1/9970/100/ — should be dropped
+        let node = emit_hydration(
+            &[plan(vec!["title"], vec![1], vec!["1/9970/", "1/9970/100/"])],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        // Only the leaf path should survive — single startsWith, no arrayExists
+        assert!(
+            !sql.contains("arrayExists"),
+            "ancestor should be pruned, leaving single TP: {sql}"
+        );
+        let count = sql.matches("startsWith").count();
+        assert_eq!(count, 1, "only leaf path should remain: {sql}");
+    }
+
+    #[test]
+    fn leaf_pruning_keeps_sibling_paths() {
+        let leaves =
+            prune_to_leaves(&["1/9970/".into(), "1/9970/100/".into(), "1/9970/200/".into()]);
+        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
+    }
+
+    #[test]
+    fn leaf_pruning_noop_when_no_ancestors() {
+        let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
+        assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
     }
 }
