@@ -31,6 +31,14 @@ service KnowledgeGraphService {
   // Used by MCP tools/list and GET /api/v4/orbit/tools.
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
 
+  // Returns available lazy command definitions with parameter schemas.
+  // Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+  rpc ListAgentCommands(ListAgentCommandsRequest) returns (ListAgentCommandsResponse);
+
+  // Executes a lazy command that does not require Rails-specific interception.
+  // Rails intercepts query_graph and get_graph_status before falling through here.
+  rpc InvokeAgentCommand(InvokeAgentCommandRequest) returns (InvokeAgentCommandResponse);
+
   // Executes a graph query against ClickHouse with bidirectional streaming
   // for the redaction exchange (server requests authorization checks from Rails,
   // Rails responds with per-resource decisions).
@@ -284,6 +292,30 @@ message ToolDefinition {
   string name = 1;                    // e.g. "query_graph", "get_graph_schema"
   string description = 2;            // tool description; intentionally short so MCP clients that truncate descriptions still see the full text
   string parameters_json_schema = 3; // JSON Schema for the tool's input parameters
+}
+
+// ---------------------------------------------------------------------------
+// AgentCommands — unary lazy-command catalog and invocation
+// ---------------------------------------------------------------------------
+
+message ListAgentCommandsRequest {
+  repeated string command_names = 1; // empty means list every command
+}
+
+message ListAgentCommandsResponse {
+  repeated ToolDefinition commands = 1;
+}
+
+message InvokeAgentCommandRequest {
+  string command_name = 1;
+  string parameters_json = 2; // downstream command parameters object as JSON
+}
+
+message InvokeAgentCommandResponse {
+  oneof content {
+    string result_json = 1;     // structured command result encoded as JSON
+    string formatted_text = 2;  // LLM-oriented text result
+  }
 }
 
 // ---------------------------------------------------------------------------

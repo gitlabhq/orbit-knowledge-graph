@@ -20,13 +20,15 @@ use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
     GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
-    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse, ListToolsRequest,
-    ListToolsResponse, QueryMetadata, ResponseFormat, ResponseFormatSchema, SchemaDomain,
-    SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
-    get_query_dsl_response, get_response_format_response,
+    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
+    InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
+    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
+    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
+    invoke_agent_command_response,
 };
-use crate::tools::{ToolRegistry, ToolService};
+use crate::tools::{CommandRegistry, ExecutorError, ToolPlan, ToolRegistry, ToolService};
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
 fn proto_format_name(name: FormatName) -> ProtoFormatName {
@@ -39,6 +41,22 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
 fn record_ai_session_id(ai_session_id: &Option<String>) {
     if let Some(sid) = ai_session_id {
         tracing::Span::current().record("ai_session_id", sid.as_str());
+    }
+}
+
+fn proto_tool_definition(t: crate::tools::ToolDefinition) -> ProtoToolDefinition {
+    ProtoToolDefinition {
+        name: t.name,
+        description: t.description,
+        parameters_json_schema: t.parameters.to_string(),
+    }
+}
+
+fn command_error_to_status(error: ExecutorError) -> Status {
+    match error {
+        ExecutorError::NotFound(_) => Status::not_found(error.to_string()),
+        ExecutorError::InvalidArguments(_) => Status::invalid_argument(error.to_string()),
+        ExecutorError::InterceptedCommand(_) => Status::failed_precondition(error.to_string()),
     }
 }
 
@@ -124,14 +142,84 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         let tools = ToolRegistry::get_all_tools(&self.ontology)
             .into_iter()
-            .map(|t| ProtoToolDefinition {
-                name: t.name,
-                description: t.description,
-                parameters_json_schema: t.parameters.to_string(),
-            })
+            .map(proto_tool_definition)
             .collect();
 
         Ok(Response::new(ListToolsResponse { tools }))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn list_agent_commands(
+        &self,
+        request: Request<ListAgentCommandsRequest>,
+    ) -> Result<Response<ListAgentCommandsResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let requested = &request.get_ref().command_names;
+        info!(
+            command_count = requested.len(),
+            "Listing agent commands for user"
+        );
+
+        let commands = CommandRegistry::get_all_commands(&self.ontology)
+            .into_iter()
+            .filter(|command| requested.is_empty() || requested.contains(&command.name))
+            .map(proto_tool_definition)
+            .collect();
+
+        Ok(Response::new(ListAgentCommandsResponse { commands }))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn invoke_agent_command(
+        &self,
+        request: Request<InvokeAgentCommandRequest>,
+    ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        if req.command_name.trim().is_empty() {
+            return Err(Status::invalid_argument("command_name is required"));
+        }
+
+        let parameters_json = if req.parameters_json.trim().is_empty() {
+            "{}"
+        } else {
+            req.parameters_json.as_str()
+        };
+
+        info!(command_name = %req.command_name, "Invoking agent command for user");
+
+        let plan = self
+            .tool_service
+            .resolve_command(&req.command_name, parameters_json)
+            .map_err(command_error_to_status)?;
+
+        let ToolPlan::Immediate { result } = plan else {
+            return Err(Status::failed_precondition(
+                "command must be handled by Rails interceptor",
+            ));
+        };
+
+        let content = match result {
+            serde_json::Value::String(text) => {
+                Some(invoke_agent_command_response::Content::FormattedText(text))
+            }
+            value => {
+                let json = serde_json::to_string(&value).map_err(|e| {
+                    Status::internal(format!("Failed to encode command result: {e}"))
+                })?;
+                Some(invoke_agent_command_response::Content::ResultJson(json))
+            }
+        };
+
+        Ok(Response::new(InvokeAgentCommandResponse { content }))
     }
 
     type ExecuteQueryStream = ExecuteQueryStream;

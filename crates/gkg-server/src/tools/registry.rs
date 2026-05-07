@@ -39,35 +39,6 @@ mod params {
         })
     }
 
-    pub fn graph_info_sections() -> Value {
-        json!({
-            "type": "array",
-            "minItems": 1,
-            "uniqueItems": true,
-            "items": {
-                "type": "string",
-                "enum": ["schema", "dsl", "response_format"]
-            },
-            "description": "Which discovery sections to return. Pick only what you need."
-        })
-    }
-
-    pub fn schema_options() -> Value {
-        json!({
-            "type": "object",
-            "additionalProperties": false,
-            "description": "Only used when 'schema' is in sections.",
-            "properties": {
-                "expand_nodes": {
-                    "type": "array",
-                    "minItems": 1,
-                    "items": { "type": "string" },
-                    "description": "Node names to expand with full property details. Use [\"*\"] to expand every node. Omit for a shape-only listing."
-                }
-            }
-        })
-    }
-
     pub fn status_targets() -> Value {
         json!({
             "type": "array",
@@ -87,6 +58,21 @@ mod params {
             }
         })
     }
+
+    pub fn command_names() -> Value {
+        json!({
+            "type": "array",
+            "items": { "type": "string" },
+            "description": "Optional command names to describe. Omit to list every command."
+        })
+    }
+
+    pub fn command_parameters() -> Value {
+        json!({
+            "type": "object",
+            "description": "Optional downstream command input object. Put the target command inputs here, not alongside command_name."
+        })
+    }
 }
 
 pub struct ToolRegistry;
@@ -96,8 +82,9 @@ impl ToolRegistry {
         vec![
             Self::query_graph(),
             Self::get_graph_schema(),
-            Self::get_graph_info(),
             Self::get_graph_status(),
+            Self::list_commands(),
+            Self::invoke_command(),
         ]
     }
 
@@ -152,55 +139,105 @@ impl ToolRegistry {
         }
     }
 
-    fn get_graph_info() -> ToolDefinition {
+    fn get_graph_status() -> ToolDefinition {
         ToolDefinition {
-            name: "get_graph_info".into(),
-            description: "Discovery tool for Orbit - the GitLab Knowledge Graph. Call this BEFORE \
-                          composing a query to learn the graph's shape, query language, or \
-                          response format. At minimum call with `sections=[\"dsl\",\"schema\"]` \
-                          before writing a query. Use get_graph_status separately for indexing \
-                          progress.\n\n\
-                          Sections (pass via `sections`, pick only what you need):\n\
-                          - `schema`: ontology of node/edge types and domains. Add \
-                          `schema_options.expand_nodes=[\"Node1\",...]` or `[\"*\"]` to include \
-                          property details. Omit for a lightweight listing.\n\
-                          - `dsl`: JSON Schema describing valid query inputs. No options.\n\
-                          - `response_format`: JSON Schema + semver of the formatter's output. \
-                          No options.\n\n\
-                          `format` controls output: \"llm\" (default, compact text) or \"raw\" \
-                          (JSON)."
+            name: "get_graph_status".into(),
+            description: "Indexing progress and entity counts for one or more namespaces or \
+                          projects. Omit `targets` to check all Knowledge Graph enabled root \
+                          namespaces the current user can access. Otherwise pass `targets` as an \
+                          array; each target supplies exactly one of `namespace_id` (int), \
+                          `project_id` (int), or `full_path` (string like \"gitlab-org/gitlab\")."
                 .into(),
             parameters: json!({
                 "type": "object",
                 "additionalProperties": false,
-                "required": ["sections"],
                 "properties": {
-                    "sections": params::graph_info_sections(),
-                    "schema_options": params::schema_options(),
+                    "targets": params::status_targets(),
                     "format": params::format()
                 }
             }),
         }
     }
 
-    fn get_graph_status() -> ToolDefinition {
+    fn list_commands() -> ToolDefinition {
         ToolDefinition {
-            name: "get_graph_status".into(),
-            description: "Indexing progress and entity counts for one or more namespaces or \
-                          projects. Pass `targets` as an array; each target supplies exactly one \
-                          of `namespace_id` (int), `project_id` (int), or `full_path` (string \
-                          like \"gitlab-org/gitlab\"). Use this when the user asks whether \
-                          something has finished indexing or how many entities are present, or \
-                          when a query returns surprisingly few rows."
+            name: "list_commands".into(),
+            description:
+                "List Orbit Knowledge Graph commands with descriptions and input schemas. \
+                          Use this before invoke_command to discover available commands."
+                    .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "command_names": params::command_names()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn invoke_command() -> ToolDefinition {
+        ToolDefinition {
+            name: "invoke_command".into(),
+            description: "Execute an Orbit command. This is a wrapper tool: keep only command_name \
+                          and parameters at the top level, and put downstream command inputs inside \
+                          parameters."
                 .into(),
             parameters: json!({
                 "type": "object",
-                "additionalProperties": false,
-                "required": ["targets"],
+                "required": ["command_name"],
                 "properties": {
-                    "targets": params::status_targets(),
+                    "command_name": {
+                        "type": "string",
+                        "description": "Command name returned by list_commands."
+                    },
+                    "parameters": params::command_parameters()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+}
+
+pub struct CommandRegistry;
+
+impl CommandRegistry {
+    pub fn get_all_commands(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+        vec![
+            ToolRegistry::query_graph(),
+            ToolRegistry::get_graph_schema(),
+            ToolRegistry::get_graph_status(),
+            Self::get_query_dsl(),
+            Self::get_response_format(),
+        ]
+    }
+
+    fn get_query_dsl() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_query_dsl".into(),
+            description: "Return the query_graph JSON DSL grammar. Use this before composing \
+                          query_graph parameters."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
                     "format": params::format()
-                }
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_response_format() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_response_format".into(),
+            description: "Return the JSON Schema and version for query_graph responses.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "format": params::format()
+                },
+                "additionalProperties": false
             }),
         }
     }
@@ -215,6 +252,11 @@ mod tests {
         ToolRegistry::get_all_tools(&ontology)
     }
 
+    fn all_commands() -> Vec<ToolDefinition> {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        CommandRegistry::get_all_commands(&ontology)
+    }
+
     fn find_tool(name: &str) -> ToolDefinition {
         all_tools()
             .into_iter()
@@ -222,10 +264,17 @@ mod tests {
             .unwrap_or_else(|| panic!("tool '{name}' not found"))
     }
 
+    fn find_command(name: &str) -> ToolDefinition {
+        all_commands()
+            .into_iter()
+            .find(|t| t.name == name)
+            .unwrap_or_else(|| panic!("command '{name}' not found"))
+    }
+
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 4);
+        assert_eq!(tools.len(), 5);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -248,13 +297,28 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_graph_info".into()));
         assert!(names.contains(&"get_graph_status".into()));
+        assert!(names.contains(&"list_commands".into()));
+        assert!(names.contains(&"invoke_command".into()));
+    }
+
+    #[test]
+    fn expected_commands_are_registered() {
+        let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
+        assert!(names.contains(&"query_graph".into()));
+        assert!(names.contains(&"get_graph_schema".into()));
+        assert!(names.contains(&"get_graph_status".into()));
+        assert!(names.contains(&"get_query_dsl".into()));
+        assert!(names.contains(&"get_response_format".into()));
     }
 
     #[test]
     fn all_tools_have_format_parameter() {
         for tool in &all_tools() {
+            if ["list_commands", "invoke_command"].contains(&tool.name.as_str()) {
+                continue;
+            }
+
             let format = &tool.parameters["properties"]["format"];
             assert!(format.is_object(), "{} missing format parameter", tool.name);
             assert_eq!(format["type"], "string");
@@ -284,7 +348,7 @@ mod tests {
 
     #[test]
     fn query_graph_requires_query_parameter() {
-        let tool = find_tool("query_graph");
+        let tool = find_command("query_graph");
         let params = &tool.parameters;
 
         assert!(params["properties"]["query"].is_object());
@@ -294,7 +358,7 @@ mod tests {
 
     #[test]
     fn query_graph_description_points_to_discovery_tools() {
-        let tool = find_tool("query_graph");
+        let tool = find_command("query_graph");
         assert!(tool.description.contains("get_query_dsl"));
         assert!(tool.description.contains("get_graph_schema"));
     }
@@ -305,7 +369,7 @@ mod tests {
         // descriptions can still find the grammar. We keep the inline TOON
         // in the description for one release cycle so existing consumers
         // do not break. A follow-up MR strips it once adoption is verified.
-        let tool = find_tool("query_graph");
+        let tool = find_command("query_graph");
         assert!(tool.description.contains("query_type"));
         assert!(tool.description.contains("traversal"));
         assert!(tool.description.contains("<toon>"));
@@ -314,21 +378,21 @@ mod tests {
     #[test]
     fn query_graph_excludes_ontology_data() {
         // The embedded DSL describes query shape, not ontology entities.
-        let tool = find_tool("query_graph");
+        let tool = find_command("query_graph");
         assert!(!tool.description.contains("username"));
         assert!(!tool.description.contains("AUTHORED"));
     }
 
     #[test]
     fn get_graph_schema_has_expand_nodes_param() {
-        let tool = find_tool("get_graph_schema");
+        let tool = find_command("get_graph_schema");
         assert!(tool.parameters["properties"]["expand_nodes"].is_object());
     }
 
     #[test]
     fn get_graph_schema_has_no_include_param() {
         // back-compat: clients on get_graph_schema must keep the old shape
-        let tool = find_tool("get_graph_schema");
+        let tool = find_command("get_graph_schema");
         let props = tool.parameters["properties"]
             .as_object()
             .expect("properties should be an object");
@@ -338,51 +402,9 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_sections_enum_lists_three_blocks() {
-        let tool = find_tool("get_graph_info");
-        let sections = &tool.parameters["properties"]["sections"];
-        assert_eq!(sections["type"], "array");
-
-        let values: Vec<&str> = sections["items"]["enum"]
-            .as_array()
-            .expect("sections.items.enum must be an array")
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect();
-        assert_eq!(values, vec!["schema", "dsl", "response_format"]);
-    }
-
-    #[test]
-    fn get_graph_info_does_not_accept_status_section() {
-        // status moved to its own get_graph_status tool. The enum on get_graph_info
-        // must not list it.
-        let tool = find_tool("get_graph_info");
-        let values: Vec<&str> = tool.parameters["properties"]["sections"]["items"]["enum"]
-            .as_array()
-            .expect("enum array")
-            .iter()
-            .filter_map(|v| v.as_str())
-            .collect();
-        assert!(!values.contains(&"status"));
-        assert!(
-            tool.parameters["properties"].get("status_target").is_none(),
-            "status_target should be removed from get_graph_info"
-        );
-    }
-
-    #[test]
-    fn get_graph_info_requires_sections() {
-        let tool = find_tool("get_graph_info");
-        let required = tool.parameters["required"]
-            .as_array()
-            .expect("required should be an array");
-        assert!(required.iter().any(|v| v == "sections"));
-    }
-
-    #[test]
-    fn get_graph_status_accepts_target_array() {
-        let tool = find_tool("get_graph_status");
-        assert_eq!(tool.parameters["required"][0], "targets");
+    fn get_graph_status_accepts_optional_target_array() {
+        let tool = find_command("get_graph_status");
+        assert!(tool.parameters.get("required").is_none());
 
         let targets = &tool.parameters["properties"]["targets"];
         assert_eq!(targets["type"], "array");
@@ -398,5 +420,23 @@ mod tests {
         for key in ["namespace_id", "project_id", "full_path"] {
             assert!(props.contains_key(key), "missing target key: {key}");
         }
+    }
+
+    #[test]
+    fn list_commands_accepts_optional_command_names() {
+        let tool = find_tool("list_commands");
+        let command_names = &tool.parameters["properties"]["command_names"];
+        assert_eq!(command_names["type"], "array");
+    }
+
+    #[test]
+    fn invoke_command_requires_command_name() {
+        let tool = find_tool("invoke_command");
+        let params = &tool.parameters;
+
+        assert!(params["properties"]["command_name"].is_object());
+        assert!(params["properties"]["parameters"].is_object());
+        let required = params["required"].as_array().expect("should have required");
+        assert!(required.iter().any(|v| v == "command_name"));
     }
 }

@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::sync::Arc;
 
 use ontology::Ontology;
@@ -20,6 +19,9 @@ pub enum ExecutorError {
 
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),
+
+    #[error("Command is handled by Rails interceptor: {0}")]
+    InterceptedCommand(String),
 }
 
 impl ExecutorError {
@@ -27,6 +29,7 @@ impl ExecutorError {
         match self {
             Self::NotFound(_) => "tool_not_found".to_string(),
             Self::InvalidArguments(_) => "invalid_arguments".to_string(),
+            Self::InterceptedCommand(_) => "intercepted_command".to_string(),
         }
     }
 }
@@ -79,8 +82,26 @@ impl ToolService {
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
-            "get_graph_info" => self.execute_get_graph_info(&arguments),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
+        }
+    }
+
+    pub fn resolve_command(
+        &self,
+        command_name: &str,
+        arguments_json: &str,
+    ) -> Result<ToolPlan, ExecutorError> {
+        let arguments: Value = serde_json::from_str(arguments_json)
+            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+
+        match command_name {
+            "query_graph" | "get_graph_status" => {
+                Err(ExecutorError::InterceptedCommand(command_name.to_string()))
+            }
+            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_query_dsl" => self.execute_get_query_dsl(&arguments),
+            "get_response_format" => self.execute_get_response_format(&arguments),
+            _ => Err(ExecutorError::NotFound(command_name.to_string())),
         }
     }
 
@@ -148,94 +169,38 @@ impl ToolService {
         Ok(ToolPlan::Immediate { result })
     }
 
-    fn execute_get_graph_info(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
-        let args: GetGraphInfoArgs = serde_json::from_value(arguments.clone())
-            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
-
-        if args.sections.is_empty() {
-            return Err(ExecutorError::InvalidArguments(
-                "sections must be a non-empty array".to_string(),
-            ));
-        }
-
-        let sections: HashSet<&str> = args.sections.iter().map(String::as_str).collect();
-        for section in &sections {
-            if !["schema", "dsl", "response_format"].contains(section) {
-                return Err(ExecutorError::InvalidArguments(format!(
-                    "unknown section: {section}"
-                )));
-            }
-        }
-
+    fn execute_get_query_dsl(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
         let format = parse_format(arguments);
-        let expand_nodes = args
-            .schema_options
-            .as_ref()
-            .and_then(|o| o.expand_nodes.as_deref())
-            .unwrap_or(&[]);
-        let response = self.build_graph_schema_response(expand_nodes);
-
         let result = match format {
-            OutputFormat::Llm => {
-                let mut toon = String::new();
-                if sections.contains("schema") {
-                    toon.push_str("== schema ==\n");
-                    toon.push_str(&encode(&response, &EncodeOptions::default()).map_err(|e| {
-                        ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
-                    })?);
-                }
-                if sections.contains("dsl") {
-                    if !toon.is_empty() {
-                        toon.push_str("\n\n");
-                    }
-                    toon.push_str("== dsl ==\n");
-                    toon.push_str(&Self::build_query_dsl_toon()?);
-                }
-                if sections.contains("response_format") {
-                    if !toon.is_empty() {
-                        toon.push_str("\n\n");
-                    }
-                    toon.push_str("== response_format v");
-                    toon.push_str(&Self::build_response_format_version());
-                    toon.push_str(" ==\n");
-                    toon.push_str(Self::build_response_format_schema());
-                }
-                json!(toon)
-            }
+            OutputFormat::Llm => json!(Self::build_query_dsl_toon()?),
             OutputFormat::Raw => {
-                let mut payload = serde_json::Map::new();
-                if sections.contains("schema") {
-                    payload.insert(
-                        "schema".to_string(),
-                        serde_json::to_value(&response)
-                            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
-                    );
-                }
-                if sections.contains("dsl") {
-                    let dsl: Value =
-                        serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
-                            ExecutorError::InvalidArguments(format!(
-                                "Failed to parse DSL schema: {e}"
-                            ))
-                        })?;
-                    payload.insert("dsl".to_string(), dsl);
-                }
-                if sections.contains("response_format") {
-                    let schema: Value = serde_json::from_str(Self::build_response_format_schema())
-                        .map_err(|e| {
-                            ExecutorError::InvalidArguments(format!(
-                                "Failed to parse response format schema: {e}"
-                            ))
-                        })?;
-                    payload.insert(
-                        "response_format".to_string(),
-                        json!({
-                            "schema": schema,
-                            "version": Self::build_response_format_version(),
-                        }),
-                    );
-                }
-                Value::Object(payload)
+                serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
+                })?
+            }
+        };
+
+        Ok(ToolPlan::Immediate { result })
+    }
+
+    fn execute_get_response_format(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        let format = parse_format(arguments);
+        let version = Self::build_response_format_version();
+        let schema = Self::build_response_format_schema();
+        let result = match format {
+            OutputFormat::Llm => json!(format!(
+                "ResponseFormat v{version} (JSON Schema):\n{schema}"
+            )),
+            OutputFormat::Raw => {
+                let parsed_schema: Value = serde_json::from_str(schema).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!(
+                        "Failed to parse response format schema: {e}"
+                    ))
+                })?;
+                json!({
+                    "schema": parsed_schema,
+                    "version": version,
+                })
             }
         };
 
@@ -265,19 +230,6 @@ fn parse_format(arguments: &Value) -> OutputFormat {
 
 #[derive(Debug, Deserialize)]
 struct GetGraphSchemaArgs {
-    #[serde(default)]
-    expand_nodes: Option<Vec<String>>,
-}
-
-#[derive(Debug, Deserialize)]
-struct GetGraphInfoArgs {
-    sections: Vec<String>,
-    #[serde(default)]
-    schema_options: Option<SchemaOptions>,
-}
-
-#[derive(Debug, Deserialize)]
-struct SchemaOptions {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
 }
@@ -609,10 +561,13 @@ mod tests {
         }
     }
 
-    fn resolve_immediate(args: &str, tool: &str) -> Value {
+    fn resolve_command_immediate(args: &str, command: &str) -> Value {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
-        match service.resolve(tool, args).expect("Should resolve") {
+        match service
+            .resolve_command(command, args)
+            .expect("Should resolve command")
+        {
             ToolPlan::Immediate { result } => result,
             _ => panic!("Expected Immediate plan"),
         }
@@ -641,127 +596,39 @@ mod tests {
     }
 
     #[test]
-    fn get_graph_info_schema_only_raw() {
-        let result = resolve_immediate(
-            r#"{"sections": ["schema"], "format": "raw"}"#,
-            "get_graph_info",
-        );
-        let schema = result.get("schema").expect("schema key must be present");
-        assert!(schema.is_object());
-        assert!(result.get("dsl").is_none());
-        assert!(result.get("response_format").is_none());
-    }
-
-    #[test]
-    fn get_graph_info_schema_with_expand_nodes_raw() {
-        let result = resolve_immediate(
-            r#"{
-                "sections": ["schema"],
-                "schema_options": { "expand_nodes": ["User"] },
-                "format": "raw"
-            }"#,
-            "get_graph_info",
-        );
-        let schema = result.get("schema").expect("schema key must be present");
-        let json_str = serde_json::to_string(schema).unwrap();
-        assert!(
-            json_str.contains("username"),
-            "expanded User should include the username property"
-        );
-    }
-
-    #[test]
-    fn get_graph_info_dsl_section_raw_carries_full_grammar() {
-        let result = resolve_immediate(
-            r#"{"sections": ["dsl"], "format": "raw"}"#,
-            "get_graph_info",
-        );
-        let dsl = result.get("dsl").expect("dsl key must be present");
+    fn resolve_command_executes_get_query_dsl() {
+        let result = resolve_command_immediate(r#"{"format": "raw"}"#, "get_query_dsl");
         assert_eq!(
-            dsl.get("title").and_then(Value::as_str),
+            result.get("title").and_then(Value::as_str),
             Some("GraphQueryAsJSON")
         );
     }
 
     #[test]
-    fn get_graph_info_response_format_section_raw() {
-        let result = resolve_immediate(
-            r#"{"sections": ["response_format"], "format": "raw"}"#,
-            "get_graph_info",
-        );
-        let rf = result
-            .get("response_format")
-            .expect("response_format key must be present");
+    fn resolve_command_executes_get_response_format() {
+        let result = resolve_command_immediate(r#"{"format": "raw"}"#, "get_response_format");
         assert_eq!(
-            rf.get("schema")
+            result
+                .get("schema")
                 .and_then(|s| s.get("title"))
                 .and_then(Value::as_str),
             Some("GKG unified query response")
         );
         assert_eq!(
-            rf.get("version").and_then(Value::as_str),
+            result.get("version").and_then(Value::as_str),
             Some(ToolService::build_response_format_version().as_str())
         );
     }
 
     #[test]
-    fn get_graph_info_three_sections_raw() {
-        let result = resolve_immediate(
-            r#"{"sections": ["schema", "dsl", "response_format"], "format": "raw"}"#,
-            "get_graph_info",
-        );
-        assert!(result.get("schema").is_some());
-        assert!(result.get("dsl").is_some());
-        assert!(result.get("response_format").is_some());
-    }
-
-    #[test]
-    fn get_graph_info_llm_appends_labelled_blocks() {
-        let result = resolve_immediate(
-            r#"{"sections": ["schema", "dsl", "response_format"], "format": "llm"}"#,
-            "get_graph_info",
-        );
-        let toon = result.as_str().expect("LLM format returns a string");
-        assert!(toon.contains("== schema =="));
-        assert!(toon.contains("== dsl =="));
-        assert!(toon.contains("== response_format v"));
-        assert!(toon.contains("GKG unified query response"));
-    }
-
-    #[test]
-    fn get_graph_info_status_section_is_rejected() {
+    fn resolve_command_rejects_rails_intercepted_commands() {
         let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
         let service = ToolService::new(ontology);
-        let result = service.resolve("get_graph_info", r#"{"sections": ["status"]}"#);
-        let err = result.expect_err("status section is no longer accepted on get_graph_info");
-        assert!(
-            err.to_string().contains("status"),
-            "error should mention status, got: {err}"
-        );
-    }
 
-    #[test]
-    fn get_graph_info_unknown_section_errors() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve("get_graph_info", r#"{"sections": ["bogus"]}"#);
-        let err = result.expect_err("unknown section should error");
-        assert!(err.to_string().contains("bogus"));
-    }
+        let result = service.resolve_command("query_graph", r#"{"query": {}}"#);
+        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
 
-    #[test]
-    fn get_graph_info_empty_sections_errors() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve("get_graph_info", r#"{"sections": []}"#);
-        assert!(result.is_err());
-    }
-
-    #[test]
-    fn get_graph_info_missing_sections_errors() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-        let result = service.resolve("get_graph_info", r#"{"format": "raw"}"#);
-        assert!(result.is_err());
+        let result = service.resolve_command("get_graph_status", "{}");
+        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
     }
 }

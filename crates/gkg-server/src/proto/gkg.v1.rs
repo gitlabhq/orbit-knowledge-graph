@@ -339,6 +339,42 @@ pub struct ToolDefinition {
     #[prost(string, tag = "3")]
     pub parameters_json_schema: ::prost::alloc::string::String,
 }
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct ListAgentCommandsRequest {
+    /// empty means list every command
+    #[prost(string, repeated, tag = "1")]
+    pub command_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+}
+#[derive(Clone, PartialEq, ::prost::Message)]
+pub struct ListAgentCommandsResponse {
+    #[prost(message, repeated, tag = "1")]
+    pub commands: ::prost::alloc::vec::Vec<ToolDefinition>,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InvokeAgentCommandRequest {
+    #[prost(string, tag = "1")]
+    pub command_name: ::prost::alloc::string::String,
+    /// downstream command parameters object as JSON
+    #[prost(string, tag = "2")]
+    pub parameters_json: ::prost::alloc::string::String,
+}
+#[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
+pub struct InvokeAgentCommandResponse {
+    #[prost(oneof = "invoke_agent_command_response::Content", tags = "1, 2")]
+    pub content: ::core::option::Option<invoke_agent_command_response::Content>,
+}
+/// Nested message and enum types in `InvokeAgentCommandResponse`.
+pub mod invoke_agent_command_response {
+    #[derive(Clone, PartialEq, Eq, Hash, ::prost::Oneof)]
+    pub enum Content {
+        /// structured command result encoded as JSON
+        #[prost(string, tag = "1")]
+        ResultJson(::prost::alloc::string::String),
+        /// LLM-oriented text result
+        #[prost(string, tag = "2")]
+        FormattedText(::prost::alloc::string::String),
+    }
+}
 /// Request for cluster health, with optional LLM formatting.
 #[derive(Clone, Copy, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetClusterHealthRequest {
@@ -775,6 +811,62 @@ pub mod knowledge_graph_service_client {
                 .insert(GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListTools"));
             self.inner.unary(req, path, codec).await
         }
+        /// Returns available lazy command definitions with parameter schemas.
+        /// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+        pub async fn list_agent_commands(
+            &mut self,
+            request: impl tonic::IntoRequest<super::ListAgentCommandsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListAgentCommandsResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/ListAgentCommands",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "ListAgentCommands"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
+        /// Executes a lazy command that does not require Rails-specific interception.
+        /// Rails intercepts query_graph and get_graph_status before falling through here.
+        pub async fn invoke_agent_command(
+            &mut self,
+            request: impl tonic::IntoRequest<super::InvokeAgentCommandRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InvokeAgentCommandResponse>,
+            tonic::Status,
+        > {
+            self.inner
+                .ready()
+                .await
+                .map_err(|e| {
+                    tonic::Status::unknown(
+                        format!("Service was not ready: {}", e.into()),
+                    )
+                })?;
+            let codec = tonic_prost::ProstCodec::default();
+            let path = http::uri::PathAndQuery::from_static(
+                "/gkg.v1.KnowledgeGraphService/InvokeAgentCommand",
+            );
+            let mut req = request.into_request();
+            req.extensions_mut()
+                .insert(
+                    GrpcMethod::new("gkg.v1.KnowledgeGraphService", "InvokeAgentCommand"),
+                );
+            self.inner.unary(req, path, codec).await
+        }
         /// Executes a graph query against ClickHouse with bidirectional streaming
         /// for the redaction exchange (server requests authorization checks from Rails,
         /// Rails responds with per-resource decisions).
@@ -972,6 +1064,24 @@ pub mod knowledge_graph_service_server {
             tonic::Response<super::ListToolsResponse>,
             tonic::Status,
         >;
+        /// Returns available lazy command definitions with parameter schemas.
+        /// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+        async fn list_agent_commands(
+            &self,
+            request: tonic::Request<super::ListAgentCommandsRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::ListAgentCommandsResponse>,
+            tonic::Status,
+        >;
+        /// Executes a lazy command that does not require Rails-specific interception.
+        /// Rails intercepts query_graph and get_graph_status before falling through here.
+        async fn invoke_agent_command(
+            &self,
+            request: tonic::Request<super::InvokeAgentCommandRequest>,
+        ) -> std::result::Result<
+            tonic::Response<super::InvokeAgentCommandResponse>,
+            tonic::Status,
+        >;
         /// Server streaming response type for the ExecuteQuery method.
         type ExecuteQueryStream: tonic::codegen::tokio_stream::Stream<
                 Item = std::result::Result<super::ExecuteQueryMessage, tonic::Status>,
@@ -1150,6 +1260,104 @@ pub mod knowledge_graph_service_server {
                     let inner = self.inner.clone();
                     let fut = async move {
                         let method = ListToolsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/ListAgentCommands" => {
+                    #[allow(non_camel_case_types)]
+                    struct ListAgentCommandsSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::ListAgentCommandsRequest>
+                    for ListAgentCommandsSvc<T> {
+                        type Response = super::ListAgentCommandsResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::ListAgentCommandsRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::list_agent_commands(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = ListAgentCommandsSvc(inner);
+                        let codec = tonic_prost::ProstCodec::default();
+                        let mut grpc = tonic::server::Grpc::new(codec)
+                            .apply_compression_config(
+                                accept_compression_encodings,
+                                send_compression_encodings,
+                            )
+                            .apply_max_message_size_config(
+                                max_decoding_message_size,
+                                max_encoding_message_size,
+                            );
+                        let res = grpc.unary(method, req).await;
+                        Ok(res)
+                    };
+                    Box::pin(fut)
+                }
+                "/gkg.v1.KnowledgeGraphService/InvokeAgentCommand" => {
+                    #[allow(non_camel_case_types)]
+                    struct InvokeAgentCommandSvc<T: KnowledgeGraphService>(pub Arc<T>);
+                    impl<
+                        T: KnowledgeGraphService,
+                    > tonic::server::UnaryService<super::InvokeAgentCommandRequest>
+                    for InvokeAgentCommandSvc<T> {
+                        type Response = super::InvokeAgentCommandResponse;
+                        type Future = BoxFuture<
+                            tonic::Response<Self::Response>,
+                            tonic::Status,
+                        >;
+                        fn call(
+                            &mut self,
+                            request: tonic::Request<super::InvokeAgentCommandRequest>,
+                        ) -> Self::Future {
+                            let inner = Arc::clone(&self.0);
+                            let fut = async move {
+                                <T as KnowledgeGraphService>::invoke_agent_command(
+                                        &inner,
+                                        request,
+                                    )
+                                    .await
+                            };
+                            Box::pin(fut)
+                        }
+                    }
+                    let accept_compression_encodings = self.accept_compression_encodings;
+                    let send_compression_encodings = self.send_compression_encodings;
+                    let max_decoding_message_size = self.max_decoding_message_size;
+                    let max_encoding_message_size = self.max_encoding_message_size;
+                    let inner = self.inner.clone();
+                    let fut = async move {
+                        let method = InvokeAgentCommandSvc(inner);
                         let codec = tonic_prost::ProstCodec::default();
                         let mut grpc = tonic::server::Grpc::new(codec)
                             .apply_compression_config(
