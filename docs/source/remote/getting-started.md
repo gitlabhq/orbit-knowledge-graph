@@ -71,7 +71,7 @@ Duo queries are zero-rated and do not consume GitLab Credits.
 
 ### MCP (Claude Code, Codex, other agents)
 
-See [Use Orbit via MCP](../access/mcp.md) for setup. Once configured, you have two tools: `query_graph` and `get_graph_schema`.
+See [Use Orbit via MCP](access/mcp.md) for setup. Once configured, you have two tools: `query_graph` and `get_graph_schema`.
 
 ### REST API
 
