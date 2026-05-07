@@ -86,6 +86,9 @@ if [ -n "$VERSION" ]; then
         v*) : ;;
         *) VERSION="v$VERSION" ;;
     esac
+    if ! echo "$VERSION" | grep -qE '^v[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$'; then
+        error "Invalid version format: $VERSION (expected: vX.Y.Z or vX.Y.Z-suffix)"
+    fi
 fi
 
 detect_os() {
@@ -141,8 +144,7 @@ verify_checksum() {
     elif command_exists shasum; then
         actual_checksum=$(shasum -a 256 "$file" | awk '{print $1}')
     else
-        warning "No SHA256 tool found. Skipping checksum verification."
-        return 0
+        error "No SHA256 tool found (sha256sum or shasum). Cannot verify download integrity."
     fi
 
     if [ "$expected_checksum" != "$actual_checksum" ]; then
@@ -209,11 +211,19 @@ install_orbit() {
 
     local orbit_binary="${TEMP_DIR}/orbit"
     if [ ! -f "$orbit_binary" ]; then
-        orbit_binary=$(find "$TEMP_DIR" -name "orbit" -type f -perm -u+x | head -n 1)
+        orbit_binary=$(find "$TEMP_DIR" -maxdepth 2 -name "orbit" -type f -perm -u+x | head -n 1)
         if [ -z "$orbit_binary" ]; then
             error "orbit binary not found in the extracted files."
         fi
     fi
+
+    local real_binary real_temp
+    real_binary=$(realpath "$orbit_binary" 2>/dev/null || readlink -f "$orbit_binary" 2>/dev/null || echo "$orbit_binary")
+    real_temp=$(realpath "$TEMP_DIR" 2>/dev/null || readlink -f "$TEMP_DIR" 2>/dev/null || echo "$TEMP_DIR")
+    case "$real_binary" in
+        "${real_temp}"/*) : ;;
+        *) error "Extracted binary resolved outside temp directory: $real_binary" ;;
+    esac
 
     echo "Installing orbit to $INSTALL_DIR..."
     if command_exists install; then
