@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data, across the Developer Flow and the foundational agents.
+description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data, across the Software Development Flow and the foundational agents.
 title: Use Orbit with GitLab Duo Agent Platform
 ---
 
@@ -25,7 +25,7 @@ title: Use Orbit with GitLab Duo Agent Platform
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit is integrated into GitLab Duo Agent Platform. The Developer Flow and the foundational
+Orbit is integrated into GitLab Duo Agent Platform. The Software Development Flow and the foundational
 agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) directly when a
 question is best answered by traversing your SDLC graph - cross-project dependencies,
 blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When
@@ -42,8 +42,8 @@ Orbit is wired into the following GitLab Duo Agent Platform surfaces:
 
 | Surface | When to use it |
 |---------|----------------|
-| **Developer Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
-| **GitLab Duo CLI** | Terminal-based, editor-agnostic, scriptable. Same Orbit capabilities as the Developer Flow, available in headless and CI workflows. |
+| **Software Development Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
+| **GitLab Duo CLI** | Terminal-based, editor-agnostic, scriptable. Same Orbit capabilities as the Software Development Flow, available in headless and CI workflows. |
 | **Planner agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
 | **Security Analyst agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
 | **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |

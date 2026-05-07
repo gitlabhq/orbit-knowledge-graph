@@ -61,9 +61,9 @@ Orbit Remote exposes the same graph through three surfaces. Pick the one that ma
 
 ### GitLab Duo Agent Platform (no setup required)
 
-Orbit is wired into the Developer Flow and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent. They call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
+Orbit is wired into the Software Development Flow and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent. They call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
 
-In the Developer Flow, ask a question that benefits from graph context, like:
+In the Software Development Flow, ask a question that benefits from graph context, like:
 
 > "What services would break if I rename the deploy_user method?"
 
