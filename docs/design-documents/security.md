@@ -141,8 +141,8 @@ During indexing, we enrich every entity (Issue, MR, Pipeline, etc.) with the `tr
 **Code Review Requirements**:
 
 - Rails service must validate that only Reporter+ memberships are included.
-- GKG query compiler must inject traversal_id filters for all entity queries (issues, MRs, pipelines, etc.).
-- Unit and integration tests must verify that users cannot access resources outside their traversal_id scope.
+- GKG query compiler must inject `traversal_id` filters for all entity queries (issues, MRs, pipelines, etc.).
+- Unit and integration tests must verify that users cannot access resources outside their `traversal_id` scope.
 
 **Detection and Monitoring**:
 
@@ -269,7 +269,7 @@ The redaction exchange occurs inside a bidirectional gRPC stream between Workhor
 - **Metric**: `gkg.redaction.batch_size` (histogram) - size of authorization batches sent to Rails.
 - **Metric**: `gkg.redaction.latency` (histogram) - time taken for Rails authorization checks.
 - **Audit Logging**: Log all denied resources with `{user_id, resource_type, resource_id, reason}`.
-- **Alert**: Trigger warning if `gkg.redaction.resources_denied` rate exceeds 20% of total results (may indicate traversal_id filtering is ineffective).
+- **Alert**: Trigger warning if `gkg.redaction.resources_denied` rate exceeds 20% of total results (may indicate `traversal_id` filtering is ineffective).
 
 ```mermaid
 sequenceDiagram
@@ -384,7 +384,7 @@ Controls:
 
 - **Per-entity role floor**: `redaction.required_role` defaults to `reporter`. Security-domain entities (Vulnerability, Finding, VulnerabilityScanner, VulnerabilityIdentifier, VulnerabilityOccurrence, SecurityScan) declare `security_manager`, matching the minimum GitLab role designed for security team members.
 - **Edge-only aggregation lowering is disabled for gated entities**: when `required_role` exceeds the default, `lower.rs` keeps the node table in the FROM clause so the security pass has an alias to filter. Without this the compiler would elide the scan and defeat the gate.
-- **Pre-filtering stays in place**: Layers 1 and 2 (organization_id and traversal_id filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
+- **Pre-filtering stays in place**: Layers 1 and 2 (`organization_id` and `traversal_id` filtering) still run on every query. The per-entity role scope is an additional drop, never a relaxation.
 - **Empty path set fails closed at compile time**: a `SecurityContext` with no traversal paths returns a compilation error rather than a `Bool(false)` everywhere, so misconfigured callers surface instead of silently returning empty results.
 
 **Code Review Requirements**:
