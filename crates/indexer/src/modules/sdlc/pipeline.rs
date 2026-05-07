@@ -2,14 +2,16 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
+use datafusion::physical_expr_adapter::BatchAdapterFactory;
 use datafusion::prelude::*;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
-use gkg_utils::arrow::{merge_batch_schemas, prepare_batches, split_into_chunks};
+use gkg_utils::arrow::{normalize_batch_types, prepare_batches, split_into_chunks};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, info_span, warn};
@@ -356,6 +358,8 @@ impl Pipeline {
             let use_presorted_split = group.len() > 1 && !sort_columns.is_empty();
 
             let chunks: Vec<Vec<RecordBatch>> = if use_presorted_split {
+                normalize_batch_types(&mut all_batches);
+
                 let sorted_batches = self
                     .sort_batches(
                         session,
@@ -481,16 +485,29 @@ impl Pipeline {
     ) -> Result<Vec<RecordBatch>, HandlerError> {
         const SORT_TABLE: &str = "_presort_staging";
 
-        let merged_schema = Arc::new(merge_batch_schemas(batches));
+        let schemas: Vec<Schema> = batches
+            .iter()
+            .map(|b| b.schema().as_ref().clone())
+            .collect();
+        let merged_schema = Arc::new(Schema::try_merge(schemas).map_err(|err| {
+            HandlerError::Processing(format!(
+                "failed to merge schemas for {pipeline_name}/{destination_table}: {err}"
+            ))
+        })?);
+
+        let adapter_factory = BatchAdapterFactory::new(Arc::clone(&merged_schema));
         let unified: Vec<RecordBatch> = batches
             .iter()
             .map(|batch| {
                 if batch.schema() == merged_schema {
-                    batch.clone()
-                } else {
-                    RecordBatch::try_new(merged_schema.clone(), batch.columns().to_vec())
-                        .unwrap_or_else(|_| batch.clone())
+                    return batch.clone();
                 }
+                let adapter = adapter_factory
+                    .make_adapter(&batch.schema())
+                    .expect("adapter creation should not fail after successful schema merge");
+                adapter
+                    .adapt_batch(batch)
+                    .expect("batch adaptation should not fail after successful schema merge")
             })
             .collect();
 

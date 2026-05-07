@@ -673,29 +673,9 @@ fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
         .unwrap_or(ColumnValue::Null)
 }
 
-/// Produces the widest schema across all batches: a field is nullable if ANY
-/// batch marks it nullable. This lets MemTable accept batches from different
-/// DataFusion queries that infer nullability differently.
-pub fn merge_batch_schemas(batches: &[RecordBatch]) -> Schema {
-    let base = batches[0].schema();
-    let fields: Vec<Field> = base
-        .fields()
-        .iter()
-        .enumerate()
-        .map(|(i, field)| {
-            let nullable = batches.iter().any(|b| b.schema().field(i).is_nullable());
-            field.as_ref().clone().with_nullable(nullable)
-        })
-        .collect();
-    Schema::new(fields)
-}
-
 /// Split a flat list of RecordBatches into approximately `target_chunks`
 /// groups, balanced by row count. Preserves batch ordering.
-pub fn split_into_chunks(
-    batches: Vec<RecordBatch>,
-    target_chunks: usize,
-) -> Vec<Vec<RecordBatch>> {
+pub fn split_into_chunks(batches: Vec<RecordBatch>, target_chunks: usize) -> Vec<Vec<RecordBatch>> {
     if batches.is_empty() || target_chunks <= 1 {
         return vec![batches];
     }
@@ -723,63 +703,88 @@ pub fn split_into_chunks(
     chunks
 }
 
-/// Single-pass column type fixup for RecordBatches before ClickHouse insertion.
-/// Mutates the vector in place.
-/// - Casts `Utf8View` / `List<Utf8View>` to `Utf8` / `List<Utf8>` (ClickHouse
-///   26.x rejects `utf8_view` in Arrow IPC).
-/// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
-///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
-pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
-    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
-
+/// Normalize column types so that batches from different DataFusion queries
+/// share a common schema. Call this before `Schema::try_merge` or MemTable
+/// creation.
+///
+/// - `Utf8View` / `List<Utf8View>` → `Utf8` / `List<Utf8>`
+/// - `UInt64` → `Int64` (ClickHouse stores all IDs as signed)
+pub fn normalize_batch_types(batches: &mut [RecordBatch]) {
     for batch in batches.iter_mut() {
         let schema = batch.schema();
-        let num_columns = schema.fields().len();
-        let mut new_fields = Vec::with_capacity(num_columns);
-        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(num_columns);
+        let mut new_fields = Vec::with_capacity(schema.fields().len());
+        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(schema.fields().len());
         let mut changed = false;
 
         for (i, field) in schema.fields().iter().enumerate() {
             let col = batch.column(i);
 
-            // StringView -> Utf8
-            if *field.data_type() == DataType::Utf8View {
-                new_fields.push(Field::new(
-                    field.name(),
-                    DataType::Utf8,
-                    field.is_nullable(),
-                ));
-                new_columns.push(
-                    compute::cast(col, &DataType::Utf8)
-                        .expect("StringView -> Utf8 cast should not fail"),
-                );
+            if let Some((new_field, new_col)) = normalize_column(field, col) {
+                new_fields.push(new_field);
+                new_columns.push(new_col);
                 changed = true;
-                continue;
+            } else {
+                new_fields.push(field.as_ref().clone());
+                new_columns.push(Arc::clone(col));
             }
+        }
 
-            // List<StringView> -> List<Utf8>
-            if let DataType::List(inner) = field.data_type()
-                && *inner.data_type() == DataType::Utf8View
-            {
-                let target = DataType::List(Arc::new(Field::new(
-                    inner.name(),
-                    DataType::Utf8,
-                    inner.is_nullable(),
-                )));
-                new_fields.push(Field::new(
-                    field.name(),
-                    target.clone(),
-                    field.is_nullable(),
-                ));
-                new_columns.push(
-                    compute::cast(col, &target)
-                        .expect("List<StringView> -> List<Utf8> cast should not fail"),
-                );
-                changed = true;
-                continue;
-            }
+        if changed {
+            *batch = RecordBatch::try_new(Arc::new(Schema::new(new_fields)), new_columns)
+                .expect("schema/column mismatch in normalize_batch_types");
+        }
+    }
+}
 
-            // Utf8 -> Dictionary<Int32, Utf8> for low-cardinality columns
+fn normalize_column(field: &Field, col: &ArrayRef) -> Option<(Field, ArrayRef)> {
+    match field.data_type() {
+        DataType::Utf8View => Some((
+            Field::new(field.name(), DataType::Utf8, field.is_nullable()),
+            compute::cast(col, &DataType::Utf8).expect("Utf8View -> Utf8 cast should not fail"),
+        )),
+        DataType::UInt64 => Some((
+            Field::new(field.name(), DataType::Int64, field.is_nullable()),
+            compute::cast(col, &DataType::Int64).expect("UInt64 -> Int64 cast should not fail"),
+        )),
+        DataType::List(inner) if *inner.data_type() == DataType::Utf8View => {
+            let target = DataType::List(Arc::new(Field::new(
+                inner.name(),
+                DataType::Utf8,
+                inner.is_nullable(),
+            )));
+            Some((
+                Field::new(field.name(), target.clone(), field.is_nullable()),
+                compute::cast(col, &target)
+                    .expect("List<Utf8View> -> List<Utf8> cast should not fail"),
+            ))
+        }
+        _ => None,
+    }
+}
+
+/// Column type fixup and dictionary encoding for ClickHouse insertion.
+/// Mutates the vector in place.
+/// - Normalizes types via [`normalize_batch_types`]
+/// - Dictionary-encodes `Utf8` columns named in `dict_columns` to
+///   `Dictionary<Int32, Utf8>` for smaller IPC payloads.
+pub fn prepare_batches(batches: &mut [RecordBatch], dict_columns: &HashSet<String>) {
+    normalize_batch_types(batches);
+
+    if dict_columns.is_empty() {
+        return;
+    }
+
+    let dict_type = DataType::Dictionary(Box::new(DataType::Int32), Box::new(DataType::Utf8));
+
+    for batch in batches.iter_mut() {
+        let schema = batch.schema();
+        let mut new_fields = Vec::with_capacity(schema.fields().len());
+        let mut new_columns: Vec<ArrayRef> = Vec::with_capacity(schema.fields().len());
+        let mut changed = false;
+
+        for (i, field) in schema.fields().iter().enumerate() {
+            let col = batch.column(i);
+
             if *field.data_type() == DataType::Utf8 && dict_columns.contains(field.name().as_str())
             {
                 new_fields.push(Field::new(
