@@ -2,16 +2,14 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::datatypes::Schema;
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
-use datafusion::physical_expr_adapter::BatchAdapterFactory;
 use datafusion::prelude::*;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
-use gkg_utils::arrow::{normalize_batch_types, prepare_batches, split_into_chunks};
+use gkg_utils::arrow::{prepare_batches, split_into_chunks};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, info_span, warn};
@@ -358,8 +356,6 @@ impl Pipeline {
             let use_presorted_split = group.len() > 1 && !sort_columns.is_empty();
 
             let chunks: Vec<Vec<RecordBatch>> = if use_presorted_split {
-                normalize_batch_types(&mut all_batches);
-
                 let sorted_batches = self
                     .sort_batches(
                         session,
@@ -483,57 +479,51 @@ impl Pipeline {
         batches: &[RecordBatch],
         sort_columns: &[String],
     ) -> Result<Vec<RecordBatch>, HandlerError> {
-        const SORT_TABLE: &str = "_presort_staging";
+        let mut table_names: Vec<String> = Vec::new();
+        let mut group_start = 0;
+        while group_start < batches.len() {
+            let group_schema = batches[group_start].schema();
+            let group_end = batches[group_start..]
+                .iter()
+                .position(|b| b.schema() != group_schema)
+                .map_or(batches.len(), |offset| group_start + offset);
 
-        let schemas: Vec<Schema> = batches
-            .iter()
-            .map(|b| b.schema().as_ref().clone())
-            .collect();
-        let merged_schema = Arc::new(Schema::try_merge(schemas).map_err(|err| {
-            HandlerError::Processing(format!(
-                "failed to merge schemas for {pipeline_name}/{destination_table}: {err}"
-            ))
-        })?);
-
-        let adapter_factory = BatchAdapterFactory::new(Arc::clone(&merged_schema));
-        let unified: Vec<RecordBatch> = batches
-            .iter()
-            .map(|batch| {
-                if batch.schema() == merged_schema {
-                    return batch.clone();
-                }
-                let adapter = adapter_factory
-                    .make_adapter(&batch.schema())
-                    .expect("adapter creation should not fail after successful schema merge");
-                adapter
-                    .adapt_batch(batch)
-                    .expect("batch adaptation should not fail after successful schema merge")
-            })
-            .collect();
-
-        let _ = session.deregister_table(SORT_TABLE);
-        let mem_table = MemTable::try_new(merged_schema, vec![unified]).map_err(|err| {
-            HandlerError::Processing(format!(
-                "failed to create sort staging table for {pipeline_name}/{destination_table}: {err}"
-            ))
-        })?;
-        session
-            .register_table(SORT_TABLE, Arc::new(mem_table))
-            .map_err(|err| {
+            let name = format!("_presort_{}", table_names.len());
+            let group = batches[group_start..group_end].to_vec();
+            let mem = MemTable::try_new(group_schema, vec![group]).map_err(|err| {
                 HandlerError::Processing(format!(
-                    "failed to register sort staging table for {pipeline_name}/{destination_table}: {err}"
+                    "failed to create staging table for {pipeline_name}/{destination_table}: {err}"
                 ))
             })?;
+            session
+                .register_table(&name, Arc::new(mem))
+                .map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to register staging table for {pipeline_name}/{destination_table}: {err}"
+                    ))
+                })?;
+            table_names.push(name);
+            group_start = group_end;
+        }
 
         let order_clause = sort_columns
             .iter()
             .map(|c| format!("\"{c}\""))
             .collect::<Vec<_>>()
             .join(", ");
-        let sort_sql = format!("SELECT * FROM {SORT_TABLE} ORDER BY {order_clause}");
+
+        let union_sql = if table_names.len() == 1 {
+            format!("SELECT * FROM {} ORDER BY {order_clause}", table_names[0])
+        } else {
+            let selects: Vec<String> = table_names
+                .iter()
+                .map(|name| format!("SELECT * FROM {name}"))
+                .collect();
+            format!("{} ORDER BY {order_clause}", selects.join(" UNION ALL "))
+        };
 
         let sorted = self
-            .execute_transform(session, &sort_sql)
+            .execute_transform(session, &union_sql)
             .await
             .map_err(|err| {
                 HandlerError::Processing(format!(
@@ -541,7 +531,9 @@ impl Pipeline {
                 ))
             })?;
 
-        let _ = session.deregister_table(SORT_TABLE);
+        for name in &table_names {
+            let _ = session.deregister_table(name);
+        }
         Ok(sorted)
     }
 
@@ -1076,5 +1068,78 @@ mod tests {
             .await;
 
         assert!(result.is_ok());
+    }
+
+    #[tokio::test]
+    async fn sort_batches_unifies_divergent_schemas() {
+        use arrow::array::{ListArray, NullArray};
+        use arrow::datatypes::DataType as DT;
+
+        let schema_a = Arc::new(Schema::new(vec![
+            ArrowField::new("sort_key", DT::Int64, false),
+            ArrowField::new("id", DT::Int64, false),
+            ArrowField::new(
+                "labels",
+                DT::List(Arc::new(ArrowField::new("item", DT::Utf8, true))),
+                true,
+            ),
+        ]));
+        let batch_a = RecordBatch::try_new(
+            schema_a,
+            vec![
+                Arc::new(Int64Array::from(vec![2])),
+                Arc::new(Int64Array::from(vec![100])),
+                Arc::new(ListArray::new(
+                    Arc::new(ArrowField::new("item", DT::Utf8, true)),
+                    arrow::buffer::OffsetBuffer::from_lengths([1]),
+                    Arc::new(StringArray::from(vec!["bug"])),
+                    None,
+                )),
+            ],
+        )
+        .unwrap();
+
+        // Batch B: nullable id, Null-typed list (all-null column from a
+        // transform that produced no labels)
+        let schema_b = Arc::new(Schema::new(vec![
+            ArrowField::new("sort_key", DT::Int64, true),
+            ArrowField::new("id", DT::Int64, true),
+            ArrowField::new("labels", DT::Null, true),
+        ]));
+        let batch_b = RecordBatch::try_new(
+            schema_b,
+            vec![
+                Arc::new(Int64Array::from(vec![1])),
+                Arc::new(Int64Array::from(vec![200])),
+                Arc::new(NullArray::new(1)),
+            ],
+        )
+        .unwrap();
+
+        let pipeline = Pipeline::new(
+            Arc::new(EmptyDatalake),
+            Arc::new(RecordingCheckpointStore::new()),
+            test_metrics(),
+            Default::default(),
+        );
+        let session = SessionContext::new();
+
+        let result = pipeline
+            .sort_batches(
+                &session,
+                "Test",
+                "gl_edge",
+                &[batch_a, batch_b],
+                &["sort_key".to_string()],
+            )
+            .await;
+
+        assert!(
+            result.is_ok(),
+            "sort_batches should handle divergent schemas: {result:?}"
+        );
+        let sorted = result.unwrap();
+        let total_rows: usize = sorted.iter().map(|b| b.num_rows()).sum();
+        assert_eq!(total_rows, 2);
     }
 }
