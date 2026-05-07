@@ -31,10 +31,10 @@ Orbit Local builds a **code-only** graph. It does not have access to SDLC data (
 
 Nodes in the local graph:
 
-- **File** — a source file in the repository
-- **Directory** — a directory in the repository
-- **Definition** — a function, class, module, or other named symbol
-- **ImportedSymbol** — a symbol imported from another file or package
+- **File** - a source file in the repository
+- **Directory** - a directory in the repository
+- **Definition** - a function, class, module, or other named symbol
+- **ImportedSymbol** - a symbol imported from another file or package
 
 Edges connect files to their definitions, files to their imports, and definitions to the symbols they reference across files.
 
@@ -43,7 +43,7 @@ Edges connect files to their definitions, files to their imports, and definition
 When you run `orbit query`:
 
 1. Orbit Local parses the JSON query payload.
-2. The query engine compiles the same JSON DSL as Orbit Remote — but targets DuckDB SQL instead of ClickHouse SQL.
+2. The query engine compiles the same JSON DSL as Orbit Remote, but targets DuckDB SQL instead of ClickHouse SQL.
 3. DuckDB executes the query against the local graph tables.
 4. Results are returned as typed JSON (or formatted text by default).
 
@@ -51,7 +51,7 @@ There is no authorization layer. All data in the graph is accessible to whoever 
 
 ## Storage
 
-The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple repositories share the same database — each repository is scoped by its project ID and branch in the manifest table.
+The graph is stored in a single DuckDB file at `~/.orbit/graph.duckdb`. Multiple repositories share the same database. Each repository is scoped by its project ID and branch in the manifest table.
 
 ## Supported languages
 

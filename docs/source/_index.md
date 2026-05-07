@@ -43,8 +43,8 @@ Query the graph to answer questions your instance cannot answer directly:
 ## Orbit Remote
 
 Orbit Remote runs as a managed service on GitLab infrastructure. Enable it on a top-level group
-and it automatically indexes your entire SDLC and code — groups, projects, users, merge requests,
-pipelines, vulnerabilities, and source code — into a managed ClickHouse graph.
+and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
+pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
 - **For:** GitLab.com Premium and Ultimate
 - **Indexes:** Full SDLC + code graph
@@ -82,7 +82,7 @@ extracts definitions and cross-file references, and writes the graph to a local 
 No GitLab instance or network connection required.
 
 - **For:** Any tier, self-managed, or offline use
-- **Indexes:** Code only — files, definitions, cross-file references
+- **Indexes:** Code only - files, definitions, cross-file references
 - **Storage:** DuckDB (local file at `~/.orbit/graph.duckdb`)
 - **Status:** Developer preview
 
@@ -96,7 +96,7 @@ flowchart LR
     DB --> Query[CLI query]
 ```
 
-Orbit Local indexes code only. SDLC data — merge requests, pipelines, work items — requires
+Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
 Orbit Remote.
 
 [Get started with Orbit Local](get_started.md#orbit-local)

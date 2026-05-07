@@ -20,9 +20,10 @@ supports the Model Context Protocol.
 
 ## Prerequisites
 
-- Orbit is [enabled on your group](../get_started.md).
-- You have a GitLab personal access token with `read_api` scope and access to the
-  groups you want to query.
+- Orbit is [enabled on your group](../getting-started.md).
+- You're authenticated to GitLab. Run `glab auth login` (uses OAuth by default;
+  personal access tokens with `read_api` scope also work).
+- Your auth has access to the groups you want to query.
 
 ## MCP tools
 
@@ -31,33 +32,51 @@ supports the Model Context Protocol.
 | `query_graph` | Execute a graph query using the Orbit query DSL. Returns typed results. |
 | `get_graph_schema` | Fetch the current schema: all node types, their properties, and relationship types. |
 
-## Configure Claude Code
+## Connect your MCP client
 
-Add the following to your Claude Code MCP configuration (`~/.claude/mcp_servers.json`
-or your project's `.claude/mcp_servers.json`):
+Run:
+
+```shell
+glab orbit setup
+```
+
+That's it. `glab` detects your AI agent, installs the Orbit skill, and writes the
+MCP server config. Authentication uses your existing `glab auth login` session -
+no token to copy or paste.
+
+Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI, Duo CLI. See
+the [glab orbit page](glab.md) for flags and overrides.
+
+If setup fails, run `glab auth status` to confirm you're authenticated, and check
+that Orbit is enabled on at least one of your groups.
+
+### Test it
+
+In your AI agent, ask:
+
+> "Use Orbit to list the 5 most recently updated projects in my group."
+
+You should get typed results back with project names and paths. If you do, you're
+connected.
+
+### Manual configuration
+
+For other clients, point them at `https://gitlab.com/api/v4/orbit/mcp`.
+
+Some clients only support local stdio MCP servers. For those,
+[`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
+as a local command:
 
 ```json
 {
   "mcpServers": {
     "gitlab-orbit": {
-      "command": "glab",
-      "args": ["mcp", "serve"],
-      "env": {
-        "GITLAB_TOKEN": "<your_personal_access_token>",
-        "GITLAB_HOST": "https://gitlab.com"
-      }
+      "command": "npx",
+      "args": ["mcp-remote", "https://gitlab.com/api/v4/orbit/mcp"]
     }
   }
 }
 ```
-
-The `glab` CLI must be installed and authenticated. See the
-[glab CLI documentation](https://docs.gitlab.com/cli/) for installation instructions.
-
-## Configure other MCP clients
-
-Any MCP client can connect to the Orbit MCP server by running `glab mcp serve`.
-The server exposes `query_graph` and `get_graph_schema` over the MCP protocol.
 
 ## Billing
 

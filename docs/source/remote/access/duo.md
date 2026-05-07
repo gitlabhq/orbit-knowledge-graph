@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data.
+description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data, across Duo Developer and the foundational agents.
 title: Use Orbit with Duo Agent Platform
 ---
 
@@ -14,27 +14,43 @@ title: Use Orbit with Duo Agent Platform
 
 {{< /details >}}
 
-The Orbit agent is available in GitLab Duo Agent Platform. Ask questions in natural language
-and Duo translates them to Orbit graph queries, executes them, and returns answers grounded
-in your live GitLab data.
+Orbit is integrated into GitLab Duo Agent Platform. Duo Developer and the foundational
+agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) directly when a
+question is best answered by traversing your SDLC graph - cross-project dependencies,
+blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When
+Orbit doesn't have the answer, the agent falls back to its existing tools.
 
 ## Prerequisites
 
-- Orbit is [enabled on your group](../get_started.md).
-- You have a GitLab Duo Developer seat.
+- Orbit is [enabled on your group](../getting-started.md).
+- You have access to Duo Agent Platform through one of:
+  - **Premium or Ultimate** subscription (includes monthly GitLab Credits: 12 per user on Premium, 24 per user on Ultimate)
+  - **Duo Pro or Duo Enterprise** seats with GitLab Credits for DAP usage
 
-## Access the Orbit agent
+## Where Orbit is available
 
-1. On the left sidebar, select **GitLab Duo**.
-1. Select the **Orbit** agent.
+Orbit is wired into the following Duo Agent Platform surfaces:
+
+| Surface | When to use it |
+|---------|----------------|
+| **Duo Developer Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
+| **Planner agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
+| **Security Analyst agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
+| **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
+| **CI Expert agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
+
+When an agent uses Orbit to answer a question, the response includes an inline
+indicator so you know the answer is grounded in your live graph rather than the
+agent's general knowledge.
 
 ## Billing
 
-Queries through Duo Agent Platform are **zero-rated**. They do not consume GitLab Credits.
+Queries that Duo Agent Platform makes against Orbit on your behalf are
+**zero-rated**. They do not consume GitLab Credits.
 
 ## Example prompts
 
-Use these as a starting point. The Orbit agent handles the query translation automatically.
+Ask these in any of the surfaces above - the agent picks the right tool.
 
 **Codebase exploration:**
 
@@ -68,8 +84,7 @@ Use these as a starting point. The Orbit agent handles the query translation aut
 
 ## Limitations
 
-- The Orbit agent answers questions about data in groups where Orbit is enabled.
-  It does not have access to groups you do not belong to.
-- Complex multi-step queries may require follow-up questions to narrow the scope.
+- Orbit only answers about groups where it is enabled and that you have access to.
+- Complex multi-step questions may need a follow-up to narrow scope.
 - Code content (file text, function bodies) is available but may not be returned
   by default for large results. Ask explicitly: "Show me the source of this function."

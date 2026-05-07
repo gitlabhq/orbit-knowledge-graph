@@ -14,7 +14,7 @@ title: Orbit Remote
 
 {{< /details >}}
 
-Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code — groups, projects, users, merge requests, pipelines, vulnerabilities, and source code — into a managed ClickHouse graph.
+Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
 - **For:** GitLab.com Premium and Ultimate
 - **Indexes:** Full SDLC + code graph

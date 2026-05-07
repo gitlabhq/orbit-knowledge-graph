@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Build a code graph for a local repository and query it with the orbit CLI.
+description: Pick an access method and build your first local Orbit graph.
 title: Get started with Orbit Local
 ---
 
@@ -15,54 +15,45 @@ title: Get started with Orbit Local
 {{< /details >}}
 
 > [!note]
-> Orbit Local is an early developer preview. It must be built from source and has
-> no UI, no MCP integration, and no daemon process yet.
+> Orbit Local is an early developer preview. Until packaged binaries ship,
+> you must build from source.
 
-## Prerequisites
+Orbit Local runs on your machine. Pick the access method that matches how you
+work, then run your first query.
 
-- [Rust toolchain](https://rustup.rs/) (stable)
-- [`mise`](https://mise.jdx.dev/) for tool management
-- A local Git repository to index
+## Pick an access method
 
-## Step 1: Build the CLI
+| Method | Best for | Setup |
+|---|---|---|
+| [orbit CLI](access/cli.md) | Direct CLI use, scripting, indexing tasks | Build the binary from source |
+| [glab CLI](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit setup` (pick "Local" when prompted) |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `glab orbit setup` or manual MCP config |
 
-```shell
-git clone https://gitlab.com/gitlab-org/orbit/knowledge-graph.git
-cd knowledge-graph
-mise install
-mise run build:cli
-```
+The query language is identical across all three. Whatever you learn in one
+transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
 
-The compiled binary is at `target/release/orbit`.
+## 60-second quickstart
 
-## Step 2: Build the graph
-
-```shell
-./target/release/orbit index --path /path/to/your/repo
-```
-
-Orbit parses the repository and writes a DuckDB graph to `~/.orbit/graph.db`.
-
-## Step 3: Query the graph
+Index a repository and inspect what Orbit found:
 
 ```shell
-./target/release/orbit query --query '{
-  "query_type": "search",
-  "node": {
-    "id": "d",
-    "entity": "Definition",
-    "columns": ["name", "kind", "file_path"],
-    "filters": { "kind": "function" }
-  },
-  "limit": 20
-}'
+glab orbit local index /path/to/your/repo
+glab orbit local schema
 ```
 
-The query language is identical to Orbit Remote. See [Query language reference](../queries/) for full syntax.
+That builds a local DuckDB graph at `~/.orbit/graph.duckdb` and prints the
+node types: `Definition`, `File`, `Directory`, `ImportedSymbol`.
+
+Next:
+
+- Run a real query: [Use Orbit Local with glab](access/glab.md).
+- Wire it into your AI agent: `glab orbit setup` and pick "Local" when
+  prompted. See [Connect via MCP](access/mcp.md).
+- Learn the query DSL: [Query language reference](../remote/queries/).
 
 ## What to try next
 
-- [What Orbit indexes](../indexing.md) — language and coverage scope
-- [Schema reference](../schema.md) — available node types and properties
-- [Cookbook](../cookbook.md) — copy-paste queries for common use cases
-- [Get started with Orbit Remote](../remote/getting_started.md) — query your full GitLab instance
+- [What Orbit Local indexes](indexing.md) - language and coverage scope.
+- [Schema reference](schema.md) - the four node types in the local graph.
+- [Cookbook](../remote/cookbook.md) - copy-paste queries (code-only ones apply to Local).
+- [Get started with Orbit Remote](../remote/getting-started.md) - query your full GitLab instance.

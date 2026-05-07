@@ -41,7 +41,15 @@ curl --header "Authorization: Bearer <your_token>" \
 
 ## Step 2: Run your first query
 
-**Duo Agent Platform (no setup required):**
+Orbit Remote exposes the same graph through three surfaces. Pick the one that matches who's querying:
+
+| Method | Best for | Setup | Billing |
+|---|---|---|---|
+| **Duo Agent Platform** | End users in the GitLab UI | None | Zero-rated |
+| **MCP** | Claude Code, Codex, other AI agents | One-time agent config | GitLab Credits |
+| **REST API** | Scripts, dashboards, custom tooling | API token | GitLab Credits |
+
+### Duo Agent Platform (no setup required)
 
 1. On the left sidebar, select **GitLab Duo**.
 1. Select **Orbit**.
@@ -49,12 +57,11 @@ curl --header "Authorization: Bearer <your_token>" \
 
 Duo queries are zero-rated and do not consume GitLab Credits.
 
-**MCP (Claude Code, Codex, other agents):**
+### MCP (Claude Code, Codex, other agents)
 
-See [Use Orbit via MCP](../access/mcp.md) for setup. Once configured, you have two tools:
-`query_graph` and `get_graph_schema`.
+See [Use Orbit via MCP](../access/mcp.md) for setup. Once configured, you have two tools: `query_graph` and `get_graph_schema`.
 
-**REST API:**
+### REST API
 
 ```shell
 curl --request POST \
@@ -74,7 +81,7 @@ curl --request POST \
 
 ## What to try next
 
-- [What Orbit indexes](../indexing.md) — understand coverage before writing queries
-- [Schema reference](../schema.md) — explore the 24 node types and their properties
-- [Cookbook](../cookbook.md) — copy-paste queries for common use cases
-- [Get started with Orbit Local](../local/getting_started.md) — query a local repository offline
+- [What Orbit indexes](../indexing.md) - understand coverage before writing queries
+- [Schema reference](../schema.md) - explore the 24 node types and their properties
+- [Cookbook](../cookbook.md) - copy-paste queries for common use cases
+- [Get started with Orbit Local](../local/getting_started.md) - query a local repository offline

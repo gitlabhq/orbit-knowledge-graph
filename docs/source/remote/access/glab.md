@@ -19,9 +19,9 @@ query Orbit from the command line.
 
 Two top-level commands:
 
-- **`glab orbit setup`** — one-command install of the Orbit skill and MCP config
+- **`glab orbit setup`** - one-command install of the Orbit skill and MCP config
   for your AI agent.
-- **`glab orbit remote`** — typed subcommands that call the Orbit Remote REST API.
+- **`glab orbit remote`** - typed subcommands that call the Orbit Remote REST API.
 
 ## Prerequisites
 
@@ -36,11 +36,13 @@ Two top-level commands:
 
 ## Set up your AI agent
 
-Run `glab orbit setup` to install the Orbit skill files and write the MCP config
-for your AI agent. The command auto-detects which agent you have installed.
+Run `glab orbit setup` to install the Orbit skill and write the MCP config.
+The command prompts you to pick **Local** or **Remote** and auto-detects
+your agent.
 
 ```shell
 glab orbit setup
+# Pick "Remote" when prompted to point the MCP config at the GitLab instance.
 ```
 
 Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI, Duo CLI.
@@ -94,8 +96,8 @@ echo '{"query":{"query_type":"search","node":{"id":"p","entity":"Project"},"limi
 
 The `--format` flag maps to the body's `response_format`:
 
-- `--format llm` — compact text optimized for AI agent consumption.
-- `--format raw` — structured JSON, suitable for piping to `jq`.
+- `--format llm` - compact text optimized for AI agent consumption.
+- `--format raw` - structured JSON, suitable for piping to `jq`.
 
 If `--format` is unset, the body's `response_format` wins, with `llm` as the
 final fallback.
