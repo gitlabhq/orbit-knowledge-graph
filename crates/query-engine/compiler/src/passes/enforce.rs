@@ -407,7 +407,12 @@ fn enforce_return_columns(
                         expr: tp_expr.clone(),
                         alias: Some(tp_col),
                     });
-                    ensure_in_group_by(q, input.query_type, tp_expr);
+                    // Do NOT add TP to GROUP BY. Unlike _gkg_*_id (functionally
+                    // dependent on the group key), traversal_path varies across
+                    // rows in the same group. Adding it would split aggregation
+                    // counts. ClickHouse allows non-GROUP-BY columns in SELECT
+                    // (takes an arbitrary value), which is fine — we just need
+                    // any TP from the group for hydration narrowing.
                 }
             }
         }
