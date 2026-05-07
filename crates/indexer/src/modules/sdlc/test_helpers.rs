@@ -64,6 +64,13 @@ impl CheckpointStore for MockCheckpointStore {
         Ok(None)
     }
 
+    async fn load_by_prefix(
+        &self,
+        _prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        Ok(vec![])
+    }
+
     async fn save_progress(
         &self,
         _key: &str,
@@ -77,6 +84,10 @@ impl CheckpointStore for MockCheckpointStore {
         _key: &str,
         _watermark: &chrono::DateTime<chrono::Utc>,
     ) -> Result<(), CheckpointError> {
+        Ok(())
+    }
+
+    async fn delete(&self, _key: &str) -> Result<(), CheckpointError> {
         Ok(())
     }
 }

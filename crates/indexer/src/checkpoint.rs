@@ -41,6 +41,11 @@ pub struct Checkpoint {
 pub trait CheckpointStore: Send + Sync {
     async fn load(&self, key: &str) -> Result<Option<Checkpoint>, CheckpointError>;
 
+    async fn load_by_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError>;
+
     async fn save_progress(
         &self,
         key: &str,
@@ -52,6 +57,8 @@ pub trait CheckpointStore: Send + Sync {
         key: &str,
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError>;
+
+    async fn delete(&self, key: &str) -> Result<(), CheckpointError>;
 }
 
 pub struct ClickHouseCheckpointStore {
@@ -150,6 +157,73 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         }))
     }
 
+    async fn load_by_prefix(
+        &self,
+        prefix: &str,
+    ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+        let table = prefixed_table_name(CHECKPOINT_TABLE, *SCHEMA_VERSION);
+        let batches = self
+            .client
+            .query(&format!(
+                "SELECT key, \
+                        argMax(watermark, _version) AS watermark, \
+                        argMax(cursor_values, _version) AS cursor_values \
+                 FROM {table} \
+                 WHERE startsWith(key, {{prefix:String}}) \
+                 GROUP BY key"
+            ))
+            .param("prefix", prefix)
+            .fetch_arrow()
+            .await
+            .map_err(|err| CheckpointError::Store(err.to_string()))?;
+
+        let mut results = Vec::new();
+
+        for batch in batches {
+            let keys: &StringArray = ArrowUtils::get_column_by_index(&batch, 0)
+                .ok_or_else(|| CheckpointError::Store("invalid key type".to_string()))?;
+            let timestamps: &TimestampMicrosecondArray = ArrowUtils::get_column_by_index(&batch, 1)
+                .ok_or_else(|| CheckpointError::Store("invalid watermark type".to_string()))?;
+            let cursor_strings: Option<&StringArray> = ArrowUtils::get_column_by_index(&batch, 2);
+
+            for row in 0..batch.num_rows() {
+                if timestamps.is_null(row) {
+                    continue;
+                }
+                let micros = timestamps.value(row);
+                if micros == 0 {
+                    continue;
+                }
+                let watermark = Utc
+                    .timestamp_micros(micros)
+                    .single()
+                    .ok_or_else(|| CheckpointError::Store("invalid timestamp".to_string()))?;
+
+                let cursor_values: Option<Vec<String>> = cursor_strings
+                    .and_then(|arr| {
+                        if arr.is_null(row) || arr.value(row).is_empty() {
+                            None
+                        } else {
+                            Some(arr.value(row).to_string())
+                        }
+                    })
+                    .map(|json| serde_json::from_str(&json))
+                    .transpose()
+                    .map_err(|err| CheckpointError::Store(err.to_string()))?;
+
+                results.push((
+                    keys.value(row).to_string(),
+                    Checkpoint {
+                        watermark,
+                        cursor_values,
+                    },
+                ));
+            }
+        }
+
+        Ok(results)
+    }
+
     async fn save_progress(
         &self,
         key: &str,
@@ -165,6 +239,10 @@ impl CheckpointStore for ClickHouseCheckpointStore {
         watermark: &DateTime<Utc>,
     ) -> Result<(), CheckpointError> {
         self.upsert(key, watermark, &None).await
+    }
+
+    async fn delete(&self, key: &str) -> Result<(), CheckpointError> {
+        self.upsert(key, &DateTime::<Utc>::UNIX_EPOCH, &None).await
     }
 }
 
@@ -198,5 +276,26 @@ mod tests {
 
         assert_eq!(deserialized, checkpoint);
         assert_eq!(deserialized.cursor_values.unwrap(), vec!["1/2/", "42"]);
+    }
+
+    #[test]
+    fn namespace_position_key_format() {
+        assert_eq!(namespace_position_key(42), "ns.42");
+        assert_eq!(namespace_position_key(100), "ns.100");
+    }
+
+    #[test]
+    fn checkpoint_is_completed_when_cursor_values_is_none() {
+        let completed = Checkpoint {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            cursor_values: None,
+        };
+        assert!(completed.cursor_values.is_none());
+
+        let in_progress = Checkpoint {
+            watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
+            cursor_values: Some(vec!["42".to_string()]),
+        };
+        assert!(in_progress.cursor_values.is_some());
     }
 }

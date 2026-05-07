@@ -88,6 +88,7 @@ schedule:
       cron: "0 */1 * * * *"           # every minute
     namespace:
       cron: "0 */1 * * * *"           # every minute
+      backfill_partitions: 4
     code-indexing-task:
       cron: "0 */1 * * * *"           # every minute
     namespace-code-backfill:

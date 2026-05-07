@@ -216,6 +216,17 @@ mod tests {
         ) -> Result<(), CheckpointError> {
             Ok(())
         }
+
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(vec![])
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), CheckpointError> {
+            Ok(())
+        }
     }
 
     fn scheduler_with_store(store: Arc<dyn NamespaceDeletionStore>) -> NamespaceDeletionScheduler {

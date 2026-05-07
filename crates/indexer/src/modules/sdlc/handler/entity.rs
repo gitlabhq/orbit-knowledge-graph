@@ -75,6 +75,7 @@ impl Handler for EntityIndexingHandler {
             (Some(_), Some(ns)) => namespace_position_key(ns),
             _ => "global".to_string(),
         };
+        let checkpoint_suffix = payload.range_index.map(|idx| format!("r.{idx}"));
 
         if let Some(traversal_path) = &payload.traversal_path {
             info!(
@@ -99,6 +100,7 @@ impl Handler for EntityIndexingHandler {
             watermark: payload.watermark,
             position_key,
             base_conditions,
+            checkpoint_suffix,
         };
 
         let result = self
@@ -177,7 +179,9 @@ mod tests {
             "namespace": null,
             "traversal_path": null,
             "range": null,
-            "watermark": "2024-01-21T00:00:00Z"
+            "watermark": "2024-01-21T00:00:00Z",
+            "range_index": null,
+            "range_count": null
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
@@ -220,7 +224,9 @@ mod tests {
             "namespace": 42,
             "traversal_path": "1/42/",
             "range": null,
-            "watermark": "2024-01-21T00:00:00Z"
+            "watermark": "2024-01-21T00:00:00Z",
+            "range_index": null,
+            "range_count": null
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);
@@ -263,7 +269,9 @@ mod tests {
             "namespace": null,
             "traversal_path": null,
             "range": null,
-            "watermark": "2024-01-21T00:00:00Z"
+            "watermark": "2024-01-21T00:00:00Z",
+            "range_index": null,
+            "range_count": null
         })
         .to_string();
         let envelope = TestEnvelopeFactory::simple(&payload);

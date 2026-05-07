@@ -295,16 +295,52 @@ pub struct HandlersConfiguration {
 
 // ── Dispatcher / scheduler config types ──────────────────────────────
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+fn default_backfill_partitions() -> u32 {
+    4
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct GlobalDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default)]
+    pub backfill_entities: Vec<String>,
+
+    #[serde(default = "default_backfill_partitions")]
+    pub backfill_partitions: u32,
 }
 
-#[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
+impl Default for GlobalDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration::default(),
+            backfill_entities: Vec::new(),
+            backfill_partitions: default_backfill_partitions(),
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDispatcherConfig {
     #[serde(flatten)]
     pub schedule: ScheduleConfiguration,
+
+    #[serde(default)]
+    pub backfill_entities: Vec<String>,
+
+    #[serde(default = "default_backfill_partitions")]
+    pub backfill_partitions: u32,
+}
+
+impl Default for NamespaceDispatcherConfig {
+    fn default() -> Self {
+        Self {
+            schedule: ScheduleConfiguration::default(),
+            backfill_entities: Vec::new(),
+            backfill_partitions: default_backfill_partitions(),
+        }
+    }
 }
 
 fn default_events_stream_name() -> String {

@@ -70,6 +70,10 @@ pub struct EntityIndexingRequest {
     pub traversal_path: Option<String>,
     pub range: Option<CursorRange>,
     pub watermark: DateTime<Utc>,
+    #[serde(default)]
+    pub range_index: Option<u32>,
+    #[serde(default)]
+    pub range_count: Option<u32>,
 }
 
 impl EntityIndexingRequest {

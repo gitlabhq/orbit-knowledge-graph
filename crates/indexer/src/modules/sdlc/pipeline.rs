@@ -33,6 +33,9 @@ pub(in crate::modules::sdlc) struct PipelineContext {
     pub watermark: DateTime<Utc>,
     pub position_key: String,
     pub base_conditions: BTreeMap<String, String>,
+    /// Optional suffix appended after the plan name in checkpoint keys.
+    /// Used for range-based backfill: `{position_key}.{plan}.r.{idx}`.
+    pub checkpoint_suffix: Option<String>,
 }
 
 pub(in crate::modules::sdlc) struct Pipeline {
@@ -118,7 +121,10 @@ impl Pipeline {
         let started_at = Instant::now();
         let mut extract_query = plan.extract_query.clone();
 
-        let position_key = format!("{}.{}", context.position_key, plan.name);
+        let position_key = match &context.checkpoint_suffix {
+            Some(suffix) => format!("{}.{}.{suffix}", context.position_key, plan.name),
+            None => format!("{}.{}", context.position_key, plan.name),
+        };
         let checkpoint = self.load_checkpoint(&position_key).await;
         let params = self.build_query_params(&checkpoint.watermark, context);
 
@@ -540,6 +546,7 @@ mod tests {
             watermark: "2024-06-15T12:00:00Z".parse().unwrap(),
             position_key: "test".to_string(),
             base_conditions: BTreeMap::new(),
+            checkpoint_suffix: None,
         }
     }
 
@@ -657,6 +664,17 @@ mod tests {
                 watermark: *watermark,
                 cursor_values: None,
             });
+            Ok(())
+        }
+
+        async fn load_by_prefix(
+            &self,
+            _prefix: &str,
+        ) -> Result<Vec<(String, Checkpoint)>, CheckpointError> {
+            Ok(vec![])
+        }
+
+        async fn delete(&self, _key: &str) -> Result<(), CheckpointError> {
             Ok(())
         }
     }

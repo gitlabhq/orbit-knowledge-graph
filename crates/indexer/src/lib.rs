@@ -68,7 +68,7 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher, entity_names_by_scope};
+use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher, entity_info_by_scope};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -229,11 +229,16 @@ pub async fn run_dispatcher(
         gitlab_client: None,
     };
 
-    let (global_entities, namespaced_entities) = entity_names_by_scope(ontology);
+    let (global_entities, namespaced_entities) = entity_info_by_scope(ontology);
+    let global_names: Vec<String> = global_entities.iter().map(|e| e.name.clone()).collect();
+
+    let dispatch_checkpoint_store: Arc<dyn checkpoint::CheckpointStore> = Arc::new(
+        checkpoint::ClickHouseCheckpointStore::new(Arc::new(config.graph.build_client())),
+    );
 
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
-            global_entities,
+            global_names,
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
@@ -242,6 +247,7 @@ pub async fn run_dispatcher(
             namespaced_entities,
             services.nats.clone(),
             datalake,
+            dispatch_checkpoint_store,
             metrics.clone(),
             config.schedule.tasks.namespace.clone(),
         )),

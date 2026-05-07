@@ -71,6 +71,8 @@ impl GlobalDispatcher {
                 traversal_path: None,
                 range: None,
                 watermark,
+                range_index: None,
+                range_count: None,
             };
 
             let subscription = request.publish_subscription();
