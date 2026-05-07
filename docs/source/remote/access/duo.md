@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Orbit is a foundational agent in GitLab Duo Agent Platform. Invoke Orbit directly to query your SDLC graph, or let other DAP agents call Orbit's graph tools to ground their answers in your live GitLab data.
+description: Use Orbit through GitLab Duo Agent Platform. Agents call Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Agent, the CI Agent, and the Duo Developer Flow.
 title: Use Orbit with GitLab Duo Agent Platform
 ---
 
@@ -25,26 +25,24 @@ title: Use Orbit with GitLab Duo Agent Platform
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit is itself a foundational agent in GitLab Duo Agent Platform. Pick **Orbit** from the agent picker in the GitLab UI to query your SDLC graph directly with natural language - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns.
-
-Other DAP agents also call Orbit's graph tools (`get_graph_schema`, `query_graph`) automatically when a question is best answered by graph traversal. When Orbit doesn't have the answer, the agent falls back to its existing tools.
+Orbit is integrated into GitLab Duo Agent Platform. DAP agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) automatically when a question is best answered by traversing your SDLC graph - cross-project dependencies, blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When Orbit doesn't have the answer, the agent falls back to its existing tools.
 
 ## Prerequisites
 
 - Orbit is [enabled on your group](../getting-started.md). Orbit requires GitLab.com Premium or Ultimate.
 - You have access to GitLab Duo Agent Platform. See [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/) for how to access it through your subscription or GitLab Credits.
 
-## Other agents that call Orbit
+## Where Orbit is available
 
-| Agent | When to use it |
-|-------|----------------|
-| **GitLab Duo** | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
-| **Duo Developer** | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
-| **GitLab Duo CLI** | Terminal-based, editor-agnostic, scriptable. Ask Orbit directly for graph context in headless and CI workflows. |
-| **Planner agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
-| **Security Analyst agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
-| **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
-| **CI Expert agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
+Orbit is wired into the following GitLab Duo Agent Platform agents and flows:
+
+| Agent or flow | When to use it |
+|---|---|
+| **GitLab Duo Agent** | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
+| **Planner Agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
+| **Security Agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
+| **CI Agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
+| **Duo Developer Flow** | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
 
 When an agent uses Orbit to answer a question, the answer is grounded in your
 live graph rather than the agent's general knowledge.
