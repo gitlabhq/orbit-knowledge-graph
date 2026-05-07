@@ -6,39 +6,38 @@ use labkit_events::BillingEvent;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 use serde_json::json;
 
-use crate::auth::Claims;
+use crate::constants::{CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, normalize_realm};
+use crate::inputs::BillingInputs;
+use crate::tracker::BillingTracker;
 
-use super::constants::{CATEGORY, EVENT_TYPE, UNIT_OF_MEASURE, normalize_realm};
-use super::tracker::BillingTracker;
-
-pub(crate) struct BillingObserver {
+pub struct BillingObserver {
     tracker: Option<Arc<dyn BillingTracker>>,
-    claims: Claims,
+    inputs: BillingInputs,
     query_type: &'static str,
     errored: Cell<bool>,
 }
 
 impl BillingObserver {
-    pub(crate) fn new(tracker: Option<Arc<dyn BillingTracker>>, claims: Claims) -> Self {
+    pub fn new(tracker: Option<Arc<dyn BillingTracker>>, inputs: BillingInputs) -> Self {
         Self {
             tracker,
-            claims,
+            inputs,
             query_type: "unknown",
             errored: Cell::new(false),
         }
     }
 
     fn build_event(&self) -> Option<BillingEvent> {
-        let Some(raw_realm) = self.claims.realm.as_deref() else {
+        let Some(raw_realm) = self.inputs.realm.as_deref() else {
             tracing::warn!(
-                user_id = self.claims.user_id,
+                user_id = self.inputs.user_id,
                 "billing event skipped: realm missing from JWT claims"
             );
             return None;
         };
         let Some(realm) = normalize_realm(raw_realm) else {
             tracing::warn!(
-                user_id = self.claims.user_id,
+                user_id = self.inputs.user_id,
                 raw_realm = raw_realm,
                 "billing event skipped: unrecognized realm value"
             );
@@ -47,41 +46,41 @@ impl BillingObserver {
 
         let mut builder = BillingEvent::builder(CATEGORY, EVENT_TYPE, realm, UNIT_OF_MEASURE, 1.0);
 
-        if let Some(org_id) = self.claims.organization_id {
-            builder = builder.organization_id(org_id as i64);
+        if let Some(org_id) = self.inputs.organization_id {
+            builder = builder.organization_id(org_id);
         }
 
-        builder = builder.subject(self.claims.user_id.to_string());
+        builder = builder.subject(self.inputs.user_id.to_string());
 
         if let Some(ref id) = labkit::correlation::current() {
             builder = builder.correlation_id(id.as_str());
         }
 
-        if let Some(ref id) = self.claims.instance_id {
+        if let Some(ref id) = self.inputs.instance_id {
             builder = builder.instance_id(id.as_str());
         }
-        if let Some(ref id) = self.claims.unique_instance_id {
+        if let Some(ref id) = self.inputs.unique_instance_id {
             builder = builder.unique_instance_id(id.as_str());
         }
-        if let Some(ref v) = self.claims.instance_version {
+        if let Some(ref v) = self.inputs.instance_version {
             builder = builder.instance_version(v.as_str());
         }
-        if let Some(ref id) = self.claims.global_user_id {
+        if let Some(ref id) = self.inputs.global_user_id {
             builder = builder.global_user_id(id.as_str());
         }
-        if let Some(ref h) = self.claims.host_name {
+        if let Some(ref h) = self.inputs.host_name {
             builder = builder.host_name(h.as_str());
         }
-        if let Some(ns_id) = self.claims.root_namespace_id {
+        if let Some(ns_id) = self.inputs.root_namespace_id {
             builder = builder.root_namespace_id(ns_id);
         }
-        if let Some(ref dt) = self.claims.deployment_type {
+        if let Some(ref dt) = self.inputs.deployment_type {
             builder = builder.deployment_type(dt.as_str());
         }
 
         builder = builder.metadata(json!({
             "query_type": self.query_type,
-            "feature_qualified_name": format!("orbit-{}", self.claims.source_type),
+            "feature_qualified_name": format!("orbit-{}", self.inputs.source_type),
         }));
 
         match builder.build() {
@@ -132,23 +131,13 @@ mod tests {
     use query_engine::pipeline::{PipelineError, PipelineObserver};
 
     use super::*;
-    use crate::billing::tracker::InMemoryBillingTracker;
+    use crate::tracker::InMemoryBillingTracker;
 
-    fn test_claims() -> Claims {
-        Claims {
-            sub: "u:123".into(),
-            iss: "gitlab".into(),
-            aud: "gitlab-knowledge-graph".into(),
-            iat: 0,
-            exp: i64::MAX,
+    fn test_inputs() -> BillingInputs {
+        BillingInputs {
             user_id: 123,
-            username: "testuser".into(),
-            admin: false,
-            organization_id: Some(42),
-            min_access_level: None,
-            group_traversal_ids: vec![],
             source_type: "mcp".into(),
-            ai_session_id: None,
+            organization_id: Some(42),
             instance_id: Some("inst-abc".into()),
             unique_instance_id: Some("uid-abc".into()),
             instance_version: Some("18.0.0".into()),
@@ -163,7 +152,7 @@ mod tests {
     #[test]
     fn billing_observer_emits_on_finish() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let mut obs = BillingObserver::new(Some(tracker.clone()), test_claims());
+        let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.finish(42, 3);
 
@@ -173,7 +162,7 @@ mod tests {
     #[test]
     fn billing_observer_skips_on_error() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let mut obs = BillingObserver::new(Some(tracker.clone()), test_claims());
+        let mut obs = BillingObserver::new(Some(tracker.clone()), test_inputs());
         obs.set_query_type("traversal");
         obs.record_error(&PipelineError::Execution("test error".into()));
         obs.finish(42, 3);
@@ -184,11 +173,11 @@ mod tests {
     #[test]
     fn billing_observer_emits_with_lowercase_realm_alias() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let claims = Claims {
+        let inputs = BillingInputs {
             realm: Some("saas".into()),
-            ..test_claims()
+            ..test_inputs()
         };
-        let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
         obs.set_query_type("traversal");
         obs.finish(1, 0);
 
@@ -198,11 +187,11 @@ mod tests {
     #[test]
     fn billing_observer_emits_with_self_managed_realm_alias() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let claims = Claims {
+        let inputs = BillingInputs {
             realm: Some("self-managed".into()),
-            ..test_claims()
+            ..test_inputs()
         };
-        let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
         obs.set_query_type("traversal");
         obs.finish(1, 0);
 
@@ -212,11 +201,11 @@ mod tests {
     #[test]
     fn billing_observer_skips_when_realm_absent() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let claims = Claims {
+        let inputs = BillingInputs {
             realm: None,
-            ..test_claims()
+            ..test_inputs()
         };
-        let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
         obs.set_query_type("traversal");
         obs.finish(1, 0);
 
@@ -226,11 +215,11 @@ mod tests {
     #[test]
     fn billing_observer_skips_when_realm_unrecognized() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let claims = Claims {
+        let inputs = BillingInputs {
             realm: Some("bogus".into()),
-            ..test_claims()
+            ..test_inputs()
         };
-        let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
         obs.set_query_type("traversal");
         obs.finish(1, 0);
 
@@ -240,7 +229,7 @@ mod tests {
     #[test]
     fn billing_observer_emits_when_optional_fields_absent() {
         let tracker = Arc::new(InMemoryBillingTracker::new());
-        let claims = Claims {
+        let inputs = BillingInputs {
             organization_id: None,
             instance_id: None,
             unique_instance_id: None,
@@ -249,9 +238,9 @@ mod tests {
             host_name: None,
             root_namespace_id: None,
             deployment_type: None,
-            ..test_claims()
+            ..test_inputs()
         };
-        let mut obs = BillingObserver::new(Some(tracker.clone()), claims);
+        let mut obs = BillingObserver::new(Some(tracker.clone()), inputs);
         obs.set_query_type("traversal");
         obs.finish(1, 0);
 
@@ -262,7 +251,7 @@ mod tests {
     // No assertion — the observable behaviour is that finish() silently skips.
     #[test]
     fn billing_observer_skips_when_tracker_none() {
-        let mut obs = BillingObserver::new(None, test_claims());
+        let mut obs = BillingObserver::new(None, test_inputs());
         obs.set_query_type("traversal");
         obs.finish(1, 0);
     }
