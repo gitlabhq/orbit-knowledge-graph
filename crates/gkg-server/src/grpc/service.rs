@@ -167,14 +167,16 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
         tracing::Span::current().record("source_type", &claims.source_type);
         record_ai_session_id(&claims.ai_session_id);
 
-        let requested = &request.get_ref().command_names;
+        let req = request.get_ref();
+        let requested = &req.command_names;
         info!(
             command_count = requested.len(),
+            format = ?req.format,
             "Listing agent commands for user"
         );
 
         let all_commands = V2CommandRegistry::get_all_commands(&self.ontology);
-        let commands = if requested.is_empty() {
+        let commands: Vec<_> = if requested.is_empty() {
             all_commands
         } else {
             let known: BTreeSet<&str> = all_commands
@@ -197,12 +199,21 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
                 .into_iter()
                 .filter(|command| requested.contains(&command.name))
                 .collect()
-        }
-        .into_iter()
-        .map(proto_tool_definition)
-        .collect();
+        };
 
-        Ok(Response::new(ListAgentCommandsResponse { commands }))
+        let formatted_text = if req.format == ResponseFormat::Llm as i32 {
+            ToolService::build_command_catalog_toon(&commands)
+                .map_err(|e| Status::internal(e.to_string()))?
+        } else {
+            String::new()
+        };
+
+        let commands = commands.into_iter().map(proto_tool_definition).collect();
+
+        Ok(Response::new(ListAgentCommandsResponse {
+            commands,
+            formatted_text,
+        }))
     }
 
     #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
@@ -739,6 +750,7 @@ mod tests {
         let response = service
             .list_agent_commands(authed_request(ListAgentCommandsRequest {
                 command_names: vec!["get_query_dsl".into()],
+                format: ResponseFormat::Raw as i32,
             }))
             .await
             .unwrap()
@@ -755,6 +767,7 @@ mod tests {
         let response = service
             .list_agent_commands(authed_request(ListAgentCommandsRequest {
                 command_names: vec![],
+                format: ResponseFormat::Raw as i32,
             }))
             .await
             .unwrap()
@@ -772,11 +785,30 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn list_agent_commands_returns_toon_for_llm_format() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["get_query_dsl".into()],
+                format: ResponseFormat::Llm as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.commands.len(), 1);
+        assert!(response.formatted_text.contains("commands[1]"));
+        assert!(response.formatted_text.contains("name: get_query_dsl"));
+        assert!(response.formatted_text.contains("input_schema"));
+    }
+
+    #[tokio::test]
     async fn list_agent_commands_rejects_unknown_command() {
         let service = test_service();
         let status = service
             .list_agent_commands(authed_request(ListAgentCommandsRequest {
                 command_names: vec!["typo".into()],
+                format: ResponseFormat::Raw as i32,
             }))
             .await
             .unwrap_err();

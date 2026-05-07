@@ -2104,6 +2104,7 @@ func (x *ToolDefinition) GetParametersJsonSchema() string {
 type ListAgentCommandsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	CommandNames  []string               `protobuf:"bytes,1,rep,name=command_names,json=commandNames,proto3" json:"command_names,omitempty"` // empty means list every command
+	Format        ResponseFormat         `protobuf:"varint,2,opt,name=format,proto3,enum=gkg.v1.ResponseFormat" json:"format,omitempty"`     // RAW: command definitions; LLM: TOON command catalog
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2145,9 +2146,17 @@ func (x *ListAgentCommandsRequest) GetCommandNames() []string {
 	return nil
 }
 
+func (x *ListAgentCommandsRequest) GetFormat() ResponseFormat {
+	if x != nil {
+		return x.Format
+	}
+	return ResponseFormat_RESPONSE_FORMAT_RAW
+}
+
 type ListAgentCommandsResponse struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Commands      []*ToolDefinition      `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	FormattedText string                 `protobuf:"bytes,2,opt,name=formatted_text,json=formattedText,proto3" json:"formatted_text,omitempty"` // format = LLM: TOON command catalog
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2187,6 +2196,13 @@ func (x *ListAgentCommandsResponse) GetCommands() []*ToolDefinition {
 		return x.Commands
 	}
 	return nil
+}
+
+func (x *ListAgentCommandsResponse) GetFormattedText() string {
+	if x != nil {
+		return x.FormattedText
+	}
+	return ""
 }
 
 type InvokeAgentCommandRequest struct {
@@ -3214,11 +3230,13 @@ const file_gkg_proto_rawDesc = "" +
 	"\x0eToolDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x124\n" +
-	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"?\n" +
+	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"o\n" +
 	"\x18ListAgentCommandsRequest\x12#\n" +
-	"\rcommand_names\x18\x01 \x03(\tR\fcommandNames\"O\n" +
+	"\rcommand_names\x18\x01 \x03(\tR\fcommandNames\x12.\n" +
+	"\x06format\x18\x02 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"v\n" +
 	"\x19ListAgentCommandsResponse\x122\n" +
-	"\bcommands\x18\x01 \x03(\v2\x16.gkg.v1.ToolDefinitionR\bcommands\"g\n" +
+	"\bcommands\x18\x01 \x03(\v2\x16.gkg.v1.ToolDefinitionR\bcommands\x12%\n" +
+	"\x0eformatted_text\x18\x02 \x01(\tR\rformattedText\"g\n" +
 	"\x19InvokeAgentCommandRequest\x12!\n" +
 	"\fcommand_name\x18\x01 \x01(\tR\vcommandName\x12'\n" +
 	"\x0fparameters_json\x18\x02 \x01(\tR\x0eparametersJson\"s\n" +
@@ -3418,45 +3436,46 @@ var file_gkg_proto_depIdxs = []int32{
 	29, // 22: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
 	49, // 23: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
 	32, // 24: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
-	32, // 25: gkg.v1.ListAgentCommandsResponse.commands:type_name -> gkg.v1.ToolDefinition
-	0,  // 26: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
-	39, // 27: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
-	3,  // 28: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
-	40, // 29: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
-	3,  // 30: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
-	41, // 31: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
-	50, // 32: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
-	4,  // 33: gkg.v1.GetGraphStatusRequest.source_type:type_name -> gkg.v1.SourceType
-	0,  // 34: gkg.v1.GetGraphStatusRequest.format:type_name -> gkg.v1.ResponseFormat
-	5,  // 35: gkg.v1.IndexingStatus.state:type_name -> gkg.v1.IndexingState
-	45, // 36: gkg.v1.GetGraphStatusResponse.structured:type_name -> gkg.v1.StructuredGraphStatus
-	46, // 37: gkg.v1.StructuredGraphStatus.projects:type_name -> gkg.v1.ProjectsStatus
-	47, // 38: gkg.v1.StructuredGraphStatus.domains:type_name -> gkg.v1.GraphStatusDomain
-	43, // 39: gkg.v1.StructuredGraphStatus.indexing:type_name -> gkg.v1.IndexingStatus
-	48, // 40: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
-	30, // 41: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
-	33, // 42: gkg.v1.KnowledgeGraphService.ListAgentCommands:input_type -> gkg.v1.ListAgentCommandsRequest
-	35, // 43: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:input_type -> gkg.v1.InvokeAgentCommandRequest
-	6,  // 44: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
-	11, // 45: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
-	20, // 46: gkg.v1.KnowledgeGraphService.GetQueryDsl:input_type -> gkg.v1.GetQueryDslRequest
-	22, // 47: gkg.v1.KnowledgeGraphService.GetResponseFormat:input_type -> gkg.v1.GetResponseFormatRequest
-	37, // 48: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	42, // 49: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
-	31, // 50: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
-	34, // 51: gkg.v1.KnowledgeGraphService.ListAgentCommands:output_type -> gkg.v1.ListAgentCommandsResponse
-	36, // 52: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:output_type -> gkg.v1.InvokeAgentCommandResponse
-	6,  // 53: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
-	12, // 54: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
-	21, // 55: gkg.v1.KnowledgeGraphService.GetQueryDsl:output_type -> gkg.v1.GetQueryDslResponse
-	23, // 56: gkg.v1.KnowledgeGraphService.GetResponseFormat:output_type -> gkg.v1.GetResponseFormatResponse
-	38, // 57: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	44, // 58: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
-	50, // [50:59] is the sub-list for method output_type
-	41, // [41:50] is the sub-list for method input_type
-	41, // [41:41] is the sub-list for extension type_name
-	41, // [41:41] is the sub-list for extension extendee
-	0,  // [0:41] is the sub-list for field type_name
+	0,  // 25: gkg.v1.ListAgentCommandsRequest.format:type_name -> gkg.v1.ResponseFormat
+	32, // 26: gkg.v1.ListAgentCommandsResponse.commands:type_name -> gkg.v1.ToolDefinition
+	0,  // 27: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
+	39, // 28: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
+	3,  // 29: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
+	40, // 30: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
+	3,  // 31: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
+	41, // 32: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
+	50, // 33: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
+	4,  // 34: gkg.v1.GetGraphStatusRequest.source_type:type_name -> gkg.v1.SourceType
+	0,  // 35: gkg.v1.GetGraphStatusRequest.format:type_name -> gkg.v1.ResponseFormat
+	5,  // 36: gkg.v1.IndexingStatus.state:type_name -> gkg.v1.IndexingState
+	45, // 37: gkg.v1.GetGraphStatusResponse.structured:type_name -> gkg.v1.StructuredGraphStatus
+	46, // 38: gkg.v1.StructuredGraphStatus.projects:type_name -> gkg.v1.ProjectsStatus
+	47, // 39: gkg.v1.StructuredGraphStatus.domains:type_name -> gkg.v1.GraphStatusDomain
+	43, // 40: gkg.v1.StructuredGraphStatus.indexing:type_name -> gkg.v1.IndexingStatus
+	48, // 41: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
+	30, // 42: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
+	33, // 43: gkg.v1.KnowledgeGraphService.ListAgentCommands:input_type -> gkg.v1.ListAgentCommandsRequest
+	35, // 44: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:input_type -> gkg.v1.InvokeAgentCommandRequest
+	6,  // 45: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
+	11, // 46: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
+	20, // 47: gkg.v1.KnowledgeGraphService.GetQueryDsl:input_type -> gkg.v1.GetQueryDslRequest
+	22, // 48: gkg.v1.KnowledgeGraphService.GetResponseFormat:input_type -> gkg.v1.GetResponseFormatRequest
+	37, // 49: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
+	42, // 50: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
+	31, // 51: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
+	34, // 52: gkg.v1.KnowledgeGraphService.ListAgentCommands:output_type -> gkg.v1.ListAgentCommandsResponse
+	36, // 53: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:output_type -> gkg.v1.InvokeAgentCommandResponse
+	6,  // 54: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
+	12, // 55: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
+	21, // 56: gkg.v1.KnowledgeGraphService.GetQueryDsl:output_type -> gkg.v1.GetQueryDslResponse
+	23, // 57: gkg.v1.KnowledgeGraphService.GetResponseFormat:output_type -> gkg.v1.GetResponseFormatResponse
+	38, // 58: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
+	44, // 59: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
+	51, // [51:60] is the sub-list for method output_type
+	42, // [42:51] is the sub-list for method input_type
+	42, // [42:42] is the sub-list for extension type_name
+	42, // [42:42] is the sub-list for extension extendee
+	0,  // [0:42] is the sub-list for field type_name
 }
 
 func init() { file_gkg_proto_init() }

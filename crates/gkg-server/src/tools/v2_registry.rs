@@ -24,7 +24,8 @@ impl V2ToolRegistry {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command_names": params::command_names()
+                    "command_names": params::command_names(),
+                    "format": params::format()
                 },
                 "additionalProperties": false
             }),

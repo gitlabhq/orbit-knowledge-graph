@@ -158,7 +158,8 @@ impl ToolRegistry {
             parameters: json!({
                 "type": "object",
                 "properties": {
-                    "command_names": params::command_names()
+                    "command_names": params::command_names(),
+                    "format": params::format()
                 },
                 "additionalProperties": false
             }),
@@ -373,7 +374,7 @@ mod tests {
     #[test]
     fn all_tools_have_format_parameter() {
         for tool in &all_tools() {
-            if ["list_commands", "invoke_command"].contains(&tool.name.as_str()) {
+            if tool.name == "invoke_command" {
                 continue;
             }
 
@@ -464,6 +465,19 @@ mod tests {
         let tool = find_tool("list_commands");
         let command_names = &tool.parameters["properties"]["command_names"];
         assert_eq!(command_names["type"], "array");
+    }
+
+    #[test]
+    fn list_commands_accepts_optional_format() {
+        for tool in all_tools()
+            .into_iter()
+            .chain(all_v2_tools())
+            .filter(|tool| tool.name == "list_commands")
+        {
+            let format = &tool.parameters["properties"]["format"];
+            assert_eq!(format["type"], "string");
+            assert_eq!(format["enum"], json!(["llm", "raw"]));
+        }
     }
 
     #[test]

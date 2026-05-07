@@ -300,10 +300,12 @@ message ToolDefinition {
 
 message ListAgentCommandsRequest {
   repeated string command_names = 1; // empty means list every command
+  ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
 }
 
 message ListAgentCommandsResponse {
   repeated ToolDefinition commands = 1;
+  string formatted_text = 2; // format = LLM: TOON command catalog
 }
 
 message InvokeAgentCommandRequest {

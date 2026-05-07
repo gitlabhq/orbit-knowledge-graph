@@ -347,11 +347,17 @@ pub struct ListAgentCommandsRequest {
     /// empty means list every command
     #[prost(string, repeated, tag = "1")]
     pub command_names: ::prost::alloc::vec::Vec<::prost::alloc::string::String>,
+    /// RAW: command definitions; LLM: TOON command catalog
+    #[prost(enumeration = "ResponseFormat", tag = "2")]
+    pub format: i32,
 }
 #[derive(Clone, PartialEq, ::prost::Message)]
 pub struct ListAgentCommandsResponse {
     #[prost(message, repeated, tag = "1")]
     pub commands: ::prost::alloc::vec::Vec<ToolDefinition>,
+    /// format = LLM: TOON command catalog
+    #[prost(string, tag = "2")]
+    pub formatted_text: ::prost::alloc::string::String,
 }
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct InvokeAgentCommandRequest {

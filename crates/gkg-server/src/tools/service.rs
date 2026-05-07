@@ -5,11 +5,12 @@ use ontology::introspection::{
     IntrospectionScope, SchemaDomain, SchemaEdge, SchemaResponse, build_schema_edges,
     build_schema_response,
 };
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
+use super::registry::ToolDefinition;
 use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
 
 #[derive(Debug, Error)]
@@ -108,6 +109,39 @@ impl ToolService {
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
+    }
+
+    pub fn build_command_catalog_toon(
+        commands: &[ToolDefinition],
+    ) -> Result<String, ExecutorError> {
+        #[derive(Serialize)]
+        struct CommandCatalogToon {
+            commands: Vec<CommandToon>,
+        }
+
+        #[derive(Serialize)]
+        struct CommandToon {
+            name: String,
+            description: String,
+            input_schema: Value,
+        }
+
+        let catalog = CommandCatalogToon {
+            commands: commands
+                .iter()
+                .map(|command| CommandToon {
+                    name: command.name.clone(),
+                    description: command.description.clone(),
+                    input_schema: command.parameters.clone(),
+                })
+                .collect(),
+        };
+
+        encode(&catalog, &EncodeOptions::default()).map_err(|e| {
+            ExecutorError::InvalidArguments(format!(
+                "Failed to encode command catalog as toon: {e}"
+            ))
+        })
     }
 
     /// TOON-encoded condensed query DSL grammar (issue #553).
