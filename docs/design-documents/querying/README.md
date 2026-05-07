@@ -28,7 +28,7 @@ A `GraphFormatter` in the Rust query pipeline will handle the transformation fro
 
 Orbit agents discover graph capabilities through a command catalog instead of relying on long MCP tool descriptions. `ListAgentCommands` returns command names, short descriptions, and parameter schemas. `InvokeAgentCommand` executes commands that do not need Rails-specific context.
 
-The initial catalog includes `query_graph`, `get_graph_status`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` and `get_graph_status` because they need Workhorse streaming, namespace resolution, and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
+The initial catalog includes `query_graph`, `get_graph_schema`, `get_query_dsl`, and `get_response_format`. Rails intercepts `query_graph` because it needs Workhorse streaming and permission checks. GKG executes schema, DSL, and response-format discovery directly from in-memory metadata and checked-in JSON schemas.
 
 Direct API consumers can call `GetQueryDsl` and `GetResponseFormat`; MCP agents should use the command catalog and `InvokeAgentCommand`. The query DSL version lives in `config/QUERY_DSL_VERSION`; the query response format version lives in `config/RAW_OUTPUT_FORMAT_VERSION`.
 

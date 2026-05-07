@@ -50,7 +50,7 @@ type KnowledgeGraphServiceClient interface {
 	// Used by Rails to build the Orbit command catalog for MCP and REST.
 	ListAgentCommands(ctx context.Context, in *ListAgentCommandsRequest, opts ...grpc.CallOption) (*ListAgentCommandsResponse, error)
 	// Executes a lazy command that does not require Rails-specific interception.
-	// Rails intercepts query_graph and get_graph_status before falling through here.
+	// Rails intercepts query_graph before falling through here.
 	InvokeAgentCommand(ctx context.Context, in *InvokeAgentCommandRequest, opts ...grpc.CallOption) (*InvokeAgentCommandResponse, error)
 	// Executes a graph query against ClickHouse with bidirectional streaming
 	// for the redaction exchange (server requests authorization checks from Rails,
@@ -193,7 +193,7 @@ type KnowledgeGraphServiceServer interface {
 	// Used by Rails to build the Orbit command catalog for MCP and REST.
 	ListAgentCommands(context.Context, *ListAgentCommandsRequest) (*ListAgentCommandsResponse, error)
 	// Executes a lazy command that does not require Rails-specific interception.
-	// Rails intercepts query_graph and get_graph_status before falling through here.
+	// Rails intercepts query_graph before falling through here.
 	InvokeAgentCommand(context.Context, *InvokeAgentCommandRequest) (*InvokeAgentCommandResponse, error)
 	// Executes a graph query against ClickHouse with bidirectional streaming
 	// for the redaction exchange (server requests authorization checks from Rails,

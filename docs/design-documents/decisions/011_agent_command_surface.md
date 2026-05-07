@@ -21,15 +21,15 @@ GKG already exposes an agent-facing surface in three places:
 - REST: `GET /api/v4/orbit/*` endpoints owned by Rails (proxy to GKG).
 - MCP: `tools/list` and `tools/call` handled by Rails, fanning out to GKG.
 
-The existing tools — `query_graph`, `get_graph_schema`, `get_graph_status` — were each registered as a top-level MCP tool with a hand-written description and JSON Schema. This worked for the first agent integrations (GitLab Duo, Agentic Chat) but broke down once we tried to make the same surface usable by external coding agents (Claude Code, OpenCode, Codex):
+The existing agent tools and structured endpoints were each exposed with hand-written descriptions and JSON Schema. This worked for the first agent integrations (GitLab Duo, Agentic Chat) but broke down once we tried to make the same surface usable by external coding agents (Claude Code, OpenCode, Codex):
 
 - **Tool descriptions are truncated.** Claude Code truncates anything over ~2000 characters. The `query_graph` description embeds the full query DSL (`config/schemas/graph_query.schema.json`) so the LLM has any chance of writing a valid query, and that pushes us well over the limit. The grammar gets cut off mid-token and the agent immediately produces invalid queries.
 - **Schema discovery is incomplete.** `get_graph_schema` returns node and edge metadata but does not include the descriptions on properties, so the LLM cannot tell that `definition_type` is a coarse category and that the language-specific fine-grained labels (e.g. `decorated_async_function`) live somewhere else. Agents hallucinate filter values like `definition_type = "function"` that do not exist.
 - **No way to discover the response shape.** Coding agents that compose Python or shell pipelines on top of `query_graph` need the response JSON Schema and its semver to write iteration code. Today that schema lives in `config/schemas/query_response.json` and is not exposed by any RPC or REST endpoint.
 - **Every new capability requires a Rails MR.** Rails owns the MCP tool catalog, the REST routes, and the gRPC client. Adding a new tool means changes in three repositories with three review queues. We have moved at one tool every few months, when we want to be moving multiple times per week as agents surface new usability bugs.
-- **`query_graph` and `get_graph_status` cannot move into the GKG executor.** `query_graph` goes through GitLab Workhorse for streaming and JWT-scoped redaction; `get_graph_status` performs Rails-side namespace fan-out across the user's enabled namespaces. Both rely on Rails-only context that the GKG executor does not have.
+- **`query_graph` cannot move into the GKG executor.** `query_graph` goes through GitLab Workhorse for streaming and JWT-scoped redaction. It relies on Rails-only context that the GKG executor does not have.
 
-The team converged on the [lazy-mcp pattern](https://gitlab.com/gitlab-org/ai/lazy-mcp) — a discovery and invocation tool pair that lets a single MCP entry point expose an arbitrary catalog of typed sub-commands. We already use lazy-mcp internally and trust the pattern. The decision is to apply the same pattern to GKG's agent surface, with one wrinkle: a small set of commands must still be intercepted by Rails before reaching the GKG executor.
+The team converged on the [lazy-mcp pattern](https://gitlab.com/gitlab-org/ai/lazy-mcp) — a discovery and invocation tool pair that lets a single MCP entry point expose an arbitrary catalog of typed sub-commands. We already use lazy-mcp internally and trust the pattern. The decision is to apply the same pattern to GKG's agent surface, with one wrinkle: commands that need Rails context must still be intercepted by Rails before reaching the GKG executor.
 
 ## Decision
 
@@ -37,7 +37,7 @@ Adopt a two-tool MCP surface (`list_commands`, `invoke_command`) backed by a typ
 
 ### Surface in each layer
 
-The agent-facing surface collapses to two MCP tools and two REST endpoints. The structured tools (`query_graph`, `get_graph_schema`, `get_graph_status`) become commands behind that surface. The structured REST endpoints (`/api/v4/orbit/query`, `/schema`, `/graph_status`, `/tools`) stay in place so the GitLab UI and existing programmatic consumers do not break.
+The agent-facing surface collapses to two MCP tools and two REST endpoints. The structured query and schema tools become commands behind that surface. The structured REST endpoints (`/api/v4/orbit/query`, `/schema`, `/graph_status`, `/tools`) stay in place so the GitLab UI and existing programmatic consumers do not break.
 
 | Layer | Surface |
 |---|---|
@@ -58,7 +58,6 @@ Initial catalog:
 | Command | Where it executes | Why |
 |---|---|---|
 | `query_graph` | Rails interceptor builds `workhorse_send_data`; Workhorse calls GKG `ExecuteQuery` | Needs Workhorse streaming and the bidirectional redaction exchange |
-| `get_graph_status` | Rails interceptor resolves namespaces, makes per-target GKG `GetGraphStatus` calls, aggregates | Needs Rails-side namespace resolution, permission checks, and fan-out across enabled namespaces |
 | `get_graph_schema` | GKG executor (`InvokeAgentCommand`) | Pure ontology lookup, no Rails context required |
 | `get_query_dsl` | GKG executor (`InvokeAgentCommand`) | Returns `config/schemas/graph_query.schema.json` and `config/QUERY_DSL_VERSION` (RAW) or a versioned TOON-condensed grammar (LLM) |
 | `get_response_format` | GKG executor (`InvokeAgentCommand`) | Returns the response JSON Schema and its semver from `RAW_OUTPUT_FORMAT_VERSION` |
@@ -86,11 +85,6 @@ sequenceDiagram
         Interceptor-->>Rails: workhorse_send_data
         Rails-->>Agent: 200 (Workhorse handles streaming)
         Note right of Workhorse: ExecuteQuery + redaction
-    else name == get_graph_status
-        Interceptor->>GKG: GetGraphStatus per target
-        GKG-->>Interceptor: per-target status
-        Interceptor-->>Rails: aggregated result
-        Rails-->>Agent: 200 JSON
     else other command
         Interceptor-->>Rails: not handled
         Rails->>GKG: InvokeAgentCommand(name, params)
@@ -101,8 +95,8 @@ sequenceDiagram
 
 Two control points keep this safe:
 
-1. **Rails interceptor (`Analytics::Orbit::CommandInterceptor`).** Sits in front of the GKG dispatch. For `query_graph` it builds the Workhorse send-data; for `get_graph_status` it resolves namespace targets, checks `read_group` / `read_project` permission for each target, and fans out across enabled namespaces when the agent omits `targets`. It returns an `InterceptResult { handled, result, workhorse_send_data }` so the caller can tell whether the command was consumed.
-2. **GKG executor guard (`ExecutorError::InterceptedCommand`).** `ToolService::resolve_command` matches on `query_graph` and `get_graph_status` and returns `InterceptedCommand`, which the gRPC handler maps to `FAILED_PRECONDITION`. If a misconfigured Rails ever forwards an intercepted command, GKG refuses rather than executing without the Rails context.
+1. **Rails interceptor (`Analytics::Orbit::CommandInterceptor`).** Sits in front of the GKG dispatch. For `query_graph` it builds the Workhorse send-data. It returns an `InterceptResult { handled, result, workhorse_send_data }` so the caller can tell whether the command was consumed.
+2. **GKG executor guard (`ExecutorError::InterceptedCommand`).** `ToolService::resolve_command` matches on `query_graph` and returns `InterceptedCommand`, which the gRPC handler maps to `FAILED_PRECONDITION`. If a misconfigured Rails ever forwards an intercepted command, GKG refuses rather than executing without the Rails context.
 
 ### `list_commands` and `invoke_command` shape
 
@@ -116,7 +110,7 @@ The ai-assist Orbit agent prompt encodes the contract that agents are expected t
 
 1. Call `orbit_list_commands` once per session.
 2. Before the first query, call `orbit_invoke_command` with `command_name=get_query_dsl` and `command_name=get_graph_schema`. Do not guess node, edge, or property names from GitLab API terminology.
-3. Call `orbit_invoke_command` with `command_name=query_graph` for queries and `command_name=get_graph_status` for indexing progress.
+3. Call `orbit_invoke_command` with `command_name=query_graph` for queries.
 4. On a schema-violation error, re-fetch `get_graph_schema` with the relevant node expanded before retrying.
 
 This is the same shape as lazy-mcp: a single discovery call followed by typed `invoke_command` calls. Agents keep one mental model regardless of whether the underlying command runs in GKG, Rails, or Workhorse.
@@ -126,17 +120,14 @@ This is the same shape as lazy-mcp: a single discovery call followed by typed `i
 A single "exploration" tool with an array of capability flags was considered. The team rejected it because:
 
 - An array of opaque keys ("schema", "dsl", "status") does not type-check the parameters for each capability. Smaller models cannot reliably reason about which fields go with which key.
-- Fan-out commands like `get_graph_status` need per-call parameters (`targets`, `format`) that do not compose well into a single union object.
 - `list_commands` plus `invoke_command` matches an existing pattern (lazy-mcp) the team already trusts and external agents already know how to consume.
 
-### Why Rails still owns `query_graph` and `get_graph_status`
+### Why Rails still owns `query_graph`
 
 A radical version of this proposal would push `query_graph` into `InvokeAgentCommand` as well, removing the interceptor entirely. We did not take that step because:
 
 - `query_graph` runs through Workhorse for streaming and for the bidirectional redaction exchange with Rails. Moving it into the GKG executor would either lose streaming (buffering large result sets in Rails) or require a parallel Workhorse path that duplicates the existing one.
-- `get_graph_status` fans out across the user's enabled root namespaces. The list of enabled namespaces lives in Rails (`Analytics::KnowledgeGraph::EnabledNamespace`), and the per-namespace permission checks (`read_group`, `read_project`) use Rails abilities. Moving the fan-out into GKG would require GKG to call back into Rails for both pieces of data.
-
-The two-layer dispatch (Rails interceptor first, GKG executor as fallback) preserves these contracts while still letting every other command move at GKG's pace.
+The two-layer dispatch (Rails interceptor first, GKG executor as fallback) preserves this contract while still letting every other command move at GKG's pace.
 
 ### REST mirroring
 
@@ -155,7 +146,7 @@ The agent command surface ships as three coordinated MRs:
 | Repository | MR | Scope |
 |---|---|---|
 | `gitlab-org/orbit/knowledge-graph` | [!1252](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/merge_requests/1252) | `ListAgentCommands`, `InvokeAgentCommand`, `GetQueryDsl`, `GetResponseFormat` RPCs; `CommandRegistry`; `ExecutorError::InterceptedCommand`; `ToolService::resolve_command` |
-| `gitlab-org/gitlab` | [!234925](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925) | MCP `list_commands` / `invoke_command` handlers; `Analytics::Orbit::CommandInterceptor`; `GET /orbit/agent/list_commands`, `POST /orbit/agent/invoke_command`; gRPC client methods |
+| `gitlab-org/gitlab` | [!234925](https://gitlab.com/gitlab-org/gitlab/-/merge_requests/234925) | MCP `list_commands` / `invoke_command` handlers; query command interception; `GET /orbit/agent/list_commands`, `POST /orbit/agent/invoke_command`; gRPC client methods |
 | `gitlab-org/modelops/.../ai-assist` | [!5446](https://gitlab.com/gitlab-org/modelops/applied-ml/code-suggestions/ai-assist/-/merge_requests/5446) | Orbit agent toolset switches to `orbit_list_commands` / `orbit_invoke_command`; prompt rewritten around discovery-first flow |
 
 Order of merge:
@@ -168,11 +159,11 @@ The new MCP tool list (`list_commands`, `invoke_command`) lands in Rails atomica
 
 ### Feature flag rollout
 
-Rails gates the MCP tool list behind a feature flag (`orbit_agent_command_surface`). The flag controls which tools `tools/list` returns:
+Rails gates the MCP tool list behind a feature flag (`orbit_mcp_command_tools`). The flag controls which tools `tools/list` returns:
 
 | Flag state | MCP `tools/list` returns |
 |---|---|
-| Off (default) | Legacy tools: `query_graph`, `get_graph_schema`, `get_graph_status` |
+| Off (default) | Legacy tools: `query_graph`, `get_graph_schema` |
 | On | New surface: `list_commands`, `invoke_command` |
 
 The switch is atomic — an agent session sees one surface or the other, never both. Mixing legacy tools with the new command surface in the same session would confuse agents: they would see both `query_graph` as a top-level tool and as a command inside `invoke_command`, leading to unpredictable tool selection.
@@ -200,7 +191,7 @@ Once the flag is fully rolled out and the new surface is stable, the legacy MCP 
 ### Trade-offs
 
 - **REST agent surface is dynamic.** Hand-written clients that hit `/orbit/agent/invoke_command` are subject to schema changes without a Rails-side deprecation cycle. We accept this because the structured endpoints stay stable for non-agent consumers, and the `hidden: true` flag plus the `/agent/` prefix signal the contract.
-- **Rails-intercepted commands stay opaque to GKG.** GKG cannot tell from the executor that `query_graph` ran successfully — Workhorse handles the response. Cross-cutting metrics (e.g. command-level latency histograms) need to be instrumented in Rails for these two commands, separately from the GKG-side metrics for the rest.
+- **Rails-intercepted commands stay opaque to GKG.** GKG cannot tell from the executor that `query_graph` ran successfully — Workhorse handles the response. Cross-cutting metrics (e.g. command-level latency histograms) need to be instrumented in Rails separately from the GKG-side metrics for the rest.
 - **One extra round-trip for first-time discovery.** Agents pay one `list_commands` call per session before they can compose queries. The lazy-mcp pattern accepts this cost in exchange for fitting under MCP description budgets.
 
 ## Alternatives considered
@@ -210,7 +201,7 @@ Once the flag is fully rolled out and the new surface is stable, the legacy MCP 
 A single MCP tool that takes `{ include: ["schema", "dsl", "response_format"] }` and returns a top-level JSON object keyed by the requested capabilities. Considered and rejected during the design sync because:
 
 - Smaller models cannot reliably map per-capability parameters (e.g. `expand_nodes` for schema, `format` for DSL) onto a flat union. Per-command JSON Schemas type-check far better.
-- It does not handle `query_graph` or `get_graph_status`, which need their own parameter shapes anyway. We would still end up with multiple top-level tools.
+- It does not handle `query_graph`, which needs its own parameter shape anyway. We would still end up with multiple top-level tools.
 
 ### Auto-expose every command as `/api/v4/orbit/<name>`
 

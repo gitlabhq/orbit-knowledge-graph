@@ -82,7 +82,6 @@ impl ToolService {
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
-            "get_graph_status" => Err(ExecutorError::InterceptedCommand(tool_name.to_string())),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -96,9 +95,7 @@ impl ToolService {
             .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
 
         match command_name {
-            "query_graph" | "get_graph_status" => {
-                Err(ExecutorError::InterceptedCommand(command_name.to_string()))
-            }
+            "query_graph" => Err(ExecutorError::InterceptedCommand(command_name.to_string())),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
             "get_query_dsl" => self.execute_get_query_dsl(&arguments),
             "get_response_format" => self.execute_get_response_format(&arguments),
@@ -249,9 +246,6 @@ struct GetGraphSchemaArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
 }
-
-// Production-side `status` dispatch happens in the monolith CallTool via the
-// dedicated get_graph_status MCP tool, not via this in-process executor.
 
 #[cfg(test)]
 mod tests {
@@ -646,18 +640,6 @@ mod tests {
         let service = ToolService::new(ontology);
 
         let result = service.resolve_command("query_graph", r#"{"query": {}}"#);
-        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
-
-        let result = service.resolve_command("get_graph_status", "{}");
-        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
-    }
-
-    #[test]
-    fn resolve_rejects_graph_status_as_rails_intercepted() {
-        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
-        let service = ToolService::new(ontology);
-
-        let result = service.resolve("get_graph_status", "{}");
         assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
     }
 }

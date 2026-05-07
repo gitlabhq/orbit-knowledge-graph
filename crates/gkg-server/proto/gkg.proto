@@ -36,7 +36,7 @@ service KnowledgeGraphService {
   rpc ListAgentCommands(ListAgentCommandsRequest) returns (ListAgentCommandsResponse);
 
   // Executes a lazy command that does not require Rails-specific interception.
-  // Rails intercepts query_graph and get_graph_status before falling through here.
+  // Rails intercepts query_graph before falling through here.
   rpc InvokeAgentCommand(InvokeAgentCommandRequest) returns (InvokeAgentCommandResponse);
 
   // Executes a graph query against ClickHouse with bidirectional streaming

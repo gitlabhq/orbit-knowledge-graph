@@ -767,8 +767,8 @@ mod tests {
         let service = test_service();
         let status = service
             .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
-                command_name: "get_graph_status".into(),
-                parameters_json: "{}".into(),
+                command_name: "query_graph".into(),
+                parameters_json: r#"{"query":{}}"#.into(),
             }))
             .await
             .unwrap_err();

@@ -39,26 +39,6 @@ mod params {
         })
     }
 
-    pub fn status_targets() -> Value {
-        json!({
-            "type": "array",
-            "minItems": 1,
-            "maxItems": 50,
-            "description": "One or more targets to fetch indexing status for. Each target must specify exactly one of namespace_id, project_id, or full_path.",
-            "items": {
-                "type": "object",
-                "additionalProperties": false,
-                "minProperties": 1,
-                "maxProperties": 1,
-                "properties": {
-                    "namespace_id": { "type": "integer", "minimum": 1 },
-                    "project_id":   { "type": "integer", "minimum": 1 },
-                    "full_path":    { "type": "string", "minLength": 1, "description": "e.g. 'gitlab-org/gitlab'" }
-                }
-            }
-        })
-    }
-
     pub fn command_names() -> Value {
         json!({
             "type": "array",
@@ -82,7 +62,6 @@ impl ToolRegistry {
         vec![
             Self::query_graph(),
             Self::get_graph_schema(),
-            Self::get_graph_status(),
             Self::list_commands(),
             Self::invoke_command(),
         ]
@@ -139,26 +118,6 @@ impl ToolRegistry {
         }
     }
 
-    fn get_graph_status() -> ToolDefinition {
-        ToolDefinition {
-            name: "get_graph_status".into(),
-            description: "Indexing progress and entity counts for one or more namespaces or \
-                          projects. Omit `targets` to check all Knowledge Graph enabled root \
-                          namespaces the current user can access. Otherwise pass `targets` as an \
-                          array; each target supplies exactly one of `namespace_id` (int), \
-                          `project_id` (int), or `full_path` (string like \"gitlab-org/gitlab\")."
-                .into(),
-            parameters: json!({
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                    "targets": params::status_targets(),
-                    "format": params::format()
-                }
-            }),
-        }
-    }
-
     fn list_commands() -> ToolDefinition {
         ToolDefinition {
             name: "list_commands".into(),
@@ -206,7 +165,6 @@ impl CommandRegistry {
         vec![
             ToolRegistry::query_graph(),
             ToolRegistry::get_graph_schema(),
-            ToolRegistry::get_graph_status(),
             Self::get_query_dsl(),
             Self::get_response_format(),
         ]
@@ -274,7 +232,7 @@ mod tests {
     #[test]
     fn all_tools_have_valid_schemas() {
         let tools = all_tools();
-        assert_eq!(tools.len(), 5);
+        assert_eq!(tools.len(), 4);
 
         for tool in &tools {
             assert!(!tool.name.is_empty());
@@ -297,7 +255,6 @@ mod tests {
         let names: Vec<String> = all_tools().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_graph_status".into()));
         assert!(names.contains(&"list_commands".into()));
         assert!(names.contains(&"invoke_command".into()));
     }
@@ -307,7 +264,6 @@ mod tests {
         let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
-        assert!(names.contains(&"get_graph_status".into()));
         assert!(names.contains(&"get_query_dsl".into()));
         assert!(names.contains(&"get_response_format".into()));
     }
@@ -399,27 +355,6 @@ mod tests {
         assert!(!props.contains_key("include"));
         assert!(props.contains_key("expand_nodes"));
         assert!(props.contains_key("format"));
-    }
-
-    #[test]
-    fn get_graph_status_accepts_optional_target_array() {
-        let tool = find_command("get_graph_status");
-        assert!(tool.parameters.get("required").is_none());
-
-        let targets = &tool.parameters["properties"]["targets"];
-        assert_eq!(targets["type"], "array");
-        assert_eq!(targets["minItems"], 1);
-
-        let item = &targets["items"];
-        assert_eq!(item["type"], "object");
-        assert_eq!(item["minProperties"], 1);
-        assert_eq!(item["maxProperties"], 1);
-        let props = item["properties"]
-            .as_object()
-            .expect("target item properties is an object");
-        for key in ["namespace_id", "project_id", "full_path"] {
-            assert!(props.contains_key(key), "missing target key: {key}");
-        }
     }
 
     #[test]

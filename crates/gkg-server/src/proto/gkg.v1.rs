@@ -843,7 +843,7 @@ pub mod knowledge_graph_service_client {
             self.inner.unary(req, path, codec).await
         }
         /// Executes a lazy command that does not require Rails-specific interception.
-        /// Rails intercepts query_graph and get_graph_status before falling through here.
+        /// Rails intercepts query_graph before falling through here.
         pub async fn invoke_agent_command(
             &mut self,
             request: impl tonic::IntoRequest<super::InvokeAgentCommandRequest>,
@@ -1076,7 +1076,7 @@ pub mod knowledge_graph_service_server {
             tonic::Status,
         >;
         /// Executes a lazy command that does not require Rails-specific interception.
-        /// Rails intercepts query_graph and get_graph_status before falling through here.
+        /// Rails intercepts query_graph before falling through here.
         async fn invoke_agent_command(
             &self,
             request: tonic::Request<super::InvokeAgentCommandRequest>,
