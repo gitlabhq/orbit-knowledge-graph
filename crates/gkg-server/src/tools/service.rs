@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
+use super::schema::{condensed_query_schema, raw_query_schema};
+
 #[derive(Debug, Error)]
 pub enum ExecutorError {
     #[error("Tool not found: {0}")]
@@ -17,6 +19,9 @@ pub enum ExecutorError {
 
     #[error("Invalid arguments: {0}")]
     InvalidArguments(String),
+
+    #[error("Command is handled by Rails interceptor: {0}")]
+    InterceptedCommand(String),
 }
 
 impl ExecutorError {
@@ -24,6 +29,7 @@ impl ExecutorError {
         match self {
             Self::NotFound(_) => "tool_not_found".to_string(),
             Self::InvalidArguments(_) => "invalid_arguments".to_string(),
+            Self::InterceptedCommand(_) => "intercepted_command".to_string(),
         }
     }
 }
@@ -80,11 +86,52 @@ impl ToolService {
         }
     }
 
+    pub fn resolve_command(
+        &self,
+        command_name: &str,
+        arguments_json: &str,
+    ) -> Result<ToolPlan, ExecutorError> {
+        let arguments: Value = serde_json::from_str(arguments_json)
+            .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?;
+
+        match command_name {
+            "query_graph" | "get_graph_status" => {
+                Err(ExecutorError::InterceptedCommand(command_name.to_string()))
+            }
+            "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_query_dsl" => self.execute_get_query_dsl(&arguments),
+            "get_response_format" => self.execute_get_response_format(&arguments),
+            _ => Err(ExecutorError::NotFound(command_name.to_string())),
+        }
+    }
+
     pub fn build_schema_toon(&self, expand_nodes: &[String]) -> Result<String, ExecutorError> {
         let response = self.build_graph_schema_response(expand_nodes);
         let options = EncodeOptions::default();
         encode(&response, &options)
             .map_err(|e| ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}")))
+    }
+
+    /// TOON-encoded condensed query DSL grammar (issue #553).
+    pub fn build_query_dsl_toon() -> Result<String, ExecutorError> {
+        condensed_query_schema().map_err(ExecutorError::InvalidArguments)
+    }
+
+    /// Full query DSL JSON Schema as a JSON string (verbatim from disk).
+    pub fn build_query_dsl_raw() -> &'static str {
+        raw_query_schema()
+    }
+
+    /// JSON Schema describing the query response shape (formatter output).
+    /// Returned verbatim from `crates/gkg-server/schemas/query_response.json`.
+    pub fn build_response_format_schema() -> &'static str {
+        super::schema::query_response_schema()
+    }
+
+    /// Semver string for the response format. Matches `config/RAW_OUTPUT_FORMAT_VERSION`
+    /// and the `format_version` field stamped on every query response.
+    pub fn build_response_format_version() -> String {
+        query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION.to_string()
     }
 
     fn resolve_query_graph(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
@@ -109,9 +156,52 @@ impl ToolService {
         let response = self.build_graph_schema_response(expand_nodes);
 
         let result = match format {
-            OutputFormat::Llm => self.format_as_toon(&response)?,
+            OutputFormat::Llm => {
+                let toon = encode(&response, &EncodeOptions::default()).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
+                })?;
+                json!(toon)
+            }
             OutputFormat::Raw => serde_json::to_value(&response)
                 .map_err(|e| ExecutorError::InvalidArguments(e.to_string()))?,
+        };
+
+        Ok(ToolPlan::Immediate { result })
+    }
+
+    fn execute_get_query_dsl(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        let format = parse_format(arguments);
+        let result = match format {
+            OutputFormat::Llm => json!(Self::build_query_dsl_toon()?),
+            OutputFormat::Raw => {
+                serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
+                })?
+            }
+        };
+
+        Ok(ToolPlan::Immediate { result })
+    }
+
+    fn execute_get_response_format(&self, arguments: &Value) -> Result<ToolPlan, ExecutorError> {
+        let format = parse_format(arguments);
+        let version = Self::build_response_format_version();
+        let schema = Self::build_response_format_schema();
+        let result = match format {
+            OutputFormat::Llm => json!(format!(
+                "ResponseFormat v{version} (JSON Schema):\n{schema}"
+            )),
+            OutputFormat::Raw => {
+                let parsed_schema: Value = serde_json::from_str(schema).map_err(|e| {
+                    ExecutorError::InvalidArguments(format!(
+                        "Failed to parse response format schema: {e}"
+                    ))
+                })?;
+                json!({
+                    "schema": parsed_schema,
+                    "version": version,
+                })
+            }
         };
 
         Ok(ToolPlan::Immediate { result })
@@ -128,15 +218,6 @@ impl ToolService {
     pub fn build_edges(&self) -> Vec<SchemaEdge> {
         build_schema_edges(&self.ontology, IntrospectionScope::All)
     }
-
-    fn format_as_toon(&self, response: &SchemaResponse) -> Result<Value, ExecutorError> {
-        let options = EncodeOptions::default();
-        let toon_str = encode(response, &options).map_err(|e| {
-            ExecutorError::InvalidArguments(format!("Failed to encode as toon: {e}"))
-        })?;
-
-        Ok(json!(toon_str))
-    }
 }
 
 fn parse_format(arguments: &Value) -> OutputFormat {
@@ -152,6 +233,9 @@ struct GetGraphSchemaArgs {
     #[serde(default)]
     expand_nodes: Option<Vec<String>>,
 }
+
+// Production-side `status` dispatch happens in the monolith CallTool via the
+// dedicated get_graph_status MCP tool, not via this in-process executor.
 
 #[cfg(test)]
 mod tests {
@@ -475,5 +559,76 @@ mod tests {
                 );
             }
         }
+    }
+
+    fn resolve_command_immediate(args: &str, command: &str) -> Value {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        match service
+            .resolve_command(command, args)
+            .expect("Should resolve command")
+        {
+            ToolPlan::Immediate { result } => result,
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn get_graph_schema_does_not_accept_include() {
+        // back-compat: get_graph_schema must keep its old shape. Passing
+        // unknown args (like include) is a hard error from the args struct.
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+        let result = service.resolve(
+            "get_graph_schema",
+            r#"{"format": "raw", "include": ["dsl"]}"#,
+        );
+        // The include key is silently dropped (serde-default semantics) but
+        // must not cause merging into the response.
+        match result.expect("Should resolve") {
+            ToolPlan::Immediate { result } => {
+                assert!(result.is_object());
+                assert!(result.get("dsl").is_none());
+                assert!(result.get("response_format").is_none());
+            }
+            _ => panic!("Expected Immediate plan"),
+        }
+    }
+
+    #[test]
+    fn resolve_command_executes_get_query_dsl() {
+        let result = resolve_command_immediate(r#"{"format": "raw"}"#, "get_query_dsl");
+        assert_eq!(
+            result.get("title").and_then(Value::as_str),
+            Some("GraphQueryAsJSON")
+        );
+    }
+
+    #[test]
+    fn resolve_command_executes_get_response_format() {
+        let result = resolve_command_immediate(r#"{"format": "raw"}"#, "get_response_format");
+        assert_eq!(
+            result
+                .get("schema")
+                .and_then(|s| s.get("title"))
+                .and_then(Value::as_str),
+            Some("GKG unified query response")
+        );
+        assert_eq!(
+            result.get("version").and_then(Value::as_str),
+            Some(ToolService::build_response_format_version().as_str())
+        );
+    }
+
+    #[test]
+    fn resolve_command_rejects_rails_intercepted_commands() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+
+        let result = service.resolve_command("query_graph", r#"{"query": {}}"#);
+        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
+
+        let result = service.resolve_command("get_graph_status", "{}");
+        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
     }
 }

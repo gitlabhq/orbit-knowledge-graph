@@ -2,6 +2,8 @@ use serde_json::{Map, Value};
 use toon_format::{EncodeOptions, encode};
 
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
+const QUERY_RESPONSE_SCHEMA: &str =
+    include_str!(concat!(env!("SCHEMA_DIR"), "/query_response.json"));
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
@@ -18,6 +20,14 @@ pub fn condensed_query_schema() -> Result<String, String> {
 
     let options = EncodeOptions::default();
     encode(&condensed, &options).map_err(|e| e.to_string())
+}
+
+pub fn raw_query_schema() -> &'static str {
+    BASE_SCHEMA
+}
+
+pub fn query_response_schema() -> &'static str {
+    QUERY_RESPONSE_SCHEMA
 }
 
 fn condense_schema(mut schema: Value) -> Value {
