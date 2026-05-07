@@ -44,7 +44,7 @@ That's it. `glab` detects your AI agent, installs the Orbit skill, and writes th
 MCP server config. Authentication uses your existing `glab auth login` session -
 no token to copy or paste.
 
-Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI, Duo CLI. See
+Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI. See
 the [glab orbit page](glab.md) for flags and overrides.
 
 If setup fails, run `glab auth status` to confirm you're authenticated, and check

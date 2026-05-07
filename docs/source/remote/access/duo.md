@@ -34,6 +34,7 @@ Orbit is wired into the following Duo Agent Platform surfaces:
 | Surface | When to use it |
 |---------|----------------|
 | **Duo Developer Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
+| **Duo CLI** | Terminal-based, editor-agnostic, scriptable. Same Orbit capabilities as Duo Developer Flow, available in headless and CI workflows. |
 | **Planner agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
 | **Security Analyst agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
 | **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
