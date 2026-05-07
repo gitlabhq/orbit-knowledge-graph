@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use arrow::datatypes::{Field, Schema};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
@@ -481,9 +482,21 @@ impl Pipeline {
     ) -> Result<Vec<RecordBatch>, HandlerError> {
         const SORT_TABLE: &str = "_presort_staging";
 
-        let schema = batches[0].schema();
+        let merged_schema = Arc::new(merge_batch_schemas(batches));
+        let unified: Vec<RecordBatch> = batches
+            .iter()
+            .map(|batch| {
+                if batch.schema() == merged_schema {
+                    batch.clone()
+                } else {
+                    RecordBatch::try_new(merged_schema.clone(), batch.columns().to_vec())
+                        .unwrap_or_else(|_| batch.clone())
+                }
+            })
+            .collect();
+
         let _ = session.deregister_table(SORT_TABLE);
-        let mem_table = MemTable::try_new(schema, vec![batches.to_vec()]).map_err(|err| {
+        let mem_table = MemTable::try_new(merged_schema, vec![unified]).map_err(|err| {
             HandlerError::Processing(format!(
                 "failed to create sort staging table for {pipeline_name}/{destination_table}: {err}"
             ))
@@ -565,6 +578,23 @@ impl Pipeline {
         }
         Value::Object(params)
     }
+}
+
+/// Produces the widest schema across all batches: a field is nullable if ANY
+/// batch marks it nullable. This lets MemTable accept batches from different
+/// DataFusion queries that infer nullability differently.
+fn merge_batch_schemas(batches: &[RecordBatch]) -> Schema {
+    let base = batches[0].schema();
+    let fields: Vec<Field> = base
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| {
+            let nullable = batches.iter().any(|b| b.schema().field(i).is_nullable());
+            field.as_ref().clone().with_nullable(nullable)
+        })
+        .collect();
+    Schema::new(fields)
 }
 
 fn split_into_chunks(batches: Vec<RecordBatch>, target_chunks: usize) -> Vec<Vec<RecordBatch>> {
