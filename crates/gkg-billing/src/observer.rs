@@ -147,8 +147,8 @@ impl PipelineObserver for BillingObserver {
         if let Some(ref tracker) = self.tracker
             && let Some(event) = self.build_event()
         {
-            let _span = tracing::info_span!("billing.track", query_type = self.query_type)
-                .entered();
+            let _span =
+                tracing::info_span!("billing.track", query_type = self.query_type).entered();
             tracker.track(event);
             METRICS.emitted.add(1, &[]);
         }
