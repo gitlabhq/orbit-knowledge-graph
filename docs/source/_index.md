@@ -27,7 +27,7 @@ title: Orbit
 
 Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
 Enable it on a group and Orbit maps everything: projects, users, merge requests, pipelines,
-work items, security findings, and the source code itself, then builds a graph of how they
+work items, security findings, and the source code itself, then builds a property graph of how they
 relate to each other.
 
 Query the graph to answer questions your instance cannot answer directly:
@@ -42,7 +42,7 @@ Query the graph to answer questions your instance cannot answer directly:
 
 ## Orbit Remote
 
-Orbit Remote runs as a managed service on GitLab infrastructure. Enable it on a top-level group
+On GitLab.com, Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
 and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
 pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
