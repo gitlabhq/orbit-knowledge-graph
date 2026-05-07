@@ -29,7 +29,7 @@ use crate::proto::{
     get_graph_schema_response, get_query_dsl_response, get_response_format_response,
     invoke_agent_command_response,
 };
-use crate::tools::{CommandRegistry, ExecutorError, ToolPlan, ToolRegistry, ToolService};
+use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::BillingTracker;
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -149,7 +149,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         info!("Listing tools for user");
 
-        let tools = ToolRegistry::get_all_tools(&self.ontology)
+        let tools = V2ToolRegistry::get_all_tools(&self.ontology)
             .into_iter()
             .map(proto_tool_definition)
             .collect();
@@ -173,7 +173,7 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             "Listing agent commands for user"
         );
 
-        let all_commands = CommandRegistry::get_all_commands(&self.ontology);
+        let all_commands = V2CommandRegistry::get_all_commands(&self.ontology);
         let commands = if requested.is_empty() {
             all_commands
         } else {
@@ -746,6 +746,29 @@ mod tests {
 
         assert_eq!(response.commands.len(), 1);
         assert_eq!(response.commands[0].name, "get_query_dsl");
+        assert!(!response.commands[0].description.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_returns_short_command_descriptions() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec![],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let query_graph = response
+            .commands
+            .iter()
+            .find(|command| command.name == "query_graph")
+            .expect("query_graph command should be listed");
+
+        assert!(!query_graph.description.is_empty());
+        assert!(!query_graph.description.contains("<toon>"));
+        assert!(!query_graph.description.contains("Query DSL Schema"));
     }
 
     #[tokio::test]

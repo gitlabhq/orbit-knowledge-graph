@@ -201,6 +201,137 @@ impl CommandRegistry {
     }
 }
 
+pub struct V2ToolRegistry;
+
+impl V2ToolRegistry {
+    pub fn get_all_tools(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+        vec![
+            ToolRegistry::query_graph(),
+            ToolRegistry::get_graph_schema(),
+            Self::list_commands(),
+            Self::invoke_command(),
+        ]
+    }
+
+    fn list_commands() -> ToolDefinition {
+        ToolDefinition {
+            name: "list_commands".into(),
+            description:
+                "List Orbit Knowledge Graph commands with descriptions and input schemas. \
+                          Use this before invoke_command to discover available commands."
+                    .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "command_names": params::command_names()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn invoke_command() -> ToolDefinition {
+        ToolDefinition {
+            name: "invoke_command".into(),
+            description: "Execute an Orbit command. This is a wrapper tool: keep only command_name \
+                          and parameters at the top level, and put downstream command inputs inside \
+                          parameters."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["command_name"],
+                "properties": {
+                    "command_name": {
+                        "type": "string",
+                        "description": "Command name returned by list_commands."
+                    },
+                    "parameters": params::command_parameters()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+}
+
+pub struct V2CommandRegistry;
+
+impl V2CommandRegistry {
+    pub fn get_all_commands(_ontology: &Arc<Ontology>) -> Vec<ToolDefinition> {
+        vec![
+            Self::query_graph(),
+            Self::get_graph_schema(),
+            Self::get_query_dsl(),
+            Self::get_response_format(),
+        ]
+    }
+
+    fn query_graph() -> ToolDefinition {
+        ToolDefinition {
+            name: "query_graph".into(),
+            description: "Execute a graph query. Before composing a query, call get_query_dsl \
+                          for the DSL and get_graph_schema for the node and edge names relevant \
+                          to the user's question."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": params::query(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_graph_schema() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_graph_schema".into(),
+            description: "Return the graph schema. Use expand_nodes for the node types relevant \
+                          to the user's question to include properties and relationships."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "expand_nodes": params::expand_nodes(),
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_query_dsl() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_query_dsl".into(),
+            description: "Return the query_graph JSON DSL grammar and version. Use this before \
+                          composing query_graph parameters."
+                .into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+
+    fn get_response_format() -> ToolDefinition {
+        ToolDefinition {
+            name: "get_response_format".into(),
+            description: "Return the JSON Schema and version for query_graph responses.".into(),
+            parameters: json!({
+                "type": "object",
+                "properties": {
+                    "format": params::format()
+                },
+                "additionalProperties": false
+            }),
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -212,7 +343,12 @@ mod tests {
 
     fn all_commands() -> Vec<ToolDefinition> {
         let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
-        CommandRegistry::get_all_commands(&ontology)
+        V2CommandRegistry::get_all_commands(&ontology)
+    }
+
+    fn all_v2_tools() -> Vec<ToolDefinition> {
+        let ontology = Arc::new(Ontology::load_embedded().expect("Failed to load ontology"));
+        V2ToolRegistry::get_all_tools(&ontology)
     }
 
     fn find_tool(name: &str) -> ToolDefinition {
@@ -260,12 +396,43 @@ mod tests {
     }
 
     #[test]
+    fn expected_v2_tools_are_registered() {
+        let names: Vec<String> = all_v2_tools().into_iter().map(|t| t.name).collect();
+        assert!(names.contains(&"query_graph".into()));
+        assert!(names.contains(&"get_graph_schema".into()));
+        assert!(names.contains(&"list_commands".into()));
+        assert!(names.contains(&"invoke_command".into()));
+    }
+
+    #[test]
     fn expected_commands_are_registered() {
         let names: Vec<String> = all_commands().into_iter().map(|t| t.name).collect();
         assert!(names.contains(&"query_graph".into()));
         assert!(names.contains(&"get_graph_schema".into()));
         assert!(names.contains(&"get_query_dsl".into()));
         assert!(names.contains(&"get_response_format".into()));
+    }
+
+    #[test]
+    fn all_commands_have_short_descriptions() {
+        for command in &all_commands() {
+            assert!(
+                !command.description.is_empty(),
+                "{} missing description",
+                command.name
+            );
+            assert!(
+                command.description.len() < 400,
+                "{} command description is too long",
+                command.name
+            );
+            assert!(
+                !command.description.contains("<toon>")
+                    && !command.description.contains("Query DSL Schema"),
+                "{} should keep large schemas out of the command description",
+                command.name
+            );
+        }
     }
 
     #[test]
@@ -325,7 +492,7 @@ mod tests {
         // descriptions can still find the grammar. We keep the inline TOON
         // in the description for one release cycle so existing consumers
         // do not break. A follow-up MR strips it once adoption is verified.
-        let tool = find_command("query_graph");
+        let tool = find_tool("query_graph");
         assert!(tool.description.contains("query_type"));
         assert!(tool.description.contains("traversal"));
         assert!(tool.description.contains("<toon>"));
