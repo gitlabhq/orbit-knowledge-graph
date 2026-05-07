@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use Orbit through GitLab Duo Agent Platform. Agents call Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Agent, the CI Agent, and the Duo Developer Flow.
+description: Use Orbit through GitLab Duo Agent Platform. Agents call Orbit's graph tools to ground their answers in your live GitLab data, across the GitLab Duo Agent, the Planner Agent, the Security Analyst Agent, the Data Analyst Agent, the CI Expert Agent, and the Duo Developer Flow.
 title: Use Orbit with GitLab Duo Agent Platform
 ---
 
@@ -40,8 +40,9 @@ Orbit is wired into the following GitLab Duo Agent Platform agents and flows:
 |---|---|
 | **GitLab Duo Agent** | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
 | **Planner Agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
-| **Security Agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
-| **CI Agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
+| **Security Analyst Agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
+| **Data Analyst Agent** | SDLC analytics powered by GLQL. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
+| **CI Expert Agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
 | **Duo Developer Flow** | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
 
 When an agent uses Orbit to answer a question, the answer is grounded in your
