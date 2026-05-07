@@ -15,7 +15,7 @@ Accepted
 
 ## Context
 
-The Knowledge Graph already has a substantial Rust codebase. The code indexer -- a multi-language static analysis engine built on tree-sitter and SWC -- was written in Rust from day one because Rust has first-class tree-sitter bindings maintained by the tree-sitter organization, compiles to WebAssembly for client-side use (Language Server, Web IDE), and provides the performance needed to parse large repositories in-memory without GC pauses. The "One Parser" initiative ([gitlab-org/gitlab#534153](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) later formalized this choice, establishing Rust as the GitLab standard for static code analysis across the Knowledge Graph, embeddings, and language server features.
+The Knowledge Graph already has a substantial Rust codebase. The code indexer -- a multi-language static analysis engine built on tree-sitter and SWC -- was written in Rust from day one because Rust has first-class tree-sitter bindings maintained by the tree-sitter organization, compiles to WebAssembly for client-side use (Language Server, Web IDE), and provides the performance needed to parse large repositories in-memory without GC pauses. The "One Parser" initiative ([`gitlab-org/gitlab#534153`](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) later formalized this choice, establishing Rust as the GitLab standard for static code analysis across the Knowledge Graph, embeddings, and language server features.
 
 When the Knowledge Graph evolved from a local CLI tool into a server-side service, the question was whether to keep the core runtime in Rust or rewrite the non-parsing components in Go. We originally embedded the Rust code via FFI into the Go-based `gitlab-zoekt-indexer` to satisfy Omnibus packaging constraints. When GitLab committed to its segmentation strategy, that constraint went away and we evaluated FFI vs. standalone service in [#168](https://gitlab.com/gitlab-org/rust/knowledge-graph/-/issues/168). The decision to run as a dedicated Rust process made the language commitment permanent.
 
@@ -105,7 +105,7 @@ Tokio cannot be embedded cleanly across FFI into Go's goroutine scheduler. Conne
 
 Observability could not be separated -- CPU and memory from the Rust FFI library were indistinguishable from the Go process. A dedicated container with its own resource limits, health checks, and metrics endpoints solved this.
 
-A proof-of-concept converting FFI-based indexing to HTTP was built in one day and was significantly easier to work with. Other projects at GitLab had similar negative experiences with FFI ([gitlab-org/gitlab#392996](https://gitlab.com/gitlab-org/gitlab/-/issues/392996)), which reinforced the decision.
+A proof-of-concept converting FFI-based indexing to HTTP was built in one day and was significantly easier to work with. Other projects at GitLab had similar negative experiences with FFI ([`gitlab-org/gitlab#392996`](https://gitlab.com/gitlab-org/gitlab/-/issues/392996)), which reinforced the decision.
 
 The question was never whether to rewrite the KG in Go, but how the existing Rust codebase should integrate with GitLab infrastructure. Once the Omnibus constraint went away, a standalone Rust service was the clear path forward.
 
@@ -115,7 +115,7 @@ Go is the established language at GitLab for infrastructure services (Gitaly, Pr
 
 GC pauses during bidirectional gRPC streams would extend the time a Puma thread is blocked on the Rails side. Rust's deterministic memory management avoids this.
 
-Go's tree-sitter bindings require cgo, which complicates cross-compilation, increases build times, and introduces memory bugs outside the Go GC's control. The "One Parser" initiative ([gitlab-org/gitlab#534153](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) evaluated the Go tree-sitter ecosystem and found two blocking problems: Go's `js/wasm` target does not support cgo (ruling out WebAssembly for client-side use in Language Server and Web IDE), and the most widely used Go binding (`smacker/go-tree-sitter`) had low activity with only a subset of available grammars. The official `tree-sitter` Rust crate is maintained by the tree-sitter organization. The initiative established Rust as the GitLab standard for static code analysis.
+Go's tree-sitter bindings require cgo, which complicates cross-compilation, increases build times, and introduces memory bugs outside the Go GC's control. The "One Parser" initiative ([`gitlab-org/gitlab#534153`](https://gitlab.com/gitlab-org/gitlab/-/issues/534153)) evaluated the Go tree-sitter ecosystem and found two blocking problems: Go's `js/wasm` target does not support cgo (ruling out WebAssembly for client-side use in Language Server and Web IDE), and the most widely used Go binding (`smacker/go-tree-sitter`) had low activity with only a subset of available grammars. The official `tree-sitter` Rust crate is maintained by the tree-sitter organization. The initiative established Rust as the GitLab standard for static code analysis.
 
 Go lacks sum types. The protobuf `oneof` pattern in the gRPC message exchange maps to Rust enums with exhaustive matching. In Go, the same pattern requires interface type assertions with no compile-time exhaustiveness check.
 

@@ -151,5 +151,5 @@ The `code` module could be extracted to its own crate. This is orthogonal to the
 
 - [Code indexing design document](../indexing/code_indexing.md)
 - [SDLC indexing design document](../indexing/sdlc_indexing.md)
-- [Indexer crate: handler registry](../../../crates/indexer/src/handler.rs)
+- [Indexer crate: handler registry](../../../crates/indexer/src/engine/handler.rs)
 - [Server CLI: mode enum](../../../crates/gkg-server/src/cli/mod.rs)

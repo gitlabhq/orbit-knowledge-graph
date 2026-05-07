@@ -87,7 +87,8 @@ message QueryMetadata {
 }
 ```
 
-Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation column values (`columns[].value`) remain integer-typed; if an aggregate ever needs to return an Int64 that exceeds the JS safe range, that is a separate decision. `raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
+Node `id` is always a JSON string (stringified ClickHouse Int64). This avoids JavaScript precision loss for values exceeding `Number.MAX_SAFE_INTEGER` (2^53-1), which routinely occurs with hash-based code-graph IDs. Edge `from_id` and `to_id` are also strings. All entity primary keys in the ontology are integer-typed internally but serialized as strings in JSON. On the input side, `node_ids` and `id_range` in the query DSL accept both JSON integers and digit strings so consumers can round-trip IDs without casting. Aggregation column values (`columns[].value`) remain integer-typed; if an aggregate ever needs to return an Int64 that exceeds the JS safe range, that is a separate decision.
+`raw_query_strings` is returned in non-production environments only; production deployments gate it behind a debug flag.
 
 ### Examples by query type
 

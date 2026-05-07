@@ -276,7 +276,7 @@ minutes. Subsequent runs use the cached build and start in seconds.
 Port assignments can be overridden in the `.env` file if you want to run
 multiple isolated local clusters on the same machine.
 
-### HTTPS and nginx GDK setups
+### HTTPS and NGINX GDK setups
 
 The dev script reads `hostname`, `port`, and `https.enabled` from `gdk.yml` to
 derive `GKG_GITLAB__BASE_URL`. If your GDK has HTTPS enabled (for example
@@ -287,9 +287,9 @@ For HTTPS to work, the GKG server's TLS stack (`rustls` via `reqwest`) must
 trust the certificate. If you used `mkcert` to generate GDK certificates, run
 `mkcert -install` to add the root CA to your system trust store.
 
-### Siphon prometheus port conflict
+### Siphon Prometheus port conflict
 
-Siphon's default prometheus port (8081) often conflicts with Elasticsearch. If
+Siphon's default Prometheus port (8081) often conflicts with Elasticsearch. If
 Siphon crash-loops with `listen tcp :8081: bind: address already in use`, change
 the port in `$GDK_ROOT/siphon/config.yml`:
 
