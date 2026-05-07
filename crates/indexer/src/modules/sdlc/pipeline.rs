@@ -479,6 +479,63 @@ impl Pipeline {
         batches: &[RecordBatch],
         sort_columns: &[String],
     ) -> Result<Vec<RecordBatch>, HandlerError> {
+        let all_same_schema = batches.iter().all(|b| b.schema() == batches[0].schema());
+        if all_same_schema {
+            return Self::sort_batches_native(batches, sort_columns).map_err(|err| {
+                HandlerError::Processing(format!(
+                    "failed to sort batches for {pipeline_name}/{destination_table}: {err}"
+                ))
+            });
+        }
+
+        self.sort_batches_union_all(
+            session,
+            pipeline_name,
+            destination_table,
+            batches,
+            sort_columns,
+        )
+        .await
+    }
+
+    fn sort_batches_native(
+        batches: &[RecordBatch],
+        sort_columns: &[String],
+    ) -> Result<Vec<RecordBatch>, arrow::error::ArrowError> {
+        let schema = batches[0].schema();
+        let combined = arrow::compute::concat_batches(&schema, batches)?;
+
+        let sort_cols: Vec<arrow::compute::SortColumn> = sort_columns
+            .iter()
+            .map(|name| {
+                let idx = schema.index_of(name).expect("sort column not found");
+                arrow::compute::SortColumn {
+                    values: Arc::clone(combined.column(idx)),
+                    options: Some(arrow::compute::SortOptions::default()),
+                }
+            })
+            .collect();
+
+        let indices = arrow::compute::lexsort_to_indices(&sort_cols, None)?;
+
+        let sorted_columns: Vec<arrow::array::ArrayRef> = combined
+            .columns()
+            .iter()
+            .map(|col| arrow::compute::take(col, &indices, None))
+            .collect::<Result<Vec<_>, _>>()?;
+
+        let sorted = RecordBatch::try_new(schema, sorted_columns)?;
+        Ok(vec![sorted])
+    }
+
+    async fn sort_batches_union_all(
+        &self,
+        session: &SessionContext,
+        pipeline_name: &str,
+        destination_table: &str,
+        batches: &[RecordBatch],
+        sort_columns: &[String],
+    ) -> Result<Vec<RecordBatch>, HandlerError> {
         let mut table_names: Vec<String> = Vec::new();
         let mut group_start = 0;
         while group_start < batches.len() {
