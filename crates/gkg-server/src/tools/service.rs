@@ -82,6 +82,7 @@ impl ToolService {
         match tool_name {
             "query_graph" => self.resolve_query_graph(&arguments),
             "get_graph_schema" => self.execute_get_graph_schema(&arguments),
+            "get_graph_status" => Err(ExecutorError::InterceptedCommand(tool_name.to_string())),
             _ => Err(ExecutorError::NotFound(tool_name.to_string())),
         }
     }
@@ -130,7 +131,7 @@ impl ToolService {
     }
 
     /// JSON Schema describing the query response shape (formatter output).
-    /// Returned verbatim from `crates/gkg-server/schemas/query_response.json`.
+    /// Returned verbatim from `config/schemas/query_response.json`.
     pub fn build_response_format_schema() -> &'static str {
         super::schema::query_response_schema()
     }
@@ -648,6 +649,15 @@ mod tests {
         assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
 
         let result = service.resolve_command("get_graph_status", "{}");
+        assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
+    }
+
+    #[test]
+    fn resolve_rejects_graph_status_as_rails_intercepted() {
+        let ontology = Arc::new(Ontology::load_embedded().expect("ontology must load"));
+        let service = ToolService::new(ontology);
+
+        let result = service.resolve("get_graph_status", "{}");
         assert!(matches!(result, Err(ExecutorError::InterceptedCommand(_))));
     }
 }

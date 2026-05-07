@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -172,11 +173,34 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             "Listing agent commands for user"
         );
 
-        let commands = CommandRegistry::get_all_commands(&self.ontology)
-            .into_iter()
-            .filter(|command| requested.is_empty() || requested.contains(&command.name))
-            .map(proto_tool_definition)
-            .collect();
+        let all_commands = CommandRegistry::get_all_commands(&self.ontology);
+        let commands = if requested.is_empty() {
+            all_commands
+        } else {
+            let known: BTreeSet<&str> = all_commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect();
+            let unknown: Vec<&str> = requested
+                .iter()
+                .map(String::as_str)
+                .filter(|name| !known.contains(name))
+                .collect();
+            if !unknown.is_empty() {
+                return Err(Status::not_found(format!(
+                    "Unknown command(s): {}",
+                    unknown.join(", ")
+                )));
+            }
+
+            all_commands
+                .into_iter()
+                .filter(|command| requested.contains(&command.name))
+                .collect()
+        }
+        .into_iter()
+        .map(proto_tool_definition)
+        .collect();
 
         Ok(Response::new(ListAgentCommandsResponse { commands }))
     }
@@ -633,6 +657,9 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::knowledge_graph_service_server::KnowledgeGraphService;
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use tonic::metadata::MetadataValue;
 
     fn mock_validator() -> JwtValidator {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
@@ -644,6 +671,38 @@ mod tests {
 
     fn test_config() -> ClickHouseConfiguration {
         ClickHouseConfiguration::default()
+    }
+
+    fn test_service() -> KnowledgeGraphServiceImpl {
+        KnowledgeGraphServiceImpl::new(
+            Arc::new(mock_validator()),
+            test_ontology(),
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+            60,
+            Arc::new(AnalyticsConfig::default()),
+        )
+    }
+
+    fn authed_request<T>(message: T) -> Request<T> {
+        let now = chrono::Utc::now().timestamp();
+        let claims = Claims {
+            iat: now,
+            exp: now + 3600,
+            ..test_claims()
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(b"test-secret-that-is-at-least-32-bytes-long"),
+        )
+        .unwrap();
+        let mut request = Request::new(message);
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from(format!("Bearer {token}")).unwrap(),
+        );
+        request
     }
 
     #[test]
@@ -672,6 +731,85 @@ mod tests {
             }
             _ => panic!("Expected Immediate plan"),
         }
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_filters_known_command() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["get_query_dsl".into()],
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.commands.len(), 1);
+        assert_eq!(response.commands[0].name, "get_query_dsl");
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_rejects_unknown_command() {
+        let service = test_service();
+        let status = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["typo".into()],
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        assert!(status.message().contains("typo"));
+    }
+
+    #[tokio::test]
+    async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() {
+        let service = test_service();
+        let status = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_graph_status".into(),
+                parameters_json: "{}".into(),
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
+        let service = test_service();
+        let raw = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_query_dsl".into(),
+                parameters_json: r#"{"format":"raw"}"#.into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(invoke_agent_command_response::Content::ResultJson(json)) = raw.content else {
+            panic!("expected raw command result JSON");
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.get("version").and_then(serde_json::Value::as_str),
+            Some(ToolService::build_query_dsl_version())
+        );
+
+        let llm = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_query_dsl".into(),
+                parameters_json: "{}".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(invoke_agent_command_response::Content::FormattedText(text)) = llm.content else {
+            panic!("expected LLM command result text");
+        };
+        assert!(text.contains("QueryDSL v"));
     }
 
     #[test]

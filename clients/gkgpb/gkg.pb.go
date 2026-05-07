@@ -2044,7 +2044,7 @@ func (x *ListToolsResponse) GetTools() []*ToolDefinition {
 type ToolDefinition struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	Name                 string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                               // e.g. "query_graph", "get_graph_schema"
-	Description          string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`                                                 // tool description; intentionally short so MCP clients that truncate descriptions still see the full text
+	Description          string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`                                                 // tool description; legacy tools may still carry longer back-compat descriptions
 	ParametersJsonSchema string                 `protobuf:"bytes,3,opt,name=parameters_json_schema,json=parametersJsonSchema,proto3" json:"parameters_json_schema,omitempty"` // JSON Schema for the tool's input parameters
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache

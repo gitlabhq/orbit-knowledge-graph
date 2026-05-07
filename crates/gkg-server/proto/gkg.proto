@@ -32,7 +32,7 @@ service KnowledgeGraphService {
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
 
   // Returns available lazy command definitions with parameter schemas.
-  // Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+  // Used by Rails to build the Orbit command catalog for MCP and REST.
   rpc ListAgentCommands(ListAgentCommandsRequest) returns (ListAgentCommandsResponse);
 
   // Executes a lazy command that does not require Rails-specific interception.
@@ -51,15 +51,14 @@ service KnowledgeGraphService {
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
 
   // Returns the query DSL grammar (JSON Schema for query_graph input).
-  // Decoupled from ListTools so MCP clients that truncate tool descriptions can
-  // still discover the grammar on demand without bloating tool metadata.
-  // Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+  // Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+  // command catalog and InvokeAgentCommand instead.
   rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
 
   // Returns the JSON Schema describing the query response shape (the formatter
   // output). Pairs with GetQueryDsl: input grammar there, output shape here.
-  // Used by MCP tools/call("get_response_format") and surfaced by the monolith
-  // through GET /api/v4/orbit/schema?include_response_format=true.
+  // Direct API helper for REST consumers. MCP agents should use the command
+  // catalog and InvokeAgentCommand instead.
   rpc GetResponseFormat(GetResponseFormatRequest) returns (GetResponseFormatResponse);
 
   // Returns cluster health and component status.
@@ -291,7 +290,7 @@ message ListToolsResponse {
 // truth for tool metadata — Rails passes these through to MCP and REST consumers.
 message ToolDefinition {
   string name = 1;                    // e.g. "query_graph", "get_graph_schema"
-  string description = 2;            // tool description; intentionally short so MCP clients that truncate descriptions still see the full text
+  string description = 2;            // tool description; legacy tools may still carry longer back-compat descriptions
   string parameters_json_schema = 3; // JSON Schema for the tool's input parameters
 }
 

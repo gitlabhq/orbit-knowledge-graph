@@ -335,7 +335,7 @@ pub struct ToolDefinition {
     /// e.g. "query_graph", "get_graph_schema"
     #[prost(string, tag = "1")]
     pub name: ::prost::alloc::string::String,
-    /// tool description; intentionally short so MCP clients that truncate descriptions still see the full text
+    /// tool description; legacy tools may still carry longer back-compat descriptions
     #[prost(string, tag = "2")]
     pub description: ::prost::alloc::string::String,
     /// JSON Schema for the tool's input parameters
@@ -815,7 +815,7 @@ pub mod knowledge_graph_service_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns available lazy command definitions with parameter schemas.
-        /// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+        /// Used by Rails to build the Orbit command catalog for MCP and REST.
         pub async fn list_agent_commands(
             &mut self,
             request: impl tonic::IntoRequest<super::ListAgentCommandsRequest>,
@@ -930,9 +930,8 @@ pub mod knowledge_graph_service_client {
             self.inner.unary(req, path, codec).await
         }
         /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Decoupled from ListTools so MCP clients that truncate tool descriptions can
-        /// still discover the grammar on demand without bloating tool metadata.
-        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+        /// command catalog and InvokeAgentCommand instead.
         pub async fn get_query_dsl(
             &mut self,
             request: impl tonic::IntoRequest<super::GetQueryDslRequest>,
@@ -959,8 +958,8 @@ pub mod knowledge_graph_service_client {
         }
         /// Returns the JSON Schema describing the query response shape (the formatter
         /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-        /// Used by MCP tools/call("get_response_format") and surfaced by the monolith
-        /// through GET /api/v4/orbit/schema?include_response_format=true.
+        /// Direct API helper for REST consumers. MCP agents should use the command
+        /// catalog and InvokeAgentCommand instead.
         pub async fn get_response_format(
             &mut self,
             request: impl tonic::IntoRequest<super::GetResponseFormatRequest>,
@@ -1068,7 +1067,7 @@ pub mod knowledge_graph_service_server {
             tonic::Status,
         >;
         /// Returns available lazy command definitions with parameter schemas.
-        /// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+        /// Used by Rails to build the Orbit command catalog for MCP and REST.
         async fn list_agent_commands(
             &self,
             request: tonic::Request<super::ListAgentCommandsRequest>,
@@ -1113,9 +1112,8 @@ pub mod knowledge_graph_service_server {
             tonic::Status,
         >;
         /// Returns the query DSL grammar (JSON Schema for query_graph input).
-        /// Decoupled from ListTools so MCP clients that truncate tool descriptions can
-        /// still discover the grammar on demand without bloating tool metadata.
-        /// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+        /// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+        /// command catalog and InvokeAgentCommand instead.
         async fn get_query_dsl(
             &self,
             request: tonic::Request<super::GetQueryDslRequest>,
@@ -1125,8 +1123,8 @@ pub mod knowledge_graph_service_server {
         >;
         /// Returns the JSON Schema describing the query response shape (the formatter
         /// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-        /// Used by MCP tools/call("get_response_format") and surfaced by the monolith
-        /// through GET /api/v4/orbit/schema?include_response_format=true.
+        /// Direct API helper for REST consumers. MCP agents should use the command
+        /// catalog and InvokeAgentCommand instead.
         async fn get_response_format(
             &self,
             request: tonic::Request<super::GetResponseFormatRequest>,

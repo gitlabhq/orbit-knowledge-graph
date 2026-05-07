@@ -47,7 +47,7 @@ type KnowledgeGraphServiceClient interface {
 	// Used by MCP tools/list and GET /api/v4/orbit/tools.
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
 	// Returns available lazy command definitions with parameter schemas.
-	// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+	// Used by Rails to build the Orbit command catalog for MCP and REST.
 	ListAgentCommands(ctx context.Context, in *ListAgentCommandsRequest, opts ...grpc.CallOption) (*ListAgentCommandsResponse, error)
 	// Executes a lazy command that does not require Rails-specific interception.
 	// Rails intercepts query_graph and get_graph_status before falling through here.
@@ -62,14 +62,13 @@ type KnowledgeGraphServiceClient interface {
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
 	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Decoupled from ListTools so MCP clients that truncate tool descriptions can
-	// still discover the grammar on demand without bloating tool metadata.
-	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
 	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-	// Used by MCP tools/call("get_response_format") and surfaced by the monolith
-	// through GET /api/v4/orbit/schema?include_response_format=true.
+	// Direct API helper for REST consumers. MCP agents should use the command
+	// catalog and InvokeAgentCommand instead.
 	GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
@@ -191,7 +190,7 @@ type KnowledgeGraphServiceServer interface {
 	// Used by MCP tools/list and GET /api/v4/orbit/tools.
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
 	// Returns available lazy command definitions with parameter schemas.
-	// Used by MCP tools/call("list_commands") and GET /api/v4/orbit/agent/commands.
+	// Used by Rails to build the Orbit command catalog for MCP and REST.
 	ListAgentCommands(context.Context, *ListAgentCommandsRequest) (*ListAgentCommandsResponse, error)
 	// Executes a lazy command that does not require Rails-specific interception.
 	// Rails intercepts query_graph and get_graph_status before falling through here.
@@ -206,14 +205,13 @@ type KnowledgeGraphServiceServer interface {
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
 	// Returns the query DSL grammar (JSON Schema for query_graph input).
-	// Decoupled from ListTools so MCP clients that truncate tool descriptions can
-	// still discover the grammar on demand without bloating tool metadata.
-	// Used by MCP tools/call("get_query_dsl") and GET /api/v4/orbit/dsl.
+	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
 	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
 	// Returns the JSON Schema describing the query response shape (the formatter
 	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
-	// Used by MCP tools/call("get_response_format") and surfaced by the monolith
-	// through GET /api/v4/orbit/schema?include_response_format=true.
+	// Direct API helper for REST consumers. MCP agents should use the command
+	// catalog and InvokeAgentCommand instead.
 	GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.

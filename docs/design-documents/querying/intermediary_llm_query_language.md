@@ -18,6 +18,8 @@ flowchart LR
 
 The JSON schema (`config/schemas/graph_query.schema.json`) defines the structure, while the ontology (`config/ontology/`) provides entity types, relationship types, and property definitions that are validated at runtime.
 
+Agents should fetch the current DSL and graph schema before composing a query. The DSL is versioned by `config/QUERY_DSL_VERSION`; the graph schema comes from the ontology. Agents should expand every candidate node type needed for the question before using properties, filters, columns, or aggregations.
+
 ```mermaid
 sequenceDiagram
     participant Client as MCP Client / LLM
