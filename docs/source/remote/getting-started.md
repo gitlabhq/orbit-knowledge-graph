@@ -23,11 +23,10 @@ Orbit indexes top-level groups only. Subgroups and projects inherit indexing aut
 
 ## Step 1: Enable Orbit
 
-1. On the left sidebar, select **Search or go to** and find your top-level group.
-1. Select **Settings > General**.
-1. Expand **Orbit**.
-1. Turn on the **Enable Orbit** toggle.
-1. Select **Save changes**.
+1. On the left sidebar, expand **Your Work**.
+1. Select **Orbit > Configuration**.
+1. Find your top-level group in the **Indexes** list.
+1. Toggle **Enable**.
 
 Orbit begins indexing immediately. Initial indexing takes a few minutes for small groups
 and up to 30 minutes for groups with thousands of projects.
@@ -51,9 +50,11 @@ Orbit Remote exposes the same graph through three surfaces. Pick the one that ma
 
 ### Duo Agent Platform (no setup required)
 
-1. On the left sidebar, select **GitLab Duo**.
-1. Select **Orbit**.
-1. Ask: "What are the most active projects in my group?"
+Orbit is wired into the Duo Developer Flow and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent. They call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
+
+In the Duo Developer Flow, ask a question that benefits from graph context, like:
+
+> "What services would break if I rename the deploy_user method?"
 
 Duo queries are zero-rated and do not consume GitLab Credits.
 
