@@ -10,7 +10,7 @@ title: Schema reference
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experiment
+- Status: Experimental
 
 {{< /details >}}
 

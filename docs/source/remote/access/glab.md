@@ -10,7 +10,7 @@ title: Use Orbit with the glab CLI
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experiment
+- Status: Experimental
 
 {{< /details >}}
 

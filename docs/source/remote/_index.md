@@ -10,7 +10,7 @@ title: Orbit Remote
 
 - Tier: Premium, Ultimate
 - Offering: GitLab.com
-- Status: Experiment
+- Status: Experimental
 
 {{< /details >}}
 

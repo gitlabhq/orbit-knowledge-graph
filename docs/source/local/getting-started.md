@@ -10,18 +10,18 @@ title: Get started with Orbit Local
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Experiment
+- Status: Experimental
 
 {{< /details >}}
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
 
 {{< /history >}}
 
 > [!note]
-> Orbit Local is an early developer preview. Until packaged binaries ship,
+> Orbit Local is experimental. Until packaged binaries ship,
 > you must build from source.
 
 Orbit Local runs on your machine. Pick the access method that matches how you
