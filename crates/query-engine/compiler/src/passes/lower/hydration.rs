@@ -99,59 +99,29 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
 ///    granule selectivity. Safe because `id IN (...)` is the correctness
 ///    guarantee — TP is purely a scan optimizer.
 /// 2. **Single path:** `startsWith(alias.traversal_path, 'tp')`
-/// 3. **Multiple paths:** `startsWith(tp, LCP) AND arrayExists(p -> startsWith(tp, p), [tps])`
-///    Same structure as the security pass — the LCP lets ClickHouse prune
-///    at the primary key level, and arrayExists handles the remaining paths.
+/// 3. **Multiple paths:** OR disjunction of `startsWith` calls.
+///
+/// Unlike the security pass which uses `arrayExists` for potentially
+/// hundreds of authorization paths, hydration has a small number of
+/// project-level paths. OR disjunction is faster because ClickHouse
+/// pushes each `startsWith` into the key condition independently,
+/// whereas `arrayExists` with a lambda evaluates post-scan on all
+/// LCP-matched rows.
 fn traversal_path_filter(alias: &str, paths: &[String]) -> Option<Expr> {
     if paths.is_empty() {
         return None;
     }
     let leaves = prune_to_leaves(paths);
-    match leaves.len() {
-        0 => None,
-        1 => Some(starts_with(alias, &leaves[0])),
-        _ => {
-            let lcp = lowest_common_prefix(&leaves);
-            let lcp_filter = starts_with(alias, &lcp);
-            let array_filter = array_exists_filter(alias, &leaves);
-            Some(Expr::and(lcp_filter, array_filter))
-        }
+    if leaves.is_empty() {
+        return None;
     }
+    Expr::or_all(leaves.iter().map(|tp| Some(starts_with(alias, tp))))
 }
 
 fn starts_with(alias: &str, path: &str) -> Expr {
     Expr::func(
         "startsWith",
         vec![Expr::col(alias, TRAVERSAL_PATH_COLUMN), Expr::string(path)],
-    )
-}
-
-/// `arrayExists(p -> startsWith(alias.traversal_path, p), [paths])`
-fn array_exists_filter(alias: &str, paths: &[String]) -> Expr {
-    let lambda_param = "_gkg_tp";
-    Expr::func(
-        "arrayExists",
-        vec![
-            Expr::lambda(
-                lambda_param,
-                Expr::func(
-                    "startsWith",
-                    vec![
-                        Expr::col(alias, TRAVERSAL_PATH_COLUMN),
-                        Expr::ident(lambda_param),
-                    ],
-                ),
-            ),
-            Expr::param(
-                ChType::String.to_array(),
-                serde_json::Value::Array(
-                    paths
-                        .iter()
-                        .map(|p| serde_json::Value::String(p.clone()))
-                        .collect(),
-                ),
-            ),
-        ],
     )
 }
 
@@ -176,26 +146,6 @@ fn prune_to_leaves(paths: &[String]) -> Vec<String> {
         }
     }
     leaves
-}
-
-/// Longest common prefix across path segments.
-fn lowest_common_prefix(paths: &[String]) -> String {
-    if paths.is_empty() {
-        return String::new();
-    }
-    let segments: Vec<Vec<&str>> = paths
-        .iter()
-        .map(|p| p.trim_end_matches('/').split('/').collect())
-        .collect();
-    let first = &segments[0];
-    let common_len = (0..first.len())
-        .take_while(|&i| segments.iter().all(|s| s.get(i) == first.get(i)))
-        .count();
-    if common_len == 0 {
-        String::new()
-    } else {
-        format!("{}/", first[..common_len].join("/"))
-    }
 }
 
 #[cfg(test)]
@@ -242,7 +192,7 @@ mod tests {
     }
 
     #[test]
-    fn multiple_tps_emit_lcp_and_array_exists() {
+    fn multiple_tps_emit_or_disjunction() {
         let node = emit_hydration(
             &[plan(
                 vec!["title"],
@@ -253,15 +203,15 @@ mod tests {
         )
         .unwrap();
         let sql = render(&node);
-        assert!(
-            sql.contains("arrayExists"),
-            "multi-TP should use arrayExists: {sql}"
-        );
-        // LCP startsWith + arrayExists inner startsWith = 2
         let count = sql.matches("startsWith").count();
         assert_eq!(
             count, 2,
-            "LCP + arrayExists should produce two startsWith: {sql}"
+            "two leaf TPs should produce two startsWith calls: {sql}"
+        );
+        assert!(sql.contains("OR"), "two TPs should use OR: {sql}");
+        assert!(
+            !sql.contains("arrayExists"),
+            "should use OR not arrayExists for key pushdown: {sql}"
         );
     }
 
