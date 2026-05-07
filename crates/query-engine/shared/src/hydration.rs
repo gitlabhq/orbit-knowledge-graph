@@ -8,7 +8,9 @@ use std::collections::HashMap;
 use arrow::datatypes::Int64Type;
 use arrow::record_batch::RecordBatch;
 use compiler::constants::MAX_DYNAMIC_HYDRATION_RESULTS;
-use compiler::constants::{HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column};
+use compiler::constants::{
+    HYDRATION_NODE_ALIAS, primary_key_column, redaction_id_column, traversal_path_column,
+};
 use compiler::{
     ColumnSelection, DynamicEntityColumns, HydrationTemplate, Input, InputNode, QueryType,
 };
@@ -35,6 +37,22 @@ pub fn collect_static_ids(result: &QueryResult, template: &HydrationTemplate) ->
     ids.sort_unstable();
     ids.dedup();
     ids
+}
+
+/// Collect distinct traversal paths from authorized rows for a static node.
+///
+/// Reads the `_gkg_{alias}_tp` column emitted by the enforce pass.
+/// Returns deduplicated paths sorted for stable output.
+pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String> {
+    let tp_col = traversal_path_column(alias);
+    let mut paths: Vec<String> = result
+        .authorized_rows()
+        .filter_map(|row| row.get_column_string(&tp_col))
+        .filter(|p| !p.is_empty())
+        .collect();
+    paths.sort_unstable();
+    paths.dedup();
+    paths
 }
 
 /// Extract (entity_type, id) pairs from dynamic nodes (path finding, neighbors).
@@ -83,6 +101,11 @@ pub fn build_static_nodes(
         if ids.is_empty() {
             continue;
         }
+        let traversal_paths = if template.has_traversal_path {
+            collect_traversal_paths(result, &template.node_alias)
+        } else {
+            Vec::new()
+        };
         total_ids += ids.len();
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
@@ -90,6 +113,7 @@ pub fn build_static_nodes(
             table: Some(template.destination_table.clone()),
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
+            traversal_paths,
             ..InputNode::default()
         });
     }
@@ -293,6 +317,12 @@ pub fn hydrate_static(
             continue;
         }
 
+        let traversal_paths = if template.has_traversal_path {
+            collect_traversal_paths(query_result, &template.node_alias)
+        } else {
+            Vec::new()
+        };
+
         total_ids += ids.len();
         nodes.push(InputNode {
             id: HYDRATION_NODE_ALIAS.to_string(),
@@ -300,6 +330,7 @@ pub fn hydrate_static(
             table: Some(template.destination_table.clone()),
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
+            traversal_paths,
             ..InputNode::default()
         });
     }

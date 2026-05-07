@@ -33,6 +33,7 @@ pub fn emit_neighbors(
     let center_table = cnp.table.clone().unwrap_or_default();
     let center_uses_default_pk = cnp.uses_default_pk();
     let center_redaction_col = cnp.redaction_id_column.clone();
+    let center_has_tp = cnp.has_traversal_path;
     let center_node_ids = cnp.node_ids.clone();
     let center_filters = cnp.filters.clone();
     let center_id_range = cnp.id_range.clone();
@@ -206,6 +207,13 @@ pub fn emit_neighbors(
             Expr::string(&center_entity),
             redaction_type_column(&center_id),
         ));
+
+        if center_has_tp {
+            select.push(SelectExpr::new(
+                Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN),
+                traversal_path_column(&center_id),
+            ));
+        }
 
         Query {
             select,

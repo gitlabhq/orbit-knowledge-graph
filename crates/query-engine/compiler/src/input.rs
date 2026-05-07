@@ -378,6 +378,11 @@ pub struct InputNode {
     /// Whether the node table has a traversal_path column. Set during normalization.
     #[serde(skip)]
     pub has_traversal_path: bool,
+    /// Narrowed traversal paths extracted from base query results. Used by the
+    /// hydration pipeline to inject `startsWith(traversal_path, tp)` into hydration
+    /// queries, pruning granules through the primary key.
+    #[serde(skip)]
+    pub traversal_paths: Vec<String>,
 }
 
 impl Default for InputNode {
@@ -394,6 +399,7 @@ impl Default for InputNode {
             redaction_id_column: DEFAULT_PRIMARY_KEY.to_string(),
             virtual_columns: Vec::new(),
             has_traversal_path: false,
+            traversal_paths: Vec::new(),
         }
     }
 }

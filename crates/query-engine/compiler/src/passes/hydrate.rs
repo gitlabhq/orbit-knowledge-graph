@@ -43,6 +43,10 @@ pub struct HydrationTemplate {
     /// user didn't explicitly request. These should be stripped from the
     /// final output after content resolution.
     pub injected_columns: Vec<String>,
+    /// Whether the destination table has a `traversal_path` column. When true,
+    /// the hydration pipeline can narrow scans via `startsWith(traversal_path, tp)`
+    /// using TP values extracted from the base query.
+    pub has_traversal_path: bool,
 }
 
 /// Pre-resolved column spec for an entity type in dynamic hydration.
@@ -54,6 +58,8 @@ pub struct DynamicEntityColumns {
     pub virtual_columns: Vec<VirtualColumnRequest>,
     /// Columns injected as dependencies, not user-requested.
     pub injected_columns: Vec<String>,
+    /// Whether the destination table has a `traversal_path` column.
+    pub has_traversal_path: bool,
 }
 
 /// A column that must be resolved from a remote service rather than ClickHouse.
@@ -141,6 +147,7 @@ fn build_static_templates(input: &Input, ontology: &Ontology) -> Vec<HydrationTe
                 columns,
                 virtual_columns,
                 injected_columns,
+                has_traversal_path: ont_node.has_traversal_path,
             })
         })
         .collect()
@@ -209,6 +216,7 @@ fn build_dynamic_specs(
                 columns,
                 virtual_columns,
                 injected_columns,
+                has_traversal_path: node.has_traversal_path,
             })
         })
         .collect()

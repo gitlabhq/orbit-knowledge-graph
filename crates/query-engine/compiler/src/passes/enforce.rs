@@ -10,10 +10,12 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
-use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
+use crate::constants::{
+    primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
+};
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,6 +375,28 @@ fn enforce_return_columns(
                         alias: Some(type_col),
                     },
                 );
+            }
+        }
+
+        // Emit traversal_path column for hydration narrowing.
+        // Only for nodes whose table carries traversal_path.
+        if node.has_traversal_path {
+            let tp_col = traversal_path_column(&node.id);
+            let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
+            if !has_tp {
+                let tp_expr = if node_is_edge_centric {
+                    let (edge_alias, _) = node_edge_col
+                        .get(&node.id)
+                        .expect("edge mapping checked above");
+                    Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN)
+                } else {
+                    Expr::col(&node.id, TRAVERSAL_PATH_COLUMN)
+                };
+                q.select.push(SelectExpr {
+                    expr: tp_expr.clone(),
+                    alias: Some(tp_col),
+                });
+                ensure_in_group_by(q, input.query_type, tp_expr);
             }
         }
     }
