@@ -67,7 +67,7 @@ repository statistics or showing related files when browsing through repository.
   serving incoming query requests (and also takes care of DB management tasks).
 - To avoid building graph nodes infrastructure from scratch, we will use Zoekt
   nodes for indexing and querying also graph databases. We will extend the existing
-  [gitlab-zoekt](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer) service
+  [`gitlab-zoekt`](https://gitlab.com/gitlab-org/gitlab-zoekt-indexer) service
   instead of creating a separate new service.
 - Create an abstraction layer on GitLab Rails side which can be used by other
   services to query graph databases using MCP tools.
@@ -127,7 +127,7 @@ The pod contains the following containers:
 - `gkg-webserver` - long-running Rust HTTP server for graph
   queries and MCP (Model Context Protocol)
 
-All containers will share the same persistent volume for data storage. This enables Knowledge Graph services to access the same data plan as the Zoekt Services, which is how the GKG services will operate on the gitaly fetched and saved by the Zoekt indexer.
+All containers will share the same persistent volume for data storage. This enables Knowledge Graph services to access the same data plan as the Zoekt Services, which is how the GKG services will operate on the Gitaly fetched and saved by the Zoekt indexer.
 
 The main reason for running `gkg-indexer` and `gkg-webserver` as separate
 services in separate containers is better isolation of indexing from querying
@@ -334,7 +334,7 @@ When a graph database for a project repository should be updated:
   of replicas where the repository is synced, a list of replicas where the repository
   should be synced and a list of nodes from where the repository should be removed
 - The GKG proxy service periodically sends heartbeat requests to GitLab Rails,
-  in response it receives indexing tasks, fetches git repositories (using Gitaly)
+  in response it receives indexing tasks, fetches Git repositories (using Gitaly)
   and stores them to a directory, then sends an
   HTTP request to index the repository to the GKG indexing service.
 - The GKG indexer service stores the parser's output data in the graph database

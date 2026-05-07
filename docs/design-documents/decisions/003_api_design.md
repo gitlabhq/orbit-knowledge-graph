@@ -116,7 +116,7 @@ enum ResponseFormat {
 | `ExecuteQuery` | Tabular JSON rows + `QueryMetadata` | [GOON](https://gitlab.com/gitlab-org/gitlab/-/snippets/4929205) (Graph Object Output Notation) — deduplicated nodes/edges, 25-50% token savings |
 | `GetGraphSchema` | Structured schema (domains, nodes, edges, properties, styles) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) text (`{name: "User", props: ["id:int", ...], out: [...]}`) |
 | `GetClusterHealth` | Structured health (status, version, components) | [TOON](https://github.com/toon-format/spec/blob/main/SPEC.md) — compact key-value notation |
-| `ListTools` | Tool definitions (name, description, parameters_json_schema) | Same (no LLM variant needed) |
+| `ListTools` | Tool definitions (name, description, `parameters_json_schema`) | Same (no LLM variant needed) |
 
 The detailed response format specification — including the unified response envelope (`metadata`, `rows`, `graph`), GOON encoding, and the shared JSON Schema contract between the Rust backend and the Vue frontend — will be covered in a separate follow-up ADR. The design research for this is tracked in [snippet 5965027](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965027) (Michael Usachenko's proposal) and [snippet 5965036](https://gitlab.com/gitlab-org/gitlab/-/snippets/5965036) (Angelo's extension with Kuzu-inspired uniform model).
 

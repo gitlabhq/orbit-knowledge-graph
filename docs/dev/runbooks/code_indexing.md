@@ -61,7 +61,7 @@ Unlike SDLC handlers, code indexing handlers retry via NATS because tasks are ev
 
 ### Push event dispatcher (`SiphonCodeIndexingTaskDispatcher`)
 
-Consumes CDC events from `siphon_stream_main_db` for the `p_knowledge_graph_code_indexing_tasks` table. Each event represents a git push.
+Consumes CDC events from `siphon_stream_main_db` for the `p_knowledge_graph_code_indexing_tasks` table. Each event represents a Git push.
 
 The dispatcher:
 
