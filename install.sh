@@ -146,7 +146,9 @@ verify_checksum() {
     fi
 
     if [ "$expected_checksum" != "$actual_checksum" ]; then
-        error "Checksum verification failed for $file using $checksum_url\nExpected: $expected_checksum\nActual:   $actual_checksum"
+        error "Checksum verification failed for $file using $checksum_url
+Expected: $expected_checksum
+Actual:   $actual_checksum"
     fi
 
     success "Checksum verified successfully."
@@ -174,9 +176,9 @@ install_orbit() {
         echo "Resolving the latest Orbit release..."
         local permalink="https://gitlab.com/api/v4/projects/${project_id}/releases/permalink/latest"
         if command_exists curl; then
-            resolved_tag=$(curl -fsSL "$permalink" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)
+            resolved_tag=$(curl -fsSL "$permalink" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"\\]+)".*/\1/p' | head -n1)
         else
-            resolved_tag=$(wget -qO- "$permalink" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/p' | head -n1)
+            resolved_tag=$(wget -qO- "$permalink" | sed -nE 's/.*"tag_name":[[:space:]]*"([^"\\]+)".*/\1/p' | head -n1)
         fi
         if [ -z "$resolved_tag" ]; then
             error "Failed to resolve the latest release tag from $permalink"
@@ -275,6 +277,9 @@ ensure_dependencies() {
     fi
     if ! command_exists curl && ! command_exists wget; then
         error "Neither 'curl' nor 'wget' found. Please install one of them and re-run the installer."
+    fi
+    if ! command_exists awk; then
+        error "Required dependency 'awk' not found. Please install it and re-run the installer."
     fi
 }
 
