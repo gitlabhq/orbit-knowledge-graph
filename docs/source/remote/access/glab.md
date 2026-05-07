@@ -14,6 +14,17 @@ title: Use Orbit with the glab CLI
 
 {{< /details >}}
 
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
+
 The [`glab` CLI](https://docs.gitlab.com/cli/) is the canonical way to set up and
 query Orbit from the command line.
 
@@ -90,7 +101,7 @@ glab orbit remote tools
 ### Run a query
 
 ```shell
-echo '{"query":{"query_type":"search","node":{"id":"p","entity":"Project"},"limit":5}}' \
+echo '{"query":{"query_type":"traversal","node":{"id":"p","entity":"Project","filters":{"full_path":{"op":"starts_with","value":"your-group/"}}},"limit":5}}' \
   | glab orbit remote query -
 ```
 

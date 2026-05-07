@@ -8,8 +8,8 @@ title: Orbit Local
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}

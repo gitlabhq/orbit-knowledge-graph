@@ -8,19 +8,23 @@ title: Schema reference
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
 
+> [!note]
+> Orbit Local is an early developer preview. Capabilities and command shape may
+> change before GA.
+
 Orbit Local indexes 4 node types - all in the source code domain. There is no
 SDLC layer, because Orbit Local does not connect to GitLab.
 
-To fetch the live schema at any time:
+To inspect the live schema at any time:
 
 ```shell
-orbit query '{"query_type":"schema"}'
+orbit schema --ontology
 ```
 
 ## Source code

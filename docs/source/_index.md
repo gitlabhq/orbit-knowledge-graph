@@ -73,7 +73,7 @@ flowchart LR
 
 Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
 
-[Get started with Orbit Remote](get_started.md#orbit-remote)
+[Get started with Orbit Remote](remote/getting-started.md)
 
 ## Orbit Local
 
@@ -92,14 +92,14 @@ flowchart LR
     accDescr: The orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
 
     Repo[Local repository] --> CLI["orbit CLI"]
-    CLI --> DB[("DuckDB\n~/.orbit/graph.db")]
+    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
     DB --> Query[CLI query]
 ```
 
 Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
 Orbit Remote.
 
-[Get started with Orbit Local](get_started.md#orbit-local)
+[Get started with Orbit Local](local/getting-started.md)
 
 ## What Orbit indexes
 
@@ -116,8 +116,9 @@ Code is indexed from the default branch only.
 **Supported languages for code indexing:**
 Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++
 
-[Full indexing coverage](indexing.md) | [Schema reference](schema.md)
+[Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
 
 ## Get started
 
-[Enable Orbit and run your first query](get_started.md)
+- [Enable Orbit Remote and run your first query](remote/getting-started.md)
+- [Build a local code graph with Orbit Local](local/getting-started.md)

@@ -8,8 +8,8 @@ title: Use Orbit Local with the glab CLI
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
@@ -23,12 +23,12 @@ instance or your local machine.
 > `glab orbit local` is the planned packaging path for the developer preview.
 > Until it ships, build from source - see [Use the orbit CLI directly](cli.md).
 
-Three top-level commands:
+Two top-level commands:
 
 - **`glab orbit setup`** - install the Orbit skill and point your AI
   agent at the local graph.
 - **`glab orbit local`** - typed subcommands that wrap the `orbit` binary.
-- **`glab orbit local mcp serve`** - run Orbit Local as an MCP server.
+  Includes `glab orbit local mcp serve` to run Orbit Local as an MCP server.
 
 ## Prerequisites
 
@@ -82,7 +82,7 @@ glab orbit local index /path/to/your/repo
 ## Run a query
 
 ```shell
-echo '{"query_type":"search","node":{"id":"d","entity":"Definition","columns":["name","kind"]},"limit":10}' \
+echo '{"query_type":"traversal","node":{"id":"d","entity":"Definition","columns":["name","definition_type"],"filters":{"definition_type":"Method"}},"limit":10}' \
   | glab orbit local query -
 ```
 

@@ -14,6 +14,17 @@ title: Get started with Orbit Remote
 
 {{< /details >}}
 
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
+
 ## Prerequisites
 
 - Owner role on the top-level group you want to enable Orbit on
@@ -64,25 +75,33 @@ See [Use Orbit via MCP](../access/mcp.md) for setup. Once configured, you have t
 
 ### REST API
 
+Replace `your-group` with the top-level group path you enabled Orbit on. The `full_path` filter scopes the query so it passes Orbit's selectivity validation.
+
 ```shell
 curl --request POST \
   --header "Authorization: Bearer <your_token>" \
   --header "Content-Type: application/json" \
   --data '{
-    "query_type": "traversal",
-    "node": {
-      "id": "p",
-      "entity": "Project",
-      "columns": ["name", "full_path"]
+    "query": {
+      "query_type": "traversal",
+      "node": {
+        "id": "p",
+        "entity": "Project",
+        "columns": ["name", "full_path"],
+        "filters": {
+          "full_path": {"op": "starts_with", "value": "your-group/"}
+        }
+      },
+      "limit": 10
     },
-    "limit": 10
+    "format": "raw"
   }' \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
 ## What to try next
 
-- [What Orbit indexes](../indexing.md) - understand coverage before writing queries
-- [Schema reference](../schema.md) - explore the 24 node types and their properties
-- [Cookbook](../cookbook.md) - copy-paste queries for common use cases
-- [Get started with Orbit Local](../local/getting_started.md) - query a local repository offline
+- [What Orbit indexes](indexing.md) - understand coverage before writing queries
+- [Schema reference](schema.md) - explore the 24 node types and their properties
+- [Cookbook](cookbook.md) - copy-paste queries for common use cases
+- [Get started with Orbit Local](../local/getting-started.md) - query a local repository offline

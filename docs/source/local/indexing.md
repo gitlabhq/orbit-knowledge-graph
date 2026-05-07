@@ -8,11 +8,15 @@ title: What Orbit Local indexes
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
+
+> [!note]
+> Orbit Local is an early developer preview. Capabilities and command shape may
+> change before GA.
 
 Orbit Local builds a **code-only** graph from a local repository. It does not
 connect to GitLab and does not index SDLC data.

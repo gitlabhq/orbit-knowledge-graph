@@ -14,6 +14,17 @@ title: Use Orbit with Duo Agent Platform
 
 {{< /details >}}
 
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+
+{{< /history >}}
+
+> [!flag]
+> The availability of this feature is controlled by a feature flag.
+> For more information, see the history.
+> This feature is available for testing, but not ready for production use.
+
 Orbit is integrated into GitLab Duo Agent Platform. Duo Developer and the foundational
 agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) directly when a
 question is best answered by traversing your SDLC graph - cross-project dependencies,
@@ -22,10 +33,8 @@ Orbit doesn't have the answer, the agent falls back to its existing tools.
 
 ## Prerequisites
 
-- Orbit is [enabled on your group](../getting-started.md).
-- You have access to Duo Agent Platform through one of:
-  - **Premium or Ultimate** subscription (includes monthly GitLab Credits: 12 per user on Premium, 24 per user on Ultimate)
-  - **Duo Pro or Duo Enterprise** seats with GitLab Credits for DAP usage
+- Orbit is [enabled on your group](../getting-started.md). Orbit requires GitLab.com Premium or Ultimate.
+- You have access to Duo Agent Platform. DAP is metered through GitLab Credits, included with Premium (12 per user per month) and Ultimate (24 per user per month) subscriptions, or available through Duo Pro / Duo Enterprise seats.
 
 ## Where Orbit is available
 
@@ -40,9 +49,8 @@ Orbit is wired into the following Duo Agent Platform surfaces:
 | **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
 | **CI Expert agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
 
-When an agent uses Orbit to answer a question, the response includes an inline
-indicator so you know the answer is grounded in your live graph rather than the
-agent's general knowledge.
+When an agent uses Orbit to answer a question, the answer is grounded in your
+live graph rather than the agent's general knowledge.
 
 ## Billing
 

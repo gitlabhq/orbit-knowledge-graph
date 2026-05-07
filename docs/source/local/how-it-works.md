@@ -8,11 +8,15 @@ title: How Orbit Local works
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
+
+> [!note]
+> Orbit Local is an early developer preview. Capabilities and command shape may
+> change before GA.
 
 ## Indexing pipeline
 

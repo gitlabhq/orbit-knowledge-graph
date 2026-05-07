@@ -8,8 +8,8 @@ title: Get started with Orbit Local
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
@@ -33,6 +33,11 @@ The query language is identical across all three. Whatever you learn in one
 transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
 
 ## 60-second quickstart
+
+> [!note]
+> `glab orbit local` is the planned packaging path. Until it ships, use the
+> `orbit` binary directly - see [Use the orbit CLI directly](access/cli.md).
+> The shapes shown below match what `glab orbit local` will support.
 
 Index a repository and inspect what Orbit found:
 

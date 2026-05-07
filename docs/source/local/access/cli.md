@@ -8,8 +8,8 @@ title: Use Orbit Local with the orbit CLI
 
 {{< details >}}
 
-- Tier: Free
-- Offering: All tiers, self-managed and GitLab.com
+- Tier: Free, Premium, Ultimate
+- Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
 - Status: Developer preview
 
 {{< /details >}}
@@ -61,12 +61,12 @@ in the manifest table.
 
 ```shell
 orbit query '{
-  "query_type": "search",
+  "query_type": "traversal",
   "node": {
     "id": "d",
     "entity": "Definition",
-    "columns": ["name", "kind", "file_path"],
-    "filters": { "kind": "function" }
+    "columns": ["name", "definition_type", "file_path"],
+    "filters": { "definition_type": "Method" }
   },
   "limit": 20
 }'
@@ -95,8 +95,13 @@ orbit schema --query
 
 ```shell
 orbit compile --local '{
-  "query_type": "search",
-  "node": { "id": "f", "entity": "File", "columns": ["path"] },
+  "query_type": "traversal",
+  "node": {
+    "id": "f",
+    "entity": "File",
+    "columns": ["path"],
+    "filters": {"language": "ruby"}
+  },
   "limit": 5
 }'
 ```
