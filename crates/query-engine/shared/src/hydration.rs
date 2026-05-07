@@ -55,6 +55,36 @@ pub fn collect_traversal_paths(result: &QueryResult, alias: &str) -> Vec<String>
     paths
 }
 
+/// Collect the union of all distinct traversal paths across every template
+/// alias that has a `_gkg_{alias}_tp` column in the result.
+///
+/// Used as a fallback for nodes whose own TP column is absent (FK-elided
+/// pinned nodes where the alias was absorbed into a literal). The TPs from
+/// sibling nodes in the same result rows are valid narrowing candidates
+/// because all entities share the same namespace hierarchy.
+fn collect_all_traversal_paths(
+    result: &QueryResult,
+    templates: &[HydrationTemplate],
+) -> Vec<String> {
+    let mut all: Vec<String> = Vec::new();
+    for t in templates {
+        if !t.has_traversal_path {
+            continue;
+        }
+        let tp_col = traversal_path_column(&t.node_alias);
+        for row in result.authorized_rows() {
+            if let Some(tp) = row.get_column_string(&tp_col)
+                && !tp.is_empty()
+            {
+                all.push(tp);
+            }
+        }
+    }
+    all.sort_unstable();
+    all.dedup();
+    all
+}
+
 /// Extract (entity_type, id) pairs from dynamic nodes (path finding, neighbors).
 ///
 /// When `static_nodes` is provided (e.g. the center node in a neighbors query),
@@ -90,6 +120,7 @@ pub fn build_static_nodes(
     templates: &[HydrationTemplate],
     result: &QueryResult,
 ) -> (Vec<InputNode>, usize) {
+    let all_tps = collect_all_traversal_paths(result, templates);
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
 
@@ -102,7 +133,8 @@ pub fn build_static_nodes(
             continue;
         }
         let traversal_paths = if template.has_traversal_path {
-            collect_traversal_paths(result, &template.node_alias)
+            let own = collect_traversal_paths(result, &template.node_alias);
+            if own.is_empty() { all_tps.clone() } else { own }
         } else {
             Vec::new()
         };
@@ -304,6 +336,7 @@ pub fn hydrate_static(
     templates: &[HydrationTemplate],
     query_result: &QueryResult,
 ) -> Result<(Vec<InputNode>, usize), PipelineError> {
+    let all_tps = collect_all_traversal_paths(query_result, templates);
     let mut nodes = Vec::new();
     let mut total_ids: usize = 0;
 
@@ -318,7 +351,8 @@ pub fn hydrate_static(
         }
 
         let traversal_paths = if template.has_traversal_path {
-            collect_traversal_paths(query_result, &template.node_alias)
+            let own = collect_traversal_paths(query_result, &template.node_alias);
+            if own.is_empty() { all_tps.clone() } else { own }
         } else {
             Vec::new()
         };
