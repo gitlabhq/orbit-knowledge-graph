@@ -181,10 +181,11 @@ pub fn hydration() -> Pipeline<SecureEnv, QueryState> {
 /// Local DuckDB hydration compilation pipeline.
 ///
 /// ```text
-/// Input → Plan → Lower → Enforce → DuckDbCodegen
+/// Input → LocalMode → Plan → Lower → Enforce → DuckDbCodegen
 /// ```
 pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
+        .pass(LocalModePass)
         .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
@@ -195,13 +196,14 @@ pub fn duckdb_hydration() -> Pipeline<LocalEnv, DuckDbState> {
 /// Local DuckDB compilation pipeline.
 ///
 /// ```text
-/// JSON → Validate → Normalize → Plan → Lower → Enforce → HydratePlan → DuckDbCodegen
+/// JSON → Validate → Normalize → LocalMode → Plan → Lower → Enforce → HydratePlan → DuckDbCodegen
 /// ```
 pub fn duckdb() -> Pipeline<LocalEnv, DuckDbState> {
     Pipeline::builder()
         .pass(ValidatePass)
         .seal(SealJson)
         .pass(NormalizePass)
+        .pass(LocalModePass)
         .pass(PlannerPass)
         .pass(LowerPass)
         .pass(EnforcePass)
