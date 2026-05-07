@@ -10,9 +10,15 @@ title: Use Orbit Local with the orbit CLI
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 The `orbit` CLI builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.
@@ -112,6 +118,10 @@ Useful for debugging query DSL or seeing the generated DuckDB SQL.
 
 The graph is stored at `~/.orbit/graph.duckdb`. Multiple repositories share
 the same database. Delete the file to start over.
+
+## Billing
+
+Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 

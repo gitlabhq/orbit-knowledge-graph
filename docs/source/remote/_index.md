@@ -27,10 +27,8 @@ title: Orbit Remote
 
 Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a ClickHouse property graph.
 
-- **For:** GitLab.com Premium and Ultimate
 - **Indexes:** Full SDLC + code graph
 - **Storage:** ClickHouse (managed, no setup required)
-- **Status:** Experiment
 
 [Get started with Orbit Remote](getting-started.md)
 
@@ -49,8 +47,10 @@ Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level grou
 
 | Method | Description |
 |---|---|
-| [Duo Agent Platform](access/duo.md) | Natural language questions via the GitLab UI |
+| [GitLab Duo Agent Platform](access/duo.md) | Natural language questions via the GitLab UI |
 | [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agents |
 | [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
 
-MCP and REST API queries consume GitLab Credits. Duo Agent Platform queries are zero-rated.
+## Billing
+
+MCP and REST API queries consume GitLab Credits. GitLab Duo Agent Platform queries are zero-rated.

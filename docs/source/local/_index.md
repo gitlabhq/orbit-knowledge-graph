@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: The orbit CLI - build and query a code graph on your own machine, no GitLab instance required.
+description: Orbit Local - build and query a code graph on your own machine, no GitLab instance required.
 title: Orbit Local
 ---
 
@@ -10,22 +10,22 @@ title: Orbit Local
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
 
-> [!note]
-> Orbit Local is an early developer preview. Until packaged binaries ship,
-> you must build from source.
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 Orbit Local runs entirely on your machine. Build a code graph for any local
 repository and query it using the same query language as Orbit Remote. No
 GitLab account, no network connection required.
 
-- **For:** Any tier, self-managed, or offline use
 - **Indexes:** Code only - files, definitions, cross-file references
 - **Storage:** DuckDB (local file at `~/.orbit/graph.duckdb`)
-- **Status:** Developer preview
 
 [Get started with Orbit Local](getting-started.md)
 
@@ -45,5 +45,7 @@ GitLab account, no network connection required.
 | [orbit CLI](access/cli.md) | Run the `orbit` binary directly to index and query |
 | [glab CLI](access/glab.md) | Drive Orbit Local through `glab orbit local` |
 | [MCP](access/mcp.md) | Expose the local graph to Claude Code, Codex, and other agents |
+
+## Billing
 
 Orbit Local does not consume GitLab Credits. All processing is local.

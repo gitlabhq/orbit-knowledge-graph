@@ -10,9 +10,15 @@ title: Use Orbit Local with the glab CLI
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 The [`glab` CLI](https://docs.gitlab.com/cli/) is the canonical way to install,
 run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors

@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data, across Duo Developer and the foundational agents.
-title: Use Orbit with Duo Agent Platform
+description: Use Orbit through GitLab Duo Agent Platform. Ask natural language questions about your SDLC and get answers grounded in your live GitLab data, across the Developer Flow and the foundational agents.
+title: Use Orbit with GitLab Duo Agent Platform
 ---
 
 {{< details >}}
@@ -25,7 +25,7 @@ title: Use Orbit with Duo Agent Platform
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit is integrated into GitLab Duo Agent Platform. Duo Developer and the foundational
+Orbit is integrated into GitLab Duo Agent Platform. The Developer Flow and the foundational
 agents call Orbit's graph tools (`get_graph_schema`, `query_graph`) directly when a
 question is best answered by traversing your SDLC graph - cross-project dependencies,
 blast radius, pipeline inheritance, vulnerability lineage, contributor patterns. When
@@ -34,16 +34,16 @@ Orbit doesn't have the answer, the agent falls back to its existing tools.
 ## Prerequisites
 
 - Orbit is [enabled on your group](../getting-started.md). Orbit requires GitLab.com Premium or Ultimate.
-- You have access to Duo Agent Platform. DAP is metered through GitLab Credits, included with Premium (12 per user per month) and Ultimate (24 per user per month) subscriptions, or available through Duo Pro / Duo Enterprise seats.
+- You have access to GitLab Duo Agent Platform. See [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/) for how to access it through your subscription or GitLab Credits.
 
 ## Where Orbit is available
 
-Orbit is wired into the following Duo Agent Platform surfaces:
+Orbit is wired into the following GitLab Duo Agent Platform surfaces:
 
 | Surface | When to use it |
 |---------|----------------|
-| **Duo Developer Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
-| **Duo CLI** | Terminal-based, editor-agnostic, scriptable. Same Orbit capabilities as Duo Developer Flow, available in headless and CI workflows. |
+| **Developer Flow** | In-IDE coding flow. Ask about cross-file references, who calls a function, blast radius for a change, dependencies between projects in your group. |
+| **GitLab Duo CLI** | Terminal-based, editor-agnostic, scriptable. Same Orbit capabilities as the Developer Flow, available in headless and CI workflows. |
 | **Planner agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
 | **Security Analyst agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
 | **Data Analyst agent** | SDLC analytics. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
@@ -54,7 +54,7 @@ live graph rather than the agent's general knowledge.
 
 ## Billing
 
-Queries that Duo Agent Platform makes against Orbit on your behalf are
+Queries that GitLab Duo Agent Platform makes against Orbit on your behalf are
 **zero-rated**. They do not consume GitLab Credits.
 
 ## Example prompts

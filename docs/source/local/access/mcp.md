@@ -10,9 +10,15 @@ title: Connect to Orbit Local via MCP
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 Orbit Local can run as an MCP server, exposing the same two tools as Orbit
 Remote (`query_graph`, `get_graph_schema`) but pointed at the local DuckDB

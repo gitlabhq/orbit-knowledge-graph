@@ -55,19 +55,19 @@ Orbit Remote exposes the same graph through three surfaces. Pick the one that ma
 
 | Method | Best for | Setup | Billing |
 |---|---|---|---|
-| **Duo Agent Platform** | End users in the GitLab UI | None | Zero-rated |
+| **GitLab Duo Agent Platform** | End users in the GitLab UI | None | Zero-rated |
 | **MCP** | Claude Code, Codex, other AI agents | One-time agent config | GitLab Credits |
 | **REST API** | Scripts, dashboards, custom tooling | API token | GitLab Credits |
 
-### Duo Agent Platform (no setup required)
+### GitLab Duo Agent Platform (no setup required)
 
-Orbit is wired into the Duo Developer Flow and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent. They call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
+Orbit is wired into the Developer Flow and the foundational agents - Planner agent, Security Analyst agent, Data Analyst agent, and CI Expert agent. They call Orbit's `query_graph` and `get_graph_schema` tools automatically when a question is best answered by traversing the graph. No tool selection or configuration required.
 
-In the Duo Developer Flow, ask a question that benefits from graph context, like:
+In the Developer Flow, ask a question that benefits from graph context, like:
 
 > "What services would break if I rename the deploy_user method?"
 
-Duo queries are zero-rated and do not consume GitLab Credits.
+GitLab Duo queries are zero-rated and do not consume GitLab Credits.
 
 ### MCP (Claude Code, Codex, other agents)
 

@@ -10,9 +10,15 @@ title: What Orbit Local indexes
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 > [!note]
 > Orbit Local is an early developer preview. Capabilities and command shape may
@@ -86,3 +92,7 @@ Also not indexed by Orbit Local:
 Orbit Local has no authorization layer. All data in the graph is accessible
 to whoever runs the CLI. The graph file at `~/.orbit/graph.duckdb` is
 protected by your operating system's file permissions.
+
+## Billing
+
+Orbit Local does not consume GitLab Credits. All processing is local.

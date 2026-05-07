@@ -84,7 +84,7 @@ depending on the size of the change.
 
 All queries go through the same path:
 
-1. Orbit receives a JSON query payload (via REST, MCP, or Duo).
+1. Orbit receives a JSON query payload (via REST, MCP, or GitLab Duo Agent Platform).
 2. The query engine validates the query against the current schema.
 3. Orbit compiles the JSON DSL to ClickHouse SQL.
 4. ClickHouse executes the query against the graph tables.

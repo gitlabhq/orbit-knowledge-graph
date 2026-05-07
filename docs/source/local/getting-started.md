@@ -10,9 +10,15 @@ title: Get started with Orbit Local
 
 - Tier: Free, Premium, Ultimate
 - Offering: GitLab.com, GitLab Self-Managed, GitLab Dedicated
-- Status: Developer preview
+- Status: Experiment
 
 {{< /details >}}
+
+{{< history >}}
+
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as a developer preview.
+
+{{< /history >}}
 
 > [!note]
 > Orbit Local is an early developer preview. Until packaged binaries ship,
@@ -55,6 +61,10 @@ Next:
 - Wire it into your AI agent: `glab orbit setup` and pick "Local" when
   prompted. See [Connect via MCP](access/mcp.md).
 - Learn the query DSL: [Query language reference](../remote/queries/).
+
+## Billing
+
+Orbit Local does not consume GitLab Credits. All processing is local.
 
 ## What to try next
 
