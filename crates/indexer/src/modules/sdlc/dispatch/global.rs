@@ -3,16 +3,17 @@ use std::time::Instant;
 
 use async_trait::async_trait;
 use chrono::Utc;
-use tracing::info;
+use tracing::{debug, info};
 
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
-use crate::topic::GlobalIndexingRequest;
-use crate::types::{Envelope, Event};
+use crate::topic::EntityIndexingRequest;
+use crate::types::Envelope;
 use gkg_server_config::{GlobalDispatcherConfig, ScheduleConfiguration};
 
 pub struct GlobalDispatcher {
+    entity_names: Vec<String>,
     nats: Arc<dyn NatsServices>,
     metrics: ScheduledTaskMetrics,
     config: GlobalDispatcherConfig,
@@ -20,11 +21,13 @@ pub struct GlobalDispatcher {
 
 impl GlobalDispatcher {
     pub fn new(
+        entity_names: Vec<String>,
         nats: Arc<dyn NatsServices>,
         metrics: ScheduledTaskMetrics,
         config: GlobalDispatcherConfig,
     ) -> Self {
         Self {
+            entity_names,
             nats,
             metrics,
             config,
@@ -57,33 +60,49 @@ impl ScheduledTask for GlobalDispatcher {
 
 impl GlobalDispatcher {
     async fn dispatch_inner(&self) -> Result<(), TaskError> {
-        let envelope = Envelope::new(&GlobalIndexingRequest {
-            watermark: Utc::now(),
-        })
-        .map_err(|error| {
-            self.metrics.record_error(self.name(), "publish");
-            TaskError::new(error)
-        })?;
+        let watermark = Utc::now();
+        let mut dispatched: u64 = 0;
+        let mut skipped: u64 = 0;
 
-        match self
-            .nats
-            .publish(&GlobalIndexingRequest::subscription(), &envelope)
-            .await
-        {
-            Ok(()) => {
-                self.metrics.record_requests_published(self.name(), 1);
-                info!("dispatched global indexing request");
-            }
-            Err(crate::nats::NatsError::PublishDuplicate) => {
-                self.metrics.record_requests_skipped(self.name(), 1);
-                info!("skipping global indexing request, already in-flight");
-            }
-            Err(error) => {
+        for entity in &self.entity_names {
+            let request = EntityIndexingRequest {
+                entity: entity.clone(),
+                namespace: None,
+                traversal_path: None,
+                range: None,
+                watermark,
+            };
+
+            let subscription = request.publish_subscription();
+            let envelope = Envelope::new(&request).map_err(|error| {
                 self.metrics.record_error(self.name(), "publish");
-                return Err(TaskError::new(error));
+                TaskError::new(error)
+            })?;
+
+            match self.nats.publish(&subscription, &envelope).await {
+                Ok(()) => {
+                    dispatched += 1;
+                    debug!(entity = %entity, "dispatched global entity indexing request");
+                }
+                Err(crate::nats::NatsError::PublishDuplicate) => {
+                    skipped += 1;
+                    debug!(entity = %entity, "skipped global entity indexing request, already in-flight");
+                }
+                Err(error) => {
+                    self.metrics.record_error(self.name(), "publish");
+                    return Err(TaskError::new(error));
+                }
             }
         }
 
+        self.metrics
+            .record_requests_published(self.name(), dispatched);
+        self.metrics.record_requests_skipped(self.name(), skipped);
+
+        info!(
+            dispatched,
+            skipped, "dispatched global entity indexing requests"
+        );
         Ok(())
     }
 }

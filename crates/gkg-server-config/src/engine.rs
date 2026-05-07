@@ -248,6 +248,28 @@ pub struct CodeIndexingTaskHandlerConfig {
     pub pipeline: CodeIndexingPipelineConfig,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize, JsonSchema)]
+pub struct EntityIndexingHandlerConfig {
+    #[serde(flatten)]
+    pub engine: HandlerConfiguration,
+
+    #[serde(default = "default_datalake_batch_size")]
+    pub datalake_batch_size: u64,
+
+    #[serde(default)]
+    pub batch_size_overrides: HashMap<String, u64>,
+}
+
+impl Default for EntityIndexingHandlerConfig {
+    fn default() -> Self {
+        Self {
+            engine: HandlerConfiguration::default(),
+            datalake_batch_size: default_datalake_batch_size(),
+            batch_size_overrides: HashMap::new(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Default, Serialize, Deserialize, JsonSchema)]
 pub struct NamespaceDeletionHandlerConfig {
     #[serde(flatten)]
@@ -263,6 +285,8 @@ pub struct HandlersConfiguration {
     pub global_handler: GlobalHandlerConfig,
     #[serde(default)]
     pub namespace_handler: NamespaceHandlerConfig,
+    #[serde(default)]
+    pub entity_indexing: EntityIndexingHandlerConfig,
     #[serde(default)]
     pub code_indexing_task: CodeIndexingTaskHandlerConfig,
     #[serde(default)]
@@ -415,7 +439,7 @@ pub struct ScheduledTasksConfiguration {
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, JsonSchema)]
 #[serde(rename_all = "snake_case")]
 pub enum IndexerModule {
-    /// SDLC handlers: `global-handler` and `namespace-handler`.
+    /// SDLC entity indexing handler.
     Sdlc,
     /// Code indexing handler: clones repositories, runs tree-sitter, writes the code graph.
     Code,

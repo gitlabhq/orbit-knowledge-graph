@@ -12,8 +12,7 @@ use crate::checkpoint::ClickHouseCheckpointStore;
 use crate::clickhouse::ClickHouseConfigurationExt;
 use crate::handler::{HandlerInitError, HandlerRegistry};
 use datalake::{Datalake, DatalakeQuery};
-use handler::global::GlobalHandler;
-use handler::namespace::NamespaceHandler;
+use handler::entity::EntityIndexingHandler;
 use metrics::SdlcMetrics;
 use pipeline::Pipeline;
 use plan::build_plans;
@@ -24,36 +23,31 @@ pub async fn register_handlers(
     config: &IndexerConfig,
     ontology: &ontology::Ontology,
 ) -> Result<(), HandlerInitError> {
-    let global_handler_config = config.engine.handlers.global_handler.clone();
-    let namespace_handler_config = config.engine.handlers.namespace_handler.clone();
+    let entity_handler_config = config.engine.handlers.entity_indexing.clone();
 
     let datalake_client = Arc::new(config.datalake.build_client());
     let graph_client = Arc::new(config.graph.build_client());
 
     let datalake: Arc<dyn DatalakeQuery> = Arc::new(Datalake::new(
         datalake_client,
-        global_handler_config.datalake_batch_size,
+        entity_handler_config.datalake_batch_size,
     ));
     let checkpoint_store: Arc<dyn crate::checkpoint::CheckpointStore> =
         Arc::new(ClickHouseCheckpointStore::new(graph_client));
     let metrics = SdlcMetrics::new();
 
-    let mut batch_size_overrides = global_handler_config.batch_size_overrides.clone();
-    batch_size_overrides.extend(namespace_handler_config.batch_size_overrides.clone());
-
     let plans = build_plans(
         ontology,
-        global_handler_config.datalake_batch_size,
-        namespace_handler_config.datalake_batch_size,
-        &batch_size_overrides,
+        entity_handler_config.datalake_batch_size,
+        entity_handler_config.datalake_batch_size,
+        &entity_handler_config.batch_size_overrides,
     );
 
+    let all_plans = plans.all();
     info!(
-        global_plans = plans.global.len(),
-        namespaced_plans = plans.namespaced.len(),
-        global_entities = ?plans.global.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        namespaced_entities = ?plans.namespaced.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
-        "SDLC pipelines initialized"
+        entity_plans = all_plans.len(),
+        entities = ?all_plans.iter().map(|p| p.name.as_str()).collect::<Vec<_>>(),
+        "SDLC entity pipelines initialized"
     );
 
     let pipeline = Arc::new(Pipeline::new(
@@ -63,23 +57,12 @@ pub async fn register_handlers(
         config.engine.datalake_retry.clone(),
     ));
 
-    if !plans.global.is_empty() {
-        registry.register_handler(Box::new(GlobalHandler::new(
-            plans.global,
-            Arc::clone(&pipeline),
-            metrics.clone(),
-            global_handler_config,
-        )));
-    }
-
-    if !plans.namespaced.is_empty() {
-        registry.register_handler(Box::new(NamespaceHandler::new(
-            plans.namespaced,
-            Arc::clone(&pipeline),
-            metrics.clone(),
-            namespace_handler_config,
-        )));
-    }
+    registry.register_handler(Box::new(EntityIndexingHandler::new(
+        all_plans,
+        Arc::clone(&pipeline),
+        metrics.clone(),
+        entity_handler_config,
+    )));
 
     Ok(())
 }

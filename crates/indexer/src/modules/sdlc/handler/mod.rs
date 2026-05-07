@@ -1,2 +1,1 @@
-pub(super) mod global;
-pub(super) mod namespace;
+pub(super) mod entity;

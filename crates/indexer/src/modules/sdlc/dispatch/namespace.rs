@@ -9,7 +9,7 @@ use crate::clickhouse::ArrowClickHouseClient;
 use crate::nats::NatsServices;
 use crate::scheduler::ScheduledTaskMetrics;
 use crate::scheduler::{ScheduledTask, TaskError};
-use crate::topic::NamespaceIndexingRequest;
+use crate::topic::EntityIndexingRequest;
 use crate::types::Envelope;
 use clickhouse_client::FromArrowColumn;
 use gkg_server_config::{NamespaceDispatcherConfig, ScheduleConfiguration};
@@ -22,6 +22,7 @@ WHERE _siphon_deleted = false
 "#;
 
 pub struct NamespaceDispatcher {
+    entity_names: Vec<String>,
     nats: Arc<dyn NatsServices>,
     datalake: ArrowClickHouseClient,
     metrics: ScheduledTaskMetrics,
@@ -30,12 +31,14 @@ pub struct NamespaceDispatcher {
 
 impl NamespaceDispatcher {
     pub fn new(
+        entity_names: Vec<String>,
         nats: Arc<dyn NatsServices>,
         datalake: ArrowClickHouseClient,
         metrics: ScheduledTaskMetrics,
         config: NamespaceDispatcherConfig,
     ) -> Self {
         Self {
+            entity_names,
             nats,
             datalake,
             metrics,
@@ -87,7 +90,8 @@ impl NamespaceDispatcher {
 
         debug!(
             enabled_namespaces = namespace_ids.len(),
-            "found enabled namespaces to dispatch indexing requests for"
+            entity_count = self.entity_names.len(),
+            "found enabled namespaces to dispatch entity indexing requests for"
         );
 
         let watermark = Utc::now();
@@ -104,38 +108,44 @@ impl NamespaceDispatcher {
                 continue;
             }
 
-            let request = NamespaceIndexingRequest {
-                namespace: *namespace_id,
-                traversal_path: traversal_path.clone(),
-                watermark,
-            };
+            for entity in &self.entity_names {
+                let request = EntityIndexingRequest {
+                    entity: entity.clone(),
+                    namespace: Some(*namespace_id),
+                    traversal_path: Some(traversal_path.clone()),
+                    range: None,
+                    watermark,
+                };
 
-            let subscription = request.publish_subscription();
-            let envelope = Envelope::new(&request).map_err(|error| {
-                self.metrics.record_error(self.name(), "publish");
-                TaskError::new(error)
-            })?;
-
-            match self.nats.publish(&subscription, &envelope).await {
-                Ok(()) => {
-                    dispatched += 1;
-                    debug!(
-                        namespace_id = *namespace_id,
-                        traversal_path = %traversal_path,
-                        "dispatched namespace indexing request"
-                    );
-                }
-                Err(crate::nats::NatsError::PublishDuplicate) => {
-                    skipped += 1;
-                    debug!(
-                        namespace_id = *namespace_id,
-                        traversal_path = %traversal_path,
-                        "skipped namespace indexing request, already in-flight"
-                    );
-                }
-                Err(error) => {
+                let subscription = request.publish_subscription();
+                let envelope = Envelope::new(&request).map_err(|error| {
                     self.metrics.record_error(self.name(), "publish");
-                    return Err(TaskError::new(error));
+                    TaskError::new(error)
+                })?;
+
+                match self.nats.publish(&subscription, &envelope).await {
+                    Ok(()) => {
+                        dispatched += 1;
+                        debug!(
+                            namespace_id = *namespace_id,
+                            traversal_path = %traversal_path,
+                            entity = %entity,
+                            "dispatched entity indexing request"
+                        );
+                    }
+                    Err(crate::nats::NatsError::PublishDuplicate) => {
+                        skipped += 1;
+                        debug!(
+                            namespace_id = *namespace_id,
+                            traversal_path = %traversal_path,
+                            entity = %entity,
+                            "skipped entity indexing request, already in-flight"
+                        );
+                    }
+                    Err(error) => {
+                        self.metrics.record_error(self.name(), "publish");
+                        return Err(TaskError::new(error));
+                    }
                 }
             }
         }
@@ -146,7 +156,7 @@ impl NamespaceDispatcher {
 
         info!(
             dispatched,
-            skipped, "dispatched namespace indexing requests"
+            skipped, "dispatched namespace entity indexing requests"
         );
         Ok(())
     }

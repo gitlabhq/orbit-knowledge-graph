@@ -31,9 +31,9 @@ pub(in crate::modules::sdlc) fn lower(
             .get(&node.name)
             .copied()
             .unwrap_or(scope_default);
-        let scope = node.scope;
+        let etl_scope = node.scope;
         let plan = lower_node_plan(node, batch_size, ontology);
-        match scope {
+        match etl_scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
         }
@@ -48,9 +48,9 @@ pub(in crate::modules::sdlc) fn lower(
             .get(&edge.relationship_kind)
             .copied()
             .unwrap_or(scope_default);
-        let scope = edge.scope;
+        let etl_scope = edge.scope;
         let plan = lower_standalone_edge_plan(edge, batch_size, ontology);
-        match scope {
+        match etl_scope {
             EtlScope::Global => global.push(plan),
             EtlScope::Namespaced => namespaced.push(plan),
         }

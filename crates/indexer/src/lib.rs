@@ -68,7 +68,7 @@ use modules::code::{NamespaceCodeBackfillDispatcher, SiphonCodeIndexingTaskDispa
 use modules::namespace_deletion::{
     ClickHouseNamespaceDeletionStore, NamespaceDeletionScheduler, NamespaceDeletionStore,
 };
-use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher};
+use modules::sdlc::dispatch::{GlobalDispatcher, NamespaceDispatcher, entity_names_by_scope};
 use nats::{KvBucketConfig, NatsBroker};
 use scheduler::{ScheduledTask, ScheduledTaskMetrics, TableCleanup};
 use tokio_util::sync::CancellationToken;
@@ -229,13 +229,17 @@ pub async fn run_dispatcher(
         gitlab_client: None,
     };
 
+    let (global_entities, namespaced_entities) = entity_names_by_scope(ontology);
+
     let tasks: Vec<Box<dyn ScheduledTask>> = vec![
         Box::new(GlobalDispatcher::new(
+            global_entities,
             services.nats.clone(),
             metrics.clone(),
             config.schedule.tasks.global.clone(),
         )),
         Box::new(NamespaceDispatcher::new(
+            namespaced_entities,
             services.nats.clone(),
             datalake,
             metrics.clone(),

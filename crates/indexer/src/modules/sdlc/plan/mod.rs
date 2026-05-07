@@ -13,6 +13,7 @@ use gkg_utils::arrow::ArrowUtils;
 
 use crate::checkpoint::Checkpoint;
 use crate::handler::HandlerError;
+use crate::topic::CursorRange;
 use ast::{Expr, Op, OrderExpr, Query};
 
 /// Paginated ClickHouse extract query. Owns its cursor state and generates
@@ -26,6 +27,10 @@ pub(in crate::modules::sdlc) struct ExtractQuery {
     /// Raw SQL template for CTE-based queries. Contains `{CURSOR}` placeholder
     /// that gets replaced with the keyset pagination WHERE clause at emit time.
     raw_template: Option<String>,
+    /// Optional range bounds for parallel partition splitting. Independent of
+    /// the cursor-based pagination — adds simple WHERE filters on the
+    /// partition column (e.g. `id >= '100' AND id < '200'`).
+    range: Option<CursorRange>,
 }
 
 impl ExtractQuery {
@@ -36,6 +41,7 @@ impl ExtractQuery {
             cursor_values: Vec::new(),
             batch_size,
             raw_template: None,
+            range: None,
         }
     }
 
@@ -52,23 +58,43 @@ impl ExtractQuery {
             cursor_values: Vec::new(),
             batch_size,
             raw_template: Some(template),
+            range: None,
         }
+    }
+
+    pub fn with_range(mut self, range: Option<CursorRange>) -> Self {
+        self.range = range;
+        self
     }
 
     pub fn to_sql(&self) -> String {
         if let Some(template) = &self.raw_template {
-            let cursor_sql = match self.build_cursor_expr() {
-                Some(expr) => format!(" AND {}", codegen::emit_expr_to_string(&expr)),
-                None => String::new(),
-            };
-            return template.replace("{CURSOR}", &cursor_sql);
+            let mut extra_clauses = String::new();
+            if let Some(range_sql) = self.build_range_sql() {
+                extra_clauses.push_str(&range_sql);
+            }
+            if let Some(expr) = self.build_cursor_expr() {
+                extra_clauses.push_str(&format!(" AND {}", codegen::emit_expr_to_string(&expr)));
+            }
+            return template.replace("{CURSOR}", &extra_clauses);
         }
 
         let mut query = self.base_query.clone();
 
-        if let Some(cursor_expr) = self.build_cursor_expr() {
-            query.where_clause = Expr::and_all([query.where_clause, Some(cursor_expr)]);
-        }
+        let range_expr = self.range.as_ref().map(|r| {
+            let parts: Vec<Option<Expr>> = vec![
+                r.start
+                    .as_ref()
+                    .map(|s| Expr::raw(format!("{} >= '{s}'", r.partition_column))),
+                r.end
+                    .as_ref()
+                    .map(|e| Expr::raw(format!("{} < '{e}'", r.partition_column))),
+            ];
+            Expr::and_all(parts).unwrap()
+        });
+
+        query.where_clause =
+            Expr::and_all([query.where_clause, range_expr, self.build_cursor_expr()]);
 
         query.order_by = self
             .sort_key_columns
@@ -107,6 +133,21 @@ impl ExtractQuery {
 
     pub fn batch_size(&self) -> u64 {
         self.batch_size
+    }
+
+    fn build_range_sql(&self) -> Option<String> {
+        let range = self.range.as_ref()?;
+        let mut parts = Vec::new();
+        if let Some(start) = &range.start {
+            parts.push(format!(" AND {} >= '{start}'", range.partition_column));
+        }
+        if let Some(end) = &range.end {
+            parts.push(format!(" AND {} < '{end}'", range.partition_column));
+        }
+        if parts.is_empty() {
+            return None;
+        }
+        Some(parts.join(""))
     }
 
     /// Builds a DNF (disjunctive normal form) greater-than expression for
@@ -192,6 +233,14 @@ impl Transformation {
 pub(in crate::modules::sdlc) struct Plans {
     pub global: Vec<PipelinePlan>,
     pub namespaced: Vec<PipelinePlan>,
+}
+
+impl Plans {
+    pub fn all(self) -> Vec<PipelinePlan> {
+        let mut plans = self.global;
+        plans.extend(self.namespaced);
+        plans
+    }
 }
 
 pub(in crate::modules::sdlc) fn build_plans(

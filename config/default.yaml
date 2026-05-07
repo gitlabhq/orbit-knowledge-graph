@@ -56,11 +56,15 @@ engine:
   handlers:
     global-handler:
       concurrency_group: sdlc
-      max_attempts: 1  # re-dispatched every minute, no need to retry
+      max_attempts: 1
       retry_interval_secs: 60
     namespace-handler:
       concurrency_group: sdlc
-      max_attempts: 1  # re-dispatched every minute, no need to retry
+      max_attempts: 1
+      retry_interval_secs: 60
+    entity-indexing:
+      concurrency_group: sdlc
+      max_attempts: 1
       retry_interval_secs: 60
       batch_size_overrides:
         WorkItem: 50000

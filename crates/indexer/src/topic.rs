@@ -8,6 +8,7 @@ pub fn all_managed_subscriptions() -> Vec<Subscription> {
     vec![
         Subscription::new(INDEXER_STREAM, GLOBAL_INDEXING_SUBJECT),
         Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN),
+        Subscription::new(INDEXER_STREAM, ENTITY_INDEXING_SUBJECT_PATTERN),
         Subscription::new(INDEXER_STREAM, CODE_INDEXING_TASK_SUBJECT_PATTERN),
         Subscription::new(INDEXER_STREAM, NAMESPACE_DELETION_SUBJECT_PATTERN),
     ]
@@ -49,6 +50,55 @@ impl NamespaceIndexingRequest {
 impl Event for NamespaceIndexingRequest {
     fn subscription() -> Subscription {
         Subscription::new(INDEXER_STREAM, NAMESPACE_INDEXING_SUBJECT_PATTERN)
+    }
+}
+
+pub const ENTITY_INDEXING_SUBJECT_PREFIX: &str = "sdlc.entity.indexing.requested";
+pub const ENTITY_INDEXING_SUBJECT_PATTERN: &str = "sdlc.entity.indexing.requested.>";
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CursorRange {
+    pub partition_column: String,
+    pub start: Option<String>,
+    pub end: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EntityIndexingRequest {
+    pub entity: String,
+    pub namespace: Option<i64>,
+    pub traversal_path: Option<String>,
+    pub range: Option<CursorRange>,
+    pub watermark: DateTime<Utc>,
+}
+
+impl EntityIndexingRequest {
+    pub fn publish_subscription(&self) -> Subscription {
+        let scope = match &self.traversal_path {
+            Some(tp) => gkg_utils::traversal_path::to_dotted(tp),
+            None => "global".to_string(),
+        };
+        let range_suffix = match &self.range {
+            Some(r) => {
+                let s = r.start.as_deref().unwrap_or("min");
+                let e = r.end.as_deref().unwrap_or("max");
+                format!("{s}_{e}")
+            }
+            None => "full".to_string(),
+        };
+        Subscription::new(
+            INDEXER_STREAM,
+            format!(
+                "{ENTITY_INDEXING_SUBJECT_PREFIX}.{scope}.{}.{range_suffix}",
+                self.entity
+            ),
+        )
+    }
+}
+
+impl Event for EntityIndexingRequest {
+    fn subscription() -> Subscription {
+        Subscription::new(INDEXER_STREAM, ENTITY_INDEXING_SUBJECT_PATTERN)
     }
 }
 
