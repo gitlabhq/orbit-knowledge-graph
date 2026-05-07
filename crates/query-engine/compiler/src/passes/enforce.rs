@@ -380,23 +380,34 @@ fn enforce_return_columns(
 
         // Emit traversal_path column for hydration narrowing.
         // Only for nodes whose table carries traversal_path.
+        // Skip when the source alias doesn't exist in FROM (FK-elided nodes
+        // where the node table was absorbed into an edge filter).
         if node.has_traversal_path {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
             if !has_tp {
                 let tp_expr = if node_is_edge_centric {
-                    let (edge_alias, _) = node_edge_col
-                        .get(&node.id)
-                        .expect("edge mapping checked above");
-                    Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN)
+                    if let Some((edge_alias, _)) = node_edge_col.get(&node.id) {
+                        if alias_exists_in_from(&q.from, edge_alias) {
+                            Some(Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if alias_exists_in_from(&q.from, &node.id) {
+                    Some(Expr::col(&node.id, TRAVERSAL_PATH_COLUMN))
                 } else {
-                    Expr::col(&node.id, TRAVERSAL_PATH_COLUMN)
+                    None
                 };
-                q.select.push(SelectExpr {
-                    expr: tp_expr.clone(),
-                    alias: Some(tp_col),
-                });
-                ensure_in_group_by(q, input.query_type, tp_expr);
+                if let Some(tp_expr) = tp_expr {
+                    q.select.push(SelectExpr {
+                        expr: tp_expr.clone(),
+                        alias: Some(tp_col),
+                    });
+                    ensure_in_group_by(q, input.query_type, tp_expr);
+                }
             }
         }
     }
