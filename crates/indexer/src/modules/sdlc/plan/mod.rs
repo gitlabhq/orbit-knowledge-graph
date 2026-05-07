@@ -181,6 +181,10 @@ pub(in crate::modules::sdlc) struct Transformation {
     /// serialization. Derived from the ontology's `LowCardinality(String)`
     /// storage columns. Empty for node transforms.
     pub dict_encode_columns: HashSet<String>,
+    /// ClickHouse ORDER BY columns for this transform's destination table.
+    /// Used to pre-sort coalesced batches before writing, which improves
+    /// write throughput by reducing projection rebuild cost.
+    pub sort_columns: Vec<String>,
 }
 
 impl Transformation {
