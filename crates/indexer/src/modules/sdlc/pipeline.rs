@@ -356,17 +356,17 @@ impl Pipeline {
             let use_presorted_split = group.len() > 1 && !sort_columns.is_empty();
 
             let chunks: Vec<Vec<RecordBatch>> = if use_presorted_split {
-                let mut sorted =
-                    sort_record_batches(&all_batches, sort_columns).map_err(|err| {
-                        HandlerError::Processing(format!(
-                            "failed to sort batches for {pipeline_name}/{destination_table}: {err}"
-                        ))
-                    })?;
+                let sorted = sort_record_batches(&all_batches, sort_columns).map_err(|err| {
+                    HandlerError::Processing(format!(
+                        "failed to sort batches for {pipeline_name}/{destination_table}: {err}"
+                    ))
+                })?;
                 drop(all_batches);
 
-                prepare_batches(&mut sorted, &dict_columns);
+                let mut batches = vec![sorted];
+                prepare_batches(&mut batches, &dict_columns);
 
-                split_into_chunks(sorted, WRITE_PARALLELISM)
+                split_into_chunks(batches, WRITE_PARALLELISM)
             } else {
                 prepare_batches(&mut all_batches, &dict_columns);
                 vec![all_batches]
@@ -416,16 +416,6 @@ impl Pipeline {
                 while let Some(Some(result)) = write_futures.next().now_or_never() {
                     result?;
                 }
-            }
-
-            if use_presorted_split {
-                info!(
-                    table = %destination_table,
-                    rows = row_count,
-                    transforms = group.len(),
-                    transform_ms = transform_elapsed.as_millis() as u64,
-                    "presorted split write started"
-                );
             }
         }
 

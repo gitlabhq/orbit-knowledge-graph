@@ -674,11 +674,11 @@ fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
 }
 
 /// Sort RecordBatches by the given columns using Arrow's native lexsort.
-/// All batches must share the same schema.
+/// All batches must share the same schema. Returns a single sorted batch.
 pub fn sort_record_batches(
     batches: &[RecordBatch],
     sort_columns: &[String],
-) -> Result<Vec<RecordBatch>, arrow::error::ArrowError> {
+) -> Result<RecordBatch, arrow::error::ArrowError> {
     let schema = batches[0].schema();
     let combined = compute::concat_batches(&schema, batches)?;
 
@@ -701,8 +701,7 @@ pub fn sort_record_batches(
         .map(|col| compute::take(col, &indices, None))
         .collect::<Result<Vec<_>, _>>()?;
 
-    let sorted = RecordBatch::try_new(schema, sorted_columns)?;
-    Ok(vec![sorted])
+    RecordBatch::try_new(schema, sorted_columns)
 }
 
 /// Split a flat list of RecordBatches into approximately `target_chunks`
@@ -1430,10 +1429,9 @@ mod tests {
         .unwrap();
 
         let sorted = sort_record_batches(&[batch1, batch2], &["key".to_string()]).unwrap();
-        assert_eq!(sorted.len(), 1);
-        assert_eq!(sorted[0].num_rows(), 3);
+        assert_eq!(sorted.num_rows(), 3);
 
-        let keys: Vec<i64> = sorted[0]
+        let keys: Vec<i64> = sorted
             .column(0)
             .as_any()
             .downcast_ref::<Int64Array>()
