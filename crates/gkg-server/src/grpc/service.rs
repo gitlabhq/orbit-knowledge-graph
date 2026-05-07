@@ -407,10 +407,12 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             let toon =
                 ToolService::build_query_dsl_toon().map_err(|e| Status::internal(e.to_string()))?;
             GetQueryDslResponse {
+                version: ToolService::build_query_dsl_version().to_string(),
                 content: Some(get_query_dsl_response::Content::FormattedText(toon)),
             }
         } else {
             GetQueryDslResponse {
+                version: ToolService::build_query_dsl_version().to_string(),
                 content: Some(get_query_dsl_response::Content::RawJsonSchema(
                     ToolService::build_query_dsl_raw().to_string(),
                 )),

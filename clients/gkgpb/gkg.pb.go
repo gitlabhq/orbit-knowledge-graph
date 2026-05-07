@@ -1335,6 +1335,325 @@ func (x *SchemaNodeStyle) GetColor() string {
 	return ""
 }
 
+// Request for the query DSL grammar.
+type GetQueryDslRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Format        ResponseFormat         `protobuf:"varint,1,opt,name=format,proto3,enum=gkg.v1.ResponseFormat" json:"format,omitempty"` // RAW: full JSON Schema; LLM: condensed TOON
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetQueryDslRequest) Reset() {
+	*x = GetQueryDslRequest{}
+	mi := &file_gkg_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetQueryDslRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetQueryDslRequest) ProtoMessage() {}
+
+func (x *GetQueryDslRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetQueryDslRequest.ProtoReflect.Descriptor instead.
+func (*GetQueryDslRequest) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *GetQueryDslRequest) GetFormat() ResponseFormat {
+	if x != nil {
+		return x.Format
+	}
+	return ResponseFormat_RESPONSE_FORMAT_RAW
+}
+
+// Response carrying the DSL grammar in the requested format.
+type GetQueryDslResponse struct {
+	state   protoimpl.MessageState `protogen:"open.v1"`
+	Version string                 `protobuf:"bytes,3,opt,name=version,proto3" json:"version,omitempty"` // semver string for the query DSL grammar, e.g. "1.0.0"
+	// Types that are valid to be assigned to Content:
+	//
+	//	*GetQueryDslResponse_RawJsonSchema
+	//	*GetQueryDslResponse_FormattedText
+	Content       isGetQueryDslResponse_Content `protobuf_oneof:"content"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetQueryDslResponse) Reset() {
+	*x = GetQueryDslResponse{}
+	mi := &file_gkg_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetQueryDslResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetQueryDslResponse) ProtoMessage() {}
+
+func (x *GetQueryDslResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetQueryDslResponse.ProtoReflect.Descriptor instead.
+func (*GetQueryDslResponse) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *GetQueryDslResponse) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
+func (x *GetQueryDslResponse) GetContent() isGetQueryDslResponse_Content {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *GetQueryDslResponse) GetRawJsonSchema() string {
+	if x != nil {
+		if x, ok := x.Content.(*GetQueryDslResponse_RawJsonSchema); ok {
+			return x.RawJsonSchema
+		}
+	}
+	return ""
+}
+
+func (x *GetQueryDslResponse) GetFormattedText() string {
+	if x != nil {
+		if x, ok := x.Content.(*GetQueryDslResponse_FormattedText); ok {
+			return x.FormattedText
+		}
+	}
+	return ""
+}
+
+type isGetQueryDslResponse_Content interface {
+	isGetQueryDslResponse_Content()
+}
+
+type GetQueryDslResponse_RawJsonSchema struct {
+	RawJsonSchema string `protobuf:"bytes,1,opt,name=raw_json_schema,json=rawJsonSchema,proto3,oneof"` // format = RAW: full JSON Schema as a JSON string
+}
+
+type GetQueryDslResponse_FormattedText struct {
+	FormattedText string `protobuf:"bytes,2,opt,name=formatted_text,json=formattedText,proto3,oneof"` // format = LLM: condensed TOON
+}
+
+func (*GetQueryDslResponse_RawJsonSchema) isGetQueryDslResponse_Content() {}
+
+func (*GetQueryDslResponse_FormattedText) isGetQueryDslResponse_Content() {}
+
+// Request for the query response shape (formatter output schema).
+type GetResponseFormatRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Format        ResponseFormat         `protobuf:"varint,1,opt,name=format,proto3,enum=gkg.v1.ResponseFormat" json:"format,omitempty"` // RAW: structured (schema + version); LLM: TOON
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetResponseFormatRequest) Reset() {
+	*x = GetResponseFormatRequest{}
+	mi := &file_gkg_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetResponseFormatRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetResponseFormatRequest) ProtoMessage() {}
+
+func (x *GetResponseFormatRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetResponseFormatRequest.ProtoReflect.Descriptor instead.
+func (*GetResponseFormatRequest) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetResponseFormatRequest) GetFormat() ResponseFormat {
+	if x != nil {
+		return x.Format
+	}
+	return ResponseFormat_RESPONSE_FORMAT_RAW
+}
+
+// Response carrying the formatter output schema and its semver.
+type GetResponseFormatResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Content:
+	//
+	//	*GetResponseFormatResponse_Structured
+	//	*GetResponseFormatResponse_FormattedText
+	Content       isGetResponseFormatResponse_Content `protobuf_oneof:"content"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetResponseFormatResponse) Reset() {
+	*x = GetResponseFormatResponse{}
+	mi := &file_gkg_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetResponseFormatResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetResponseFormatResponse) ProtoMessage() {}
+
+func (x *GetResponseFormatResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetResponseFormatResponse.ProtoReflect.Descriptor instead.
+func (*GetResponseFormatResponse) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *GetResponseFormatResponse) GetContent() isGetResponseFormatResponse_Content {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *GetResponseFormatResponse) GetStructured() *ResponseFormatSchema {
+	if x != nil {
+		if x, ok := x.Content.(*GetResponseFormatResponse_Structured); ok {
+			return x.Structured
+		}
+	}
+	return nil
+}
+
+func (x *GetResponseFormatResponse) GetFormattedText() string {
+	if x != nil {
+		if x, ok := x.Content.(*GetResponseFormatResponse_FormattedText); ok {
+			return x.FormattedText
+		}
+	}
+	return ""
+}
+
+type isGetResponseFormatResponse_Content interface {
+	isGetResponseFormatResponse_Content()
+}
+
+type GetResponseFormatResponse_Structured struct {
+	Structured *ResponseFormatSchema `protobuf:"bytes,1,opt,name=structured,proto3,oneof"` // format = RAW
+}
+
+type GetResponseFormatResponse_FormattedText struct {
+	FormattedText string `protobuf:"bytes,2,opt,name=formatted_text,json=formattedText,proto3,oneof"` // format = LLM (TOON notation)
+}
+
+func (*GetResponseFormatResponse_Structured) isGetResponseFormatResponse_Content() {}
+
+func (*GetResponseFormatResponse_FormattedText) isGetResponseFormatResponse_Content() {}
+
+// JSON Schema describing the query response shape plus its semver.
+// The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+// format_version stamped on every query response.
+type ResponseFormatSchema struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Schema        string                 `protobuf:"bytes,1,opt,name=schema,proto3" json:"schema,omitempty"`   // verbatim JSON Schema as a JSON string
+	Version       string                 `protobuf:"bytes,2,opt,name=version,proto3" json:"version,omitempty"` // semver string, e.g. "1.2.0"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ResponseFormatSchema) Reset() {
+	*x = ResponseFormatSchema{}
+	mi := &file_gkg_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ResponseFormatSchema) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ResponseFormatSchema) ProtoMessage() {}
+
+func (x *ResponseFormatSchema) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ResponseFormatSchema.ProtoReflect.Descriptor instead.
+func (*ResponseFormatSchema) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *ResponseFormatSchema) GetSchema() string {
+	if x != nil {
+		return x.Schema
+	}
+	return ""
+}
+
+func (x *ResponseFormatSchema) GetVersion() string {
+	if x != nil {
+		return x.Version
+	}
+	return ""
+}
+
 // Wrapper for the redaction handshake within a streaming query.
 // Server sends `required` with resources to check, client responds with decisions.
 type RedactionExchange struct {
@@ -1350,7 +1669,7 @@ type RedactionExchange struct {
 
 func (x *RedactionExchange) Reset() {
 	*x = RedactionExchange{}
-	mi := &file_gkg_proto_msgTypes[14]
+	mi := &file_gkg_proto_msgTypes[19]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1362,7 +1681,7 @@ func (x *RedactionExchange) String() string {
 func (*RedactionExchange) ProtoMessage() {}
 
 func (x *RedactionExchange) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[14]
+	mi := &file_gkg_proto_msgTypes[19]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1375,7 +1694,7 @@ func (x *RedactionExchange) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionExchange.ProtoReflect.Descriptor instead.
 func (*RedactionExchange) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{14}
+	return file_gkg_proto_rawDescGZIP(), []int{19}
 }
 
 func (x *RedactionExchange) GetContent() isRedactionExchange_Content {
@@ -1430,7 +1749,7 @@ type RedactionRequired struct {
 
 func (x *RedactionRequired) Reset() {
 	*x = RedactionRequired{}
-	mi := &file_gkg_proto_msgTypes[15]
+	mi := &file_gkg_proto_msgTypes[20]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1442,7 +1761,7 @@ func (x *RedactionRequired) String() string {
 func (*RedactionRequired) ProtoMessage() {}
 
 func (x *RedactionRequired) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[15]
+	mi := &file_gkg_proto_msgTypes[20]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1455,7 +1774,7 @@ func (x *RedactionRequired) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionRequired.ProtoReflect.Descriptor instead.
 func (*RedactionRequired) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{15}
+	return file_gkg_proto_rawDescGZIP(), []int{20}
 }
 
 func (x *RedactionRequired) GetResultId() string {
@@ -1484,7 +1803,7 @@ type ResourceToAuthorize struct {
 
 func (x *ResourceToAuthorize) Reset() {
 	*x = ResourceToAuthorize{}
-	mi := &file_gkg_proto_msgTypes[16]
+	mi := &file_gkg_proto_msgTypes[21]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1496,7 +1815,7 @@ func (x *ResourceToAuthorize) String() string {
 func (*ResourceToAuthorize) ProtoMessage() {}
 
 func (x *ResourceToAuthorize) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[16]
+	mi := &file_gkg_proto_msgTypes[21]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1509,7 +1828,7 @@ func (x *ResourceToAuthorize) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceToAuthorize.ProtoReflect.Descriptor instead.
 func (*ResourceToAuthorize) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{16}
+	return file_gkg_proto_rawDescGZIP(), []int{21}
 }
 
 func (x *ResourceToAuthorize) GetResourceType() string {
@@ -1544,7 +1863,7 @@ type RedactionResponse struct {
 
 func (x *RedactionResponse) Reset() {
 	*x = RedactionResponse{}
-	mi := &file_gkg_proto_msgTypes[17]
+	mi := &file_gkg_proto_msgTypes[22]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1556,7 +1875,7 @@ func (x *RedactionResponse) String() string {
 func (*RedactionResponse) ProtoMessage() {}
 
 func (x *RedactionResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[17]
+	mi := &file_gkg_proto_msgTypes[22]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1569,7 +1888,7 @@ func (x *RedactionResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use RedactionResponse.ProtoReflect.Descriptor instead.
 func (*RedactionResponse) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{17}
+	return file_gkg_proto_rawDescGZIP(), []int{22}
 }
 
 func (x *RedactionResponse) GetResultId() string {
@@ -1598,7 +1917,7 @@ type ResourceAuthorization struct {
 
 func (x *ResourceAuthorization) Reset() {
 	*x = ResourceAuthorization{}
-	mi := &file_gkg_proto_msgTypes[18]
+	mi := &file_gkg_proto_msgTypes[23]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1610,7 +1929,7 @@ func (x *ResourceAuthorization) String() string {
 func (*ResourceAuthorization) ProtoMessage() {}
 
 func (x *ResourceAuthorization) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[18]
+	mi := &file_gkg_proto_msgTypes[23]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1623,7 +1942,7 @@ func (x *ResourceAuthorization) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ResourceAuthorization.ProtoReflect.Descriptor instead.
 func (*ResourceAuthorization) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{18}
+	return file_gkg_proto_rawDescGZIP(), []int{23}
 }
 
 func (x *ResourceAuthorization) GetResourceType() string {
@@ -1648,7 +1967,7 @@ type ListToolsRequest struct {
 
 func (x *ListToolsRequest) Reset() {
 	*x = ListToolsRequest{}
-	mi := &file_gkg_proto_msgTypes[19]
+	mi := &file_gkg_proto_msgTypes[24]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1660,7 +1979,7 @@ func (x *ListToolsRequest) String() string {
 func (*ListToolsRequest) ProtoMessage() {}
 
 func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[19]
+	mi := &file_gkg_proto_msgTypes[24]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1673,7 +1992,7 @@ func (x *ListToolsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsRequest.ProtoReflect.Descriptor instead.
 func (*ListToolsRequest) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{19}
+	return file_gkg_proto_rawDescGZIP(), []int{24}
 }
 
 type ListToolsResponse struct {
@@ -1685,7 +2004,7 @@ type ListToolsResponse struct {
 
 func (x *ListToolsResponse) Reset() {
 	*x = ListToolsResponse{}
-	mi := &file_gkg_proto_msgTypes[20]
+	mi := &file_gkg_proto_msgTypes[25]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1697,7 +2016,7 @@ func (x *ListToolsResponse) String() string {
 func (*ListToolsResponse) ProtoMessage() {}
 
 func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[20]
+	mi := &file_gkg_proto_msgTypes[25]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1710,7 +2029,7 @@ func (x *ListToolsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ListToolsResponse.ProtoReflect.Descriptor instead.
 func (*ListToolsResponse) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{20}
+	return file_gkg_proto_rawDescGZIP(), []int{25}
 }
 
 func (x *ListToolsResponse) GetTools() []*ToolDefinition {
@@ -1725,7 +2044,7 @@ func (x *ListToolsResponse) GetTools() []*ToolDefinition {
 type ToolDefinition struct {
 	state                protoimpl.MessageState `protogen:"open.v1"`
 	Name                 string                 `protobuf:"bytes,1,opt,name=name,proto3" json:"name,omitempty"`                                                               // e.g. "query_graph", "get_graph_schema"
-	Description          string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`                                                 // includes TOON schema context for query_graph
+	Description          string                 `protobuf:"bytes,2,opt,name=description,proto3" json:"description,omitempty"`                                                 // tool description; intentionally short so MCP clients that truncate descriptions still see the full text
 	ParametersJsonSchema string                 `protobuf:"bytes,3,opt,name=parameters_json_schema,json=parametersJsonSchema,proto3" json:"parameters_json_schema,omitempty"` // JSON Schema for the tool's input parameters
 	unknownFields        protoimpl.UnknownFields
 	sizeCache            protoimpl.SizeCache
@@ -1733,7 +2052,7 @@ type ToolDefinition struct {
 
 func (x *ToolDefinition) Reset() {
 	*x = ToolDefinition{}
-	mi := &file_gkg_proto_msgTypes[21]
+	mi := &file_gkg_proto_msgTypes[26]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1745,7 +2064,7 @@ func (x *ToolDefinition) String() string {
 func (*ToolDefinition) ProtoMessage() {}
 
 func (x *ToolDefinition) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[21]
+	mi := &file_gkg_proto_msgTypes[26]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1758,7 +2077,7 @@ func (x *ToolDefinition) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ToolDefinition.ProtoReflect.Descriptor instead.
 func (*ToolDefinition) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{21}
+	return file_gkg_proto_rawDescGZIP(), []int{26}
 }
 
 func (x *ToolDefinition) GetName() string {
@@ -1782,6 +2101,228 @@ func (x *ToolDefinition) GetParametersJsonSchema() string {
 	return ""
 }
 
+type ListAgentCommandsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	CommandNames  []string               `protobuf:"bytes,1,rep,name=command_names,json=commandNames,proto3" json:"command_names,omitempty"` // empty means list every command
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAgentCommandsRequest) Reset() {
+	*x = ListAgentCommandsRequest{}
+	mi := &file_gkg_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAgentCommandsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAgentCommandsRequest) ProtoMessage() {}
+
+func (x *ListAgentCommandsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAgentCommandsRequest.ProtoReflect.Descriptor instead.
+func (*ListAgentCommandsRequest) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *ListAgentCommandsRequest) GetCommandNames() []string {
+	if x != nil {
+		return x.CommandNames
+	}
+	return nil
+}
+
+type ListAgentCommandsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Commands      []*ToolDefinition      `protobuf:"bytes,1,rep,name=commands,proto3" json:"commands,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAgentCommandsResponse) Reset() {
+	*x = ListAgentCommandsResponse{}
+	mi := &file_gkg_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAgentCommandsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAgentCommandsResponse) ProtoMessage() {}
+
+func (x *ListAgentCommandsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAgentCommandsResponse.ProtoReflect.Descriptor instead.
+func (*ListAgentCommandsResponse) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *ListAgentCommandsResponse) GetCommands() []*ToolDefinition {
+	if x != nil {
+		return x.Commands
+	}
+	return nil
+}
+
+type InvokeAgentCommandRequest struct {
+	state          protoimpl.MessageState `protogen:"open.v1"`
+	CommandName    string                 `protobuf:"bytes,1,opt,name=command_name,json=commandName,proto3" json:"command_name,omitempty"`
+	ParametersJson string                 `protobuf:"bytes,2,opt,name=parameters_json,json=parametersJson,proto3" json:"parameters_json,omitempty"` // downstream command parameters object as JSON
+	unknownFields  protoimpl.UnknownFields
+	sizeCache      protoimpl.SizeCache
+}
+
+func (x *InvokeAgentCommandRequest) Reset() {
+	*x = InvokeAgentCommandRequest{}
+	mi := &file_gkg_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvokeAgentCommandRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvokeAgentCommandRequest) ProtoMessage() {}
+
+func (x *InvokeAgentCommandRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvokeAgentCommandRequest.ProtoReflect.Descriptor instead.
+func (*InvokeAgentCommandRequest) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *InvokeAgentCommandRequest) GetCommandName() string {
+	if x != nil {
+		return x.CommandName
+	}
+	return ""
+}
+
+func (x *InvokeAgentCommandRequest) GetParametersJson() string {
+	if x != nil {
+		return x.ParametersJson
+	}
+	return ""
+}
+
+type InvokeAgentCommandResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Types that are valid to be assigned to Content:
+	//
+	//	*InvokeAgentCommandResponse_ResultJson
+	//	*InvokeAgentCommandResponse_FormattedText
+	Content       isInvokeAgentCommandResponse_Content `protobuf_oneof:"content"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *InvokeAgentCommandResponse) Reset() {
+	*x = InvokeAgentCommandResponse{}
+	mi := &file_gkg_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *InvokeAgentCommandResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*InvokeAgentCommandResponse) ProtoMessage() {}
+
+func (x *InvokeAgentCommandResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gkg_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use InvokeAgentCommandResponse.ProtoReflect.Descriptor instead.
+func (*InvokeAgentCommandResponse) Descriptor() ([]byte, []int) {
+	return file_gkg_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *InvokeAgentCommandResponse) GetContent() isInvokeAgentCommandResponse_Content {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+func (x *InvokeAgentCommandResponse) GetResultJson() string {
+	if x != nil {
+		if x, ok := x.Content.(*InvokeAgentCommandResponse_ResultJson); ok {
+			return x.ResultJson
+		}
+	}
+	return ""
+}
+
+func (x *InvokeAgentCommandResponse) GetFormattedText() string {
+	if x != nil {
+		if x, ok := x.Content.(*InvokeAgentCommandResponse_FormattedText); ok {
+			return x.FormattedText
+		}
+	}
+	return ""
+}
+
+type isInvokeAgentCommandResponse_Content interface {
+	isInvokeAgentCommandResponse_Content()
+}
+
+type InvokeAgentCommandResponse_ResultJson struct {
+	ResultJson string `protobuf:"bytes,1,opt,name=result_json,json=resultJson,proto3,oneof"` // structured command result encoded as JSON
+}
+
+type InvokeAgentCommandResponse_FormattedText struct {
+	FormattedText string `protobuf:"bytes,2,opt,name=formatted_text,json=formattedText,proto3,oneof"` // LLM-oriented text result
+}
+
+func (*InvokeAgentCommandResponse_ResultJson) isInvokeAgentCommandResponse_Content() {}
+
+func (*InvokeAgentCommandResponse_FormattedText) isInvokeAgentCommandResponse_Content() {}
+
 // Request for cluster health, with optional LLM formatting.
 type GetClusterHealthRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
@@ -1792,7 +2333,7 @@ type GetClusterHealthRequest struct {
 
 func (x *GetClusterHealthRequest) Reset() {
 	*x = GetClusterHealthRequest{}
-	mi := &file_gkg_proto_msgTypes[22]
+	mi := &file_gkg_proto_msgTypes[31]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1804,7 +2345,7 @@ func (x *GetClusterHealthRequest) String() string {
 func (*GetClusterHealthRequest) ProtoMessage() {}
 
 func (x *GetClusterHealthRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[22]
+	mi := &file_gkg_proto_msgTypes[31]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1817,7 +2358,7 @@ func (x *GetClusterHealthRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterHealthRequest.ProtoReflect.Descriptor instead.
 func (*GetClusterHealthRequest) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{22}
+	return file_gkg_proto_rawDescGZIP(), []int{31}
 }
 
 func (x *GetClusterHealthRequest) GetFormat() ResponseFormat {
@@ -1841,7 +2382,7 @@ type GetClusterHealthResponse struct {
 
 func (x *GetClusterHealthResponse) Reset() {
 	*x = GetClusterHealthResponse{}
-	mi := &file_gkg_proto_msgTypes[23]
+	mi := &file_gkg_proto_msgTypes[32]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1853,7 +2394,7 @@ func (x *GetClusterHealthResponse) String() string {
 func (*GetClusterHealthResponse) ProtoMessage() {}
 
 func (x *GetClusterHealthResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[23]
+	mi := &file_gkg_proto_msgTypes[32]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1866,7 +2407,7 @@ func (x *GetClusterHealthResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetClusterHealthResponse.ProtoReflect.Descriptor instead.
 func (*GetClusterHealthResponse) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{23}
+	return file_gkg_proto_rawDescGZIP(), []int{32}
 }
 
 func (x *GetClusterHealthResponse) GetContent() isGetClusterHealthResponse_Content {
@@ -1923,7 +2464,7 @@ type StructuredClusterHealth struct {
 
 func (x *StructuredClusterHealth) Reset() {
 	*x = StructuredClusterHealth{}
-	mi := &file_gkg_proto_msgTypes[24]
+	mi := &file_gkg_proto_msgTypes[33]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -1935,7 +2476,7 @@ func (x *StructuredClusterHealth) String() string {
 func (*StructuredClusterHealth) ProtoMessage() {}
 
 func (x *StructuredClusterHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[24]
+	mi := &file_gkg_proto_msgTypes[33]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -1948,7 +2489,7 @@ func (x *StructuredClusterHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredClusterHealth.ProtoReflect.Descriptor instead.
 func (*StructuredClusterHealth) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{24}
+	return file_gkg_proto_rawDescGZIP(), []int{33}
 }
 
 func (x *StructuredClusterHealth) GetStatus() ClusterStatus {
@@ -1992,7 +2533,7 @@ type ComponentHealth struct {
 
 func (x *ComponentHealth) Reset() {
 	*x = ComponentHealth{}
-	mi := &file_gkg_proto_msgTypes[25]
+	mi := &file_gkg_proto_msgTypes[34]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2004,7 +2545,7 @@ func (x *ComponentHealth) String() string {
 func (*ComponentHealth) ProtoMessage() {}
 
 func (x *ComponentHealth) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[25]
+	mi := &file_gkg_proto_msgTypes[34]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2017,7 +2558,7 @@ func (x *ComponentHealth) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ComponentHealth.ProtoReflect.Descriptor instead.
 func (*ComponentHealth) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{25}
+	return file_gkg_proto_rawDescGZIP(), []int{34}
 }
 
 func (x *ComponentHealth) GetName() string {
@@ -2058,7 +2599,7 @@ type ReplicaStatus struct {
 
 func (x *ReplicaStatus) Reset() {
 	*x = ReplicaStatus{}
-	mi := &file_gkg_proto_msgTypes[26]
+	mi := &file_gkg_proto_msgTypes[35]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2070,7 +2611,7 @@ func (x *ReplicaStatus) String() string {
 func (*ReplicaStatus) ProtoMessage() {}
 
 func (x *ReplicaStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[26]
+	mi := &file_gkg_proto_msgTypes[35]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2083,7 +2624,7 @@ func (x *ReplicaStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ReplicaStatus.ProtoReflect.Descriptor instead.
 func (*ReplicaStatus) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{26}
+	return file_gkg_proto_rawDescGZIP(), []int{35}
 }
 
 func (x *ReplicaStatus) GetReady() int32 {
@@ -2112,7 +2653,7 @@ type GetGraphStatusRequest struct {
 
 func (x *GetGraphStatusRequest) Reset() {
 	*x = GetGraphStatusRequest{}
-	mi := &file_gkg_proto_msgTypes[27]
+	mi := &file_gkg_proto_msgTypes[36]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2124,7 +2665,7 @@ func (x *GetGraphStatusRequest) String() string {
 func (*GetGraphStatusRequest) ProtoMessage() {}
 
 func (x *GetGraphStatusRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[27]
+	mi := &file_gkg_proto_msgTypes[36]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2137,7 +2678,7 @@ func (x *GetGraphStatusRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGraphStatusRequest.ProtoReflect.Descriptor instead.
 func (*GetGraphStatusRequest) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{27}
+	return file_gkg_proto_rawDescGZIP(), []int{36}
 }
 
 func (x *GetGraphStatusRequest) GetTraversalPath() string {
@@ -2175,7 +2716,7 @@ type IndexingStatus struct {
 
 func (x *IndexingStatus) Reset() {
 	*x = IndexingStatus{}
-	mi := &file_gkg_proto_msgTypes[28]
+	mi := &file_gkg_proto_msgTypes[37]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2187,7 +2728,7 @@ func (x *IndexingStatus) String() string {
 func (*IndexingStatus) ProtoMessage() {}
 
 func (x *IndexingStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[28]
+	mi := &file_gkg_proto_msgTypes[37]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2200,7 +2741,7 @@ func (x *IndexingStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use IndexingStatus.ProtoReflect.Descriptor instead.
 func (*IndexingStatus) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{28}
+	return file_gkg_proto_rawDescGZIP(), []int{37}
 }
 
 func (x *IndexingStatus) GetState() IndexingState {
@@ -2252,7 +2793,7 @@ type GetGraphStatusResponse struct {
 
 func (x *GetGraphStatusResponse) Reset() {
 	*x = GetGraphStatusResponse{}
-	mi := &file_gkg_proto_msgTypes[29]
+	mi := &file_gkg_proto_msgTypes[38]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2264,7 +2805,7 @@ func (x *GetGraphStatusResponse) String() string {
 func (*GetGraphStatusResponse) ProtoMessage() {}
 
 func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[29]
+	mi := &file_gkg_proto_msgTypes[38]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2277,7 +2818,7 @@ func (x *GetGraphStatusResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetGraphStatusResponse.ProtoReflect.Descriptor instead.
 func (*GetGraphStatusResponse) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{29}
+	return file_gkg_proto_rawDescGZIP(), []int{38}
 }
 
 func (x *GetGraphStatusResponse) GetContent() isGetGraphStatusResponse_Content {
@@ -2333,7 +2874,7 @@ type StructuredGraphStatus struct {
 
 func (x *StructuredGraphStatus) Reset() {
 	*x = StructuredGraphStatus{}
-	mi := &file_gkg_proto_msgTypes[30]
+	mi := &file_gkg_proto_msgTypes[39]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2345,7 +2886,7 @@ func (x *StructuredGraphStatus) String() string {
 func (*StructuredGraphStatus) ProtoMessage() {}
 
 func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[30]
+	mi := &file_gkg_proto_msgTypes[39]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2358,7 +2899,7 @@ func (x *StructuredGraphStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use StructuredGraphStatus.ProtoReflect.Descriptor instead.
 func (*StructuredGraphStatus) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{30}
+	return file_gkg_proto_rawDescGZIP(), []int{39}
 }
 
 func (x *StructuredGraphStatus) GetProjects() *ProjectsStatus {
@@ -2393,7 +2934,7 @@ type ProjectsStatus struct {
 
 func (x *ProjectsStatus) Reset() {
 	*x = ProjectsStatus{}
-	mi := &file_gkg_proto_msgTypes[31]
+	mi := &file_gkg_proto_msgTypes[40]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2405,7 +2946,7 @@ func (x *ProjectsStatus) String() string {
 func (*ProjectsStatus) ProtoMessage() {}
 
 func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[31]
+	mi := &file_gkg_proto_msgTypes[40]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2418,7 +2959,7 @@ func (x *ProjectsStatus) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use ProjectsStatus.ProtoReflect.Descriptor instead.
 func (*ProjectsStatus) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{31}
+	return file_gkg_proto_rawDescGZIP(), []int{40}
 }
 
 func (x *ProjectsStatus) GetIndexed() int64 {
@@ -2446,7 +2987,7 @@ type GraphStatusDomain struct {
 
 func (x *GraphStatusDomain) Reset() {
 	*x = GraphStatusDomain{}
-	mi := &file_gkg_proto_msgTypes[32]
+	mi := &file_gkg_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2458,7 +2999,7 @@ func (x *GraphStatusDomain) String() string {
 func (*GraphStatusDomain) ProtoMessage() {}
 
 func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[32]
+	mi := &file_gkg_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2471,7 +3012,7 @@ func (x *GraphStatusDomain) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusDomain.ProtoReflect.Descriptor instead.
 func (*GraphStatusDomain) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{32}
+	return file_gkg_proto_rawDescGZIP(), []int{41}
 }
 
 func (x *GraphStatusDomain) GetName() string {
@@ -2499,7 +3040,7 @@ type GraphStatusItem struct {
 
 func (x *GraphStatusItem) Reset() {
 	*x = GraphStatusItem{}
-	mi := &file_gkg_proto_msgTypes[33]
+	mi := &file_gkg_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2511,7 +3052,7 @@ func (x *GraphStatusItem) String() string {
 func (*GraphStatusItem) ProtoMessage() {}
 
 func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
-	mi := &file_gkg_proto_msgTypes[33]
+	mi := &file_gkg_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2524,7 +3065,7 @@ func (x *GraphStatusItem) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GraphStatusItem.ProtoReflect.Descriptor instead.
 func (*GraphStatusItem) Descriptor() ([]byte, []int) {
-	return file_gkg_proto_rawDescGZIP(), []int{33}
+	return file_gkg_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GraphStatusItem) GetName() string {
@@ -2626,7 +3167,25 @@ const file_gkg_proto_rawDesc = "" +
 	"targetType\";\n" +
 	"\x0fSchemaNodeStyle\x12\x12\n" +
 	"\x04size\x18\x01 \x01(\x05R\x04size\x12\x14\n" +
-	"\x05color\x18\x02 \x01(\tR\x05color\"\x90\x01\n" +
+	"\x05color\x18\x02 \x01(\tR\x05color\"D\n" +
+	"\x12GetQueryDslRequest\x12.\n" +
+	"\x06format\x18\x01 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"\x8d\x01\n" +
+	"\x13GetQueryDslResponse\x12\x18\n" +
+	"\aversion\x18\x03 \x01(\tR\aversion\x12(\n" +
+	"\x0fraw_json_schema\x18\x01 \x01(\tH\x00R\rrawJsonSchema\x12'\n" +
+	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
+	"\acontent\"J\n" +
+	"\x18GetResponseFormatRequest\x12.\n" +
+	"\x06format\x18\x01 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"\x8f\x01\n" +
+	"\x19GetResponseFormatResponse\x12>\n" +
+	"\n" +
+	"structured\x18\x01 \x01(\v2\x1c.gkg.v1.ResponseFormatSchemaH\x00R\n" +
+	"structured\x12'\n" +
+	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
+	"\acontent\"H\n" +
+	"\x14ResponseFormatSchema\x12\x16\n" +
+	"\x06schema\x18\x01 \x01(\tR\x06schema\x12\x18\n" +
+	"\aversion\x18\x02 \x01(\tR\aversion\"\x90\x01\n" +
 	"\x11RedactionExchange\x127\n" +
 	"\brequired\x18\x01 \x01(\v2\x19.gkg.v1.RedactionRequiredH\x00R\brequired\x127\n" +
 	"\bresponse\x18\x02 \x01(\v2\x19.gkg.v1.RedactionResponseH\x00R\bresponseB\t\n" +
@@ -2655,7 +3214,19 @@ const file_gkg_proto_rawDesc = "" +
 	"\x0eToolDefinition\x12\x12\n" +
 	"\x04name\x18\x01 \x01(\tR\x04name\x12 \n" +
 	"\vdescription\x18\x02 \x01(\tR\vdescription\x124\n" +
-	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"I\n" +
+	"\x16parameters_json_schema\x18\x03 \x01(\tR\x14parametersJsonSchema\"?\n" +
+	"\x18ListAgentCommandsRequest\x12#\n" +
+	"\rcommand_names\x18\x01 \x03(\tR\fcommandNames\"O\n" +
+	"\x19ListAgentCommandsResponse\x122\n" +
+	"\bcommands\x18\x01 \x03(\v2\x16.gkg.v1.ToolDefinitionR\bcommands\"g\n" +
+	"\x19InvokeAgentCommandRequest\x12!\n" +
+	"\fcommand_name\x18\x01 \x01(\tR\vcommandName\x12'\n" +
+	"\x0fparameters_json\x18\x02 \x01(\tR\x0eparametersJson\"s\n" +
+	"\x1aInvokeAgentCommandResponse\x12!\n" +
+	"\vresult_json\x18\x01 \x01(\tH\x00R\n" +
+	"resultJson\x12'\n" +
+	"\x0eformatted_text\x18\x02 \x01(\tH\x00R\rformattedTextB\t\n" +
+	"\acontent\"I\n" +
 	"\x17GetClusterHealthRequest\x12.\n" +
 	"\x06format\x18\x01 \x01(\x0e2\x16.gkg.v1.ResponseFormatR\x06format\"\x91\x01\n" +
 	"\x18GetClusterHealthResponse\x12A\n" +
@@ -2742,11 +3313,15 @@ const file_gkg_proto_rawDesc = "" +
 	"\x16INDEXING_STATE_INDEXED\x10\x02\x12\x18\n" +
 	"\x14INDEXING_STATE_ERROR\x10\x03\x12\x1a\n" +
 	"\x16INDEXING_STATE_UNKNOWN\x10\x04\x12\x1b\n" +
-	"\x17INDEXING_STATE_INDEXING\x10\x052\xa0\x03\n" +
+	"\x17INDEXING_STATE_INDEXING\x10\x052\xf9\x05\n" +
 	"\x15KnowledgeGraphService\x12@\n" +
-	"\tListTools\x12\x18.gkg.v1.ListToolsRequest\x1a\x19.gkg.v1.ListToolsResponse\x12L\n" +
+	"\tListTools\x12\x18.gkg.v1.ListToolsRequest\x1a\x19.gkg.v1.ListToolsResponse\x12X\n" +
+	"\x11ListAgentCommands\x12 .gkg.v1.ListAgentCommandsRequest\x1a!.gkg.v1.ListAgentCommandsResponse\x12[\n" +
+	"\x12InvokeAgentCommand\x12!.gkg.v1.InvokeAgentCommandRequest\x1a\".gkg.v1.InvokeAgentCommandResponse\x12L\n" +
 	"\fExecuteQuery\x12\x1b.gkg.v1.ExecuteQueryMessage\x1a\x1b.gkg.v1.ExecuteQueryMessage(\x010\x01\x12O\n" +
-	"\x0eGetGraphSchema\x12\x1d.gkg.v1.GetGraphSchemaRequest\x1a\x1e.gkg.v1.GetGraphSchemaResponse\x12U\n" +
+	"\x0eGetGraphSchema\x12\x1d.gkg.v1.GetGraphSchemaRequest\x1a\x1e.gkg.v1.GetGraphSchemaResponse\x12F\n" +
+	"\vGetQueryDsl\x12\x1a.gkg.v1.GetQueryDslRequest\x1a\x1b.gkg.v1.GetQueryDslResponse\x12X\n" +
+	"\x11GetResponseFormat\x12 .gkg.v1.GetResponseFormatRequest\x1a!.gkg.v1.GetResponseFormatResponse\x12U\n" +
 	"\x10GetClusterHealth\x12\x1f.gkg.v1.GetClusterHealthRequest\x1a .gkg.v1.GetClusterHealthResponse\x12O\n" +
 	"\x0eGetGraphStatus\x12\x1d.gkg.v1.GetGraphStatusRequest\x1a\x1e.gkg.v1.GetGraphStatusResponseb\x06proto3"
 
@@ -2763,54 +3338,63 @@ func file_gkg_proto_rawDescGZIP() []byte {
 }
 
 var file_gkg_proto_enumTypes = make([]protoimpl.EnumInfo, 6)
-var file_gkg_proto_msgTypes = make([]protoimpl.MessageInfo, 36)
+var file_gkg_proto_msgTypes = make([]protoimpl.MessageInfo, 45)
 var file_gkg_proto_goTypes = []any{
-	(ResponseFormat)(0),              // 0: gkg.v1.ResponseFormat
-	(FormatName)(0),                  // 1: gkg.v1.FormatName
-	(QueryType)(0),                   // 2: gkg.v1.QueryType
-	(ClusterStatus)(0),               // 3: gkg.v1.ClusterStatus
-	(SourceType)(0),                  // 4: gkg.v1.SourceType
-	(IndexingState)(0),               // 5: gkg.v1.IndexingState
-	(*ExecuteQueryMessage)(nil),      // 6: gkg.v1.ExecuteQueryMessage
-	(*ExecuteQueryRequest)(nil),      // 7: gkg.v1.ExecuteQueryRequest
-	(*ExecuteQueryResult)(nil),       // 8: gkg.v1.ExecuteQueryResult
-	(*QueryMetadata)(nil),            // 9: gkg.v1.QueryMetadata
-	(*ExecuteQueryError)(nil),        // 10: gkg.v1.ExecuteQueryError
-	(*GetGraphSchemaRequest)(nil),    // 11: gkg.v1.GetGraphSchemaRequest
-	(*GetGraphSchemaResponse)(nil),   // 12: gkg.v1.GetGraphSchemaResponse
-	(*StructuredSchema)(nil),         // 13: gkg.v1.StructuredSchema
-	(*SchemaDomain)(nil),             // 14: gkg.v1.SchemaDomain
-	(*SchemaNode)(nil),               // 15: gkg.v1.SchemaNode
-	(*SchemaProperty)(nil),           // 16: gkg.v1.SchemaProperty
-	(*SchemaEdge)(nil),               // 17: gkg.v1.SchemaEdge
-	(*SchemaEdgeVariant)(nil),        // 18: gkg.v1.SchemaEdgeVariant
-	(*SchemaNodeStyle)(nil),          // 19: gkg.v1.SchemaNodeStyle
-	(*RedactionExchange)(nil),        // 20: gkg.v1.RedactionExchange
-	(*RedactionRequired)(nil),        // 21: gkg.v1.RedactionRequired
-	(*ResourceToAuthorize)(nil),      // 22: gkg.v1.ResourceToAuthorize
-	(*RedactionResponse)(nil),        // 23: gkg.v1.RedactionResponse
-	(*ResourceAuthorization)(nil),    // 24: gkg.v1.ResourceAuthorization
-	(*ListToolsRequest)(nil),         // 25: gkg.v1.ListToolsRequest
-	(*ListToolsResponse)(nil),        // 26: gkg.v1.ListToolsResponse
-	(*ToolDefinition)(nil),           // 27: gkg.v1.ToolDefinition
-	(*GetClusterHealthRequest)(nil),  // 28: gkg.v1.GetClusterHealthRequest
-	(*GetClusterHealthResponse)(nil), // 29: gkg.v1.GetClusterHealthResponse
-	(*StructuredClusterHealth)(nil),  // 30: gkg.v1.StructuredClusterHealth
-	(*ComponentHealth)(nil),          // 31: gkg.v1.ComponentHealth
-	(*ReplicaStatus)(nil),            // 32: gkg.v1.ReplicaStatus
-	(*GetGraphStatusRequest)(nil),    // 33: gkg.v1.GetGraphStatusRequest
-	(*IndexingStatus)(nil),           // 34: gkg.v1.IndexingStatus
-	(*GetGraphStatusResponse)(nil),   // 35: gkg.v1.GetGraphStatusResponse
-	(*StructuredGraphStatus)(nil),    // 36: gkg.v1.StructuredGraphStatus
-	(*ProjectsStatus)(nil),           // 37: gkg.v1.ProjectsStatus
-	(*GraphStatusDomain)(nil),        // 38: gkg.v1.GraphStatusDomain
-	(*GraphStatusItem)(nil),          // 39: gkg.v1.GraphStatusItem
-	nil,                              // 40: gkg.v1.ResourceAuthorization.AuthorizedEntry
-	nil,                              // 41: gkg.v1.ComponentHealth.MetricsEntry
+	(ResponseFormat)(0),                // 0: gkg.v1.ResponseFormat
+	(FormatName)(0),                    // 1: gkg.v1.FormatName
+	(QueryType)(0),                     // 2: gkg.v1.QueryType
+	(ClusterStatus)(0),                 // 3: gkg.v1.ClusterStatus
+	(SourceType)(0),                    // 4: gkg.v1.SourceType
+	(IndexingState)(0),                 // 5: gkg.v1.IndexingState
+	(*ExecuteQueryMessage)(nil),        // 6: gkg.v1.ExecuteQueryMessage
+	(*ExecuteQueryRequest)(nil),        // 7: gkg.v1.ExecuteQueryRequest
+	(*ExecuteQueryResult)(nil),         // 8: gkg.v1.ExecuteQueryResult
+	(*QueryMetadata)(nil),              // 9: gkg.v1.QueryMetadata
+	(*ExecuteQueryError)(nil),          // 10: gkg.v1.ExecuteQueryError
+	(*GetGraphSchemaRequest)(nil),      // 11: gkg.v1.GetGraphSchemaRequest
+	(*GetGraphSchemaResponse)(nil),     // 12: gkg.v1.GetGraphSchemaResponse
+	(*StructuredSchema)(nil),           // 13: gkg.v1.StructuredSchema
+	(*SchemaDomain)(nil),               // 14: gkg.v1.SchemaDomain
+	(*SchemaNode)(nil),                 // 15: gkg.v1.SchemaNode
+	(*SchemaProperty)(nil),             // 16: gkg.v1.SchemaProperty
+	(*SchemaEdge)(nil),                 // 17: gkg.v1.SchemaEdge
+	(*SchemaEdgeVariant)(nil),          // 18: gkg.v1.SchemaEdgeVariant
+	(*SchemaNodeStyle)(nil),            // 19: gkg.v1.SchemaNodeStyle
+	(*GetQueryDslRequest)(nil),         // 20: gkg.v1.GetQueryDslRequest
+	(*GetQueryDslResponse)(nil),        // 21: gkg.v1.GetQueryDslResponse
+	(*GetResponseFormatRequest)(nil),   // 22: gkg.v1.GetResponseFormatRequest
+	(*GetResponseFormatResponse)(nil),  // 23: gkg.v1.GetResponseFormatResponse
+	(*ResponseFormatSchema)(nil),       // 24: gkg.v1.ResponseFormatSchema
+	(*RedactionExchange)(nil),          // 25: gkg.v1.RedactionExchange
+	(*RedactionRequired)(nil),          // 26: gkg.v1.RedactionRequired
+	(*ResourceToAuthorize)(nil),        // 27: gkg.v1.ResourceToAuthorize
+	(*RedactionResponse)(nil),          // 28: gkg.v1.RedactionResponse
+	(*ResourceAuthorization)(nil),      // 29: gkg.v1.ResourceAuthorization
+	(*ListToolsRequest)(nil),           // 30: gkg.v1.ListToolsRequest
+	(*ListToolsResponse)(nil),          // 31: gkg.v1.ListToolsResponse
+	(*ToolDefinition)(nil),             // 32: gkg.v1.ToolDefinition
+	(*ListAgentCommandsRequest)(nil),   // 33: gkg.v1.ListAgentCommandsRequest
+	(*ListAgentCommandsResponse)(nil),  // 34: gkg.v1.ListAgentCommandsResponse
+	(*InvokeAgentCommandRequest)(nil),  // 35: gkg.v1.InvokeAgentCommandRequest
+	(*InvokeAgentCommandResponse)(nil), // 36: gkg.v1.InvokeAgentCommandResponse
+	(*GetClusterHealthRequest)(nil),    // 37: gkg.v1.GetClusterHealthRequest
+	(*GetClusterHealthResponse)(nil),   // 38: gkg.v1.GetClusterHealthResponse
+	(*StructuredClusterHealth)(nil),    // 39: gkg.v1.StructuredClusterHealth
+	(*ComponentHealth)(nil),            // 40: gkg.v1.ComponentHealth
+	(*ReplicaStatus)(nil),              // 41: gkg.v1.ReplicaStatus
+	(*GetGraphStatusRequest)(nil),      // 42: gkg.v1.GetGraphStatusRequest
+	(*IndexingStatus)(nil),             // 43: gkg.v1.IndexingStatus
+	(*GetGraphStatusResponse)(nil),     // 44: gkg.v1.GetGraphStatusResponse
+	(*StructuredGraphStatus)(nil),      // 45: gkg.v1.StructuredGraphStatus
+	(*ProjectsStatus)(nil),             // 46: gkg.v1.ProjectsStatus
+	(*GraphStatusDomain)(nil),          // 47: gkg.v1.GraphStatusDomain
+	(*GraphStatusItem)(nil),            // 48: gkg.v1.GraphStatusItem
+	nil,                                // 49: gkg.v1.ResourceAuthorization.AuthorizedEntry
+	nil,                                // 50: gkg.v1.ComponentHealth.MetricsEntry
 }
 var file_gkg_proto_depIdxs = []int32{
 	7,  // 0: gkg.v1.ExecuteQueryMessage.request:type_name -> gkg.v1.ExecuteQueryRequest
-	20, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
+	25, // 1: gkg.v1.ExecuteQueryMessage.redaction:type_name -> gkg.v1.RedactionExchange
 	8,  // 2: gkg.v1.ExecuteQueryMessage.result:type_name -> gkg.v1.ExecuteQueryResult
 	10, // 3: gkg.v1.ExecuteQueryMessage.error:type_name -> gkg.v1.ExecuteQueryError
 	0,  // 4: gkg.v1.ExecuteQueryRequest.format:type_name -> gkg.v1.ResponseFormat
@@ -2825,42 +3409,54 @@ var file_gkg_proto_depIdxs = []int32{
 	16, // 13: gkg.v1.SchemaNode.properties:type_name -> gkg.v1.SchemaProperty
 	19, // 14: gkg.v1.SchemaNode.style:type_name -> gkg.v1.SchemaNodeStyle
 	18, // 15: gkg.v1.SchemaEdge.variants:type_name -> gkg.v1.SchemaEdgeVariant
-	21, // 16: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
-	23, // 17: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
-	22, // 18: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
-	24, // 19: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
-	40, // 20: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
-	27, // 21: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
-	0,  // 22: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
-	30, // 23: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
-	3,  // 24: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
-	31, // 25: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
-	3,  // 26: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
-	32, // 27: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
-	41, // 28: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
-	4,  // 29: gkg.v1.GetGraphStatusRequest.source_type:type_name -> gkg.v1.SourceType
-	0,  // 30: gkg.v1.GetGraphStatusRequest.format:type_name -> gkg.v1.ResponseFormat
-	5,  // 31: gkg.v1.IndexingStatus.state:type_name -> gkg.v1.IndexingState
-	36, // 32: gkg.v1.GetGraphStatusResponse.structured:type_name -> gkg.v1.StructuredGraphStatus
-	37, // 33: gkg.v1.StructuredGraphStatus.projects:type_name -> gkg.v1.ProjectsStatus
-	38, // 34: gkg.v1.StructuredGraphStatus.domains:type_name -> gkg.v1.GraphStatusDomain
-	34, // 35: gkg.v1.StructuredGraphStatus.indexing:type_name -> gkg.v1.IndexingStatus
-	39, // 36: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
-	25, // 37: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
-	6,  // 38: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
-	11, // 39: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
-	28, // 40: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
-	33, // 41: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
-	26, // 42: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
-	6,  // 43: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
-	12, // 44: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
-	29, // 45: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
-	35, // 46: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
-	42, // [42:47] is the sub-list for method output_type
-	37, // [37:42] is the sub-list for method input_type
-	37, // [37:37] is the sub-list for extension type_name
-	37, // [37:37] is the sub-list for extension extendee
-	0,  // [0:37] is the sub-list for field type_name
+	0,  // 16: gkg.v1.GetQueryDslRequest.format:type_name -> gkg.v1.ResponseFormat
+	0,  // 17: gkg.v1.GetResponseFormatRequest.format:type_name -> gkg.v1.ResponseFormat
+	24, // 18: gkg.v1.GetResponseFormatResponse.structured:type_name -> gkg.v1.ResponseFormatSchema
+	26, // 19: gkg.v1.RedactionExchange.required:type_name -> gkg.v1.RedactionRequired
+	28, // 20: gkg.v1.RedactionExchange.response:type_name -> gkg.v1.RedactionResponse
+	27, // 21: gkg.v1.RedactionRequired.resources:type_name -> gkg.v1.ResourceToAuthorize
+	29, // 22: gkg.v1.RedactionResponse.authorizations:type_name -> gkg.v1.ResourceAuthorization
+	49, // 23: gkg.v1.ResourceAuthorization.authorized:type_name -> gkg.v1.ResourceAuthorization.AuthorizedEntry
+	32, // 24: gkg.v1.ListToolsResponse.tools:type_name -> gkg.v1.ToolDefinition
+	32, // 25: gkg.v1.ListAgentCommandsResponse.commands:type_name -> gkg.v1.ToolDefinition
+	0,  // 26: gkg.v1.GetClusterHealthRequest.format:type_name -> gkg.v1.ResponseFormat
+	39, // 27: gkg.v1.GetClusterHealthResponse.structured:type_name -> gkg.v1.StructuredClusterHealth
+	3,  // 28: gkg.v1.StructuredClusterHealth.status:type_name -> gkg.v1.ClusterStatus
+	40, // 29: gkg.v1.StructuredClusterHealth.components:type_name -> gkg.v1.ComponentHealth
+	3,  // 30: gkg.v1.ComponentHealth.status:type_name -> gkg.v1.ClusterStatus
+	41, // 31: gkg.v1.ComponentHealth.replicas:type_name -> gkg.v1.ReplicaStatus
+	50, // 32: gkg.v1.ComponentHealth.metrics:type_name -> gkg.v1.ComponentHealth.MetricsEntry
+	4,  // 33: gkg.v1.GetGraphStatusRequest.source_type:type_name -> gkg.v1.SourceType
+	0,  // 34: gkg.v1.GetGraphStatusRequest.format:type_name -> gkg.v1.ResponseFormat
+	5,  // 35: gkg.v1.IndexingStatus.state:type_name -> gkg.v1.IndexingState
+	45, // 36: gkg.v1.GetGraphStatusResponse.structured:type_name -> gkg.v1.StructuredGraphStatus
+	46, // 37: gkg.v1.StructuredGraphStatus.projects:type_name -> gkg.v1.ProjectsStatus
+	47, // 38: gkg.v1.StructuredGraphStatus.domains:type_name -> gkg.v1.GraphStatusDomain
+	43, // 39: gkg.v1.StructuredGraphStatus.indexing:type_name -> gkg.v1.IndexingStatus
+	48, // 40: gkg.v1.GraphStatusDomain.items:type_name -> gkg.v1.GraphStatusItem
+	30, // 41: gkg.v1.KnowledgeGraphService.ListTools:input_type -> gkg.v1.ListToolsRequest
+	33, // 42: gkg.v1.KnowledgeGraphService.ListAgentCommands:input_type -> gkg.v1.ListAgentCommandsRequest
+	35, // 43: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:input_type -> gkg.v1.InvokeAgentCommandRequest
+	6,  // 44: gkg.v1.KnowledgeGraphService.ExecuteQuery:input_type -> gkg.v1.ExecuteQueryMessage
+	11, // 45: gkg.v1.KnowledgeGraphService.GetGraphSchema:input_type -> gkg.v1.GetGraphSchemaRequest
+	20, // 46: gkg.v1.KnowledgeGraphService.GetQueryDsl:input_type -> gkg.v1.GetQueryDslRequest
+	22, // 47: gkg.v1.KnowledgeGraphService.GetResponseFormat:input_type -> gkg.v1.GetResponseFormatRequest
+	37, // 48: gkg.v1.KnowledgeGraphService.GetClusterHealth:input_type -> gkg.v1.GetClusterHealthRequest
+	42, // 49: gkg.v1.KnowledgeGraphService.GetGraphStatus:input_type -> gkg.v1.GetGraphStatusRequest
+	31, // 50: gkg.v1.KnowledgeGraphService.ListTools:output_type -> gkg.v1.ListToolsResponse
+	34, // 51: gkg.v1.KnowledgeGraphService.ListAgentCommands:output_type -> gkg.v1.ListAgentCommandsResponse
+	36, // 52: gkg.v1.KnowledgeGraphService.InvokeAgentCommand:output_type -> gkg.v1.InvokeAgentCommandResponse
+	6,  // 53: gkg.v1.KnowledgeGraphService.ExecuteQuery:output_type -> gkg.v1.ExecuteQueryMessage
+	12, // 54: gkg.v1.KnowledgeGraphService.GetGraphSchema:output_type -> gkg.v1.GetGraphSchemaResponse
+	21, // 55: gkg.v1.KnowledgeGraphService.GetQueryDsl:output_type -> gkg.v1.GetQueryDslResponse
+	23, // 56: gkg.v1.KnowledgeGraphService.GetResponseFormat:output_type -> gkg.v1.GetResponseFormatResponse
+	38, // 57: gkg.v1.KnowledgeGraphService.GetClusterHealth:output_type -> gkg.v1.GetClusterHealthResponse
+	44, // 58: gkg.v1.KnowledgeGraphService.GetGraphStatus:output_type -> gkg.v1.GetGraphStatusResponse
+	50, // [50:59] is the sub-list for method output_type
+	41, // [41:50] is the sub-list for method input_type
+	41, // [41:41] is the sub-list for extension type_name
+	41, // [41:41] is the sub-list for extension extendee
+	0,  // [0:41] is the sub-list for field type_name
 }
 
 func init() { file_gkg_proto_init() }
@@ -2882,16 +3478,28 @@ func file_gkg_proto_init() {
 		(*GetGraphSchemaResponse_Structured)(nil),
 		(*GetGraphSchemaResponse_FormattedText)(nil),
 	}
-	file_gkg_proto_msgTypes[14].OneofWrappers = []any{
+	file_gkg_proto_msgTypes[15].OneofWrappers = []any{
+		(*GetQueryDslResponse_RawJsonSchema)(nil),
+		(*GetQueryDslResponse_FormattedText)(nil),
+	}
+	file_gkg_proto_msgTypes[17].OneofWrappers = []any{
+		(*GetResponseFormatResponse_Structured)(nil),
+		(*GetResponseFormatResponse_FormattedText)(nil),
+	}
+	file_gkg_proto_msgTypes[19].OneofWrappers = []any{
 		(*RedactionExchange_Required)(nil),
 		(*RedactionExchange_Response)(nil),
 	}
-	file_gkg_proto_msgTypes[23].OneofWrappers = []any{
+	file_gkg_proto_msgTypes[30].OneofWrappers = []any{
+		(*InvokeAgentCommandResponse_ResultJson)(nil),
+		(*InvokeAgentCommandResponse_FormattedText)(nil),
+	}
+	file_gkg_proto_msgTypes[32].OneofWrappers = []any{
 		(*GetClusterHealthResponse_Structured)(nil),
 		(*GetClusterHealthResponse_FormattedText)(nil),
 	}
-	file_gkg_proto_msgTypes[28].OneofWrappers = []any{}
-	file_gkg_proto_msgTypes[29].OneofWrappers = []any{
+	file_gkg_proto_msgTypes[37].OneofWrappers = []any{}
+	file_gkg_proto_msgTypes[38].OneofWrappers = []any{
 		(*GetGraphStatusResponse_Structured)(nil),
 		(*GetGraphStatusResponse_FormattedText)(nil),
 	}
@@ -2901,7 +3509,7 @@ func file_gkg_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gkg_proto_rawDesc), len(file_gkg_proto_rawDesc)),
 			NumEnums:      6,
-			NumMessages:   36,
+			NumMessages:   45,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

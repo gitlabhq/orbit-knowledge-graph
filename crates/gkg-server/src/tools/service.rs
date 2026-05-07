@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use thiserror::Error;
 use toon_format::{EncodeOptions, encode};
 
-use super::schema::{condensed_query_schema, raw_query_schema};
+use super::schema::{condensed_query_schema, query_dsl_version, raw_query_schema};
 
 #[derive(Debug, Error)]
 pub enum ExecutorError {
@@ -114,12 +114,19 @@ impl ToolService {
 
     /// TOON-encoded condensed query DSL grammar (issue #553).
     pub fn build_query_dsl_toon() -> Result<String, ExecutorError> {
-        condensed_query_schema().map_err(ExecutorError::InvalidArguments)
+        let version = Self::build_query_dsl_version();
+        let schema = condensed_query_schema().map_err(ExecutorError::InvalidArguments)?;
+        Ok(format!("QueryDSL v{version}:\n{schema}"))
     }
 
     /// Full query DSL JSON Schema as a JSON string (verbatim from disk).
     pub fn build_query_dsl_raw() -> &'static str {
         raw_query_schema()
+    }
+
+    /// Semver string for the query DSL grammar. Matches `config/QUERY_DSL_VERSION`.
+    pub fn build_query_dsl_version() -> &'static str {
+        query_dsl_version()
     }
 
     /// JSON Schema describing the query response shape (formatter output).
@@ -174,9 +181,17 @@ impl ToolService {
         let result = match format {
             OutputFormat::Llm => json!(Self::build_query_dsl_toon()?),
             OutputFormat::Raw => {
-                serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
-                    ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
-                })?
+                let mut schema: Value =
+                    serde_json::from_str(Self::build_query_dsl_raw()).map_err(|e| {
+                        ExecutorError::InvalidArguments(format!("Failed to parse DSL schema: {e}"))
+                    })?;
+                if let Value::Object(ref mut object) = schema {
+                    object.insert(
+                        "version".to_string(),
+                        Value::String(Self::build_query_dsl_version().to_string()),
+                    );
+                }
+                schema
             }
         };
 
@@ -601,6 +616,10 @@ mod tests {
         assert_eq!(
             result.get("title").and_then(Value::as_str),
             Some("GraphQueryAsJSON")
+        );
+        assert_eq!(
+            result.get("version").and_then(Value::as_str),
+            Some(ToolService::build_query_dsl_version())
         );
     }
 

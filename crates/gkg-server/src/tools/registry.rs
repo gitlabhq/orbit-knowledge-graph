@@ -215,8 +215,8 @@ impl CommandRegistry {
     fn get_query_dsl() -> ToolDefinition {
         ToolDefinition {
             name: "get_query_dsl".into(),
-            description: "Return the query_graph JSON DSL grammar. Use this before composing \
-                          query_graph parameters."
+            description: "Return the query_graph JSON DSL grammar and version. Use this before \
+                          composing query_graph parameters."
                 .into(),
             parameters: json!({
                 "type": "object",

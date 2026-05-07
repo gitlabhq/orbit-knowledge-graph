@@ -4,6 +4,7 @@ use toon_format::{EncodeOptions, encode};
 const BASE_SCHEMA: &str = include_str!(concat!(env!("SCHEMA_DIR"), "/graph_query.schema.json"));
 const QUERY_RESPONSE_SCHEMA: &str =
     include_str!(concat!(env!("SCHEMA_DIR"), "/query_response.json"));
+const QUERY_DSL_VERSION: &str = include_str!(concat!(env!("CONFIG_DIR"), "/QUERY_DSL_VERSION"));
 
 const TRIVIAL_DESCRIPTIONS: &[&str] = &[
     "Integer value",
@@ -24,6 +25,10 @@ pub fn condensed_query_schema() -> Result<String, String> {
 
 pub fn raw_query_schema() -> &'static str {
     BASE_SCHEMA
+}
+
+pub fn query_dsl_version() -> &'static str {
+    QUERY_DSL_VERSION.trim()
 }
 
 pub fn query_response_schema() -> &'static str {

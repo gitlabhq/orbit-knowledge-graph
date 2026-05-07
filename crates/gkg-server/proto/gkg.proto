@@ -206,6 +206,7 @@ message GetQueryDslRequest {
 
 // Response carrying the DSL grammar in the requested format.
 message GetQueryDslResponse {
+  string version = 3;  // semver string for the query DSL grammar, e.g. "1.0.0"
   oneof content {
     string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
     string formatted_text = 2;   // format = LLM: condensed TOON

@@ -209,6 +209,9 @@ pub struct GetQueryDslRequest {
 /// Response carrying the DSL grammar in the requested format.
 #[derive(Clone, PartialEq, Eq, Hash, ::prost::Message)]
 pub struct GetQueryDslResponse {
+    /// semver string for the query DSL grammar, e.g. "1.0.0"
+    #[prost(string, tag = "3")]
+    pub version: ::prost::alloc::string::String,
     #[prost(oneof = "get_query_dsl_response::Content", tags = "1, 2")]
     pub content: ::core::option::Option<get_query_dsl_response::Content>,
 }
