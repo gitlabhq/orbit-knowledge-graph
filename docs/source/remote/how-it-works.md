@@ -32,7 +32,8 @@ Orbit indexes data from two sources and combines them into a single graph.
 ### SDLC data
 
 GitLab streams change events through a change data capture (CDC) pipeline to the
-GitLab Data Insights Platform. The platform writes records to ClickHouse tables
+[GitLab Data Insights Platform](https://handbook.gitlab.com/handbook/engineering/architecture/design-documents/data_insights_platform/).
+The platform writes records to ClickHouse tables
 that Orbit reads and writes its graph on top of.
 
 This happens continuously. When a user opens a merge request, creates a work item,
