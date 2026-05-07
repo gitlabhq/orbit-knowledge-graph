@@ -673,6 +673,56 @@ fn timestamp_to_string(dt: Option<chrono::NaiveDateTime>) -> ColumnValue {
         .unwrap_or(ColumnValue::Null)
 }
 
+/// Produces the widest schema across all batches: a field is nullable if ANY
+/// batch marks it nullable. This lets MemTable accept batches from different
+/// DataFusion queries that infer nullability differently.
+pub fn merge_batch_schemas(batches: &[RecordBatch]) -> Schema {
+    let base = batches[0].schema();
+    let fields: Vec<Field> = base
+        .fields()
+        .iter()
+        .enumerate()
+        .map(|(i, field)| {
+            let nullable = batches.iter().any(|b| b.schema().field(i).is_nullable());
+            field.as_ref().clone().with_nullable(nullable)
+        })
+        .collect();
+    Schema::new(fields)
+}
+
+/// Split a flat list of RecordBatches into approximately `target_chunks`
+/// groups, balanced by row count. Preserves batch ordering.
+pub fn split_into_chunks(
+    batches: Vec<RecordBatch>,
+    target_chunks: usize,
+) -> Vec<Vec<RecordBatch>> {
+    if batches.is_empty() || target_chunks <= 1 {
+        return vec![batches];
+    }
+
+    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
+    let rows_per_chunk = (total_rows / target_chunks).max(1);
+    let mut chunks: Vec<Vec<RecordBatch>> = Vec::with_capacity(target_chunks);
+    let mut current_chunk = Vec::new();
+    let mut current_rows = 0usize;
+
+    for batch in batches {
+        current_rows += batch.num_rows();
+        current_chunk.push(batch);
+
+        if current_rows >= rows_per_chunk && chunks.len() < target_chunks - 1 {
+            chunks.push(std::mem::take(&mut current_chunk));
+            current_rows = 0;
+        }
+    }
+
+    if !current_chunk.is_empty() {
+        chunks.push(current_chunk);
+    }
+
+    chunks
+}
+
 /// Single-pass column type fixup for RecordBatches before ClickHouse insertion.
 /// Mutates the vector in place.
 /// - Casts `Utf8View` / `List<Utf8View>` to `Utf8` / `List<Utf8>` (ClickHouse

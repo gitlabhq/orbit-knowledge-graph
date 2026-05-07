@@ -2,7 +2,6 @@ use std::collections::{BTreeMap, HashSet};
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
-use arrow::datatypes::{Field, Schema};
 use arrow::record_batch::RecordBatch;
 use chrono::{DateTime, Utc};
 use datafusion::datasource::MemTable;
@@ -10,7 +9,7 @@ use datafusion::prelude::*;
 use futures::future::BoxFuture;
 use futures::stream::FuturesUnordered;
 use futures::{FutureExt, StreamExt};
-use gkg_utils::arrow::prepare_batches;
+use gkg_utils::arrow::{merge_batch_schemas, prepare_batches, split_into_chunks};
 use serde_json::Value;
 use tokio::sync::Semaphore;
 use tracing::{Instrument, debug, info, info_span, warn};
@@ -578,51 +577,6 @@ impl Pipeline {
         }
         Value::Object(params)
     }
-}
-
-/// Produces the widest schema across all batches: a field is nullable if ANY
-/// batch marks it nullable. This lets MemTable accept batches from different
-/// DataFusion queries that infer nullability differently.
-fn merge_batch_schemas(batches: &[RecordBatch]) -> Schema {
-    let base = batches[0].schema();
-    let fields: Vec<Field> = base
-        .fields()
-        .iter()
-        .enumerate()
-        .map(|(i, field)| {
-            let nullable = batches.iter().any(|b| b.schema().field(i).is_nullable());
-            field.as_ref().clone().with_nullable(nullable)
-        })
-        .collect();
-    Schema::new(fields)
-}
-
-fn split_into_chunks(batches: Vec<RecordBatch>, target_chunks: usize) -> Vec<Vec<RecordBatch>> {
-    if batches.is_empty() || target_chunks <= 1 {
-        return vec![batches];
-    }
-
-    let total_rows: usize = batches.iter().map(|b| b.num_rows()).sum();
-    let rows_per_chunk = (total_rows / target_chunks).max(1);
-    let mut chunks: Vec<Vec<RecordBatch>> = Vec::with_capacity(target_chunks);
-    let mut current_chunk = Vec::new();
-    let mut current_rows = 0usize;
-
-    for batch in batches {
-        current_rows += batch.num_rows();
-        current_chunk.push(batch);
-
-        if current_rows >= rows_per_chunk && chunks.len() < target_chunks - 1 {
-            chunks.push(std::mem::take(&mut current_chunk));
-            current_rows = 0;
-        }
-    }
-
-    if !current_chunk.is_empty() {
-        chunks.push(current_chunk);
-    }
-
-    chunks
 }
 
 #[cfg(test)]
