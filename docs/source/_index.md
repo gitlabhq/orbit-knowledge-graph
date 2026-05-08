@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Index your repositories and build a knowledge graph of your software development lifecycle.
+description: Query your GitLab instance as a knowledge graph. Find blast radius, trace dependencies, and answer SDLC questions that GitLab alone cannot.
 title: Orbit
 ---
 
@@ -16,7 +16,7 @@ title: Orbit
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default.
+- [Introduced](https://gitlab.com/gitlab-org/gitlab/-/work_items/583676) in GitLab 18.10 [with a feature flag](https://docs.gitlab.com/administration/feature_flags/) named `knowledge_graph`. Disabled by default. This feature is an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 {{< /history >}}
 
@@ -25,100 +25,94 @@ title: Orbit
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-Orbit is an AI-queryable knowledge graph of your software development
-lifecycle. It indexes your groups, projects, and repositories, then
-analyzes the relationships between them to build a structured map of
-your entire GitLab instance.
+<!-- -->
 
-Orbit exposes the knowledge graph through a unified context API.
-Explore the graph in the GitLab UI or query it with GitLab Duo or
-other MCP-enabled AI tools to bring full workspace context into your
-agentic AI sessions.
+> [!disclaimer]
 
-You can use Orbit to get answers to questions like:
+Orbit indexes your GitLab instance and exposes your entire SDLC as a queryable knowledge graph.
+Enable it on a group and Orbit maps everything: projects, users, merge requests, pipelines,
+work items, security findings, and the source code itself, then builds a property graph of how they
+relate to each other.
 
-- Based on past reviews and file ownership, who should review this change?
-- Which MRs introduced vulnerabilities in these projects?
-- Which projects depend on this module or library?
-- What work items are assigned to this user in these projects?
-- Which projects do most pipeline failures come from?
+Query the graph to answer questions your instance cannot answer directly:
 
-<!--- To get started with Orbit ... --->
+- What breaks if I change this service?
+- Which merge requests touched this file in the last 90 days?
+- Who has reviewed the most code in this group?
+- Where are the open critical vulnerabilities, and which pipelines introduced them?
+- Which projects depend on this library?
 
-## Performance
+*Orbit is an analytical system designed for point-in-time SDLC insight, not real-time or transactional use cases. Results reflect the state of your data as of the last index cycle.*
 
-The Orbit indexer runs in a separate Kubernetes cluster and does not
-impact the performance of your instance. The indexer job completes in
-seconds, even for large groups.
+## Orbit Remote
 
-Changes to a group, project, or repository are reindexed automatically.
-Reindexing typically completes a few minutes after a change.
-
-<!--- ## Billing and usage --->
-
-## Coverage
-
-Orbit indexes only the top-level groups where it is turned on.
-Subgroups and projects inherit indexing from the top-level group.
-
-Orbit indexes two types of data:
-
-1. GitLab data includes the software development lifecycle objects that make up your instance:
-
-   - Groups and projects
-   - Users
-   - Work items
-   - Merge requests
-   - Pipelines
-   - Vulnerabilities and security findings
-
-1. Code includes the content of your repositories:
-
-   - Source files and directories
-   - Function, class, and module definitions
-   - Imports and cross-file references
-
-   Code is indexed from only the default branch.
-
-The following diagram shows how Orbit builds the knowledge graph:
+On GitLab.com, Orbit Remote runs as a separate service on GitLab infrastructure. Enable it on a top-level group
+and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
+pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
 ```mermaid
 flowchart LR
-    accTitle: Orbit architecture overview
-    accDescr: SDLC data from GitLab is replicated via CDC to the Data Insights Platform, which writes to ClickHouse. Orbit reads and writes graph tables in ClickHouse, and indexes code through an internal API.
+    accTitle: Orbit Remote architecture
+    accDescr: SDLC data streams from GitLab via CDC to the Data Insights Platform, then to ClickHouse. Code is served over the Rails internal API. Orbit reads both sources, builds the graph in ClickHouse, and exposes it via REST API, MCP tools, and Duo Agent Platform.
 
-    subgraph GitLab
+    subgraph GitLab["GitLab instance"]
         SDLC[SDLC data]
-        Code[Code]
+        Code[Source code]
     end
 
-    SDLC -- CDC replication --> DIP[Data Insights Platform]
+    SDLC -- CDC --> DIP[Data Insights Platform]
     DIP --> CH[(ClickHouse)]
-    CH <--> GKG[Orbit]
-    Code -- Rails API --> GKG
+    Code -- Rails API --> Orbit[Orbit service]
+    CH <--> Orbit
+
+    Orbit --> REST[REST API]
+    Orbit --> MCP[MCP tools]
+    Orbit --> DAP[Duo Agent Platform]
 ```
 
-GitLab data is streamed through change data capture (CDC) events to
-the GitLab Data Insights Platform, which writes to ClickHouse. Code
-is served to Orbit over the Rails internal API. To build the graph,
-Orbit combines SDLC data and code into a graph table, then writes the
-result to ClickHouse.
+Orbit Remote runs as a separate service and shares minimal load with your GitLab instance.
 
-### Supported languages
+[Get started with Orbit Remote](remote/getting-started.md)
 
-Orbit supports code indexing for the following languages:
+## Orbit Local
 
-- Ruby
-- Java
-- Kotlin
-- Python
-- TypeScript
-- JavaScript
-- Rust
-- C#
-- Go
+Orbit Local runs entirely on your machine. The `orbit` CLI parses a local repository,
+extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
+No GitLab instance or network connection required.
 
-## Feedback
+```mermaid
+flowchart LR
+    accTitle: Orbit Local architecture
+    accDescr: The orbit CLI parses a local repository, builds a code graph, and writes it to a local DuckDB file. You query the graph via the CLI.
 
-Your feedback is valuable in helping us improve this feature.
-Share your experience in [issue 592436](https://gitlab.com/gitlab-org/gitlab/-/work_items/592436).
+    Repo[Local repository] --> CLI["orbit CLI"]
+    CLI --> DB[("DuckDB\n~/.orbit/graph.duckdb")]
+    DB --> Query[CLI query]
+```
+
+Orbit Local indexes code only. SDLC data - merge requests, pipelines, work items - requires
+Orbit Remote.
+
+[Get started with Orbit Local](local/getting-started.md)
+
+## What Orbit indexes
+
+Orbit indexes two categories of data:
+
+**SDLC objects** from your GitLab instance:
+groups, projects, users, merge requests, pipelines, jobs, work items, milestones, labels,
+and security findings.
+
+**Source code** from your repositories:
+files, directories, function and class definitions, and cross-file import references.
+Code is indexed from the default branch only.
+
+**Supported languages for code indexing:**
+Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++
+
+[Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
+
+## Get started
+
+- [Enable Orbit Remote and run your first query](remote/getting-started.md)
+- [Build a local code graph with Orbit Local](local/getting-started.md)
