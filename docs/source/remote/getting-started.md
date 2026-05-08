@@ -38,7 +38,7 @@ Orbit indexes top-level groups only. Subgroups and projects inherit indexing aut
 ## Step 1: Enable Orbit
 
 1. On the left sidebar, expand **Your Work**.
-1. Select **Orbit > Configuration**.
+1. Select **Orbit** > **Configuration**.
 1. Find your top-level group in the **Indexes** list.
 1. Toggle **Enable**.
 

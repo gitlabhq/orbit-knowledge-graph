@@ -28,7 +28,7 @@ title: What Orbit Local indexes
 > Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
 
-Orbit Local builds a **code-only** graph from a local repository. It does not
+Orbit Local builds a code-only graph from a local repository. It does not
 connect to GitLab and does not index SDLC data.
 
 ## Scope

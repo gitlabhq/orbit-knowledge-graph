@@ -88,16 +88,16 @@ Any MCP client can connect by running `orbit mcp serve` (or
 
 ## Using the tools
 
-Once connected, instruct your AI agent to use Orbit directly:
+Once connected, instruct your AI agent to use Orbit directly.
 
-**Discover the schema:**
+Discover the schema:
 > "Use `get_graph_schema` to show me what node types are in my local graph."
 
-**Find callers of a function:**
+Find callers of a function:
 > "Use Orbit to find every file that imports `parseConfig` and the functions
 > that call it."
 
-**Map a module:**
+Map a module:
 > "Use Orbit to list every definition declared in `src/auth/` and show their
 > kind."
 
@@ -105,7 +105,7 @@ The agent composes the JSON query DSL and calls `query_graph` on your behalf.
 
 ## What's in the local graph
 
-Orbit Local indexes **code only**: files, directories, definitions, and
+Orbit Local indexes code only: files, directories, definitions, and
 imported symbols across all 11 supported languages. SDLC data (merge requests,
 pipelines, users, vulnerabilities) is not available locally - that requires
 [Orbit Remote](../../remote/_index.md).

@@ -94,17 +94,14 @@ curl --header "Authorization: Bearer <your_token>" \
 
 ## Notes
 
-**Definition IDs** are content-hashed integers scoped per project and branch. Two definitions
+- Definition IDs are content-hashed integers scoped per project and branch. Two definitions
 of the same symbol in different projects have different IDs even if the function name and
 file path are identical.
-
-**All entity IDs** are returned as strings in query responses, even when the underlying value
+- All entity IDs are returned as strings in query responses, even when the underlying value
 is an integer. This prevents precision loss in JavaScript clients for values above
 `Number.MAX_SAFE_INTEGER`.
-
-**`content` fields** on `Definition` and `File` nodes contain the full source text of the
+- `content` fields on `Definition` and `File` nodes contain the full source text of the
 definition or file. These fields are available for agent tools that need to hydrate file
 content without making separate API calls to GitLab.
-
-**Authorization:** All nodes include a `traversal_path` property used for authorization
+- All nodes include a `traversal_path` property used for authorization
 filtering. Query results are automatically scoped to entities the requesting user can access.

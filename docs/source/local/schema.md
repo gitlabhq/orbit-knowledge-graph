@@ -63,13 +63,11 @@ merge requests, pipelines, users, vulnerabilities, work items - is unavailable.
 
 ## Notes
 
-**Definition IDs** are content-hashed integers scoped per file path. The same
+- Definition IDs are content-hashed integers scoped per file path. The same
 function in two indexed repositories will have different IDs.
-
-**`content` fields** on `Definition` and `File` nodes contain the full source
+- `content` fields on `Definition` and `File` nodes contain the full source
 text. These are populated so agent tools can hydrate code without separate
 file reads.
-
-**No authorization layer.** Orbit Local does not enforce per-user access
+- There is no authorization layer. Orbit Local does not enforce per-user access
 control. The graph file at `~/.orbit/graph.duckdb` is protected only by file
 system permissions.

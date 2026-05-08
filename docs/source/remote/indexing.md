@@ -41,11 +41,11 @@ Orbit indexes the following GitLab objects and their relationships:
 
 | Domain | Objects indexed |
 |--------|----------------|
-| **Core** | Groups, projects, users, notes (comments) |
-| **Code review** | Merge requests, merge request diffs, changed files |
-| **CI/CD** | Pipelines, stages, jobs |
-| **Planning** | Work items (issues, epics, tasks, incidents), milestones, labels |
-| **Security** | Vulnerabilities, security findings, security scans, scanners, CVE/CWE identifiers |
+| Core | Groups, projects, users, notes (comments) |
+| Code review | Merge requests, merge request diffs, changed files |
+| CI/CD | Pipelines, stages, jobs |
+| Planning | Work items (issues, epics, tasks, incidents), milestones, labels |
+| Security | Vulnerabilities, security findings, security scans, scanners, CVE/CWE identifiers |
 
 SDLC data is updated continuously via change data capture. Changes in your GitLab instance
 appear in Orbit within minutes.
@@ -60,7 +60,7 @@ What gets indexed:
 - Function, class, and module definitions (with start/end line and full source content)
 - Import and cross-file reference relationships between files
 
-Code is indexed from the **default branch only**. Orbit re-indexes automatically when
+Code is indexed from the default branch only. Orbit re-indexes automatically when
 the default branch changes.
 
 ### Supported languages

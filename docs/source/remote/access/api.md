@@ -67,7 +67,7 @@ The request body contains:
 - `format`: Optional response format. Use `raw` for structured JSON, or `llm`
   for compact text optimized for AI agents. Default: `llm`.
 
-**Request:**
+For example:
 
 ```shell
 curl --request POST \
@@ -79,7 +79,9 @@ curl --request POST \
 
 See the [query language reference](../queries/query-language.md) for the full DSL.
 
-**Example - find projects with the most pipeline failures:**
+### Example request
+
+For example, a request to find projects with the most pipeline failures:
 
 ```shell
 curl --request POST \
@@ -111,7 +113,7 @@ curl --request POST \
   "https://gitlab.com/api/v4/orbit/query"
 ```
 
-**Response:**
+An example response:
 
 ```json
 {
@@ -163,7 +165,7 @@ curl --header "Authorization: Bearer <your_token>" \
   "https://gitlab.com/api/v4/orbit/status"
 ```
 
-**Example response:**
+An example response:
 
 ```json
 {

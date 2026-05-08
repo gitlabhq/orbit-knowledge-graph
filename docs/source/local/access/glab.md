@@ -34,9 +34,9 @@ instance or your local machine.
 
 Two top-level commands (both planned, not yet shipped):
 
-- **`glab orbit setup`** - install the Orbit skill and point your AI
+- `glab orbit setup` - install the Orbit skill and point your AI
   agent at the local graph.
-- **`glab orbit local`** - typed subcommands that wrap the `orbit` binary.
+- `glab orbit local` - typed subcommands that wrap the `orbit` binary.
   Includes `glab orbit local mcp serve` to run Orbit Local as an MCP server.
 
 ## Prerequisites

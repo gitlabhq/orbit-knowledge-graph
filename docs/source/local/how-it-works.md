@@ -41,7 +41,7 @@ The v2 pipeline runs all language parsers in parallel. Indexing a medium-sized r
 
 ## The graph model
 
-Orbit Local builds a **code-only** graph. It does not have access to SDLC data (merge requests, pipelines, users) because there is no GitLab connection.
+Orbit Local builds a code-only graph. It does not have access to SDLC data (merge requests, pipelines, users) because there is no GitLab connection.
 
 Nodes in the local graph:
 

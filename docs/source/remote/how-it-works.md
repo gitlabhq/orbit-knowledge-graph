@@ -66,10 +66,9 @@ executes it, and returns typed results.
 
 The graph has two layers:
 
-**SDLC layer:** GitLab objects and their relationships. Projects belong to groups.
+- SDLC layer: GitLab objects and their relationships. Projects belong to groups.
 Users author merge requests. Pipelines run on projects. Work items are assigned to users.
-
-**Code layer:** Source code structure and cross-file references. Functions are defined in files.
+- Code layer: Source code structure and cross-file references. Functions are defined in files.
 Files import symbols from other files. Definitions exist within projects and branches.
 
 The two layers are connected. A merge request (SDLC layer) touches files (code layer).

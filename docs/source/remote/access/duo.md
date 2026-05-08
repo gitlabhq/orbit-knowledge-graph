@@ -42,12 +42,12 @@ Orbit is wired into the following GitLab Duo Agent Platform agents and flows:
 
 | Agent or flow | When to use it |
 |---|---|
-| **GitLab Duo Agent** | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
-| **Planner Agent** | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
-| **Security Analyst Agent** | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
-| **Data Analyst Agent** | SDLC analytics powered by GLQL. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
-| **CI Expert Agent** | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
-| **Developer Flow** | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
+| GitLab Duo Agent | General development assistant. Get help with code, planning, security, and project management. Calls Orbit when answers benefit from graph context. |
+| Planner Agent | Issue and milestone planning. Ask about work item ownership, blockers, contributor load, milestone progress across projects. |
+| Security Analyst Agent | Vulnerability triage. Ask about open vulnerabilities by severity, CVE coverage across the group, vulnerability introduction timelines. |
+| Data Analyst Agent | SDLC analytics powered by GLQL. Ask about pipeline health, MR cycle time, contributor patterns, deployment frequency. |
+| CI Expert Agent | Pipeline triage. Ask about job failure causes, pipeline inheritance, slowest jobs, frequently failing projects. |
+| Developer Flow | Turn a work item into a draft MR in the UI. Orbit grounds the agent's implementation in your live SDLC graph - dependencies, ownership, blast radius. |
 
 When an agent uses Orbit to answer a question, the answer is grounded in your
 live graph rather than the agent's general knowledge.
@@ -55,37 +55,37 @@ live graph rather than the agent's general knowledge.
 ## Billing
 
 Queries that GitLab Duo Agent Platform makes against Orbit on your behalf are
-**zero-rated**. They do not consume GitLab Credits.
+zero-rated. They do not consume GitLab Credits.
 
 ## Example prompts
 
 Ask these in any of the surfaces above - the agent picks the right tool.
 
-**Codebase exploration:**
+Codebase exploration:
 
 - "What are the 10 most recently updated projects in my group?"
 - "Which projects have the most open merge requests?"
 - "Who are the top contributors to this project by merge requests merged?"
 
-**Blast radius and impact:**
+Blast radius and impact:
 
 - "Which projects import the `payments-service` library?"
 - "What files in this project depend on `UserAuthService`?"
 - "If I deprecate this function, which other files reference it?"
 
-**CI/CD and pipeline health:**
+CI/CD and pipeline health:
 
 - "Which projects have the highest pipeline failure rate?"
 - "What are the most common job failure reasons in this group?"
 - "Which pipelines take the longest to run?"
 
-**Security:**
+Security:
 
 - "Show me all critical and high severity open vulnerabilities in this group."
 - "Which projects have unresolved vulnerabilities introduced in the last 30 days?"
 - "What CVEs are present across my projects?"
 
-**Planning and work items:**
+Planning and work items:
 
 - "How many open issues are assigned to each user in this group?"
 - "Which milestones are overdue?"

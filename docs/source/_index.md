@@ -99,16 +99,13 @@ Orbit Remote.
 
 Orbit indexes two categories of data:
 
-**SDLC objects** from your GitLab instance:
-groups, projects, users, merge requests, pipelines, jobs, work items, milestones, labels,
-and security findings.
+- SDLC objects from your GitLab instance: groups, projects, users, merge requests, pipelines, jobs,
+  work items, milestones, labels, and security findings.
 
-**Source code** from your repositories:
-files, directories, function and class definitions, and cross-file import references.
-Code is indexed from the default branch only.
+- Source code from your repositories: files, directories, function and class definitions, and
+  cross-file import references. Code is indexed from the default branch only.
 
-**Supported languages for code indexing:**
-Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, C++
+Orbit indexes code in Ruby, Java, Kotlin, Python, TypeScript, JavaScript, Rust, Go, C#, C, and C++.
 
 [Full indexing coverage](remote/indexing.md) | [Schema reference](remote/schema.md)
 
