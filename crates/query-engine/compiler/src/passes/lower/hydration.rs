@@ -13,7 +13,7 @@ use crate::ast::*;
 use crate::error::{QueryError, Result};
 
 use crate::passes::plan::HydrationNodePlan;
-use crate::passes::shared::dedup_subquery;
+use crate::passes::shared::{dedup_subquery, filter_to_expr};
 
 // ─── Emit ────────────────────────────────────────────────────────────────────
 
@@ -54,6 +54,11 @@ fn emit_arm(node: &HydrationNodePlan) -> Result<Query> {
     // Narrow scan via traversal_path when base query provided TPs.
     if let Some(tp_filter) = traversal_path_filter(alias, &node.traversal_paths) {
         scan_where.push(tp_filter);
+    }
+
+    // Push base query filters to help skip indexes prune granules.
+    for (prop, filter) in &node.filters {
+        scan_where.push(filter_to_expr(alias, prop, filter));
     }
 
     if let Some(id_filter) = Expr::col_in(
@@ -166,6 +171,15 @@ mod tests {
         node_ids: Vec<i64>,
         traversal_paths: Vec<&str>,
     ) -> HydrationNodePlan {
+        plan_with_filters(columns, node_ids, traversal_paths, vec![])
+    }
+
+    fn plan_with_filters(
+        columns: Vec<&str>,
+        node_ids: Vec<i64>,
+        traversal_paths: Vec<&str>,
+        filters: Vec<(&str, crate::input::InputFilter)>,
+    ) -> HydrationNodePlan {
         HydrationNodePlan {
             alias: "hydrate".into(),
             table: "gl_merge_request".into(),
@@ -174,6 +188,10 @@ mod tests {
             node_ids,
             columns: columns.into_iter().map(String::from).collect(),
             traversal_paths: traversal_paths.into_iter().map(String::from).collect(),
+            filters: filters
+                .into_iter()
+                .map(|(k, v)| (k.to_string(), v))
+                .collect(),
         }
     }
 
@@ -266,5 +284,59 @@ mod tests {
     fn leaf_pruning_noop_when_no_ancestors() {
         let leaves = prune_to_leaves(&["1/9970/100/".into(), "1/9970/200/".into()]);
         assert_eq!(leaves, vec!["1/9970/100/", "1/9970/200/"]);
+    }
+
+    #[test]
+    fn filters_pushed_into_hydration_scan() {
+        use crate::input::InputFilter;
+
+        let node = emit_hydration(
+            &[plan_with_filters(
+                vec!["title"],
+                vec![1, 2],
+                vec![],
+                vec![(
+                    "state",
+                    InputFilter {
+                        op: Some(crate::input::FilterOp::Eq),
+                        value: Some(serde_json::Value::String("merged".into())),
+                        data_type: None,
+                    },
+                )],
+            )],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        assert!(
+            sql.contains("state"),
+            "pushed filter should reference state column: {sql}"
+        );
+    }
+
+    #[test]
+    fn filters_and_tp_both_present() {
+        use crate::input::InputFilter;
+
+        let node = emit_hydration(
+            &[plan_with_filters(
+                vec!["title"],
+                vec![1],
+                vec!["1/9970/"],
+                vec![(
+                    "state",
+                    InputFilter {
+                        op: Some(crate::input::FilterOp::Eq),
+                        value: Some(serde_json::Value::String("merged".into())),
+                        data_type: None,
+                    },
+                )],
+            )],
+            10,
+        )
+        .unwrap();
+        let sql = render(&node);
+        assert!(sql.contains("startsWith"), "should have TP filter: {sql}");
+        assert!(sql.contains("state"), "should have pushed filter: {sql}");
     }
 }

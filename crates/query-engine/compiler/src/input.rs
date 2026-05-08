@@ -482,7 +482,7 @@ where
 // Filters
 // ─────────────────────────────────────────────────────────────────────────────
 
-#[derive(Debug, Clone, Default)]
+#[derive(Debug, Clone, Default, PartialEq)]
 pub struct InputFilter {
     pub op: Option<FilterOp>,
     pub value: Option<Value>,

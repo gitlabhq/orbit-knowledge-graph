@@ -17,6 +17,9 @@ pub struct HydrationNodePlan {
     /// Traversal paths extracted from the base query, used to narrow hydration
     /// scans via `startsWith(traversal_path, tp)`.
     pub traversal_paths: Vec<String>,
+    /// Filters from the base query pushed into the hydration scan to help
+    /// skip indexes prune granules.
+    pub filters: Vec<(String, InputFilter)>,
 }
 
 pub fn plan_hydration(input: &Input) -> Result<Plan> {
@@ -49,6 +52,11 @@ pub fn plan_hydration(input: &Input) -> Result<Plan> {
                 node_ids: node.node_ids.clone(),
                 columns,
                 traversal_paths: node.traversal_paths.clone(),
+                filters: node
+                    .filters
+                    .iter()
+                    .map(|(k, v)| (k.clone(), v.clone()))
+                    .collect(),
             })
         })
         .collect::<Result<Vec<_>>>()?;

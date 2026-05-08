@@ -146,6 +146,7 @@ pub fn build_static_nodes(
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
+            filters: template.filters.iter().cloned().collect(),
             ..InputNode::default()
         });
     }
@@ -365,6 +366,7 @@ pub fn hydrate_static(
             columns: Some(ColumnSelection::List(template.columns.clone())),
             node_ids: ids,
             traversal_paths,
+            filters: template.filters.iter().cloned().collect(),
             ..InputNode::default()
         });
     }
