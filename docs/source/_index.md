@@ -50,11 +50,6 @@ On GitLab.com, Orbit Remote runs as a separate service on GitLab infrastructure.
 and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests,
 pipelines, vulnerabilities, and source code - into a managed ClickHouse graph.
 
-- **For:** GitLab.com Premium and Ultimate
-- **Indexes:** Full SDLC + code graph
-- **Storage:** ClickHouse (managed, no setup required)
-- **Status:** Experiment
-
 ```mermaid
 flowchart LR
     accTitle: Orbit Remote architecture
@@ -84,11 +79,6 @@ Orbit Remote runs as a separate service and shares minimal load with your GitLab
 Orbit Local runs entirely on your machine. The `orbit` CLI parses a local repository,
 extracts definitions and cross-file references, and writes the graph to a local DuckDB file.
 No GitLab instance or network connection required.
-
-- **For:** Any tier, self-managed, or offline use
-- **Indexes:** Code only - files, definitions, cross-file references
-- **Storage:** DuckDB (local file at `~/.orbit/graph.duckdb`)
-- **Status:** Developer preview
 
 ```mermaid
 flowchart LR
