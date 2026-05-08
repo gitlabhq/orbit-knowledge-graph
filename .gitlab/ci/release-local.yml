@@ -4,10 +4,24 @@
 # code indexing on a developer machine) from the gkg-server image we ship
 # elsewhere in this pipeline.
 #
-# Both build and publish run only on tag pipelines (`vX.Y.Z`) on the canonical
-# project.
+# Build runs on tag pipelines (`vX.Y.Z`) and on MRs that touch the build
+# script, this file, or the orbit-local / duckdb-client crates so the binary
+# can be validated before tagging. Publish runs only on tag pipelines.
+# Both stages are gated to the canonical project.
 
-.local-cli-release-rules:
+.local-cli-build-rules:
+  rules:
+    - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
+      when: never
+    - if: $CI_COMMIT_TAG =~ /^v\d+\.\d+\.\d+$/
+    - if: $CI_PIPELINE_SOURCE == 'merge_request_event'
+      changes:
+        - scripts/build-local-cli.sh
+        - .gitlab/ci/release-local.yml
+        - crates/orbit-local/**/*
+        - crates/duckdb-client/**/*
+
+.local-cli-publish-rules:
   rules:
     - if: $CI_PROJECT_ID != $CANONICAL_PROJECT_ID
       when: never
@@ -17,7 +31,7 @@
   extends:
     - .job-template
     - .sccache-template
-    - .local-cli-release-rules
+    - .local-cli-build-rules
   stage: build
   needs: []
   variables:
@@ -46,7 +60,7 @@ local-cli-build-linux-arm64:
 
 .local-cli-build-darwin:
   extends:
-    - .local-cli-release-rules
+    - .local-cli-build-rules
   stage: build
   image: macos-15-xcode-16
   tags:
@@ -54,8 +68,6 @@ local-cli-build-linux-arm64:
   needs: []
   variables:
     PLATFORM: darwin
-    # Pull a prebuilt libduckdb instead of compiling it; matches local dev defaults.
-    DUCKDB_DOWNLOAD_LIB: "1"
     RUST_VERSION: "1.95.0"
   before_script:
     # macos-15-xcode-16 ships with rustup but no toolchain pre-selected; the
@@ -86,7 +98,7 @@ local-cli-build-darwin-arm64:
 
 local-cli-publish:
   extends:
-    - .local-cli-release-rules
+    - .local-cli-publish-rules
   stage: publish
   image: ${DEP_PROXY}alpine:latest
   tags:

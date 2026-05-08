@@ -41,7 +41,8 @@ fi
 rustup target add "$TARGET"
 
 echo "Building orbit for $PLATFORM/$ARCH ($TARGET)"
-cargo build --release --locked --bin orbit --target "$TARGET"
+# Bundle libduckdb (compile from C++) so the released binary is self-contained.
+cargo build --release --locked --bin orbit --target "$TARGET" --features duckdb-client/bundled
 
 ARCHIVE="orbit-local-${PLATFORM}-${ARCH}.tar.gz"
 tar -czvf "$ARCHIVE" -C "target/${TARGET}/release" orbit
