@@ -2,9 +2,7 @@ use std::time::Duration;
 
 use labkit_events::Tracker;
 use labkit_events::gkg::GkgEvent;
-use labkit_events::orbit::{
-    DeploymentType, OrbitCommonContext, OrbitQueryContext, SourceType, ToolName,
-};
+use labkit_events::orbit::{DeploymentType, OrbitCommonContext, OrbitQueryContext, SourceType};
 use serde_json::Value;
 use testcontainers::core::{ContainerPort, WaitFor};
 use testcontainers::runners::AsyncRunner;
@@ -120,7 +118,7 @@ async fn snowplow_micro_receives_gkg_query_executed() {
         .expect("common");
 
     let query = OrbitQueryContext::builder(SourceType::Mcp)
-        .tool_name(ToolName::QueryGraph)
+        .tool_name("query_graph")
         .global_user_id("guser-it")
         .session_id("sess-it")
         .root_namespace_id(99)
@@ -174,7 +172,7 @@ async fn snowplow_micro_receives_gkg_query_executed() {
     assert!(
         context_schemas
             .iter()
-            .any(|s| s == "iglu:com.gitlab/orbit_query/jsonschema/1-0-0"),
+            .any(|s| s == "iglu:com.gitlab/orbit_query/jsonschema/2-0-0"),
         "missing orbit_query context, contexts={context_schemas:?}"
     );
 
