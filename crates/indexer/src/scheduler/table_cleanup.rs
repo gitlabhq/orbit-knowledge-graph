@@ -1,15 +1,16 @@
 use std::time::Instant;
 
 use async_trait::async_trait;
-use clickhouse_client::FromArrowColumn;
 use tracing::{info, warn};
 
 use crate::clickhouse::ArrowClickHouseClient;
 use crate::scheduler::{ScheduledTask, ScheduledTaskMetrics, TaskError};
+use crate::schema::version::{SCHEMA_VERSION, prefixed_table_name};
 use gkg_server_config::{ScheduleConfiguration, TableCleanupConfig};
 
 pub struct TableCleanup {
     graph: ArrowClickHouseClient,
+    tables: Vec<String>,
     metrics: ScheduledTaskMetrics,
     config: TableCleanupConfig,
 }
@@ -17,11 +18,14 @@ pub struct TableCleanup {
 impl TableCleanup {
     pub fn new(
         graph: ArrowClickHouseClient,
+        ontology: &ontology::Ontology,
         metrics: ScheduledTaskMetrics,
         config: TableCleanupConfig,
     ) -> Self {
+        let tables = table_names_from_ontology(ontology);
         Self {
             graph,
+            tables,
             metrics,
             config,
         }
@@ -52,27 +56,11 @@ impl ScheduledTask for TableCleanup {
 }
 
 impl TableCleanup {
-    async fn discover_tables(&self) -> Result<Vec<String>, TaskError> {
-        let batches = self
-            .graph
-            .query_arrow(
-                "SELECT table_name FROM information_schema.tables \
-                 WHERE table_catalog = currentDatabase() \
-                   AND table_type = 'BASE TABLE'",
-            )
-            .await
-            .map_err(|error| TaskError::new(format!("failed to discover tables: {error}")))?;
-
-        String::extract_column(&batches, 0)
-            .map_err(|error| TaskError::new(format!("failed to extract table names: {error}")))
-    }
-
     async fn cleanup_all_tables(&self) -> Result<(), TaskError> {
-        let tables = self.discover_tables().await?;
         let mut cleaned = 0u64;
         let mut failed = 0u64;
 
-        for table in &tables {
+        for table in &self.tables {
             let statement = format!("OPTIMIZE TABLE {table} FINAL CLEANUP");
 
             match self.graph.execute(&statement).await {
@@ -97,5 +85,44 @@ impl TableCleanup {
         }
 
         Ok(())
+    }
+}
+
+fn table_names_from_ontology(ontology: &ontology::Ontology) -> Vec<String> {
+    let mut names = Vec::new();
+
+    for aux in ontology.auxiliary_tables() {
+        names.push(prefixed_table_name(&aux.name, *SCHEMA_VERSION));
+    }
+    for node in ontology.nodes() {
+        names.push(prefixed_table_name(
+            &node.destination_table,
+            *SCHEMA_VERSION,
+        ));
+    }
+    for edge_table in ontology.edge_tables() {
+        names.push(prefixed_table_name(edge_table, *SCHEMA_VERSION));
+    }
+
+    names
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn table_names_cover_auxiliary_node_and_edge_tables() {
+        let ontology = ontology::Ontology::load_embedded().expect("ontology must load");
+        let names = table_names_from_ontology(&ontology);
+
+        assert!(!names.is_empty());
+
+        for name in &names {
+            assert!(
+                name.starts_with(&format!("v{}_", *SCHEMA_VERSION)),
+                "table '{name}' should be prefixed with schema version"
+            );
+        }
     }
 }
