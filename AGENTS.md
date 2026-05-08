@@ -53,6 +53,7 @@ CLI integration tests (concurrency, worktrees): `mise test:cli`.
 | Ontology edge definitions | `config/ontology/edges/` |
 | Ontology JSON schema | `config/schemas/ontology.schema.json` |
 | Graph query JSON schema | `config/schemas/graph_query.schema.json` |
+| Query DSL version | `config/QUERY_DSL_VERSION` |
 | Server config JSON schema | `config/schemas/config.schema.json` (generated via `mise schema:generate`) |
 | Query response JSON schema | `config/schemas/query_response.json` |
 | Query test fixtures | `fixtures/queries/` |
@@ -81,7 +82,7 @@ Single binary: `gkg-server` (4 modes: Webserver, Indexer, DispatchIndexing, Heal
 
 | Crate | Role |
 |---|---|
-| `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`) |
+| `gkg-server` | HTTP/gRPC server, all 4 modes, JWT auth, config loading, schema-version readiness gate (`schema_watcher.rs`), MCP tool registry, and Orbit agent command registry (`CommandRegistry`) |
 | `gkg-server-config` | All config struct definitions (`AppConfig`, `ClickHouseConfiguration`, `NatsConfiguration`, `EngineConfiguration`, `QuerySettings`, etc.) and `OnceLock` global for query settings; avoids circular dep between server and compiler |
 | `gkg-analytics` | Cross-crate Snowplow analytics primitives: `AnalyticsTracker` trait, `SnowplowAnalyticsTracker` (wraps `labkit_events::Tracker`), `InMemoryAnalyticsTracker` (testkit), shared `OrbitCommonContext` builder. Domain-specific contexts (Claims → `OrbitQueryContext`, indexer state → `OrbitSdlcIndexingContext`) are built in the consuming crate. |
 | `query-engine` | Parent crate for all query subsystem crates; re-exports `compiler` |

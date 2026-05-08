@@ -1,3 +1,4 @@
+use std::collections::BTreeSet;
 use std::pin::Pin;
 use std::sync::Arc;
 
@@ -19,12 +20,16 @@ use crate::pipeline::{QueryPipelineService, receive_query_request, send_query_er
 use crate::proto::{
     ExecuteQueryMessage, ExecuteQueryResult, FormatName as ProtoFormatName,
     GetClusterHealthRequest, GetClusterHealthResponse, GetGraphSchemaRequest,
-    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, ListToolsRequest,
-    ListToolsResponse, QueryMetadata, ResponseFormat, SchemaDomain, SchemaEdge, SchemaEdgeVariant,
-    SchemaNode, SchemaNodeStyle, SchemaProperty, StructuredSchema,
-    ToolDefinition as ProtoToolDefinition, execute_query_message, get_graph_schema_response,
+    GetGraphSchemaResponse, GetGraphStatusRequest, GetGraphStatusResponse, GetQueryDslRequest,
+    GetQueryDslResponse, GetResponseFormatRequest, GetResponseFormatResponse,
+    InvokeAgentCommandRequest, InvokeAgentCommandResponse, ListAgentCommandsRequest,
+    ListAgentCommandsResponse, ListToolsRequest, ListToolsResponse, QueryMetadata, ResponseFormat,
+    ResponseFormatSchema, SchemaDomain, SchemaEdge, SchemaEdgeVariant, SchemaNode, SchemaNodeStyle,
+    SchemaProperty, StructuredSchema, ToolDefinition as ProtoToolDefinition, execute_query_message,
+    get_graph_schema_response, get_query_dsl_response, get_response_format_response,
+    invoke_agent_command_response,
 };
-use crate::tools::{ToolRegistry, ToolService};
+use crate::tools::{ExecutorError, ToolPlan, ToolService, V2CommandRegistry, V2ToolRegistry};
 use gkg_billing::BillingTracker;
 use query_engine::formatters::{FormatName, GoonFormatter, GraphFormatter, ResultFormatter};
 
@@ -38,6 +43,22 @@ fn proto_format_name(name: FormatName) -> ProtoFormatName {
 fn record_ai_session_id(ai_session_id: &Option<String>) {
     if let Some(sid) = ai_session_id {
         tracing::Span::current().record("ai_session_id", sid.as_str());
+    }
+}
+
+fn proto_tool_definition(t: crate::tools::ToolDefinition) -> ProtoToolDefinition {
+    ProtoToolDefinition {
+        name: t.name,
+        description: t.description,
+        parameters_json_schema: t.parameters.to_string(),
+    }
+}
+
+fn command_error_to_status(error: ExecutorError) -> Status {
+    match error {
+        ExecutorError::NotFound(_) => Status::not_found(error.to_string()),
+        ExecutorError::InvalidArguments(_) => Status::invalid_argument(error.to_string()),
+        ExecutorError::InterceptedCommand(_) => Status::failed_precondition(error.to_string()),
     }
 }
 
@@ -128,16 +149,120 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
 
         info!("Listing tools for user");
 
-        let tools = ToolRegistry::get_all_tools(&self.ontology)
+        let tools = V2ToolRegistry::get_all_tools(&self.ontology)
             .into_iter()
-            .map(|t| ProtoToolDefinition {
-                name: t.name,
-                description: t.description,
-                parameters_json_schema: t.parameters.to_string(),
-            })
+            .map(proto_tool_definition)
             .collect();
 
         Ok(Response::new(ListToolsResponse { tools }))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn list_agent_commands(
+        &self,
+        request: Request<ListAgentCommandsRequest>,
+    ) -> Result<Response<ListAgentCommandsResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        let requested = &req.command_names;
+        info!(
+            command_count = requested.len(),
+            format = ?req.format,
+            "Listing agent commands for user"
+        );
+
+        let all_commands = V2CommandRegistry::get_all_commands(&self.ontology);
+        let commands: Vec<_> = if requested.is_empty() {
+            all_commands
+        } else {
+            let known: BTreeSet<&str> = all_commands
+                .iter()
+                .map(|command| command.name.as_str())
+                .collect();
+            let unknown: Vec<&str> = requested
+                .iter()
+                .map(String::as_str)
+                .filter(|name| !known.contains(name))
+                .collect();
+            if !unknown.is_empty() {
+                return Err(Status::not_found(format!(
+                    "Unknown command(s): {}",
+                    unknown.join(", ")
+                )));
+            }
+
+            all_commands
+                .into_iter()
+                .filter(|command| requested.contains(&command.name))
+                .collect()
+        };
+
+        let formatted_text = if req.format == ResponseFormat::Llm as i32 {
+            ToolService::build_command_catalog_toon(&commands)
+                .map_err(|e| Status::internal(e.to_string()))?
+        } else {
+            String::new()
+        };
+
+        let commands = commands.into_iter().map(proto_tool_definition).collect();
+
+        Ok(Response::new(ListAgentCommandsResponse {
+            commands,
+            formatted_text,
+        }))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn invoke_agent_command(
+        &self,
+        request: Request<InvokeAgentCommandRequest>,
+    ) -> Result<Response<InvokeAgentCommandResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        if req.command_name.trim().is_empty() {
+            return Err(Status::invalid_argument("command_name is required"));
+        }
+
+        let parameters_json = if req.parameters_json.trim().is_empty() {
+            "{}"
+        } else {
+            req.parameters_json.as_str()
+        };
+
+        info!(command_name = %req.command_name, "Invoking agent command for user");
+
+        let plan = self
+            .tool_service
+            .resolve_command(&req.command_name, parameters_json)
+            .map_err(command_error_to_status)?;
+
+        let ToolPlan::Immediate { result } = plan else {
+            return Err(Status::failed_precondition(
+                "command must be handled by Rails interceptor",
+            ));
+        };
+
+        let content = match result {
+            serde_json::Value::String(text) => {
+                Some(invoke_agent_command_response::Content::FormattedText(text))
+            }
+            value => {
+                let json = serde_json::to_string(&value).map_err(|e| {
+                    Status::internal(format!("Failed to encode command result: {e}"))
+                })?;
+                Some(invoke_agent_command_response::Content::ResultJson(json))
+            }
+        };
+
+        Ok(Response::new(InvokeAgentCommandResponse { content }))
     }
 
     type ExecuteQueryStream = ExecuteQueryStream;
@@ -258,6 +383,74 @@ impl crate::proto::knowledge_graph_service_server::KnowledgeGraphService
             let structured = self.build_structured_schema(&req.expand_nodes);
             GetGraphSchemaResponse {
                 content: Some(get_graph_schema_response::Content::Structured(structured)),
+            }
+        };
+
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn get_response_format(
+        &self,
+        request: Request<GetResponseFormatRequest>,
+    ) -> Result<Response<GetResponseFormatResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching query response format for user");
+
+        let version = ToolService::build_response_format_version();
+        let schema = ToolService::build_response_format_schema().to_string();
+
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let mut toon = String::with_capacity(schema.len() + 64);
+            toon.push_str("ResponseFormat v");
+            toon.push_str(&version);
+            toon.push_str(" (JSON Schema):\n");
+            toon.push_str(&schema);
+            GetResponseFormatResponse {
+                content: Some(get_response_format_response::Content::FormattedText(toon)),
+            }
+        } else {
+            GetResponseFormatResponse {
+                content: Some(get_response_format_response::Content::Structured(
+                    ResponseFormatSchema { schema, version },
+                )),
+            }
+        };
+
+        Ok(Response::new(response))
+    }
+
+    #[instrument(skip(self, request), fields(user_id, source_type, ai_session_id))]
+    async fn get_query_dsl(
+        &self,
+        request: Request<GetQueryDslRequest>,
+    ) -> Result<Response<GetQueryDslResponse>, Status> {
+        let claims = extract_claims(&request, &self.validator)?;
+        tracing::Span::current().record("user_id", claims.user_id);
+        tracing::Span::current().record("source_type", &claims.source_type);
+        record_ai_session_id(&claims.ai_session_id);
+
+        let req = request.get_ref();
+        info!(format = ?req.format, "Fetching query DSL grammar for user");
+
+        let response = if req.format == ResponseFormat::Llm as i32 {
+            let toon =
+                ToolService::build_query_dsl_toon().map_err(|e| Status::internal(e.to_string()))?;
+            GetQueryDslResponse {
+                version: ToolService::build_query_dsl_version().to_string(),
+                content: Some(get_query_dsl_response::Content::FormattedText(toon)),
+            }
+        } else {
+            GetQueryDslResponse {
+                version: ToolService::build_query_dsl_version().to_string(),
+                content: Some(get_query_dsl_response::Content::RawJsonSchema(
+                    ToolService::build_query_dsl_raw().to_string(),
+                )),
             }
         };
 
@@ -475,6 +668,9 @@ fn authorize_traversal_path(claims: &Claims, requested_path: &str) -> Result<(),
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::proto::knowledge_graph_service_server::KnowledgeGraphService;
+    use jsonwebtoken::{Algorithm, EncodingKey, Header, encode};
+    use tonic::metadata::MetadataValue;
 
     fn mock_validator() -> JwtValidator {
         JwtValidator::new("test-secret-that-is-at-least-32-bytes-long", 0).unwrap()
@@ -486,6 +682,38 @@ mod tests {
 
     fn test_config() -> ClickHouseConfiguration {
         ClickHouseConfiguration::default()
+    }
+
+    fn test_service() -> KnowledgeGraphServiceImpl {
+        KnowledgeGraphServiceImpl::new(
+            Arc::new(mock_validator()),
+            test_ontology(),
+            &test_config(),
+            ClusterHealthChecker::default().into_arc(),
+            60,
+            Arc::new(AnalyticsConfig::default()),
+        )
+    }
+
+    fn authed_request<T>(message: T) -> Request<T> {
+        let now = chrono::Utc::now().timestamp();
+        let claims = Claims {
+            iat: now,
+            exp: now + 3600,
+            ..test_claims()
+        };
+        let token = encode(
+            &Header::new(Algorithm::HS256),
+            &claims,
+            &EncodingKey::from_secret(b"test-secret-that-is-at-least-32-bytes-long"),
+        )
+        .unwrap();
+        let mut request = Request::new(message);
+        request.metadata_mut().insert(
+            "authorization",
+            MetadataValue::try_from(format!("Bearer {token}")).unwrap(),
+        );
+        request
     }
 
     #[test]
@@ -514,6 +742,129 @@ mod tests {
             }
             _ => panic!("Expected Immediate plan"),
         }
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_filters_known_command() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["get_query_dsl".into()],
+                format: ResponseFormat::Raw as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.commands.len(), 1);
+        assert_eq!(response.commands[0].name, "get_query_dsl");
+        assert!(!response.commands[0].description.is_empty());
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_returns_short_command_descriptions() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec![],
+                format: ResponseFormat::Raw as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let query_graph = response
+            .commands
+            .iter()
+            .find(|command| command.name == "query_graph")
+            .expect("query_graph command should be listed");
+
+        assert!(!query_graph.description.is_empty());
+        assert!(!query_graph.description.contains("<toon>"));
+        assert!(!query_graph.description.contains("Query DSL Schema"));
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_returns_toon_for_llm_format() {
+        let service = test_service();
+        let response = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["get_query_dsl".into()],
+                format: ResponseFormat::Llm as i32,
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        assert_eq!(response.commands.len(), 1);
+        assert!(response.formatted_text.contains("commands[1]"));
+        assert!(response.formatted_text.contains("name: get_query_dsl"));
+        assert!(response.formatted_text.contains("input_schema"));
+    }
+
+    #[tokio::test]
+    async fn list_agent_commands_rejects_unknown_command() {
+        let service = test_service();
+        let status = service
+            .list_agent_commands(authed_request(ListAgentCommandsRequest {
+                command_names: vec!["typo".into()],
+                format: ResponseFormat::Raw as i32,
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::NotFound);
+        assert!(status.message().contains("typo"));
+    }
+
+    #[tokio::test]
+    async fn invoke_agent_command_maps_intercepted_command_to_failed_precondition() {
+        let service = test_service();
+        let status = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "query_graph".into(),
+                parameters_json: r#"{"query":{}}"#.into(),
+            }))
+            .await
+            .unwrap_err();
+
+        assert_eq!(status.code(), tonic::Code::FailedPrecondition);
+    }
+
+    #[tokio::test]
+    async fn invoke_agent_command_preserves_raw_and_llm_content_shapes() {
+        let service = test_service();
+        let raw = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_query_dsl".into(),
+                parameters_json: r#"{"format":"raw"}"#.into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(invoke_agent_command_response::Content::ResultJson(json)) = raw.content else {
+            panic!("expected raw command result JSON");
+        };
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed.get("version").and_then(serde_json::Value::as_str),
+            Some(ToolService::build_query_dsl_version().as_str())
+        );
+
+        let llm = service
+            .invoke_agent_command(authed_request(InvokeAgentCommandRequest {
+                command_name: "get_query_dsl".into(),
+                parameters_json: "{}".into(),
+            }))
+            .await
+            .unwrap()
+            .into_inner();
+
+        let Some(invoke_agent_command_response::Content::FormattedText(text)) = llm.content else {
+            panic!("expected LLM command result text");
+        };
+        assert!(text.contains("QueryDSL v"));
     }
 
     #[test]
@@ -848,5 +1199,17 @@ mod tests {
                 node.name
             );
         }
+    }
+
+    #[test]
+    fn test_response_format_helpers_return_canonical_values() {
+        let schema = ToolService::build_response_format_schema();
+        assert!(schema.contains("GKG unified query response"));
+
+        let version = ToolService::build_response_format_version();
+        assert!(
+            !version.is_empty() && version.chars().any(|c| c.is_ascii_digit()),
+            "version should look like semver, got {version:?}"
+        );
     }
 }
