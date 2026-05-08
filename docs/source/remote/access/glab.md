@@ -2,8 +2,8 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Query Orbit from the command line with glab orbit remote, available in glab v1.94 or later. The glab orbit setup helper is planned for a future glab release.
-title: Use Orbit with the glab CLI
+description: Query Orbit from the command line with glab orbit remote, available in glab 1.94 or later. The glab orbit setup helper is planned for a future glab release.
+title: Use Orbit with the GitLab CLI (`glab`)
 ---
 
 {{< details >}}
@@ -29,7 +29,7 @@ title: Use Orbit with the glab CLI
 
 > [!disclaimer]
 
-The [`glab` CLI](https://docs.gitlab.com/cli/) is the canonical way to set up and
+The [GitLab CLI (`glab`)](https://docs.gitlab.com/cli/) is the canonical way to set up and
 query Orbit from the command line.
 
 Two top-level commands:
@@ -37,7 +37,7 @@ Two top-level commands:
 - `glab orbit remote`: typed subcommands that call the Orbit Remote REST API.
   Available in glab v1.94 or later.
 - `glab orbit setup`: one-command install of the Orbit skill and MCP config
-  for your AI agent. Planned for a future glab release. Until it ships,
+  for your AI agent. Planned for a future `glab` release. Until it ships,
   [configure your MCP client manually](mcp.md#connect-your-mcp-client).
 
 ## Prerequisites
@@ -53,7 +53,7 @@ Two top-level commands:
 
 ## Set up your AI agent
 
-`glab orbit setup` is planned for a future glab release. When it ships, one
+`glab orbit setup` is planned for a future `glab` release. When it ships, one
 command will install the Orbit skill and write the MCP config for your AI
 agent (Claude Code, OpenCode, Cursor, Codex, Gemini CLI).
 
@@ -63,7 +63,7 @@ Until it ships, [configure your MCP client manually](mcp.md#connect-your-mcp-cli
 
 Use `glab orbit remote` (or the `r` alias) to call the Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.
-Requires glab v1.94 or later.
+Requires `glab` 1.94 or later.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|

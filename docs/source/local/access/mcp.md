@@ -32,7 +32,7 @@ graph instead of a GitLab instance.
 
 ## Prerequisites
 
-- The `orbit` CLI is installed. See [Use the orbit CLI directly](cli.md).
+- The Orbit CLI (`orbit`) is installed. See [Use the Orbit CLI directly](cli.md).
 - A local repository has been indexed (`orbit index <path>` or
   `glab orbit local index <path>`).
 

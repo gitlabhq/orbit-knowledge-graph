@@ -53,7 +53,7 @@ Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level grou
 |---|---|
 | [GitLab Duo Agent Platform](access/duo.md) | Natural language questions via the GitLab UI |
 | [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agents |
-| [glab CLI](access/glab.md) | `glab orbit remote` for scripting and discovery (glab v1.94+) |
+| [The GitLab CLI (`glab`)](access/glab.md) | `glab orbit remote` for scripting and discovery (`glab` 1.94 or later) |
 | [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
 
 ## Billing
