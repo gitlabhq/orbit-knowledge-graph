@@ -16,7 +16,7 @@ title: What Orbit Local indexes
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0 as an [experiment](https://docs.gitlab.com/policy/development_stages_support/#experiment).
 
 {{< /history >}}
 
