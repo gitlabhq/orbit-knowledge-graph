@@ -100,6 +100,19 @@ GetClusterHealth()                      →  GetClusterHealth
 
 **Removed:** `ExecuteTool` (generic dispatch), `GetOntology` (subsumed by `GetGraphSchema`)
 
+### Agent command RPCs
+
+The Orbit agent surface adds a lazy command catalog on top of the structured RPCs:
+
+| RPC | Type | Purpose |
+|-----|------|---------|
+| `ListAgentCommands` | Unary | Returns command definitions and parameter schemas for agent discovery |
+| `InvokeAgentCommand` | Unary | Executes non-intercepted commands such as schema, DSL, and response-format discovery |
+| `GetQueryDsl` | Unary | Direct API helper for the query DSL JSON Schema and `QUERY_DSL_VERSION` |
+| `GetResponseFormat` | Unary | Direct API helper for the query response JSON Schema and `RAW_OUTPUT_FORMAT_VERSION` |
+
+MCP agents normally access DSL and response-format discovery through `ListAgentCommands` and `InvokeAgentCommand`. The direct `GetQueryDsl` and `GetResponseFormat` RPCs exist for REST/API consumers that need stable structured endpoints without going through the agent command wrapper.
+
 ### Unified `ResponseFormat` across all data RPCs
 
 The `format` parameter answers one question: **who is consuming this response?**

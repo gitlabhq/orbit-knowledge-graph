@@ -25,11 +25,15 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	KnowledgeGraphService_ListTools_FullMethodName        = "/gkg.v1.KnowledgeGraphService/ListTools"
-	KnowledgeGraphService_ExecuteQuery_FullMethodName     = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
-	KnowledgeGraphService_GetGraphSchema_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
-	KnowledgeGraphService_GetClusterHealth_FullMethodName = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
-	KnowledgeGraphService_GetGraphStatus_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
+	KnowledgeGraphService_ListTools_FullMethodName          = "/gkg.v1.KnowledgeGraphService/ListTools"
+	KnowledgeGraphService_ListAgentCommands_FullMethodName  = "/gkg.v1.KnowledgeGraphService/ListAgentCommands"
+	KnowledgeGraphService_InvokeAgentCommand_FullMethodName = "/gkg.v1.KnowledgeGraphService/InvokeAgentCommand"
+	KnowledgeGraphService_ExecuteQuery_FullMethodName       = "/gkg.v1.KnowledgeGraphService/ExecuteQuery"
+	KnowledgeGraphService_GetGraphSchema_FullMethodName     = "/gkg.v1.KnowledgeGraphService/GetGraphSchema"
+	KnowledgeGraphService_GetQueryDsl_FullMethodName        = "/gkg.v1.KnowledgeGraphService/GetQueryDsl"
+	KnowledgeGraphService_GetResponseFormat_FullMethodName  = "/gkg.v1.KnowledgeGraphService/GetResponseFormat"
+	KnowledgeGraphService_GetClusterHealth_FullMethodName   = "/gkg.v1.KnowledgeGraphService/GetClusterHealth"
+	KnowledgeGraphService_GetGraphStatus_FullMethodName     = "/gkg.v1.KnowledgeGraphService/GetGraphStatus"
 )
 
 // KnowledgeGraphServiceClient is the client API for KnowledgeGraphService service.
@@ -42,6 +46,12 @@ type KnowledgeGraphServiceClient interface {
 	// Returns available tool definitions with parameter schemas.
 	// Used by MCP tools/list and GET /api/v4/orbit/tools.
 	ListTools(ctx context.Context, in *ListToolsRequest, opts ...grpc.CallOption) (*ListToolsResponse, error)
+	// Returns available lazy command definitions with parameter schemas.
+	// Used by Rails to build the Orbit command catalog for MCP and REST.
+	ListAgentCommands(ctx context.Context, in *ListAgentCommandsRequest, opts ...grpc.CallOption) (*ListAgentCommandsResponse, error)
+	// Executes a lazy command that does not require Rails-specific interception.
+	// Rails intercepts query_graph before falling through here.
+	InvokeAgentCommand(ctx context.Context, in *InvokeAgentCommandRequest, opts ...grpc.CallOption) (*InvokeAgentCommandResponse, error)
 	// Executes a graph query against ClickHouse with bidirectional streaming
 	// for the redaction exchange (server requests authorization checks from Rails,
 	// Rails responds with per-resource decisions).
@@ -51,6 +61,15 @@ type KnowledgeGraphServiceClient interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(ctx context.Context, in *GetGraphSchemaRequest, opts ...grpc.CallOption) (*GetGraphSchemaResponse, error)
+	// Returns the query DSL grammar (JSON Schema for query_graph input).
+	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
+	GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error)
+	// Returns the JSON Schema describing the query response shape (the formatter
+	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// Direct API helper for REST consumers. MCP agents should use the command
+	// catalog and InvokeAgentCommand instead.
+	GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(ctx context.Context, in *GetClusterHealthRequest, opts ...grpc.CallOption) (*GetClusterHealthResponse, error)
@@ -77,6 +96,26 @@ func (c *knowledgeGraphServiceClient) ListTools(ctx context.Context, in *ListToo
 	return out, nil
 }
 
+func (c *knowledgeGraphServiceClient) ListAgentCommands(ctx context.Context, in *ListAgentCommandsRequest, opts ...grpc.CallOption) (*ListAgentCommandsResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(ListAgentCommandsResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_ListAgentCommands_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *knowledgeGraphServiceClient) InvokeAgentCommand(ctx context.Context, in *InvokeAgentCommandRequest, opts ...grpc.CallOption) (*InvokeAgentCommandResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(InvokeAgentCommandResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_InvokeAgentCommand_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 func (c *knowledgeGraphServiceClient) ExecuteQuery(ctx context.Context, opts ...grpc.CallOption) (grpc.BidiStreamingClient[ExecuteQueryMessage, ExecuteQueryMessage], error) {
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	stream, err := c.cc.NewStream(ctx, &KnowledgeGraphService_ServiceDesc.Streams[0], KnowledgeGraphService_ExecuteQuery_FullMethodName, cOpts...)
@@ -94,6 +133,26 @@ func (c *knowledgeGraphServiceClient) GetGraphSchema(ctx context.Context, in *Ge
 	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
 	out := new(GetGraphSchemaResponse)
 	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetGraphSchema_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *knowledgeGraphServiceClient) GetQueryDsl(ctx context.Context, in *GetQueryDslRequest, opts ...grpc.CallOption) (*GetQueryDslResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetQueryDslResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetQueryDsl_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *knowledgeGraphServiceClient) GetResponseFormat(ctx context.Context, in *GetResponseFormatRequest, opts ...grpc.CallOption) (*GetResponseFormatResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(GetResponseFormatResponse)
+	err := c.cc.Invoke(ctx, KnowledgeGraphService_GetResponseFormat_FullMethodName, in, out, cOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -130,6 +189,12 @@ type KnowledgeGraphServiceServer interface {
 	// Returns available tool definitions with parameter schemas.
 	// Used by MCP tools/list and GET /api/v4/orbit/tools.
 	ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error)
+	// Returns available lazy command definitions with parameter schemas.
+	// Used by Rails to build the Orbit command catalog for MCP and REST.
+	ListAgentCommands(context.Context, *ListAgentCommandsRequest) (*ListAgentCommandsResponse, error)
+	// Executes a lazy command that does not require Rails-specific interception.
+	// Rails intercepts query_graph before falling through here.
+	InvokeAgentCommand(context.Context, *InvokeAgentCommandRequest) (*InvokeAgentCommandResponse, error)
 	// Executes a graph query against ClickHouse with bidirectional streaming
 	// for the redaction exchange (server requests authorization checks from Rails,
 	// Rails responds with per-resource decisions).
@@ -139,6 +204,15 @@ type KnowledgeGraphServiceServer interface {
 	// No ClickHouse, no redaction. Supports selective node expansion.
 	// Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
 	GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error)
+	// Returns the query DSL grammar (JSON Schema for query_graph input).
+	// Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+	// command catalog and InvokeAgentCommand instead.
+	GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error)
+	// Returns the JSON Schema describing the query response shape (the formatter
+	// output). Pairs with GetQueryDsl: input grammar there, output shape here.
+	// Direct API helper for REST consumers. MCP agents should use the command
+	// catalog and InvokeAgentCommand instead.
+	GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error)
 	// Returns cluster health and component status.
 	// Used by GET /api/v4/orbit/status.
 	GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error)
@@ -158,11 +232,23 @@ type UnimplementedKnowledgeGraphServiceServer struct{}
 func (UnimplementedKnowledgeGraphServiceServer) ListTools(context.Context, *ListToolsRequest) (*ListToolsResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method ListTools not implemented")
 }
+func (UnimplementedKnowledgeGraphServiceServer) ListAgentCommands(context.Context, *ListAgentCommandsRequest) (*ListAgentCommandsResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method ListAgentCommands not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) InvokeAgentCommand(context.Context, *InvokeAgentCommandRequest) (*InvokeAgentCommandResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method InvokeAgentCommand not implemented")
+}
 func (UnimplementedKnowledgeGraphServiceServer) ExecuteQuery(grpc.BidiStreamingServer[ExecuteQueryMessage, ExecuteQueryMessage]) error {
 	return status.Error(codes.Unimplemented, "method ExecuteQuery not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetGraphSchema(context.Context, *GetGraphSchemaRequest) (*GetGraphSchemaResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetGraphSchema not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) GetQueryDsl(context.Context, *GetQueryDslRequest) (*GetQueryDslResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetQueryDsl not implemented")
+}
+func (UnimplementedKnowledgeGraphServiceServer) GetResponseFormat(context.Context, *GetResponseFormatRequest) (*GetResponseFormatResponse, error) {
+	return nil, status.Error(codes.Unimplemented, "method GetResponseFormat not implemented")
 }
 func (UnimplementedKnowledgeGraphServiceServer) GetClusterHealth(context.Context, *GetClusterHealthRequest) (*GetClusterHealthResponse, error) {
 	return nil, status.Error(codes.Unimplemented, "method GetClusterHealth not implemented")
@@ -209,6 +295,42 @@ func _KnowledgeGraphService_ListTools_Handler(srv interface{}, ctx context.Conte
 	return interceptor(ctx, in, info, handler)
 }
 
+func _KnowledgeGraphService_ListAgentCommands_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(ListAgentCommandsRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).ListAgentCommands(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_ListAgentCommands_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).ListAgentCommands(ctx, req.(*ListAgentCommandsRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KnowledgeGraphService_InvokeAgentCommand_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(InvokeAgentCommandRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).InvokeAgentCommand(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_InvokeAgentCommand_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).InvokeAgentCommand(ctx, req.(*InvokeAgentCommandRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 func _KnowledgeGraphService_ExecuteQuery_Handler(srv interface{}, stream grpc.ServerStream) error {
 	return srv.(KnowledgeGraphServiceServer).ExecuteQuery(&grpc.GenericServerStream[ExecuteQueryMessage, ExecuteQueryMessage]{ServerStream: stream})
 }
@@ -230,6 +352,42 @@ func _KnowledgeGraphService_GetGraphSchema_Handler(srv interface{}, ctx context.
 	}
 	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
 		return srv.(KnowledgeGraphServiceServer).GetGraphSchema(ctx, req.(*GetGraphSchemaRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KnowledgeGraphService_GetQueryDsl_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetQueryDslRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).GetQueryDsl(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_GetQueryDsl_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).GetQueryDsl(ctx, req.(*GetQueryDslRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _KnowledgeGraphService_GetResponseFormat_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(GetResponseFormatRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(KnowledgeGraphServiceServer).GetResponseFormat(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: KnowledgeGraphService_GetResponseFormat_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(KnowledgeGraphServiceServer).GetResponseFormat(ctx, req.(*GetResponseFormatRequest))
 	}
 	return interceptor(ctx, in, info, handler)
 }
@@ -282,8 +440,24 @@ var KnowledgeGraphService_ServiceDesc = grpc.ServiceDesc{
 			Handler:    _KnowledgeGraphService_ListTools_Handler,
 		},
 		{
+			MethodName: "ListAgentCommands",
+			Handler:    _KnowledgeGraphService_ListAgentCommands_Handler,
+		},
+		{
+			MethodName: "InvokeAgentCommand",
+			Handler:    _KnowledgeGraphService_InvokeAgentCommand_Handler,
+		},
+		{
 			MethodName: "GetGraphSchema",
 			Handler:    _KnowledgeGraphService_GetGraphSchema_Handler,
+		},
+		{
+			MethodName: "GetQueryDsl",
+			Handler:    _KnowledgeGraphService_GetQueryDsl_Handler,
+		},
+		{
+			MethodName: "GetResponseFormat",
+			Handler:    _KnowledgeGraphService_GetResponseFormat_Handler,
 		},
 		{
 			MethodName: "GetClusterHealth",

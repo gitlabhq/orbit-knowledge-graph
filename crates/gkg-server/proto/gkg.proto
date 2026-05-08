@@ -31,6 +31,14 @@ service KnowledgeGraphService {
   // Used by MCP tools/list and GET /api/v4/orbit/tools.
   rpc ListTools(ListToolsRequest) returns (ListToolsResponse);
 
+  // Returns available lazy command definitions with parameter schemas.
+  // Used by Rails to build the Orbit command catalog for MCP and REST.
+  rpc ListAgentCommands(ListAgentCommandsRequest) returns (ListAgentCommandsResponse);
+
+  // Executes a lazy command that does not require Rails-specific interception.
+  // Rails intercepts query_graph before falling through here.
+  rpc InvokeAgentCommand(InvokeAgentCommandRequest) returns (InvokeAgentCommandResponse);
+
   // Executes a graph query against ClickHouse with bidirectional streaming
   // for the redaction exchange (server requests authorization checks from Rails,
   // Rails responds with per-resource decisions).
@@ -41,6 +49,17 @@ service KnowledgeGraphService {
   // No ClickHouse, no redaction. Supports selective node expansion.
   // Used by MCP tools/call("get_graph_schema") and GET /api/v4/orbit/schema.
   rpc GetGraphSchema(GetGraphSchemaRequest) returns (GetGraphSchemaResponse);
+
+  // Returns the query DSL grammar (JSON Schema for query_graph input).
+  // Direct API helper for GET /api/v4/orbit/dsl. MCP agents should use the
+  // command catalog and InvokeAgentCommand instead.
+  rpc GetQueryDsl(GetQueryDslRequest) returns (GetQueryDslResponse);
+
+  // Returns the JSON Schema describing the query response shape (the formatter
+  // output). Pairs with GetQueryDsl: input grammar there, output shape here.
+  // Direct API helper for REST consumers. MCP agents should use the command
+  // catalog and InvokeAgentCommand instead.
+  rpc GetResponseFormat(GetResponseFormatRequest) returns (GetResponseFormatResponse);
 
   // Returns cluster health and component status.
   // Used by GET /api/v4/orbit/status.
@@ -176,6 +195,49 @@ message SchemaNodeStyle {
 }
 
 // ---------------------------------------------------------------------------
+// GetQueryDsl — unary, returns the JSON Schema for query_graph input
+// ---------------------------------------------------------------------------
+
+// Request for the query DSL grammar.
+message GetQueryDslRequest {
+  ResponseFormat format = 1;  // RAW: full JSON Schema; LLM: condensed TOON
+}
+
+// Response carrying the DSL grammar in the requested format.
+message GetQueryDslResponse {
+  string version = 3;  // semver string for the query DSL grammar, e.g. "1.0.0"
+  oneof content {
+    string raw_json_schema = 1;  // format = RAW: full JSON Schema as a JSON string
+    string formatted_text = 2;   // format = LLM: condensed TOON
+  }
+}
+
+// ---------------------------------------------------------------------------
+// GetResponseFormat — unary, returns the JSON Schema for query response
+// ---------------------------------------------------------------------------
+
+// Request for the query response shape (formatter output schema).
+message GetResponseFormatRequest {
+  ResponseFormat format = 1;  // RAW: structured (schema + version); LLM: TOON
+}
+
+// Response carrying the formatter output schema and its semver.
+message GetResponseFormatResponse {
+  oneof content {
+    ResponseFormatSchema structured = 1;  // format = RAW
+    string formatted_text = 2;           // format = LLM (TOON notation)
+  }
+}
+
+// JSON Schema describing the query response shape plus its semver.
+// The version matches config/RAW_OUTPUT_FORMAT_VERSION and the
+// format_version stamped on every query response.
+message ResponseFormatSchema {
+  string schema = 1;   // verbatim JSON Schema as a JSON string
+  string version = 2;  // semver string, e.g. "1.2.0"
+}
+
+// ---------------------------------------------------------------------------
 // Redaction — bidirectional authorization exchange within ExecuteQuery
 // ---------------------------------------------------------------------------
 
@@ -228,8 +290,34 @@ message ListToolsResponse {
 // truth for tool metadata — Rails passes these through to MCP and REST consumers.
 message ToolDefinition {
   string name = 1;                    // e.g. "query_graph", "get_graph_schema"
-  string description = 2;            // includes TOON schema context for query_graph
+  string description = 2;            // tool description; legacy tools may still carry longer back-compat descriptions
   string parameters_json_schema = 3; // JSON Schema for the tool's input parameters
+}
+
+// ---------------------------------------------------------------------------
+// AgentCommands — unary lazy-command catalog and invocation
+// ---------------------------------------------------------------------------
+
+message ListAgentCommandsRequest {
+  repeated string command_names = 1; // empty means list every command
+  ResponseFormat format = 2;         // RAW: command definitions; LLM: TOON command catalog
+}
+
+message ListAgentCommandsResponse {
+  repeated ToolDefinition commands = 1;
+  string formatted_text = 2; // format = LLM: TOON command catalog
+}
+
+message InvokeAgentCommandRequest {
+  string command_name = 1;
+  string parameters_json = 2; // downstream command parameters object as JSON
+}
+
+message InvokeAgentCommandResponse {
+  oneof content {
+    string result_json = 1;     // structured command result encoded as JSON
+    string formatted_text = 2;  // LLM-oriented text result
+  }
 }
 
 // ---------------------------------------------------------------------------

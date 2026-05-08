@@ -35,8 +35,9 @@ async fn main() -> anyhow::Result<()> {
     let args = Args::parse();
     let config = AppConfig::load()?;
 
-    // Force-parse the output format version at boot so a malformed
-    // RAW_OUTPUT_FORMAT_VERSION fails fast instead of per-request.
+    // Force-parse schema/format versions at boot so malformed version files
+    // fail fast instead of per-request.
+    let _ = gkg_server::tools::ToolService::build_query_dsl_version();
     std::sync::LazyLock::force(&query_engine::formatters::RAW_OUTPUT_FORMAT_VERSION);
 
     let invalid_keys = config.query.validate_keys(QueryType::VARIANTS);
