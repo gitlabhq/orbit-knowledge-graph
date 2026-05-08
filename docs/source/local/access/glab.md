@@ -30,7 +30,7 @@ instance or your local machine.
 > [!note]
 > Both `glab orbit local` and `glab orbit setup` are planned for a future glab
 > release. Every command on this page is the future shape, not the current one.
-> Until they ship, build from source - see [Use the Orbit CLI directly](cli.md).
+> Until they ship, build from source - see [use `orbit` directly](cli.md).
 
 Two top-level commands (both planned, not yet shipped):
 
