@@ -20,6 +20,8 @@ title: Orbit Local
 
 {{< /history >}}
 
+> [!disclaimer]
+
 Orbit Local runs entirely on your machine. Build a code graph for any local
 repository and query it using the same query language as Orbit Remote. No
 GitLab account, no network connection required.

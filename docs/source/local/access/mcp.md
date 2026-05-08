@@ -20,6 +20,8 @@ title: Connect to Orbit Local via MCP
 
 {{< /history >}}
 
+> [!disclaimer]
+
 Orbit Local can run as an MCP server, exposing the same two tools as Orbit
 Remote (`query_graph`, `get_graph_schema`) but pointed at the local DuckDB
 graph instead of a GitLab instance.

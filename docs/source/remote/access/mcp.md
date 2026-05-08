@@ -25,6 +25,8 @@ title: Connect via MCP
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
+> [!disclaimer]
+
 Orbit exposes two MCP tools that let any MCP-compatible AI agent query your GitLab
 knowledge graph. Use this with Claude Code, OpenAI Codex, or any other tool that
 supports the Model Context Protocol.
