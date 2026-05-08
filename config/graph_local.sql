@@ -3,10 +3,10 @@
 
 CREATE TABLE IF NOT EXISTS gl_definition (
     id BIGINT NOT NULL,
+    traversal_path VARCHAR NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
-    traversal_path VARCHAR NOT NULL DEFAULT '',
     file_path VARCHAR NOT NULL,
     fqn VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
@@ -21,20 +21,20 @@ CREATE TABLE IF NOT EXISTS gl_definition (
 
 CREATE TABLE IF NOT EXISTS gl_directory (
     id BIGINT NOT NULL,
+    traversal_path VARCHAR NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
-    traversal_path VARCHAR NOT NULL DEFAULT '',
     path VARCHAR NOT NULL,
     name VARCHAR NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS gl_file (
     id BIGINT NOT NULL,
+    traversal_path VARCHAR NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
-    traversal_path VARCHAR NOT NULL DEFAULT '',
     path VARCHAR NOT NULL,
     name VARCHAR NOT NULL,
     extension VARCHAR NOT NULL,
@@ -43,10 +43,10 @@ CREATE TABLE IF NOT EXISTS gl_file (
 
 CREATE TABLE IF NOT EXISTS gl_imported_symbol (
     id BIGINT NOT NULL,
+    traversal_path VARCHAR NOT NULL,
     project_id BIGINT NOT NULL,
     branch VARCHAR NOT NULL,
     commit_sha VARCHAR NOT NULL DEFAULT '',
-    traversal_path VARCHAR NOT NULL DEFAULT '',
     file_path VARCHAR NOT NULL,
     import_type VARCHAR NOT NULL,
     import_path VARCHAR NOT NULL,
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS gl_edge (
     relationship_kind VARCHAR NOT NULL,
     target_id BIGINT NOT NULL,
     target_kind VARCHAR NOT NULL,
-    traversal_path VARCHAR NOT NULL DEFAULT ''
+    traversal_path VARCHAR NOT NULL
 );
 
 CREATE TYPE IF NOT EXISTS repo_status AS ENUM ('pending', 'indexing', 'indexed', 'error');
