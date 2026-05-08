@@ -4,9 +4,23 @@ use crate::MetricSpec;
 
 pub mod labels {
     pub const REASON: &str = "reason";
+    pub const FAILURE_REASON: &str = "failure_reason";
 }
 
 const DOMAIN: &str = "query.engine";
+
+/// Rolled-up counter for every query the compiler rejects, regardless of
+/// which threat class it belongs to. The `failure_reason` label uses the
+/// same closed enum as the per-class threat counters (parse, schema,
+/// reference, pagination, ontology, ontology_internal, depth, limit,
+/// security, lowering, enforcement, codegen, pipeline).
+pub const COMPILER_REJECTED: MetricSpec = MetricSpec::counter(
+    "gkg.query.engine.compiler.rejected",
+    "Total queries the compiler rejected before execution, labelled by failure reason.",
+    None,
+    &[labels::FAILURE_REASON],
+    DOMAIN,
+);
 
 pub const THREAT_VALIDATION_FAILED: MetricSpec = MetricSpec::counter(
     "gkg.query.engine.threat.validation_failed",
@@ -81,4 +95,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &THREAT_DEPTH_EXCEEDED,
     &THREAT_LIMIT_EXCEEDED,
     &INTERNAL_PIPELINE_INVARIANT_VIOLATED,
+    &COMPILER_REJECTED,
 ];

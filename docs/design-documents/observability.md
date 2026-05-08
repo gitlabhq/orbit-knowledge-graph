@@ -142,6 +142,7 @@ The query pipeline instruments end-to-end query execution from security check th
 | `gkg.query.pipeline.error.authorization_failed` | Counter | count | `reason` (authorization) | Authorization exchange with Rails failed |
 | `gkg.query.pipeline.error.content_resolution_failed` | Counter | count | `reason` (content_resolution) | Virtual column resolution from remote service failed |
 | `gkg.query.pipeline.error.streaming_failed` | Counter | count | `reason` (streaming) | Streaming channel unavailable during authorization |
+| `gkg.query.pipeline.failed` | Counter | count | `failure_reason` (security/execution/authorization/content_resolution/streaming/custom) | Rolled-up post-compile pipeline failure counter. Compile-time rejections are excluded; they are tracked on `gkg.query.engine.compiler.rejected`. |
 
 *Content resolution metrics:*
 
@@ -169,6 +170,7 @@ The query engine fires counters during compilation to track security-relevant re
 | `gkg.query.engine.threat.depth_exceeded` | Counter | `reason` (depth) | Traversal depth or hop count exceeded the hard cap |
 | `gkg.query.engine.threat.limit_exceeded` | Counter | `reason` (limit) | Array cardinality cap exceeded (node_ids count or IN filter value count) |
 | `gkg.query.engine.internal.pipeline_invariant_violated` | Counter | `reason` (lowering/codegen) | Lowering or codegen hit a state upstream validation should have prevented |
+| `gkg.query.engine.compiler.rejected` | Counter | `failure_reason` (parse/schema/reference/pagination/ontology/ontology_internal/depth/limit/security/lowering/enforcement/codegen/pipeline) | Rolled-up counter for every query the compiler rejected before execution. Use this for SLO dashboards; the per-class threat counters above remain available for finer-grained alerting. |
 
 *Circuit breaker metrics (resilience):*
 

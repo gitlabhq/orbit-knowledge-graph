@@ -14,6 +14,7 @@ pub mod labels {
     pub const STATUS: &str = "status";
     pub const LABEL: &str = "label";
     pub const REASON: &str = "reason";
+    pub const FAILURE_REASON: &str = "failure_reason";
 }
 
 const DOMAIN: &str = "query.pipeline";
@@ -170,6 +171,19 @@ pub const ERROR_STREAMING_FAILED: MetricSpec = MetricSpec::counter(
     DOMAIN,
 );
 
+/// Rolled-up counter for every query that failed during execution (post-compile).
+/// `failure_reason` uses the closed enum derived from `PipelineError::code()`
+/// minus the `_error` suffix: `security`, `execution`, `authorization`,
+/// `content_resolution`, `streaming`, `custom`. Compile-time rejections are
+/// counted separately under `gkg.query.engine.compiler.rejected`.
+pub const FAILED: MetricSpec = MetricSpec::counter(
+    "gkg.query.pipeline.failed",
+    "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
+    None,
+    &[labels::FAILURE_REASON],
+    DOMAIN,
+);
+
 pub const CATALOG: &[&MetricSpec] = &[
     &QUERIES,
     &COMPILE_DURATION,
@@ -188,4 +202,5 @@ pub const CATALOG: &[&MetricSpec] = &[
     &ERROR_AUTHORIZATION_FAILED,
     &ERROR_CONTENT_RESOLUTION_FAILED,
     &ERROR_STREAMING_FAILED,
+    &FAILED,
 ];

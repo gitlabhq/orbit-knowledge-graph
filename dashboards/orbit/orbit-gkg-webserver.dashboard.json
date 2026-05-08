@@ -4798,6 +4798,57 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "description": "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 8,
+                  "y": 256
+               },
+               "id": 91,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (failure_reason) (rate(gkg_query_pipeline_failed_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{failure_reason}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_query_pipeline_failed_total — rate/s",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "description": "Time spent hydrating neighbour properties from ClickHouse.",
                "fieldConfig": {
                   "defaults": {
@@ -4813,10 +4864,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 256
                },
-               "id": 91,
+               "id": 92,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4882,10 +4933,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 256
+                  "x": 0,
+                  "y": 264
                },
-               "id": 92,
+               "id": 93,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4933,10 +4984,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 8,
                   "y": 264
                },
-               "id": 93,
+               "id": 94,
                "options": {
                   "legend": {
                      "calcs": [
@@ -4984,10 +5035,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 264
                },
-               "id": 94,
+               "id": 95,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5053,10 +5104,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 264
+                  "x": 0,
+                  "y": 272
                },
-               "id": 95,
+               "id": 96,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5104,10 +5155,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 8,
                   "y": 272
                },
-               "id": 96,
+               "id": 97,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5173,10 +5224,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 272
                },
-               "id": 97,
+               "id": 98,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5216,8 +5267,59 @@
             "x": 0,
             "y": 280
          },
-         "id": 98,
+         "id": 99,
          "panels": [
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Total queries the compiler rejected before execution, labelled by failure reason.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 8,
+                  "x": 0,
+                  "y": 281
+               },
+               "id": 100,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "sum by (failure_reason) (rate(gkg_query_engine_compiler_rejected_total{container=\"gkg-webserver\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{failure_reason}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "gkg_query_engine_compiler_rejected_total — rate/s",
+               "type": "timeseries"
+            },
             {
                "datasource": {
                   "type": "prometheus",
@@ -5238,10 +5340,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 8,
                   "y": 281
                },
-               "id": 99,
+               "id": 101,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5289,10 +5391,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 281
                },
-               "id": 100,
+               "id": 102,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5340,10 +5442,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 281
+                  "x": 0,
+                  "y": 289
                },
-               "id": 101,
+               "id": 103,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5391,10 +5493,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 8,
                   "y": 289
                },
-               "id": 102,
+               "id": 104,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5442,10 +5544,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 289
                },
-               "id": 103,
+               "id": 105,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5493,10 +5595,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 16,
-                  "y": 289
+                  "x": 0,
+                  "y": 297
                },
-               "id": 104,
+               "id": 106,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5544,10 +5646,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 0,
+                  "x": 8,
                   "y": 297
                },
-               "id": 105,
+               "id": 107,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5595,10 +5697,10 @@
                "gridPos": {
                   "h": 8,
                   "w": 8,
-                  "x": 8,
+                  "x": 16,
                   "y": 297
                },
-               "id": 106,
+               "id": 108,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5638,7 +5740,7 @@
             "x": 0,
             "y": 305
          },
-         "id": 107,
+         "id": 109,
          "panels": [
             {
                "datasource": {
@@ -5663,7 +5765,7 @@
                   "x": 0,
                   "y": 306
                },
-               "id": 108,
+               "id": 110,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5732,7 +5834,7 @@
                   "x": 8,
                   "y": 306
                },
-               "id": 109,
+               "id": 111,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5783,7 +5885,7 @@
                   "x": 16,
                   "y": 306
                },
-               "id": 110,
+               "id": 112,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5834,7 +5936,7 @@
                   "x": 0,
                   "y": 314
                },
-               "id": 111,
+               "id": 113,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5885,7 +5987,7 @@
                   "x": 8,
                   "y": 314
                },
-               "id": 112,
+               "id": 114,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5936,7 +6038,7 @@
                   "x": 16,
                   "y": 314
                },
-               "id": 113,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6005,7 +6107,7 @@
                   "x": 0,
                   "y": 322
                },
-               "id": 114,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6056,7 +6158,7 @@
                   "x": 8,
                   "y": 322
                },
-               "id": 115,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6125,7 +6227,7 @@
                   "x": 16,
                   "y": 322
                },
-               "id": 116,
+               "id": 118,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6165,7 +6267,7 @@
             "x": 0,
             "y": 330
          },
-         "id": 117,
+         "id": 119,
          "panels": [
             {
                "datasource": {
@@ -6190,7 +6292,7 @@
                   "x": 0,
                   "y": 331
                },
-               "id": 118,
+               "id": 120,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6230,7 +6332,7 @@
             "x": 0,
             "y": 339
          },
-         "id": 119,
+         "id": 121,
          "panels": [ ],
          "title": "Rails KG — request (reference)",
          "type": "row"
@@ -6258,7 +6360,7 @@
             "x": 0,
             "y": 340
          },
-         "id": 120,
+         "id": 122,
          "options": {
             "legend": {
                "calcs": [
@@ -6327,7 +6429,7 @@
             "x": 8,
             "y": 340
          },
-         "id": 121,
+         "id": 123,
          "options": {
             "legend": {
                "calcs": [
@@ -6378,7 +6480,7 @@
             "x": 16,
             "y": 340
          },
-         "id": 122,
+         "id": 124,
          "options": {
             "legend": {
                "calcs": [
@@ -6429,7 +6531,7 @@
             "x": 0,
             "y": 348
          },
-         "id": 123,
+         "id": 125,
          "options": {
             "legend": {
                "calcs": [
@@ -6498,7 +6600,7 @@
             "x": 8,
             "y": 348
          },
-         "id": 124,
+         "id": 126,
          "options": {
             "legend": {
                "calcs": [
@@ -6549,7 +6651,7 @@
             "x": 16,
             "y": 348
          },
-         "id": 125,
+         "id": 127,
          "options": {
             "legend": {
                "calcs": [
@@ -6618,7 +6720,7 @@
             "x": 0,
             "y": 356
          },
-         "id": 126,
+         "id": 128,
          "options": {
             "legend": {
                "calcs": [
@@ -6669,7 +6771,7 @@
             "x": 8,
             "y": 356
          },
-         "id": 127,
+         "id": 129,
          "options": {
             "legend": {
                "calcs": [
@@ -6738,7 +6840,7 @@
             "x": 16,
             "y": 356
          },
-         "id": 128,
+         "id": 130,
          "options": {
             "legend": {
                "calcs": [
@@ -6789,7 +6891,7 @@
             "x": 0,
             "y": 364
          },
-         "id": 129,
+         "id": 131,
          "options": {
             "legend": {
                "calcs": [
@@ -6858,7 +6960,7 @@
             "x": 8,
             "y": 364
          },
-         "id": 130,
+         "id": 132,
          "options": {
             "legend": {
                "calcs": [
@@ -6909,7 +7011,7 @@
             "x": 16,
             "y": 364
          },
-         "id": 131,
+         "id": 133,
          "options": {
             "legend": {
                "calcs": [
@@ -6978,7 +7080,7 @@
             "x": 0,
             "y": 372
          },
-         "id": 132,
+         "id": 134,
          "options": {
             "legend": {
                "calcs": [
@@ -7014,7 +7116,7 @@
             "x": 0,
             "y": 380
          },
-         "id": 133,
+         "id": 135,
          "panels": [ ],
          "title": "Rails KG — traversal (reference)",
          "type": "row"
@@ -7042,7 +7144,7 @@
             "x": 0,
             "y": 381
          },
-         "id": 134,
+         "id": 136,
          "options": {
             "legend": {
                "calcs": [
@@ -7111,7 +7213,7 @@
             "x": 8,
             "y": 381
          },
-         "id": 135,
+         "id": 137,
          "options": {
             "legend": {
                "calcs": [
@@ -7162,7 +7264,7 @@
             "x": 16,
             "y": 381
          },
-         "id": 136,
+         "id": 138,
          "options": {
             "legend": {
                "calcs": [
@@ -7231,7 +7333,7 @@
             "x": 0,
             "y": 389
          },
-         "id": 137,
+         "id": 139,
          "options": {
             "legend": {
                "calcs": [
@@ -7282,7 +7384,7 @@
             "x": 8,
             "y": 389
          },
-         "id": 138,
+         "id": 140,
          "options": {
             "legend": {
                "calcs": [
@@ -7333,7 +7435,7 @@
             "x": 16,
             "y": 389
          },
-         "id": 139,
+         "id": 141,
          "options": {
             "legend": {
                "calcs": [

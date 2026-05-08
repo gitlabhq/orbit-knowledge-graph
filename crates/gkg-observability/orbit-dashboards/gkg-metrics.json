@@ -664,6 +664,17 @@
       "domain": "indexer.sdlc"
     },
     {
+      "otel_name": "gkg.query.engine.compiler.rejected",
+      "prom_name": "gkg_query_engine_compiler_rejected_total",
+      "description": "Total queries the compiler rejected before execution, labelled by failure reason.",
+      "kind": "counter",
+      "labels": [
+        "failure_reason"
+      ],
+      "stability": "stable",
+      "domain": "query.engine"
+    },
+    {
       "otel_name": "gkg.query.engine.internal.pipeline_invariant_violated",
       "prom_name": "gkg_query_engine_internal_pipeline_invariant_violated_total",
       "description": "Lowering or codegen hit a state that upstream validation should have prevented.",
@@ -952,6 +963,17 @@
         2.5,
         5.0,
         10.0
+      ],
+      "stability": "stable",
+      "domain": "query.pipeline"
+    },
+    {
+      "otel_name": "gkg.query.pipeline.failed",
+      "prom_name": "gkg_query_pipeline_failed_total",
+      "description": "Total queries that failed in the pipeline post-compile, labelled by failure reason.",
+      "kind": "counter",
+      "labels": [
+        "failure_reason"
       ],
       "stability": "stable",
       "domain": "query.pipeline"

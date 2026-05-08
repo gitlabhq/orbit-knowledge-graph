@@ -33,6 +33,7 @@ pub struct QueryEngineMetrics {
     pub depth_exceeded: Counter<u64>,
     pub limit_exceeded: Counter<u64>,
     pub pipeline_invariant_violated: Counter<u64>,
+    pub compiler_rejected: Counter<u64>,
 }
 
 impl QueryEngineMetrics {
@@ -48,6 +49,7 @@ impl QueryEngineMetrics {
             limit_exceeded: spec::THREAT_LIMIT_EXCEEDED.build_counter_u64(&meter),
             pipeline_invariant_violated: spec::INTERNAL_PIPELINE_INVARIANT_VIOLATED
                 .build_counter_u64(&meter),
+            compiler_rejected: spec::COMPILER_REJECTED.build_counter_u64(&meter),
         }
     }
 }
@@ -89,6 +91,9 @@ impl<T, E: Into<QueryError>> CountErr<T, E> for std::result::Result<T, E> {
             let qe: QueryError = e.into();
             let (counter, reason) = counter_info(&qe);
             counter.add(1, &[KeyValue::new(spec::labels::REASON, reason)]);
+            METRICS
+                .compiler_rejected
+                .add(1, &[KeyValue::new(spec::labels::FAILURE_REASON, reason)]);
             qe
         })
     }

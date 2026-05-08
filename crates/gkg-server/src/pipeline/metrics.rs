@@ -27,6 +27,7 @@ struct QueryPipelineMetrics {
     authorization_failed: Counter<u64>,
     content_resolution_failed: Counter<u64>,
     streaming_failed: Counter<u64>,
+    failed: Counter<u64>,
 }
 
 impl QueryPipelineMetrics {
@@ -51,7 +52,23 @@ impl QueryPipelineMetrics {
             content_resolution_failed: spec::ERROR_CONTENT_RESOLUTION_FAILED
                 .build_counter_u64(&meter),
             streaming_failed: spec::ERROR_STREAMING_FAILED.build_counter_u64(&meter),
+            failed: spec::FAILED.build_counter_u64(&meter),
         }
+    }
+}
+
+/// Closed-enum mapping for `gkg.query.pipeline.failed{failure_reason}`.
+/// Returns `None` for `Compile` because compile-time rejections are
+/// counted on `gkg.query.engine.compiler.rejected` instead.
+fn failure_reason(err: &PipelineError) -> Option<&'static str> {
+    match err {
+        PipelineError::Security(_) => Some("security"),
+        PipelineError::Compile { .. } => None,
+        PipelineError::Execution(_) => Some("execution"),
+        PipelineError::Authorization(_) => Some("authorization"),
+        PipelineError::ContentResolution(_) => Some("content_resolution"),
+        PipelineError::Streaming(_) => Some("streaming"),
+        PipelineError::Custom(_) => Some("custom"),
     }
 }
 
@@ -146,6 +163,12 @@ impl PipelineObserver for OTelPipelineObserver {
 
         if let Some((counter, reason)) = counter_info(err) {
             counter.add(1, &[KeyValue::new(spec::labels::REASON, reason)]);
+        }
+
+        if let Some(reason) = failure_reason(err) {
+            METRICS
+                .failed
+                .add(1, &[KeyValue::new(spec::labels::FAILURE_REASON, reason)]);
         }
     }
 
