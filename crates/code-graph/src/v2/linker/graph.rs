@@ -1179,6 +1179,7 @@ impl AsRecordBatch for EdgeRow<'_> {
         b.col("relationship_kind")?.push_str(self.edge_kind)?;
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
+        b.col("traversal_path")?.push_str("")?;
         Ok(())
     }
 }
