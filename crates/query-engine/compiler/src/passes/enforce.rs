@@ -380,9 +380,11 @@ fn enforce_return_columns(
 
         // Emit traversal_path column for hydration narrowing.
         // Only for nodes whose table carries traversal_path.
+        // Skip aggregation queries: TP can't go in GROUP BY (splits counts)
+        // and ClickHouse rejects non-GROUP-BY columns in SELECT.
         // Skip when the source alias doesn't exist in FROM (FK-elided nodes
         // where the node table was absorbed into an edge filter).
-        if node.has_traversal_path {
+        if node.has_traversal_path && input.query_type != QueryType::Aggregation {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
             if !has_tp {
@@ -403,15 +405,9 @@ fn enforce_return_columns(
                 };
                 if let Some(tp_expr) = tp_expr {
                     q.select.push(SelectExpr {
-                        expr: tp_expr.clone(),
+                        expr: tp_expr,
                         alias: Some(tp_col),
                     });
-                    // Do NOT add TP to GROUP BY. Unlike _gkg_*_id (functionally
-                    // dependent on the group key), traversal_path varies across
-                    // rows in the same group. Adding it would split aggregation
-                    // counts. ClickHouse allows non-GROUP-BY columns in SELECT
-                    // (takes an arbitrary value), which is fine — we just need
-                    // any TP from the group for hydration narrowing.
                 }
             }
         }
