@@ -3,6 +3,9 @@ variables:
   SECURITY_PROJECT_ID: "80999258"
   DEP_PROXY: ${CI_DEPENDENCY_PROXY_GROUP_IMAGE_PREFIX}/
   DEV_PREFIX: "dev"
+  GCLOUD_PROJECT: gitlab-ci-runners-signing
+  SERVICE_ACCOUNT: gitlab-orbit-kg-signer@gitlab-ci-runners-signing.iam.gserviceaccount.com
+  WI_POOL_PROVIDER: //iam.googleapis.com/projects/8522242139/locations/global/workloadIdentityPools/gitlab-pool-oidc-$CI_PROJECT_ID/providers/gitlab-jwt-$CI_PROJECT_ID
 
 workflow:
   rules:
@@ -44,6 +47,9 @@ include:
   - template: Jobs/SAST.gitlab-ci.yml
   - template: Jobs/Secret-Detection.gitlab-ci.yml
   - local: .gitlab/ci/release-local.yml
+  - project: 'gitlab-com/gl-security/security-operations/infrastructure-security-public/oidc-modules'
+    ref: '3.3.0'
+    file: 'templates/gcp_auth.yaml'
   - project: 'gitlab-org/orbit/experiments/ai-review-bot'
     file: '/template.yml'
   - component: ${CI_SERVER_FQDN}/gitlab-org/orbit/experiments/ai-review-bot/ai-review-bot@main
