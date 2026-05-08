@@ -60,7 +60,10 @@ fn no_security_filter() {
     }"#,
     );
 
-    assert!(sql.lacks_column_ref("traversal_path"));
+    // No startsWith security filter on traversal_path (local mode has no auth).
+    // The _gkg_*_tp column is present for hydration narrowing but there is no
+    // startsWith predicate in WHERE.
+    assert!(!sql.has_function("startsWith"));
 }
 
 #[test]

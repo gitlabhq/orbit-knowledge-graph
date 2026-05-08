@@ -58,6 +58,13 @@ pub fn redaction_type_column(alias: &str) -> String {
     format!("{}{alias}_type", internal_column_prefix())
 }
 
+/// Hidden column carrying the entity's `traversal_path` value from the base
+/// query into the hydration pipeline. Used to narrow hydration scans via
+/// `startsWith(traversal_path, tp)`, pruning granules through the primary key.
+pub fn traversal_path_column(alias: &str) -> String {
+    format!("{}{alias}_tp", internal_column_prefix())
+}
+
 /// Node alias used in synthetic hydration search queries.
 /// `parse_property_batches` strips this prefix so consumers see clean keys.
 pub const HYDRATION_NODE_ALIAS: &str = "hydrate";

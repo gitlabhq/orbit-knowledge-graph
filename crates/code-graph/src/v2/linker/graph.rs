@@ -1047,6 +1047,7 @@ impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
         b.col("project_id")?.push_int(self.project_id)?;
         b.col("branch")?.push_str(self.branch)?;
         b.col("commit_sha")?.push_str(self.commit_sha)?;
+        b.col("traversal_path")?.push_str("")?;
         Ok(())
     }
 
@@ -1069,6 +1070,11 @@ impl gkg_utils::arrow::RowEnvelope for RowContext<'_> {
             },
             ColumnSpec {
                 name: "commit_sha".into(),
+                col_type: ColumnType::Str,
+                nullable: false,
+            },
+            ColumnSpec {
+                name: "traversal_path".into(),
                 col_type: ColumnType::Str,
                 nullable: false,
             },
@@ -1173,6 +1179,7 @@ impl AsRecordBatch for EdgeRow<'_> {
         b.col("relationship_kind")?.push_str(self.edge_kind)?;
         b.col("target_id")?.push_int(self.target_id)?;
         b.col("target_kind")?.push_str(self.target_node_kind)?;
+        b.col("traversal_path")?.push_str("")?;
         Ok(())
     }
 }

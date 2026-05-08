@@ -52,7 +52,7 @@ pub fn generate_graph_tables_with_prefix(ontology: &Ontology, prefix: &str) -> V
 ///
 /// Returns `CreateTable` ASTs for each local entity and the local edge table.
 /// These are stripped-down versions of the ClickHouse tables: no system columns
-/// (`_version`, `_deleted`), and excluded properties (e.g. `traversal_path`)
+/// (`_version`, `_deleted`), and any entity-specific excluded properties
 /// are filtered out. The engine/indexes/projections fields are set to empty
 /// defaults since DuckDB codegen ignores them.
 pub fn generate_local_tables(ontology: &Ontology) -> Vec<CreateTable> {
@@ -663,12 +663,15 @@ mod tests {
     }
 
     #[test]
-    fn local_tables_exclude_traversal_path() {
+    fn local_node_tables_include_traversal_path() {
         for table in &generate_local_tables(&ontology()) {
+            if table.name == "gl_edge" {
+                continue;
+            }
             let cols: Vec<&str> = table.columns.iter().map(|c| c.name.as_str()).collect();
             assert!(
-                !cols.contains(&"traversal_path"),
-                "{}: should not contain traversal_path",
+                cols.contains(&"traversal_path"),
+                "{}: should contain traversal_path for hydration TP narrowing",
                 table.name
             );
         }

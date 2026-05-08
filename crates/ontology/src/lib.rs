@@ -2287,8 +2287,8 @@ properties:
         assert!(names.contains(&"branch"));
         assert!(names.contains(&"path"));
         assert!(names.contains(&"name"));
-        // Excluded: listed in exclude_properties for this entity
-        assert!(!names.contains(&"traversal_path"));
+        // traversal_path is now included for hydration TP narrowing
+        assert!(names.contains(&"traversal_path"));
         // commit_sha is now included in local schema
         assert!(names.contains(&"commit_sha"));
     }
@@ -2325,7 +2325,8 @@ properties:
                 "source_kind",
                 "relationship_kind",
                 "target_id",
-                "target_kind"
+                "target_kind",
+                "traversal_path",
             ]
         );
     }

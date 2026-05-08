@@ -303,7 +303,7 @@ mod tests {
     }
 
     #[test]
-    fn local_expand_definition_omits_traversal_path() {
+    fn local_expand_definition_includes_traversal_path() {
         let ont = load();
         let response =
             build_schema_response(&ont, IntrospectionScope::Local, &["Definition".to_string()]);
@@ -318,12 +318,10 @@ mod tests {
             })
             .expect("Definition should be expanded");
 
-        for p in props {
-            assert!(
-                !p.starts_with("traversal_path:"),
-                "traversal_path should be excluded from local scope, got {p}"
-            );
-        }
+        assert!(
+            props.iter().any(|p| p.starts_with("traversal_path:")),
+            "traversal_path should be included in local scope for hydration TP narrowing"
+        );
     }
 
     #[test]

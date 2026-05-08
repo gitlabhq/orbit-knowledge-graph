@@ -10,10 +10,12 @@
 //! the end node's ID is added to the final query.
 
 use crate::ast::{Expr, JoinType, Node, Query, SelectExpr, TableRef};
-use crate::constants::{primary_key_column, redaction_id_column, redaction_type_column};
+use crate::constants::{
+    primary_key_column, redaction_id_column, redaction_type_column, traversal_path_column,
+};
 use crate::error::{QueryError, Result};
 use crate::input::{EntityAuthConfig, Input, QueryType};
-use ontology::constants::DEFAULT_PRIMARY_KEY;
+use ontology::constants::{DEFAULT_PRIMARY_KEY, TRAVERSAL_PATH_COLUMN};
 use std::collections::{HashMap, HashSet};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -373,6 +375,40 @@ fn enforce_return_columns(
                         alias: Some(type_col),
                     },
                 );
+            }
+        }
+
+        // Emit traversal_path column for hydration narrowing.
+        // Only for nodes whose table carries traversal_path.
+        // Skip aggregation queries: TP can't go in GROUP BY (splits counts)
+        // and ClickHouse rejects non-GROUP-BY columns in SELECT.
+        // Skip when the source alias doesn't exist in FROM (FK-elided nodes
+        // where the node table was absorbed into an edge filter).
+        if node.has_traversal_path && input.query_type != QueryType::Aggregation {
+            let tp_col = traversal_path_column(&node.id);
+            let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
+            if !has_tp {
+                let tp_expr = if node_is_edge_centric {
+                    if let Some((edge_alias, _)) = node_edge_col.get(&node.id) {
+                        if alias_exists_in_from(&q.from, edge_alias) {
+                            Some(Expr::col(edge_alias, TRAVERSAL_PATH_COLUMN))
+                        } else {
+                            None
+                        }
+                    } else {
+                        None
+                    }
+                } else if alias_exists_in_from(&q.from, &node.id) {
+                    Some(Expr::col(&node.id, TRAVERSAL_PATH_COLUMN))
+                } else {
+                    None
+                };
+                if let Some(tp_expr) = tp_expr {
+                    q.select.push(SelectExpr {
+                        expr: tp_expr,
+                        alias: Some(tp_col),
+                    });
+                }
             }
         }
     }
