@@ -255,6 +255,7 @@ pub async fn run_dispatcher(
         )),
         Box::new(TableCleanup::new(
             graph,
+            ontology,
             metrics.clone(),
             config.schedule.tasks.table_cleanup.clone(),
         )),

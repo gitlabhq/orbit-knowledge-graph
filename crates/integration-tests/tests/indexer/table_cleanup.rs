@@ -10,8 +10,10 @@ use integration_testkit::{GRAPH_SCHEMA_SQL, TestContext, t};
 async fn cleanup_succeeds_on_all_tables() {
     let context = TestContext::new(&[*GRAPH_SCHEMA_SQL]).await;
     let graph = context.config.build_client();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
     let task = TableCleanup::new(
         graph,
+        &ontology,
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
     );
@@ -41,8 +43,10 @@ async fn cleanup_removes_soft_deleted_rows() {
         .await;
 
     let graph = context.config.build_client();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
     let task = TableCleanup::new(
         graph,
+        &ontology,
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
     );
@@ -83,8 +87,10 @@ async fn cleanup_removes_soft_deleted_edges() {
         .await;
 
     let graph = context.config.build_client();
+    let ontology = ontology::Ontology::load_embedded().unwrap();
     let task = TableCleanup::new(
         graph,
+        &ontology,
         ScheduledTaskMetrics::new(),
         TableCleanupConfig::default(),
     );
