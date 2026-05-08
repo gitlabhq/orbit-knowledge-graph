@@ -26,7 +26,8 @@ WHERE root_namespace_id = {namespace_id:Int64}
 const DELETED_NAMESPACES_QUERY: &str = r#"
 SELECT
     root_namespace_id AS namespace_id,
-    traversal_path
+    traversal_path,
+    toString(_siphon_replicated_at) AS deleted_at
 FROM siphon_knowledge_graph_enabled_namespaces
 WHERE _siphon_deleted = true
   AND traversal_path != ''
@@ -124,6 +125,13 @@ pub struct NamespaceScheduleEntry {
     pub traversal_path: String,
 }
 
+#[derive(Clone)]
+pub struct DeletedNamespaceEntry {
+    pub namespace_id: i64,
+    pub traversal_path: String,
+    pub deleted_at: String,
+}
+
 #[derive(Debug, Error)]
 pub enum NamespaceDeletionStoreError {
     #[error("mark complete for namespace {namespace_id}: {reason}")]
@@ -159,7 +167,7 @@ pub trait NamespaceDeletionStore: Send + Sync {
         &self,
         last_watermark: &str,
         watermark: &str,
-    ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError>;
+    ) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError>;
 
     async fn schedule_deletion(
         &self,
@@ -282,7 +290,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
         &self,
         last_watermark: &str,
         watermark: &str,
-    ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
+    ) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError> {
         let batches = self
             .datalake
             .query(DELETED_NAMESPACES_QUERY)
@@ -292,7 +300,7 @@ impl NamespaceDeletionStore for ClickHouseNamespaceDeletionStore {
             .await
             .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
 
-        extract_schedule_entries(&batches)
+        extract_deleted_namespace_entries(&batches)
     }
 
     async fn schedule_deletion(
@@ -346,6 +354,30 @@ fn extract_schedule_entries(
         .collect())
 }
 
+fn extract_deleted_namespace_entries(
+    batches: &[RecordBatch],
+) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError> {
+    let namespace_ids = i64::extract_column(batches, 0)
+        .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+    let traversal_paths = String::extract_column(batches, 1)
+        .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+    let deleted_ats = String::extract_column(batches, 2)
+        .map_err(|e| NamespaceDeletionStoreError::Query(e.to_string()))?;
+
+    Ok(namespace_ids
+        .into_iter()
+        .zip(traversal_paths)
+        .zip(deleted_ats)
+        .map(
+            |((namespace_id, traversal_path), deleted_at)| DeletedNamespaceEntry {
+                namespace_id,
+                traversal_path,
+                deleted_at,
+            },
+        )
+        .collect())
+}
+
 #[cfg(test)]
 pub mod test_utils {
     use super::*;
@@ -357,7 +389,7 @@ pub mod test_utils {
         mark_complete_calls: Mutex<Vec<(i64, String)>>,
         schedule_calls: Mutex<Vec<(i64, String, String)>>,
         deletion_outcomes: Vec<TableDeletionOutcome>,
-        newly_deleted: Vec<NamespaceScheduleEntry>,
+        newly_deleted: Vec<DeletedNamespaceEntry>,
         due_deletions: Vec<NamespaceScheduleEntry>,
         namespace_still_deleted: bool,
         fail_mark_complete: bool,
@@ -388,7 +420,7 @@ pub mod test_utils {
                 mark_complete_calls: Mutex::new(Vec::new()),
                 schedule_calls: Mutex::new(Vec::new()),
                 deletion_outcomes: vec![ok_outcome("gl_project")],
-                newly_deleted: Vec::new(),
+                newly_deleted: Vec::<DeletedNamespaceEntry>::new(),
                 due_deletions: Vec::new(),
                 namespace_still_deleted: true,
                 fail_mark_complete: false,
@@ -416,7 +448,7 @@ pub mod test_utils {
             self
         }
 
-        pub fn with_newly_deleted(mut self, entries: Vec<NamespaceScheduleEntry>) -> Self {
+        pub fn with_newly_deleted(mut self, entries: Vec<DeletedNamespaceEntry>) -> Self {
             self.newly_deleted = entries;
             self
         }
@@ -489,7 +521,7 @@ pub mod test_utils {
             &self,
             _last_watermark: &str,
             _watermark: &str,
-        ) -> Result<Vec<NamespaceScheduleEntry>, NamespaceDeletionStoreError> {
+        ) -> Result<Vec<DeletedNamespaceEntry>, NamespaceDeletionStoreError> {
             Ok(self.newly_deleted.clone())
         }
 

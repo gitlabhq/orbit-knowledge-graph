@@ -2,7 +2,7 @@ use std::sync::Arc;
 use std::time::Instant;
 
 use async_trait::async_trait;
-use chrono::{DateTime, Duration, Utc};
+use chrono::{DateTime, Duration, NaiveDateTime, Utc};
 use tracing::{debug, info};
 
 use super::NamespaceDeletionStore;
@@ -97,13 +97,12 @@ impl NamespaceDeletionScheduler {
                 TaskError::new(error)
             })?;
 
-        let scheduled_deletion_date = (Utc::now() + Duration::days(GRACE_PERIOD_DAYS))
-            .format(TIMESTAMP_FORMAT)
-            .to_string();
-
         let mut recorded = 0u64;
 
         for entry in &entries {
+            let scheduled_deletion_date =
+                scheduled_deletion_date_for(&entry.deleted_at, GRACE_PERIOD_DAYS)?;
+
             self.store
                 .schedule_deletion(
                     entry.namespace_id,
@@ -182,11 +181,26 @@ impl NamespaceDeletionScheduler {
     }
 }
 
+fn scheduled_deletion_date_for(
+    deleted_at: &str,
+    grace_period_days: i64,
+) -> Result<String, TaskError> {
+    let naive = NaiveDateTime::parse_from_str(deleted_at, TIMESTAMP_FORMAT).map_err(|error| {
+        TaskError::new(format!(
+            "failed to parse deleted_at timestamp '{deleted_at}': {error}"
+        ))
+    })?;
+    let deletion_date = naive.and_utc() + Duration::days(grace_period_days);
+    Ok(deletion_date.format(TIMESTAMP_FORMAT).to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::modules::namespace_deletion::store::NamespaceScheduleEntry;
     use crate::modules::namespace_deletion::store::test_utils::MockNamespaceDeletionStore;
+    use crate::modules::namespace_deletion::store::{
+        DeletedNamespaceEntry, NamespaceScheduleEntry,
+    };
     use crate::testkit::mocks::MockNatsServices;
 
     use crate::checkpoint::{Checkpoint, CheckpointError};
@@ -231,9 +245,10 @@ mod tests {
     #[tokio::test]
     async fn schedules_newly_deleted_namespaces() {
         let store = Arc::new(MockNamespaceDeletionStore::new().with_newly_deleted(vec![
-            NamespaceScheduleEntry {
+            DeletedNamespaceEntry {
                 namespace_id: 100,
                 traversal_path: "1/100/".to_string(),
+                deleted_at: "2025-04-01 12:00:00.000000".to_string(),
             },
         ]));
 
@@ -244,6 +259,7 @@ mod tests {
         assert_eq!(calls.len(), 1);
         assert_eq!(calls[0].0, 100);
         assert_eq!(calls[0].1, "1/100/");
+        assert_eq!(calls[0].2, "2025-05-01 12:00:00.000000");
     }
 
     #[tokio::test]
@@ -286,9 +302,10 @@ mod tests {
         let store = Arc::new(
             MockNamespaceDeletionStore::new()
                 .failing_schedule()
-                .with_newly_deleted(vec![NamespaceScheduleEntry {
+                .with_newly_deleted(vec![DeletedNamespaceEntry {
                     namespace_id: 100,
                     traversal_path: "1/100/".to_string(),
+                    deleted_at: "2025-04-01 12:00:00.000000".to_string(),
                 }]),
         );
 
@@ -365,5 +382,23 @@ mod tests {
         ) -> Result<Vec<crate::nats::NatsMessage>, NatsError> {
             unimplemented!()
         }
+    }
+
+    #[test]
+    fn grace_period_anchored_to_deletion_timestamp() {
+        let result = scheduled_deletion_date_for("2025-01-15 08:30:00.000000", 30).unwrap();
+        assert_eq!(result, "2025-02-14 08:30:00.000000");
+    }
+
+    #[test]
+    fn grace_period_with_past_deletion_produces_past_date() {
+        let result = scheduled_deletion_date_for("2020-06-01 00:00:00.000000", 30).unwrap();
+        assert_eq!(result, "2020-07-01 00:00:00.000000");
+    }
+
+    #[test]
+    fn invalid_timestamp_returns_error() {
+        let result = scheduled_deletion_date_for("not-a-timestamp", 30);
+        assert!(result.is_err());
     }
 }
