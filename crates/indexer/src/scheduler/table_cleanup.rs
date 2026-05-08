@@ -59,24 +59,36 @@ impl TableCleanup {
     async fn cleanup_all_tables(&self) -> Result<(), TaskError> {
         let mut cleaned = 0u64;
         let mut failed = 0u64;
+        let mut total_duration = 0.0f64;
 
         for table in &self.tables {
             let statement = format!("OPTIMIZE TABLE {table} FINAL CLEANUP");
+            let table_start = Instant::now();
 
-            match self.graph.execute(&statement).await {
+            let duration_secs = match self.graph.execute(&statement).await {
                 Ok(()) => {
                     cleaned += 1;
-                    info!(table, "cleaned up table");
+                    let d = table_start.elapsed().as_secs_f64();
+                    info!(table, duration_secs = d, "cleaned up table");
+                    d
                 }
                 Err(error) => {
                     failed += 1;
+                    let d = table_start.elapsed().as_secs_f64();
                     self.metrics.record_error(self.name(), "cleanup");
-                    warn!(table, %error, "failed to clean up table");
+                    warn!(table, duration_secs = d, %error, "failed to clean up table");
+                    d
                 }
-            }
+            };
+            total_duration += duration_secs;
         }
 
-        info!(cleaned, failed, "table cleanup complete");
+        info!(
+            cleaned,
+            failed,
+            duration_secs = total_duration,
+            "table cleanup complete"
+        );
 
         if failed > 0 && cleaned == 0 {
             return Err(TaskError::new(format!(

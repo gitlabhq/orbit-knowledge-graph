@@ -3727,7 +3727,7 @@
             "type": "prometheus",
             "uid": "$ORBIT_DS"
          },
-         "description": "Total per-table deletion failures.",
+         "description": "Total table deletion failures during namespace deletion.",
          "fieldConfig": {
             "defaults": {
                "custom": {
@@ -3765,8 +3765,8 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "expr": "sum by (table) (rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-               "legendFormat": "{{table}}",
+               "expr": "sum(rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+               "legendFormat": "{{instance}}",
                "refId": "A"
             }
          ],

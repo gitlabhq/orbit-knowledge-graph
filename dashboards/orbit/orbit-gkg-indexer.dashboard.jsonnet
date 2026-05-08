@@ -385,11 +385,63 @@ local migration = [
 ] + o.counterPanels(o.metric('gkg_schema_migration_phase_total'), DS, SEL);
 
 // 9. Reference (collapsed by default) ------------------------------------
+// Scheduler metrics used by the data deletion panels below.
+local schedulerDur = o.metric('gkg_scheduler_task_duration_seconds');
+local schedulerRuns = o.metric('gkg_scheduler_task_runs_total');
+local schedulerErrors = o.metric('gkg_scheduler_task_errors_total');
+
+local deletionTableDur = o.metric('gkg_indexer_namespace_deletion_table_duration_seconds');
+local deletionTableErrors = o.metric('gkg_indexer_namespace_deletion_table_errors_total');
+
+local NS_DEL_SEL = SEL + ', task="dispatch.namespace_deletion"';
+local CLEANUP_SEL = SEL + ', task="maintenance.table_cleanup"';
+
+local dataDeletionPanels = [
+  // Namespace deletion
+  o.histogramPercentiles(
+    deletionTableDur,
+    'Namespace deletion: per-table soft-delete duration (p50/p95/p99)',
+    'Duration of the INSERT-SELECT that soft-deletes rows for a single table during namespace deletion.',
+    DS, SEL, w=12,
+  ),
+  o.counterIncreaseBars(
+    deletionTableErrors,
+    'Namespace deletion: errors',
+    'Table deletion failures during namespace deletion. Per-table detail is in the logs.',
+    DS, SEL, unit='short', w=12, or_zero=true,
+  ),
+  o.counterIncreaseBars(
+    schedulerRuns,
+    'Namespace deletion: scheduler runs by outcome',
+    'Namespace deletion scheduler runs, stacked by outcome.',
+    DS, NS_DEL_SEL, by=['outcome'], unit='short', w=12, or_zero=true,
+  ),
+  // Table cleanup
+  o.histogramPercentiles(
+    schedulerDur,
+    'Table cleanup: run duration (p50/p95/p99)',
+    'End-to-end duration of the table cleanup task. Covers all tables in a single run.',
+    DS, CLEANUP_SEL, w=12,
+  ),
+  o.counterIncreaseBars(
+    schedulerRuns,
+    'Table cleanup: runs by outcome',
+    'Table cleanup task runs, stacked by outcome (success/error).',
+    DS, CLEANUP_SEL, by=['outcome'], unit='short', w=12, or_zero=true,
+  ),
+  o.counterIncreaseBars(
+    schedulerErrors,
+    'Table cleanup: errors by stage',
+    'Table cleanup errors, stacked by stage. Non-zero means at least one table failed OPTIMIZE.',
+    DS, CLEANUP_SEL, by=['stage'], unit='short', w=12, or_zero=true,
+  ),
+] + std.flattenArrays([o.panelsFor(m, DS, SEL) for m in o.metricsInDomain('indexer.namespace_deletion')]);
+
 local reference =
   o.sectionCollapsed('ETL engine (reference)', o.metricsInDomain('indexer.etl'), DS, SEL)
   + o.sectionCollapsed('Code pipeline (reference)', o.metricsInDomain('indexer.code'), DS, SEL)
   + o.sectionCollapsed('SDLC pipeline (reference)', o.metricsInDomain('indexer.sdlc'), DS, SEL)
-  + o.sectionCollapsed('Namespace deletion (reference)', o.metricsInDomain('indexer.namespace_deletion'), DS, SEL)
+  + [o.rowCollapsed('Data deletion')] + dataDeletionPanels
   + o.sectionCollapsed('Scheduler (reference)', o.metricsInDomain('indexer.scheduler'), DS, SEL);
 
 local items =

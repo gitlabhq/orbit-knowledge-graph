@@ -3,10 +3,6 @@
 use crate::MetricSpec;
 use crate::buckets::LATENCY;
 
-pub mod labels {
-    pub const TABLE: &str = "table";
-}
-
 const DOMAIN: &str = "indexer.namespace_deletion";
 
 pub const TABLE_DELETION_DURATION: MetricSpec = MetricSpec::histogram_f64(
@@ -20,9 +16,9 @@ pub const TABLE_DELETION_DURATION: MetricSpec = MetricSpec::histogram_f64(
 
 pub const TABLE_DELETION_ERRORS: MetricSpec = MetricSpec::counter(
     "gkg.indexer.namespace_deletion.table.errors",
-    "Total per-table deletion failures.",
+    "Total table deletion failures during namespace deletion.",
     None,
-    &[labels::TABLE],
+    &[],
     DOMAIN,
 );
 

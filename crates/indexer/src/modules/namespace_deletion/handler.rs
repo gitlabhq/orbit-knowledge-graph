@@ -102,7 +102,7 @@ impl Handler for NamespaceDeletionHandler {
         let mut failed_tables = Vec::new();
         for outcome in &outcomes {
             if let Some(ref error) = outcome.error {
-                self.metrics.record_table_error(&outcome.table);
+                self.metrics.record_table_error();
                 warn!(
                     namespace_id = payload.namespace_id,
                     table = %outcome.table,

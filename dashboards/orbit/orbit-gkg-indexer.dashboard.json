@@ -5447,6 +5447,376 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
+               "description": "Duration of the INSERT-SELECT that soft-deletes rows for a single table during namespace deletion.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "s"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 271
+               },
+               "id": 109,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p50 overall",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p95 overall",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_indexer_namespace_deletion_table_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m])))",
+                     "legendFormat": "p99 overall",
+                     "refId": "C"
+                  }
+               ],
+               "title": "Namespace deletion: per-table soft-delete duration (p50/p95/p99)",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Table deletion failures during namespace deletion. Per-table detail is in the logs.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "barAlignment": 0,
+                        "drawStyle": "bars",
+                        "fillOpacity": 70,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "showPoints": "never",
+                        "stacking": {
+                           "group": "A",
+                           "mode": "normal"
+                        }
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 271
+               },
+               "id": 110,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max",
+                        "sum"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "(sum(increase(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[$__rate_interval]))) or vector(0)",
+                     "legendFormat": "{{instance}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "Namespace deletion: errors",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Namespace deletion scheduler runs, stacked by outcome.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "barAlignment": 0,
+                        "drawStyle": "bars",
+                        "fillOpacity": 70,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "showPoints": "never",
+                        "stacking": {
+                           "group": "A",
+                           "mode": "normal"
+                        }
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 279
+               },
+               "id": 111,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max",
+                        "sum"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"dispatch.namespace_deletion\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+                     "legendFormat": "{{outcome}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "Namespace deletion: scheduler runs by outcome",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "End-to-end duration of the table cleanup task. Covers all tables in a single run.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "drawStyle": "line",
+                        "fillOpacity": 10,
+                        "lineInterpolation": "smooth",
+                        "showPoints": "auto"
+                     },
+                     "unit": "s"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 279
+               },
+               "id": 112,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.5, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "legendFormat": "p50 overall",
+                     "refId": "A"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.95, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "legendFormat": "p95 overall",
+                     "refId": "B"
+                  },
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "histogram_quantile(0.99, sum by (le) (rate(gkg_scheduler_task_duration_seconds_bucket{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[5m])))",
+                     "legendFormat": "p99 overall",
+                     "refId": "C"
+                  }
+               ],
+               "title": "Table cleanup: run duration (p50/p95/p99)",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Table cleanup task runs, stacked by outcome (success/error).",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "barAlignment": 0,
+                        "drawStyle": "bars",
+                        "fillOpacity": 70,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "showPoints": "never",
+                        "stacking": {
+                           "group": "A",
+                           "mode": "normal"
+                        }
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 0,
+                  "y": 287
+               },
+               "id": 113,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max",
+                        "sum"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "(sum by (outcome) (increase(gkg_scheduler_task_runs_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"outcome\", \"(none)\", \"\", \"\")",
+                     "legendFormat": "{{outcome}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "Table cleanup: runs by outcome",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
+               "description": "Table cleanup errors, stacked by stage. Non-zero means at least one table failed OPTIMIZE.",
+               "fieldConfig": {
+                  "defaults": {
+                     "custom": {
+                        "barAlignment": 0,
+                        "drawStyle": "bars",
+                        "fillOpacity": 70,
+                        "lineInterpolation": "linear",
+                        "lineWidth": 1,
+                        "showPoints": "never",
+                        "stacking": {
+                           "group": "A",
+                           "mode": "normal"
+                        }
+                     },
+                     "unit": "short"
+                  }
+               },
+               "gridPos": {
+                  "h": 8,
+                  "w": 12,
+                  "x": 12,
+                  "y": 287
+               },
+               "id": 114,
+               "options": {
+                  "legend": {
+                     "calcs": [
+                        "lastNotNull",
+                        "max",
+                        "sum"
+                     ],
+                     "displayMode": "table",
+                     "placement": "bottom"
+                  },
+                  "tooltip": {
+                     "mode": "multi"
+                  }
+               },
+               "targets": [
+                  {
+                     "datasource": {
+                        "type": "prometheus",
+                        "uid": "$ORBIT_DS"
+                     },
+                     "expr": "(sum by (stage) (increase(gkg_scheduler_task_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\", task=\"maintenance.table_cleanup\"}[$__rate_interval]))) or label_replace(vector(0), \"stage\", \"(none)\", \"\", \"\")",
+                     "legendFormat": "{{stage}}",
+                     "refId": "A"
+                  }
+               ],
+               "title": "Table cleanup: errors by stage",
+               "type": "timeseries"
+            },
+            {
+               "datasource": {
+                  "type": "prometheus",
+                  "uid": "$ORBIT_DS"
+               },
                "description": "Duration of a single table's soft-delete INSERT-SELECT.",
                "fieldConfig": {
                   "defaults": {
@@ -5463,9 +5833,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 271
+                  "y": 295
                },
-               "id": 109,
+               "id": 115,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5532,9 +5902,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 271
+                  "y": 295
                },
-               "id": 110,
+               "id": 116,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5567,7 +5937,7 @@
                   "type": "prometheus",
                   "uid": "$ORBIT_DS"
                },
-               "description": "Total per-table deletion failures.",
+               "description": "Total table deletion failures during namespace deletion.",
                "fieldConfig": {
                   "defaults": {
                      "custom": {
@@ -5583,9 +5953,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 271
+                  "y": 295
                },
-               "id": 111,
+               "id": 117,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5605,8 +5975,8 @@
                         "type": "prometheus",
                         "uid": "$ORBIT_DS"
                      },
-                     "expr": "sum by (table) (rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
-                     "legendFormat": "{{table}}",
+                     "expr": "sum(rate(gkg_indexer_namespace_deletion_table_errors_total{container=\"gkg-indexer\", cluster=~\"$cluster\"}[5m]))",
+                     "legendFormat": "{{instance}}",
                      "refId": "A"
                   }
                ],
@@ -5614,7 +5984,7 @@
                "type": "timeseries"
             }
          ],
-         "title": "Namespace deletion (reference)",
+         "title": "Data deletion",
          "type": "row"
       },
       {
@@ -5623,9 +5993,9 @@
             "h": 1,
             "w": 24,
             "x": 0,
-            "y": 279
+            "y": 303
          },
-         "id": 112,
+         "id": 118,
          "panels": [
             {
                "datasource": {
@@ -5648,9 +6018,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 280
+                  "y": 304
                },
-               "id": 113,
+               "id": 119,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5717,9 +6087,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 280
+                  "y": 304
                },
-               "id": 114,
+               "id": 120,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5768,9 +6138,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 280
+                  "y": 304
                },
-               "id": 115,
+               "id": 121,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5819,9 +6189,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 288
+                  "y": 312
                },
-               "id": 116,
+               "id": 122,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5888,9 +6258,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 288
+                  "y": 312
                },
-               "id": 117,
+               "id": 123,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5939,9 +6309,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 16,
-                  "y": 288
+                  "y": 312
                },
-               "id": 118,
+               "id": 124,
                "options": {
                   "legend": {
                      "calcs": [
@@ -5990,9 +6360,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 0,
-                  "y": 296
+                  "y": 320
                },
-               "id": 119,
+               "id": 125,
                "options": {
                   "legend": {
                      "calcs": [
@@ -6041,9 +6411,9 @@
                   "h": 8,
                   "w": 8,
                   "x": 8,
-                  "y": 296
+                  "y": 320
                },
-               "id": 120,
+               "id": 126,
                "options": {
                   "legend": {
                      "calcs": [
