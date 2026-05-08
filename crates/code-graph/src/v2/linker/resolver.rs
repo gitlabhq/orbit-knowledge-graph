@@ -171,7 +171,21 @@ impl<'a> FileResolver<'a> {
             .map(|did| (NodeKind::Definition, Some(graph.defs[did.0 as usize].kind)))
             .unwrap_or((NodeKind::File, None));
 
+        // A member call on a non-self receiver cannot resolve to
+        // the enclosing function. `stream_->Foo()` inside `Foo()`
+        // is not recursion. But `this->Foo()` or `self.foo()` IS
+        // a legitimate self-call, and bare `Foo()` can be recursion.
+        let receiver_is_other = chain.is_some_and(|c| {
+            matches!(
+                c.first(),
+                Some(ExpressionStep::Ident(_) | ExpressionStep::Field(_) | ExpressionStep::New(_))
+            )
+        });
+
         for target in targets {
+            if receiver_is_other && target == source_node {
+                continue;
+            }
             let target_def_kind = graph.graph[target]
                 .def_id()
                 .map(|did| graph.defs[did.0 as usize].kind);
