@@ -257,24 +257,6 @@ where
     }
 }
 
-/// Marks the compilation as targeting a local DuckDB backend.
-/// Local tables exclude `traversal_path`, so the enforce pass must not
-/// emit `_gkg_*_tp` columns.
-pub struct LocalModePass;
-
-impl<E, S> CompilerPass<E, S> for LocalModePass
-where
-    E: PipelineEnv,
-    S: PipelineState + HasInput,
-{
-    const NAME: &'static str = "local_mode";
-
-    fn run(&self, _env: &E, state: &mut S) -> Result<()> {
-        state.input_mut()?.compiler.skip_tp_narrowing = true;
-        Ok(())
-    }
-}
-
 pub struct DuckDbCodegenPass;
 
 impl<E, S> CompilerPass<E, S> for DuckDbCodegenPass

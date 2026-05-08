@@ -379,11 +379,10 @@ fn enforce_return_columns(
         }
 
         // Emit traversal_path column for hydration narrowing.
-        // Only for nodes whose table carries traversal_path and when TP
-        // narrowing is enabled. Local DuckDB tables exclude traversal_path.
+        // Only for nodes whose table carries traversal_path.
         // Skip when the source alias doesn't exist in FROM (FK-elided nodes
         // where the node table was absorbed into an edge filter).
-        if node.has_traversal_path && !input.compiler.skip_tp_narrowing {
+        if node.has_traversal_path {
             let tp_col = traversal_path_column(&node.id);
             let has_tp = q.select.iter().any(|s| s.alias.as_ref() == Some(&tp_col));
             if !has_tp {

@@ -266,13 +266,13 @@ settings:
   local_db:
     entities:
       - name: Directory
-        exclude_properties: [traversal_path]
+        exclude_properties: []
       - name: File
-        exclude_properties: [traversal_path]
+        exclude_properties: []
       - name: Definition
-        exclude_properties: [traversal_path]
+        exclude_properties: []
       - name: ImportedSymbol
-        exclude_properties: [traversal_path]
+        exclude_properties: []
     edge_table:
       name: gl_edge
       columns:

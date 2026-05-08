@@ -190,10 +190,6 @@ pub struct CompilerMetadata {
     pub edge_source_kinds: HashMap<String, Vec<String>>,
     /// Maps relationship kind → valid target entity kinds.
     pub edge_target_kinds: HashMap<String, Vec<String>>,
-    /// When true, suppress `_gkg_*_tp` column emission in the enforce pass.
-    /// Set by the local DuckDB pipeline because local tables exclude the
-    /// `traversal_path` column.
-    pub skip_tp_narrowing: bool,
 }
 
 /// Defaults to `gl_edge` for test convenience. In production, `normalize()`
@@ -211,7 +207,6 @@ impl Default for CompilerMetadata {
             table_columns: HashMap::new(),
             edge_source_kinds: HashMap::new(),
             edge_target_kinds: HashMap::new(),
-            skip_tp_narrowing: false,
         }
     }
 }
