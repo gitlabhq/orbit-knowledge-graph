@@ -33,7 +33,7 @@ Orbit is integrated into GitLab Duo Agent Platform. DAP agents call Orbit's grap
 
 ## Prerequisites
 
-- Orbit is [enabled on your group](../getting-started.md). Orbit requires GitLab.com Premium or Ultimate.
+- Orbit is [enabled on your group](../getting-started.md).
 - You have access to GitLab Duo Agent Platform. See [GitLab Duo Agent Platform](https://docs.gitlab.com/user/duo_agent_platform/) for how to access it through your subscription or GitLab Credits.
 
 ## Where Orbit is available

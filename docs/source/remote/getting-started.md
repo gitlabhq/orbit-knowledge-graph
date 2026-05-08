@@ -32,7 +32,6 @@ title: Get started with Orbit Remote
 ## Prerequisites
 
 - Owner role on the top-level group you want to enable Orbit on
-- GitLab.com Premium or Ultimate plan
 
 Orbit indexes top-level groups only. Subgroups and projects inherit indexing automatically.
 
