@@ -863,7 +863,7 @@ impl<'a> ResolvedEdgeCollector<'a> {
             self.macro_depth += 1;
             for node in expanded.value.descendants() {
                 if self.expanded_macro_nodes >= MAX_EXPANDED_MACRO_NODES {
-                    tracing::warn!(
+                    tracing::debug!(
                         file = self.relative_path,
                         max_nodes = MAX_EXPANDED_MACRO_NODES,
                         "rust macro expansion budget exhausted"

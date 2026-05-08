@@ -99,6 +99,7 @@ impl<'a> FileResolver<'a> {
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
             include_index: None,
+            include_reachable: None,
         };
         Self {
             ctx,
@@ -106,6 +107,11 @@ impl<'a> FileResolver<'a> {
             import_edges: Vec::new(),
             import_edge_keys: FxHashSet::default(),
         }
+    }
+
+    /// Pre-set the include index from a shared precomputed value.
+    pub fn set_include_index(&mut self, idx: std::sync::Arc<super::graph::IncludeIndex>) {
+        self.ctx.include_index = Some(idx);
     }
 
     /// Drain accumulated Definition → ImportedSymbol edges.
@@ -315,8 +321,11 @@ struct ResolveCtx<'a> {
     import_cache: FxHashMap<NodeIndex, Vec<NodeIndex>>,
     nested_cache: FxHashMap<(String, String), Vec<NodeIndex>>,
     inferred_returns: FxHashMap<NodeIndex, String>,
-    /// Built lazily on first `IncludeGraph` call, reused for the file.
-    include_index: Option<super::graph::IncludeIndex>,
+    /// Precomputed or lazily built include index for C/C++ resolution.
+    include_index: Option<std::sync::Arc<super::graph::IncludeIndex>>,
+    /// Cached BFS result: files reachable via transitive includes from
+    /// this file. Computed once on first IncludeGraph resolve call.
+    include_reachable: Option<Vec<petgraph::graph::NodeIndex>>,
 }
 
 impl<'a> ResolveCtx<'a> {
@@ -348,6 +357,7 @@ impl<'a> ResolveCtx<'a> {
             nested_cache: FxHashMap::default(),
             inferred_returns: FxHashMap::default(),
             include_index: None,
+            include_reachable: None,
         }
     }
 
@@ -369,7 +379,9 @@ impl<'a> ResolveCtx<'a> {
             .import_strategies
             .contains(&super::rules::ImportStrategy::IncludeGraph);
         if needs_include_index && self.include_index.is_none() {
-            self.include_index = Some(super::graph::IncludeIndex::build(self.graph));
+            self.include_index = Some(std::sync::Arc::new(super::graph::IncludeIndex::build(
+                self.graph,
+            )));
         }
         ImportResolver {
             graph: self.graph,
@@ -377,7 +389,8 @@ impl<'a> ResolveCtx<'a> {
             import_map: &self.import_map,
             scratch: &mut self.scratch,
             settings: self.settings,
-            include_index: self.include_index.as_ref(),
+            include_index: self.include_index.as_deref(),
+            include_reachable: &mut self.include_reachable,
         }
     }
 

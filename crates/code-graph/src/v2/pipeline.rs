@@ -1192,6 +1192,19 @@ impl FamilyPipeline {
         }
 
         // ── Phase 2: resolve refs with per-file lang_ctx ────────
+        let needs_include = member_ctxs.values().any(|lc| {
+            lc.rules
+                .import_strategies
+                .contains(&crate::v2::linker::rules::ImportStrategy::IncludeGraph)
+        });
+        let shared_include_index = if needs_include {
+            Some(Arc::new(crate::v2::linker::graph::IncludeIndex::build(
+                &graph,
+            )))
+        } else {
+            None
+        };
+
         let t2 = std::time::Instant::now();
         let pb2 = progress_bar(file_count as u64, "resolve");
         let total_edges = std::sync::atomic::AtomicUsize::new(0);
@@ -1229,6 +1242,9 @@ impl FamilyPipeline {
                     guard,
                 );
                 resolver.set_inferred_returns(&fwr.inferred_returns);
+                if let Some(idx) = &shared_include_index {
+                    resolver.set_include_index(Arc::clone(idx));
+                }
 
                 let mut edges = Vec::new();
                 let mut failed_chains: Vec<FailedChain> = Vec::new();
@@ -1344,6 +1360,9 @@ impl FamilyPipeline {
                         lctx,
                         guard,
                     );
+                    if let Some(idx) = &shared_include_index {
+                        resolver.set_include_index(Arc::clone(idx));
+                    }
                     let mut edges = Vec::new();
                     for failed in failed_chains {
                         let before = edges.len();

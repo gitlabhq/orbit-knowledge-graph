@@ -49,6 +49,7 @@ pub(crate) struct ImportResolver<'a> {
     pub scratch: &'a mut ScratchBuf,
     pub settings: &'a ResolveSettings,
     pub include_index: Option<&'a super::graph::IncludeIndex>,
+    pub include_reachable: &'a mut Option<Vec<NodeIndex>>,
 }
 
 impl<'a> ImportResolver<'a> {
@@ -287,55 +288,62 @@ impl<'a> ImportResolver<'a> {
     /// BFS through the include DAG: starting from this file's includes,
     /// recursively follow each included header's includes. For each
     /// reachable header, also search the paired source file (.h -> .c/.cpp).
-    fn include_graph(&self, name: &str) -> Vec<NodeIndex> {
-        const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
-
+    fn include_graph(&mut self, name: &str) -> Vec<NodeIndex> {
         let Some(idx) = self.include_index else {
             return Vec::new();
         };
 
-        let self_path = self.graph.graph[self.file_node].path().to_string();
-        let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
-        visited.insert(self_path.clone());
-        let mut queue = std::collections::VecDeque::new();
-        queue.push_back(self_path);
-        let mut reachable = Vec::new();
-        let empty = Vec::new();
+        if self.include_reachable.is_none() {
+            const SOURCE_EXTENSIONS: &[&str] = &[".c", ".cc", ".cpp", ".cxx", ".m"];
+            const MAX_REACHABLE: usize = 512;
+            let self_path = self.graph.graph[self.file_node].path().to_string();
+            let mut visited: rustc_hash::FxHashSet<String> = rustc_hash::FxHashSet::default();
+            visited.insert(self_path.clone());
+            let mut queue = std::collections::VecDeque::new();
+            queue.push_back(self_path);
+            let mut reachable = Vec::new();
+            let empty = Vec::new();
 
-        while let Some(current) = queue.pop_front() {
-            for inc in idx.include_map.get(&current).unwrap_or(&empty) {
-                if let Some(matched) = idx.suffix_map.get(inc.as_str()) {
-                    for &file_idx in matched {
-                        let path = &idx.path_by_idx[&file_idx];
-                        if visited.insert(path.clone()) {
-                            reachable.push(file_idx);
-                            queue.push_back(path.clone());
+            while let Some(current) = queue.pop_front() {
+                if reachable.len() >= MAX_REACHABLE {
+                    break;
+                }
+                for inc in idx.include_map.get(&current).unwrap_or(&empty) {
+                    if let Some(matched) = idx.suffix_map.get(inc.as_str()) {
+                        for &file_idx in matched {
+                            let path = &idx.path_by_idx[&file_idx];
+                            if visited.insert(path.clone()) {
+                                reachable.push(file_idx);
+                                queue.push_back(path.clone());
+                            }
                         }
                     }
-                }
-                if let Some(stem) = inc
-                    .strip_suffix(".h")
-                    .or_else(|| inc.strip_suffix(".hpp"))
-                    .or_else(|| inc.strip_suffix(".hh"))
-                    .or_else(|| inc.strip_suffix(".hxx"))
-                {
-                    for ext in SOURCE_EXTENSIONS {
-                        let paired = format!("{stem}{ext}");
-                        if let Some(src_idxs) = idx.suffix_map.get(&paired) {
-                            for &src_idx in src_idxs {
-                                let src_path = &idx.path_by_idx[&src_idx];
-                                if visited.insert(src_path.clone()) {
-                                    reachable.push(src_idx);
+                    if let Some(stem) = inc
+                        .strip_suffix(".h")
+                        .or_else(|| inc.strip_suffix(".hpp"))
+                        .or_else(|| inc.strip_suffix(".hh"))
+                        .or_else(|| inc.strip_suffix(".hxx"))
+                    {
+                        for ext in SOURCE_EXTENSIONS {
+                            let paired = format!("{stem}{ext}");
+                            if let Some(src_idxs) = idx.suffix_map.get(&paired) {
+                                for &src_idx in src_idxs {
+                                    let src_path = &idx.path_by_idx[&src_idx];
+                                    if visited.insert(src_path.clone()) {
+                                        reachable.push(src_idx);
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
+            *self.include_reachable = Some(reachable);
         }
 
+        let reachable = self.include_reachable.as_ref().unwrap();
         let mut results = Vec::new();
-        for &file_idx in &reachable {
+        for &file_idx in reachable {
             let file_path = self.graph.graph[file_idx].path();
             for &def_idx in self
                 .graph
