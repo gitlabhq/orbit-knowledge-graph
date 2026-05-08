@@ -25,10 +25,6 @@ title: Orbit Remote
 > For more information, see the history.
 > This feature is available for testing, but not ready for production use.
 
-<!-- -->
-
-> [!disclaimer]
-
 Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level group and it automatically indexes your entire SDLC and code - groups, projects, users, merge requests, pipelines, vulnerabilities, and source code - into a ClickHouse property graph.
 
 - Indexes: Full SDLC + code graph
@@ -53,7 +49,7 @@ Orbit Remote runs on GitLab-hosted infrastructure. Enable it on a top-level grou
 |---|---|
 | [GitLab Duo Agent Platform](access/duo.md) | Natural language questions via the GitLab UI |
 | [MCP](access/mcp.md) | Connect Claude Code, Codex, and other agents |
-| [The GitLab CLI (`glab`)](access/glab.md) | `glab orbit remote` for scripting and discovery (`glab` 1.94 or later) |
+| [The GitLab CLI (`glab`)](access/glab.md) | `glab orbit remote` for scripting and discovery (available in `glab` 1.94 or later) |
 | [REST API](access/api.md) | Query from scripts, CI pipelines, or custom tooling |
 
 ## Billing

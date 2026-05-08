@@ -20,8 +20,6 @@ title: Use Orbit Local with the Orbit CLI (`orbit`)
 
 {{< /history >}}
 
-> [!disclaimer]
-
 The Orbit CLI (`orbit`) builds a code graph for any local repository and queries it
 against a local DuckDB file. No GitLab connection required.
 

@@ -20,10 +20,6 @@ title: Get started with Orbit Local
 
 {{< /history >}}
 
-> [!disclaimer]
-
-<!-- -->
-
 > [!note]
 > Orbit Local is experimental. Until packaged binaries ship,
 > you must build from source.

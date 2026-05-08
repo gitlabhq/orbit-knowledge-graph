@@ -20,10 +20,6 @@ title: Schema reference
 
 {{< /history >}}
 
-> [!disclaimer]
-
-<!-- -->
-
 > [!note]
 > Orbit Local is experimental. Capabilities and command shape may
 > change before GA.
