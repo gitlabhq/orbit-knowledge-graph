@@ -1,5 +1,5 @@
 use gkg_server_config::AnalyticsConfig;
-use labkit_events::orbit::{OrbitCommonContext, OrbitQueryContext, SourceType, ToolName};
+use labkit_events::orbit::{OrbitCommonContext, OrbitQueryContext, SourceType};
 
 use crate::auth::Claims;
 
@@ -32,7 +32,7 @@ pub(crate) fn build_common(
         .ok()
 }
 
-pub(crate) fn build_query(claims: &Claims, tool_name: ToolName) -> Option<OrbitQueryContext> {
+pub(crate) fn build_query(claims: &Claims, tool_name: &str) -> Option<OrbitQueryContext> {
     let mut b = OrbitQueryContext::builder(map_source(&claims.source_type)).tool_name(tool_name);
     if let Some(ref id) = claims.global_user_id {
         b = b.global_user_id(id);
@@ -64,10 +64,11 @@ fn leaf_namespace_ids(claims: &Claims) -> Vec<i64> {
 
 fn map_source(s: &str) -> SourceType {
     match s {
-        "dap" => SourceType::Dap,
+        "frontend" => SourceType::Frontend,
+        "dws" => SourceType::Dws,
         "mcp" => SourceType::Mcp,
-        "cli" => SourceType::Cli,
-        _ => SourceType::RestApi,
+        "core" => SourceType::Core,
+        _ => SourceType::Rest,
     }
 }
 
@@ -123,7 +124,7 @@ mod tests {
     /// Inspect the JSON `data` of a context built via `build_*`. The
     /// `to_self_describing_json` method is `pub(crate)` in labkit_events, so
     /// we round-trip through `GkgEvent` and read its public `contexts()`.
-    fn query_data(claims: &Claims, tool: ToolName) -> serde_json::Value {
+    fn query_data(claims: &Claims, tool: &str) -> serde_json::Value {
         use labkit_events::gkg::GkgEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, "33").unwrap();
         let query = build_query(claims, tool).unwrap();
@@ -134,7 +135,7 @@ mod tests {
     fn common_data(claims: &Claims, schema_version: &str) -> serde_json::Value {
         use labkit_events::gkg::GkgEvent;
         let common = build_common(&AnalyticsConfig::default(), claims, schema_version).unwrap();
-        let query = build_query(claims, ToolName::QueryGraph).unwrap();
+        let query = build_query(claims, "query_graph").unwrap();
         let event = GkgEvent::query_executed(common, query);
         event.contexts()[0].data.clone()
     }
@@ -142,7 +143,7 @@ mod tests {
     #[test]
     fn build_query_sets_queried_namespace_ids_when_paths_present() {
         let claims = claims_with_paths(vec!["1/22/", "1/33/"]);
-        let data = query_data(&claims, ToolName::QueryGraph);
+        let data = query_data(&claims, "query_graph");
         let ids = data["queried_namespace_ids"].as_array().unwrap();
         assert_eq!(ids[0], 22);
         assert_eq!(ids[1], 33);
@@ -151,15 +152,30 @@ mod tests {
     #[test]
     fn build_query_omits_queried_namespace_ids_when_empty() {
         let claims = claims_with_paths(vec![]);
-        let data = query_data(&claims, ToolName::QueryGraph);
+        let data = query_data(&claims, "query_graph");
         assert!(data.get("queried_namespace_ids").is_none());
     }
 
     #[test]
     fn build_query_passes_through_tool_name() {
         let claims = claims_with_paths(vec![]);
-        let data = query_data(&claims, ToolName::GetGraphSchema);
+        let data = query_data(&claims, "get_graph_schema");
         assert_eq!(data["tool_name"], "get_graph_schema");
+    }
+
+    #[test]
+    fn map_source_recognises_all_jwt_values() {
+        let cases = [
+            ("frontend", SourceType::Frontend),
+            ("dws", SourceType::Dws),
+            ("mcp", SourceType::Mcp),
+            ("core", SourceType::Core),
+            ("rest", SourceType::Rest),
+            ("anything-else", SourceType::Rest),
+        ];
+        for (input, expected) in cases {
+            assert_eq!(map_source(input), expected, "for input {input}");
+        }
     }
 
     #[test]

@@ -4,7 +4,6 @@ use std::time::Duration;
 
 use gkg_server_config::AnalyticsConfig;
 use labkit_events::gkg::GkgEvent;
-use labkit_events::orbit::ToolName;
 use query_engine::pipeline::{PipelineError, PipelineObserver};
 
 use crate::auth::Claims;
@@ -17,7 +16,7 @@ pub(crate) struct AnalyticsObserver {
     tracker: Option<Arc<dyn AnalyticsTracker>>,
     config: Arc<AnalyticsConfig>,
     claims: Claims,
-    tool_name: ToolName,
+    tool_name: String,
     schema_version: String,
     errored: Cell<bool>,
 }
@@ -27,14 +26,14 @@ impl AnalyticsObserver {
         tracker: Option<Arc<dyn AnalyticsTracker>>,
         config: Arc<AnalyticsConfig>,
         claims: Claims,
-        tool_name: ToolName,
+        tool_name: impl Into<String>,
         schema_version: String,
     ) -> Self {
         Self {
             tracker,
             config,
             claims,
-            tool_name,
+            tool_name: tool_name.into(),
             schema_version,
             errored: Cell::new(false),
         }
@@ -63,7 +62,7 @@ impl PipelineObserver for AnalyticsObserver {
         let Some(common) = build_common(&self.config, &self.claims, &self.schema_version) else {
             return;
         };
-        let Some(query) = build_query(&self.claims, self.tool_name) else {
+        let Some(query) = build_query(&self.claims, &self.tool_name) else {
             return;
         };
         tracker.track(GkgEvent::query_executed(common, query));
@@ -114,7 +113,7 @@ mod tests {
             Some(tracker.clone()),
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
-            ToolName::QueryGraph,
+            "query_graph",
             "33".to_string(),
         );
         obs.finish(10, 0);
@@ -128,7 +127,7 @@ mod tests {
             Some(tracker.clone()),
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
-            ToolName::QueryGraph,
+            "query_graph",
             "33".to_string(),
         );
         obs.record_error(&PipelineError::Execution("x".into()));
@@ -142,7 +141,7 @@ mod tests {
             None,
             Arc::new(AnalyticsConfig::default()),
             test_claims(),
-            ToolName::QueryGraph,
+            "query_graph",
             "33".to_string(),
         );
         obs.finish(1, 0);
