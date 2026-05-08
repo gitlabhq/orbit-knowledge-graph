@@ -1,4 +1,3 @@
-use opentelemetry::KeyValue;
 use opentelemetry::metrics::{Counter, Histogram};
 
 use gkg_observability::indexer::deletion;
@@ -22,11 +21,8 @@ impl DeletionMetrics {
         self.table_deletion_duration.record(duration, &[]);
     }
 
-    pub(super) fn record_table_error(&self, table: &str) {
-        self.table_deletion_errors.add(
-            1,
-            &[KeyValue::new(deletion::labels::TABLE, table.to_owned())],
-        );
+    pub(super) fn record_table_error(&self) {
+        self.table_deletion_errors.add(1, &[]);
     }
 }
 
