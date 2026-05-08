@@ -86,7 +86,7 @@ check that Orbit is enabled on at least one of your groups.
 
 ## Billing
 
-Queries through MCP consume **GitLab Credits**. Each query call to `query_graph`
+Queries through MCP consume GitLab Credits. Each query call to `query_graph`
 uses credits from your GitLab subscription. `get_graph_schema` calls are free.
 
 ## Using the tools

@@ -123,5 +123,5 @@ can branch on them without parsing stderr.
 
 ## Billing
 
-`glab orbit remote query` consumes **GitLab Credits** the same way as MCP queries.
+`glab orbit remote query` consumes GitLab Credits the same way as MCP queries.
 `status`, `schema`, `tools`, and `graph-status` calls are free.
