@@ -1,3 +1,25 @@
+## [0.53.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.52.0...v0.53.0) (2026-05-08)
+
+### Features
+
+* **analytics:** adopt orbit_query 2-0-0 schema ([c02934f](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/c02934f77f0ecf7814d90240d6deca1544f6d2c4)) by Bohdan Parkhomchuk
+* **hydration:** extend TP narrowing to dynamic hydration ([1912b41](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1912b41047bbe67cd92e6854fadc49ed70b9b68e)) by Michael Usachenko
+* **indexer:** add data deletion dashboard section and per-table duration logging ([69fd67a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/69fd67a9dc93ca5300b4ce7c72413533b5c07eaf)) by Jean-Gabriel Doyon
+* **install:** add one-line install.sh for orbit local CLI ([0f5ede7](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/0f5ede745435cf140b1bfeb0a339869123189c26)) by Michael Angelo Rivera
+
+### Fixes
+
+* **code-graph:** eliminate [secure] self-call edges from member call resolution ([367856d](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/367856d7622021260817b2f3c78b61dce86915f7)) by Michael Usachenko
+* **indexer:** anchor namespace deletion grace period to deletion timestamp ([8db1870](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/8db1870e3bf435c40e5e3583a738bc53c4924331)) by Jean-Gabriel Doyon
+* **indexer:** derive table cleanup list from ontology instead of information_schema ([b670a7a](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/b670a7a160cfd1fc20254229766c13665b2e5bf6)) by Jean-Gabriel Doyon
+* **release:** bundle libduckdb in orbit binary ([1e5fc09](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/1e5fc094776abff14316cc3ee9f26d561958dfe1)) by Bohdan Parkhomchuk
+
+### Other
+
+* refactor follow-up part 2 - remove bold used for emphasis and update GitLab Duo references ([7a8f104](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/7a8f1040d1f61ac89798a23a61160b1785bc077b)) by Uma Chandran
+* **release:** sign darwin binaries via Cloud HSM ([af70d86](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/af70d86d81e8c88166e1faa1ad55b89c31ce476c)) by Bohdan Parkhomchuk
+* rewrite the Orbit / GitLab Knowledge Graph docs ([dc15433](https://gitlab.com/gitlab-org/orbit/knowledge-graph/commit/dc154339dd6dc097fdde150f42d4dc43297e0fa0)) by Meg Corren
+
 ## [0.52.0](https://gitlab.com/gitlab-org/orbit/knowledge-graph/compare/v0.51.0...v0.52.0) (2026-05-08)
 
 ### Features
