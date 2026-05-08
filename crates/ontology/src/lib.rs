@@ -2325,7 +2325,8 @@ properties:
                 "source_kind",
                 "relationship_kind",
                 "target_id",
-                "target_kind"
+                "target_kind",
+                "traversal_path",
             ]
         );
     }
