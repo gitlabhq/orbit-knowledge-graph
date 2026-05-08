@@ -33,9 +33,9 @@ title: How Orbit Local works
 When you run `orbit index`, Orbit Local:
 
 1. Walks the repository directory tree, respecting `.gitignore`.
-2. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
-3. Extracts definitions (functions, classes, modules), import declarations, and cross-file symbol references.
-4. Writes the results as nodes and edges into a local DuckDB file at `~/.orbit/graph.duckdb`.
+1. Passes each source file to a language-specific parser (rust-analyzer, tree-sitter, or a custom parser depending on language).
+1. Extracts definitions (functions, classes, modules), import declarations, and cross-file symbol references.
+1. Writes the results as nodes and edges into a local DuckDB file at `~/.orbit/graph.duckdb`.
 
 The v2 pipeline runs all language parsers in parallel. Indexing a medium-sized repository typically completes in seconds.
 
