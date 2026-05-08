@@ -227,14 +227,14 @@ impl PipelineStage for HydrationStage {
                         &query_result,
                         &static_nodes,
                     );
-                    if tps.is_empty() {
-                        if let Ok(sec) = ctx.security_context() {
-                            tps = sec
-                                .traversal_paths
-                                .iter()
-                                .map(|tp| tp.path.clone())
-                                .collect();
-                        }
+                    if tps.is_empty()
+                        && let Ok(sec) = ctx.security_context()
+                    {
+                        tps = sec
+                            .traversal_paths
+                            .iter()
+                            .map(|tp| tp.path.clone())
+                            .collect();
                     }
                     let (nodes, ids_count) =
                         hydration_helpers::hydrate_dynamic(entity_specs, &refs, &tps)?;
