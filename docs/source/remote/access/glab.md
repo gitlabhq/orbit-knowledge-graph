@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Set up Orbit for your AI agent and query it from the command line with the glab CLI. Use glab orbit setup to install the skill and MCP config in one command, and glab orbit remote to call the Orbit API directly.
+description: Query Orbit from the command line with glab orbit remote, available in glab v1.94 or later. The glab orbit setup helper is planned for a future glab release.
 title: Use Orbit with the glab CLI
 ---
 
@@ -34,9 +34,11 @@ query Orbit from the command line.
 
 Two top-level commands:
 
-- **`glab orbit setup`** - one-command install of the Orbit skill and MCP config
-  for your AI agent.
 - **`glab orbit remote`** - typed subcommands that call the Orbit Remote REST API.
+  Available in glab v1.94 or later.
+- **`glab orbit setup`** - one-command install of the Orbit skill and MCP config
+  for your AI agent. Planned for a future glab release. Until it ships,
+  [configure your MCP client manually](mcp.md#connect-your-mcp-client).
 
 ## Prerequisites
 
@@ -51,39 +53,17 @@ Two top-level commands:
 
 ## Set up your AI agent
 
-Run `glab orbit setup` to install the Orbit skill and write the MCP config.
-The command prompts you to pick **Local** or **Remote** and auto-detects
-your agent.
+`glab orbit setup` is planned for a future glab release. When it ships, one
+command will install the Orbit skill and write the MCP config for your AI
+agent (Claude Code, OpenCode, Cursor, Codex, Gemini CLI).
 
-```shell
-glab orbit setup
-# Pick "Remote" when prompted to point the MCP config at the GitLab instance.
-```
-
-Supported agents: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
-
-| Flag | Purpose |
-|------|---------|
-| `--agent=<name>` | Override auto-detection (`claude-code`, `cursor`, `codex`, `opencode`, `gemini`). |
-| `--skill-only` | Install the skill files only; skip MCP config. |
-| `--mcp-only` | Write MCP config only; skip skill install. |
-| `--dry-run` | Print what would change without writing anything. |
-
-The skill is fetched from
-[`gitlab-org/orbit/knowledge-graph`](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/tree/main/skills/orbit)
-and dropped into your agent's skill convention path (for example,
-`~/.claude/skills/orbit` for Claude Code). The MCP config points at
-`<instance>/api/v4/orbit/mcp` so the agent can call `query_graph` and
-`get_graph_schema` directly.
-
-After setup, ask your agent:
-
-> "Check the Orbit API status."
+Until it ships, [configure your MCP client manually](mcp.md#connect-your-mcp-client).
 
 ## Query Orbit from the command line
 
 Use `glab orbit remote` (or the `r` alias) to call the Orbit Remote API directly.
 Useful for scripting, debugging, and exploring the schema before writing queries.
+Requires glab v1.94 or later.
 
 | Subcommand | Endpoint | Purpose |
 |------------|----------|---------|

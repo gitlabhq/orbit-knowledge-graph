@@ -36,8 +36,8 @@ work, then run your first query.
 | Method | Best for | Setup |
 |---|---|---|
 | [orbit CLI](access/cli.md) | Direct CLI use, scripting, indexing tasks | Build the binary from source |
-| [glab CLI](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit setup` (pick "Local" when prompted) |
-| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | `glab orbit setup` or manual MCP config |
+| [glab CLI](access/glab.md) | Anyone already using `glab`; one-command AI agent setup | `glab orbit local` (planned) - today, use `orbit` directly |
+| [MCP](access/mcp.md) | Claude Code, Codex, and other AI agents | Manual MCP config; `glab orbit setup` planned |
 
 The query language is identical across all three. Whatever you learn in one
 transfers directly to the others, and to [Orbit Remote](../remote/_index.md).
@@ -62,8 +62,8 @@ node types: `Definition`, `File`, `Directory`, `ImportedSymbol`.
 Next:
 
 - Run a real query: [Use Orbit Local with glab](access/glab.md).
-- Wire it into your AI agent: `glab orbit setup` and pick "Local" when
-  prompted. See [Connect via MCP](access/mcp.md).
+- Wire it into your AI agent: see [Connect via MCP](access/mcp.md) for the
+  manual config. (`glab orbit setup` is planned to automate this.)
 - Learn the query DSL: [Query language reference](../remote/queries/).
 
 ## Billing

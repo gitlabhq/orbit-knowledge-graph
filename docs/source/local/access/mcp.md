@@ -46,16 +46,10 @@ graph instead of a GitLab instance.
 The contract is identical to Orbit Remote, so any skill or agent prompt that
 works against Remote works against Local without changes.
 
-## Quickest path: glab orbit setup
-
-Install the Orbit skill and write the MCP config in one command:
-
-```shell
-glab orbit setup
-```
-
-Auto-detects your agent and points the MCP config at `orbit mcp serve`. See
-[Use Orbit Local with glab](glab.md#set-up-your-ai-agent) for flags.
+> [!note]
+> A planned `glab orbit setup` subcommand will install the Orbit skill and
+> write the MCP config for you. Until it ships, configure your MCP client
+> manually as shown below.
 
 ## Manual config: Claude Code
 

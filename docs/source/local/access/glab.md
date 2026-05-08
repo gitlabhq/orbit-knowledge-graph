@@ -2,7 +2,7 @@
 stage: Analytics
 group: Knowledge Graph
 info: To determine the technical writer assigned to the Stage/Group associated with this page, see https://handbook.gitlab.com/handbook/product/ux/technical-writing/#assignments
-description: Use the glab CLI to install Orbit Local, index repositories, and run queries against the local code graph.
+description: The glab orbit local subcommands and glab orbit setup are planned for a future glab release. Until they ship, build from source and use the orbit binary directly.
 title: Use Orbit Local with the glab CLI
 ---
 
@@ -28,10 +28,11 @@ run, and integrate Orbit Local with your AI agent. `glab orbit local` mirrors
 instance or your local machine.
 
 > [!note]
-> `glab orbit local` is the planned packaging path for Orbit Local.
-> Until it ships, build from source - see [Use the orbit CLI directly](cli.md).
+> Both `glab orbit local` and `glab orbit setup` are planned for a future glab
+> release. Every command on this page is the future shape, not the current one.
+> Until they ship, build from source - see [Use the orbit CLI directly](cli.md).
 
-Two top-level commands:
+Two top-level commands (both planned, not yet shipped):
 
 - **`glab orbit setup`** - install the Orbit skill and point your AI
   agent at the local graph.
@@ -53,9 +54,13 @@ once the binary is installed.
 
 ## Set up your AI agent
 
-Run `glab orbit setup` to install the Orbit skill and write the MCP config.
-The command prompts you to pick **Local** or **Remote** and auto-detects
-your agent.
+> [!note]
+> `glab orbit setup` is planned, not yet shipped. Until it ships,
+> [configure your MCP client manually](mcp.md#manual-config-claude-code).
+
+Once shipped, `glab orbit setup` will install the Orbit skill and write the
+MCP config in one command. It prompts for **Local** or **Remote** and
+auto-detects your agent.
 
 ```shell
 glab orbit setup

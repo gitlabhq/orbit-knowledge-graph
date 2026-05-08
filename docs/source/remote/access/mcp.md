@@ -49,34 +49,7 @@ supports the Model Context Protocol.
 
 ## Connect your MCP client
 
-Run:
-
-```shell
-glab orbit setup
-```
-
-That's it. `glab` detects your AI agent, installs the Orbit skill, and writes the
-MCP server config. Authentication uses your existing `glab auth login` session -
-no token to copy or paste.
-
-Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI. See
-the [glab orbit page](glab.md) for flags and overrides.
-
-If setup fails, run `glab auth status` to confirm you're authenticated, and check
-that Orbit is enabled on at least one of your groups.
-
-### Test it
-
-In your AI agent, ask:
-
-> "Use Orbit to list the 5 most recently updated projects in my group."
-
-You should get typed results back with project names and paths. If you do, you're
-connected.
-
-### Manual configuration
-
-For other clients, point them at `https://gitlab.com/api/v4/orbit/mcp`.
+Configure your MCP client to point at `https://gitlab.com/api/v4/orbit/mcp`.
 
 Some clients only support local stdio MCP servers. For those,
 [`mcp-remote`](https://www.npmjs.com/package/mcp-remote) wraps the Orbit endpoint
@@ -92,6 +65,24 @@ as a local command:
   }
 }
 ```
+
+Authentication uses your existing `glab auth login` session - no token to copy or
+paste. Supported clients: Claude Code, OpenCode, Cursor, Codex, Gemini CLI.
+
+> [!note]
+> A planned `glab orbit setup` subcommand will install the Orbit skill and
+> write this MCP config in one step. Until it ships, configure your MCP client
+> manually as shown above.
+
+### Test it
+
+In your AI agent, ask:
+
+> "Use Orbit to list the 5 most recently updated projects in my group."
+
+You should get typed results back with project names and paths. If you do, you're
+connected. If not, run `glab auth status` to confirm you're authenticated, and
+check that Orbit is enabled on at least one of your groups.
 
 ## Billing
 
