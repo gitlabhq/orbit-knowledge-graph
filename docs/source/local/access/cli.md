@@ -16,7 +16,7 @@ title: Use Orbit Local with the orbit CLI
 
 {{< history >}}
 
-- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 19.0.
+- [Introduced](https://gitlab.com/gitlab-org/orbit/knowledge-graph/-/work_items/324) in GitLab 18.11.
 
 {{< /history >}}
 
